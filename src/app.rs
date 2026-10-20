@@ -81,6 +81,8 @@ pub struct App {
     pub(crate) usage_open: bool,
     /// `server.discoverSourceControl` for the Source Control settings.
     pub(crate) discovery: crate::ui::source_control::Discovery,
+    /// The latest `subscribeDeviceState` value (Integrations settings).
+    pub(crate) device_state: Option<Value>,
     pub(crate) usage: crate::ui::usage::UsageState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
@@ -195,6 +197,7 @@ impl App {
             settings_page: None,
             usage_open: false,
             discovery: Default::default(),
+            device_state: None,
             usage: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
@@ -828,6 +831,11 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key == "device-state" {
+            // A stream: keep the last good state if it later fails or expires.
+            if let Ok(state) = result {
+                self.device_state = Some(state);
+            }
         } else if key == "source-control-discovery" {
             self.discovery.pending = false;
             self.discovery.result = Some(result);

@@ -403,6 +403,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "sc-azure-devops",
         "sc-bitbucket",
         "sc-forgejo",
+        "ellipsis-vertical",
     )
 }
 

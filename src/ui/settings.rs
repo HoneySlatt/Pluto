@@ -156,7 +156,7 @@ pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
 /// Pages with a native port; the others show a notice.
-const PORTED_PAGES: [usize; 7] = [
+const PORTED_PAGES: [usize; 8] = [
     0,
     KEYBINDINGS_PAGE,
     SNAP_SHOT_PAGE,
@@ -164,9 +164,12 @@ const PORTED_PAGES: [usize; 7] = [
     CONNECTIONS_PAGE,
     ARCHIVE_PAGE,
     SOURCE_CONTROL_PAGE,
+    INTEGRATIONS_PAGE,
 ];
 /// Index of the Source Control page in `PAGES`.
 pub const SOURCE_CONTROL_PAGE: usize = 6;
+/// Index of the Integrations page in `PAGES`.
+pub const INTEGRATIONS_PAGE: usize = 5;
 /// Index of the Connections page in `PAGES`.
 pub const CONNECTIONS_PAGE: usize = 8;
 /// Index of the SnapShots page in `PAGES`.
@@ -210,6 +213,19 @@ enum Control {
         traits: Option<String>,
     },
     Button(&'static str),
+    /// `Button variant="outline" size="sm"` with a leading icon.
+    OutlineIcon {
+        label: &'static str,
+        icon: &'static str,
+        icon_size: f32,
+    },
+    /// `DeviceToolVersions` (16px muted) before a device switch; `enabled`
+    /// is false when the switch is disabled.
+    Tool {
+        label: String,
+        on: bool,
+        enabled: bool,
+    },
     /// `Button variant="outline" size="xs"` with a leading icon.
     OutlineXs {
         label: &'static str,
@@ -1151,6 +1167,281 @@ impl App {
         }
     }
 
+    /// The children under a row's header (see `row_children_height`).
+    fn row_children(&mut self, ui: &mut Ui, rect: Rect, row: &Row, extra: f32) {
+        let top = rect.bottom() - extra;
+        let left = rect.left() + ROW_PAD_X;
+        match row.id.as_str() {
+            "browser-profiles" => {
+                // The default profile in its bordered list (disabled here).
+                let list = Rect::from_min_size(
+                    Pos2::new(left, top + 8.0 - 12.0),
+                    Vec2::new(rect.width() - 2.0 * ROW_PAD_X, 42.0),
+                );
+                ui.painter().rect(
+                    list,
+                    CornerRadius::same(10),
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.0, theme::white(0.036)),
+                    StrokeKind::Inside,
+                );
+                let name_font = font(14.0, Weight::Regular);
+                let fade = |c: Color32| {
+                    if ui.is_enabled() {
+                        c
+                    } else {
+                        theme::alpha(c, 0.64)
+                    }
+                };
+                widgets::text(
+                    ui,
+                    Pos2::new(list.left() + 13.0, list.top() + 11.0),
+                    "Default",
+                    name_font.clone(),
+                    fade(theme::FOREGROUND),
+                    20.0,
+                );
+                let badge_x =
+                    list.left() + 13.0 + widgets::text_width(ui, "Default", name_font) + 8.0;
+                let badge_font = font(12.0, Weight::Medium);
+                let badge = Rect::from_min_size(
+                    Pos2::new(badge_x, list.top() + 12.0),
+                    Vec2::new(
+                        widgets::text_width(ui, "Default", badge_font.clone()) + 8.0,
+                        18.0,
+                    ),
+                );
+                ui.painter()
+                    .rect_filled(badge, CornerRadius::same(6), fade(theme::PRIMARY));
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(Pos2::new(badge.left() + 4.0, badge.top()), badge.max),
+                    "Default",
+                    badge_font,
+                    fade(Color32::WHITE),
+                );
+                theme::paint_icon(
+                    ui,
+                    "ellipsis-vertical",
+                    Rect::from_min_size(
+                        Pos2::new(list.right() - 37.0, list.top() + 9.0),
+                        Vec2::splat(24.0),
+                    ),
+                    14.0,
+                    fade(theme::MUTED_FOREGROUND),
+                );
+            }
+            "device-hosts" => {
+                widgets::text(
+                    ui,
+                    Pos2::new(left, top + 12.0 - 12.0 + 8.0),
+                    "No device hosts.",
+                    font(14.0, Weight::Regular),
+                    theme::MUTED_FOREGROUND,
+                    20.0,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// `IntegrationsSettingsPanel` outside the desktop app: agent browser
+    /// access, the device-local browser defaults (unavailable), and devices.
+    fn integrations_sections(&self) -> Vec<Section> {
+        let row = |id: &str, title: &str, description: &str, layers: bool, control: Control| Row {
+            id: id.into(),
+            title: title.into(),
+            description: description.into(),
+            status: None,
+            layers,
+            reset: false,
+            control,
+        };
+        let select = |value: &str, label: &str, width: f32| Control::Select {
+            value: value.into(),
+            options: options(&[(value, label)]),
+            width,
+            icon: None,
+        };
+        let browser_access = self.server_setting("enableAgentBrowserAccess") != false;
+        let mut access_row = row(
+            "agent-browser-access",
+            "Agent browser access",
+            "Allow agents to use the shared browser. Projects can override it.",
+            true,
+            Control::Switch(browser_access),
+        );
+        access_row.reset = !browser_access;
+        // `DeviceToolVersions` for the local host's hub and agent tools.
+        let tools = self
+            .device_state
+            .as_ref()
+            .and_then(|state| state["hosts"].as_array())
+            .and_then(|hosts| hosts.iter().find(|h| h["kind"] == "local"))
+            .map(|host| host["tools"].clone());
+        let tool_label = |kind: &str| -> String {
+            let Some(tool) = tools.as_ref().map(|t| &t[kind]).filter(|t| t.is_object()) else {
+                return "Version unknown".into();
+            };
+            let installed: Vec<&str> = tool["installedVersions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let required = tool["requiredVersion"].as_str().unwrap_or_default();
+            let version = tool["runningVersion"]
+                .as_str()
+                .or_else(|| installed.contains(&required).then_some(required))
+                .or_else(|| installed.iter().max_by(|a, b| natural_cmp(a, b)).copied());
+            version.map_or_else(|| "Not installed".into(), |v| format!("v{v}"))
+        };
+        let hub = self.server_setting("enableDeviceSupport") == true;
+        let agent = self.server_setting("enableAgentDeviceAccess") == true;
+        vec![
+            Section {
+                title: "Browser".into(),
+                project: None,
+                unavailable: None,
+                rows: vec![access_row],
+            },
+            Section {
+                title: "Browser".into(),
+                project: None,
+                unavailable: Some("Only available in the desktop app."),
+                rows: vec![
+                    row(
+                        "browser-profiles",
+                        "Browser profiles",
+                        "Profiles separate cookies and logins. Incognito data is cleared when the app closes.",
+                        false,
+                        Control::OutlineIcon {
+                            label: "Add profile",
+                            icon: "plus",
+                            icon_size: 16.0,
+                        },
+                    ),
+                    row(
+                        "browser-default-viewport",
+                        "Default browser viewport",
+                        "Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar.",
+                        false,
+                        select("fill", "Fill panel", 176.0),
+                    ),
+                    row(
+                        "browser-default-zoom",
+                        "Default browser zoom",
+                        "Page zoom applied to new browser tabs.",
+                        false,
+                        select("100", "100%", 160.0),
+                    ),
+                    row(
+                        "browser-default-appearance",
+                        "Default browser appearance",
+                        "The color scheme pages are told to prefer. System follows your OS setting.",
+                        false,
+                        select("system", "System", 160.0),
+                    ),
+                    row(
+                        "browser-recording-frame-rate",
+                        "Browser recording frame rate",
+                        "Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother.",
+                        false,
+                        select("30", "30 fps", 160.0),
+                    ),
+                    row(
+                        "browser-recording-key-presses",
+                        "Show key presses in recordings",
+                        "Show pressed keys and shortcuts in new recordings. Password fields are excluded.",
+                        false,
+                        Control::Switch(false),
+                    ),
+                    row(
+                        "browser-recording-mouse-presses",
+                        "Show mouse presses in recordings",
+                        "Highlight mouse presses and held buttons in new recordings.",
+                        false,
+                        Control::Switch(false),
+                    ),
+                    row(
+                        "browser-link-target",
+                        "Open links in",
+                        "Where links in the chat and terminal open. Hold \u{2318} or Ctrl while clicking a link to open it in your default browser either way.",
+                        false,
+                        select("system", "Your default browser", 160.0),
+                    ),
+                    row(
+                        "browser-auto-show-floating-preview",
+                        "Auto-show floating preview",
+                        "Show the floating preview when an agent opens a browser or device unless the agent says otherwise.",
+                        false,
+                        Control::Switch(true),
+                    ),
+                ],
+            },
+            Section {
+                title: "Devices".into(),
+                project: None,
+                unavailable: None,
+                rows: vec![
+                    row(
+                        "device-hub",
+                        "Device hub",
+                        "Enable this environment to open simulators and emulators, whether they run here or on a remote device host.",
+                        true,
+                        Control::Tool {
+                            label: tool_label("hub"),
+                            on: hub,
+                            enabled: self.device_state.is_some(),
+                        },
+                    ),
+                    row(
+                        "agent-device-access",
+                        "Agent device access",
+                        "Allow new agent sessions in this environment to start and control local and remote devices, with required tools set up automatically.",
+                        true,
+                        Control::Tool {
+                            label: tool_label("agent"),
+                            on: agent,
+                            enabled: hub,
+                        },
+                    ),
+                    row(
+                        "device-hosts",
+                        "Device hosts",
+                        "Add remote machines with simulator or emulator runtimes installed, and the selected environments will connect over SSH and set up device tools automatically.",
+                        true,
+                        Control::OutlineIcon {
+                            label: "Add host",
+                            icon: "plus",
+                            icon_size: 14.0,
+                        },
+                    ),
+                ],
+            },
+        ]
+    }
+
+    fn apply_integrations(&mut self, id: &str, action: RowAction) {
+        match (id, action) {
+            ("agent-browser-access", RowAction::Toggle(on)) => {
+                self.update_setting(Store::Server, "enableAgentBrowserAccess", json!(on))
+            }
+            ("agent-browser-access", RowAction::Reset) => {
+                self.update_setting(Store::Server, "enableAgentBrowserAccess", json!(true))
+            }
+            // Turning the hub on installs device tools on the server; not ported.
+            ("device-hub" | "agent-device-access" | "device-hosts", _) => {
+                self.status = Some("Device setup is not implemented yet".into())
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn request_device_state(&mut self) {
+        self.send_request("device-state".into(), "subscribeDeviceState", json!({}));
+    }
+
     /// `ConnectionsSettings`' Environments section with no saved remote
     /// environment: the Add environment action and the empty state. Returns
     /// the bottom of the section.
@@ -1607,6 +1898,9 @@ impl App {
                 if index == ARCHIVE_PAGE {
                     self.request_archived();
                 }
+                if index == INTEGRATIONS_PAGE {
+                    self.request_device_state();
+                }
                 if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
                     self.request_discovery();
                 }
@@ -1701,6 +1995,7 @@ impl App {
             SNAP_SHOT_PAGE => self.snap_shot_sections(),
             CONNECTIONS_PAGE => connections_sections(),
             SOURCE_CONTROL_PAGE => self.source_control_sections(),
+            INTEGRATIONS_PAGE => self.integrations_sections(),
             _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
@@ -1812,7 +2107,11 @@ impl App {
                         .rows
                         .iter()
                         .enumerate()
-                        .map(|(i, row)| row_height(ui, row) - if i == 0 { 1.0 } else { 0.0 })
+                        .map(|(i, row)| {
+                            // Rows inside an unavailable group carry no divider.
+                            let undivided = i == 0 || section.unavailable.is_some();
+                            row_height(ui, row) - if undivided { 1.0 } else { 0.0 }
+                        })
                         .collect();
                     // The unavailable group pads by 6 and leads with its notice.
                     let notice = if section.unavailable.is_some() {
@@ -1864,11 +2163,12 @@ impl App {
                     }
                     let mut row_top = card.top() + 1.0 + notice;
                     for (index, (row, height)) in section.rows.iter().zip(&heights).enumerate() {
+                        let divided = index > 0 && section.unavailable.is_none();
                         let rect = Rect::from_min_size(
                             Pos2::new(card.left() + 1.0, row_top),
                             Vec2::new(card_width - 2.0, *height),
                         );
-                        if index > 0 {
+                        if divided {
                             ui.painter().rect_filled(
                                 Rect::from_min_size(rect.min, Vec2::new(rect.width(), 1.0)),
                                 0.0,
@@ -1881,7 +2181,7 @@ impl App {
                                     ui.visuals_mut().disabled_alpha = 0.64;
                                     ui.disable();
                                 }
-                                self.settings_row(ui, rect, row, index > 0)
+                                self.settings_row(ui, rect, row, divided)
                             })
                             .inner;
                         if let Some(action) = action {
@@ -1908,6 +2208,7 @@ impl App {
                 ARCHIVE_PAGE => self.apply_archive(&id, action),
                 STORAGE_PAGE => self.apply_storage(&id, action),
                 SOURCE_CONTROL_PAGE => self.apply_source_control(&id, action),
+                INTEGRATIONS_PAGE => self.apply_integrations(&id, action),
                 _ => self.apply_general(&id, action),
             }
         }
@@ -2047,9 +2348,13 @@ impl App {
             );
         }
         let right = rect.right() - ROW_PAD_X;
+        let extra = row_children_height(row);
         let center_y = rect.top()
             + (if divided { 1.0 } else { 0.0 })
-            + (rect.height() - if divided { 1.0 } else { 0.0 }) / 2.0;
+            + (rect.height() - extra - if divided { 1.0 } else { 0.0 }) / 2.0;
+        if extra > 0.0 {
+            self.row_children(ui, rect, row, extra);
+        }
         self.settings_control(ui, row, right, center_y)
             .or(action)
             .or(menu)
@@ -2139,7 +2444,8 @@ impl App {
                     font(14.0, Weight::Regular),
                     theme::FOREGROUND,
                     20.0,
-                    trigger.right() - 18.0 - text_left,
+                    // The value slot stops `gap-1.5` before the chevron.
+                    trigger.right() - 24.0 - text_left,
                 );
                 ui.painter().galley(
                     Pos2::new(text_left, trigger.center().y - 10.0),
@@ -2297,6 +2603,76 @@ impl App {
                 clicked.then_some(RowAction::Click)
             }
             Control::None => None,
+            Control::OutlineIcon {
+                label,
+                icon,
+                icon_size,
+            } => {
+                let width = outline_icon_width(ui, label, *icon_size);
+                let button = Rect::from_min_size(
+                    Pos2::new(right - width, center_y - 14.0),
+                    Vec2::new(width, 28.0),
+                );
+                let response = ui.interact(
+                    button,
+                    ui.id().with(("settings-outline", &row.id)),
+                    Sense::click(),
+                );
+                ui.painter().rect(
+                    button,
+                    CornerRadius::same(10),
+                    if response.hovered() {
+                        theme::white(0.05)
+                    } else {
+                        theme::CONTROL_SURFACE
+                    },
+                    Stroke::new(1.0, theme::INPUT),
+                    StrokeKind::Inside,
+                );
+                theme::paint_icon(
+                    ui,
+                    icon,
+                    Rect::from_min_size(
+                        Pos2::new(button.left() + 8.0, center_y - icon_size / 2.0),
+                        Vec2::splat(*icon_size),
+                    ),
+                    *icon_size,
+                    theme::MUTED_FOREGROUND,
+                );
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(
+                        Pos2::new(button.left() + 14.0 + icon_size, button.top()),
+                        button.max,
+                    ),
+                    label,
+                    font(14.0, Weight::Medium),
+                    theme::FOREGROUND,
+                );
+                response.clicked().then_some(RowAction::Click)
+            }
+            Control::Tool { label, on, enabled } => {
+                let label_font = font(16.0, Weight::Medium);
+                let width = widgets::text_width(ui, label, label_font.clone());
+                widgets::text(
+                    ui,
+                    Pos2::new(right - 38.0 - width, center_y - 12.0),
+                    label,
+                    label_font,
+                    theme::MUTED_FOREGROUND,
+                    24.0,
+                );
+                let clicked = ui
+                    .scope(|ui| {
+                        if !enabled {
+                            ui.visuals_mut().disabled_alpha = 0.64;
+                            ui.disable();
+                        }
+                        switch(ui, right, center_y, *on, &row.id)
+                    })
+                    .inner;
+                (clicked && *enabled).then_some(RowAction::Toggle(!on))
+            }
             Control::OutlineXs { label, icon } => {
                 // A bare label (no `ml-0.5`) starts 2px closer to the icon.
                 let width = widgets::outline_button_width(ui, true, label) - 2.0;
@@ -2438,6 +2814,12 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         }
         Control::Button(label) => widgets::outline_button_width(ui, false, label) + 6.0,
         Control::OutlineXs { label, .. } => widgets::outline_button_width(ui, true, label) - 2.0,
+        Control::OutlineIcon {
+            label, icon_size, ..
+        } => outline_icon_width(ui, label, *icon_size),
+        Control::Tool { label, .. } => {
+            38.0 + widgets::text_width(ui, label, font(16.0, Weight::Medium))
+        }
         Control::None => 0.0,
     }
 }
@@ -2467,7 +2849,23 @@ fn row_height(ui: &Ui, row: &Row) -> f32 {
     if row.status.is_some() {
         height += 4.0 + 18.0;
     }
-    height + 1.0
+    height + row_children_height(row) + 1.0
+}
+
+/// Content under a row's header: the browser profile list (`mt-2`, 42) or
+/// the device host list (`mt-3`, "No device hosts." with `py-2`).
+fn row_children_height(row: &Row) -> f32 {
+    match row.id.as_str() {
+        "browser-profiles" => 8.0 + 42.0,
+        "device-hosts" => 12.0 + 36.0,
+        _ => 0.0,
+    }
+}
+
+/// An outline `sm` button: `px-[9px]`, the icon pulled in by `-mx-0.5`,
+/// `gap-2`, the label.
+fn outline_icon_width(ui: &Ui, label: &str, icon_size: f32) -> f32 {
+    (24.0 + icon_size + widgets::text_width(ui, label, font(14.0, Weight::Medium))).round()
 }
 
 /// `formatRelativeTimeLabel`: "just now", "5m ago", "3h ago", "2d ago".
@@ -3108,5 +3506,46 @@ mod tests {
         assert_eq!(settings["confirmThreadDelete"], true);
         assert!(settings.get("bogus").is_none());
         assert_eq!(load_client_settings(None), default_client_settings());
+    }
+}
+
+/// `localeCompare(…, { numeric: true })` for version strings: digit runs
+/// compare by value, everything else by character.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let chunks = |s: &str| -> Vec<(bool, String)> {
+        let mut out: Vec<(bool, String)> = Vec::new();
+        for c in s.chars() {
+            let digit = c.is_ascii_digit();
+            match out.last_mut() {
+                Some((d, run)) if *d == digit => run.push(c),
+                _ => out.push((digit, c.to_string())),
+            }
+        }
+        out
+    };
+    for (x, y) in chunks(a).iter().zip(chunks(b).iter()) {
+        let order = match (x, y) {
+            ((true, x), (true, y)) => x
+                .trim_start_matches('0')
+                .len()
+                .cmp(&y.trim_start_matches('0').len())
+                .then_with(|| x.trim_start_matches('0').cmp(y.trim_start_matches('0'))),
+            ((_, x), (_, y)) => x.cmp(y),
+        };
+        if order.is_ne() {
+            return order;
+        }
+    }
+    chunks(a).len().cmp(&chunks(b).len())
+}
+
+#[cfg(test)]
+mod natural_tests {
+    #[test]
+    fn versions_compare_numerically() {
+        use std::cmp::Ordering::*;
+        assert_eq!(super::natural_cmp("0.12.0", "0.9.3"), Greater);
+        assert_eq!(super::natural_cmp("1.2", "1.2.1"), Less);
+        assert_eq!(super::natural_cmp("2.0", "2.0"), Equal);
     }
 }
