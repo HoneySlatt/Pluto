@@ -3643,6 +3643,7 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_kittest",
+ "iana-time-zone",
  "image",
  "pulldown-cmark",
  "serde",

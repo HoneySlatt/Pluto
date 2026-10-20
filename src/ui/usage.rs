@@ -3,10 +3,11 @@
 //!
 //! Ported: the header (metric and period groups, refresh) and the Limits view:
 //! provider quota windows pooled per driver from the server config, with the
-//! remaining share, pace and reset countdown. Not ported: the Cost and Tokens
-//! charts (`server.getUsageSummary`), segment popovers, reset credits, usage
-//! limit sources (hubs) and limit notices. Like upstream, the clock only
-//! advances on refresh.
+//! remaining share, pace and reset countdown, refreshed through
+//! `server.refreshProviders`. The Cost and Tokens views live in
+//! `usage_summary.rs`. Not ported: segment popovers, reset credits, usage
+//! limit sources (hubs), limit notices and keyboard shortcuts. Like upstream,
+//! the limits clock only advances on refresh.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::Value;
 
@@ -15,7 +16,7 @@ use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
 
 const METRICS: [&str; 3] = ["Cost", "Tokens", "Limits"];
-const PERIODS: [(&str, u32); 4] = [
+pub(crate) const PERIODS: [(&str, u32); 4] = [
     ("Past 24h", 1),
     ("7 days", 7),
     ("30 days", 30),
@@ -32,6 +33,16 @@ pub struct UsageState {
     pub period: usize,
     /// The page's clock, advanced on open and refresh.
     pub now: chrono::DateTime<chrono::Utc>,
+    /// The Cost/Tokens request window (`makeWindow`), made on first use.
+    pub window: Option<Value>,
+    /// `server.getUsageSummary` results by request key, and keys in flight.
+    pub summaries: std::collections::HashMap<String, Result<Value, String>>,
+    pub requested: std::collections::HashSet<String>,
+    /// The breakdown table groups by period instead of model.
+    pub by_time: bool,
+    /// When limits were last refreshed (`refreshUsageLimits` waits 5 minutes
+    /// between automatic refreshes).
+    pub limits_refreshed: Option<std::time::Instant>,
 }
 
 impl Default for UsageState {
@@ -40,6 +51,11 @@ impl Default for UsageState {
             metric: 2,
             period: 2,
             now: chrono::Utc::now(),
+            window: None,
+            summaries: Default::default(),
+            requested: Default::default(),
+            by_time: false,
+            limits_refreshed: None,
         }
     }
 }
@@ -230,79 +246,28 @@ impl App {
         self.usage_open = true;
         self.usage.now = chrono::Utc::now();
         self.open_menu = None;
+        if self.usage.metric == 2 {
+            self.refresh_limits(true);
+        }
     }
 
-    /// A segmented group (`ToggleGroup variant="segmented"`) right-aligned at
-    /// `right`; returns its left edge and the clicked index. A disabled group
-    /// fades to 64% and ignores the pointer.
-    fn segmented(
-        &self,
-        ui: &mut Ui,
-        right: f32,
-        labels: &[&str],
-        active: usize,
-        disabled: bool,
-        id: &str,
-    ) -> (f32, Option<usize>) {
-        let label_font = font(14.0, Weight::Medium);
-        let opacity = if disabled { 0.64 } else { 1.0 };
-        // Buttons are `px-2.5` with a transparent 1px border.
-        let text_widths: Vec<f32> = labels
-            .iter()
-            .map(|l| widgets::text_width(ui, l, label_font.clone()))
-            .collect();
-        let total = text_widths.iter().map(|w| w + 22.0).sum::<f32>()
-            + 2.0 * (labels.len() - 1) as f32
-            + 4.0;
-        let snap = |a: f32, b: f32| {
-            Rect::from_min_max(Pos2::new(a.round(), 14.0), Pos2::new(b.round(), 38.0))
-        };
-        let group = Rect::from_min_max(
-            Pos2::new((right - total).round(), 12.0),
-            Pos2::new(right, 40.0),
-        );
-        ui.painter()
-            .rect_filled(group, CornerRadius::same(10), theme::white(0.032));
-        let mut x = right - total + 2.0;
-        let mut clicked = None;
-        for (index, (label, text_width)) in labels.iter().zip(&text_widths).enumerate() {
-            let button = snap(x, x + text_width + 22.0);
-            let text_x = x + 11.0;
-            x += text_width + 24.0;
-            let sense = if disabled {
-                Sense::hover()
-            } else {
-                Sense::click()
-            };
-            let response = ui.interact(button, ui.id().with((id, index)), sense);
-            let hovered = !disabled && response.hovered();
-            if index == active {
-                ui.painter().rect_filled(
-                    button,
-                    CornerRadius::same(8),
-                    theme::alpha(theme::white(0.0576), opacity),
-                );
-            } else if hovered {
-                ui.painter()
-                    .rect_filled(button, CornerRadius::same(8), theme::white(0.0256));
-            }
-            let color = if index == active || hovered {
-                theme::FOREGROUND
-            } else {
-                theme::MUTED_FOREGROUND
-            };
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(Pos2::new(text_x, button.top()), button.max),
-                label,
-                label_font.clone(),
-                theme::alpha(color, opacity),
-            );
-            if response.clicked() {
-                clicked = Some(index);
-            }
+    /// `refreshLimits`: asks the server to re-read provider status and quotas;
+    /// automatic refreshes skip a check made in the last five minutes.
+    fn refresh_limits(&mut self, automatic: bool) {
+        if automatic
+            && self
+                .usage
+                .limits_refreshed
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(300))
+        {
+            return;
         }
-        (right - total, clicked)
+        self.usage.limits_refreshed = Some(std::time::Instant::now());
+        self.send_request(
+            "usage-limits".into(),
+            "server.refreshProviders",
+            serde_json::json!({}),
+        );
     }
 
     /// The Usage page in the workspace area.
@@ -333,16 +298,21 @@ impl App {
             "refresh-cw",
             14.0,
             theme::MUTED_FOREGROUND,
-            "Refresh usage",
+            "",
         )
         .clicked()
         {
-            self.usage.now = chrono::Utc::now();
+            if self.usage.metric == 2 {
+                self.refresh_limits(false);
+            } else {
+                self.refresh_usage_summary();
+            }
         }
         let periods: Vec<&str> = PERIODS.iter().map(|p| p.0).collect();
-        let (left, clicked) = self.segmented(
+        let (left, clicked) = segmented(
             ui,
             refresh.left() - 8.0,
+            12.0,
             &periods,
             self.usage.period,
             self.usage.metric == 2,
@@ -350,10 +320,12 @@ impl App {
         );
         if let Some(index) = clicked {
             self.usage.period = index;
+            self.usage.window = None;
         }
-        let (_, clicked) = self.segmented(
+        let (_, clicked) = segmented(
             ui,
             left - 8.0,
+            12.0,
             &METRICS,
             self.usage.metric,
             false,
@@ -361,20 +333,15 @@ impl App {
         );
         if let Some(index) = clicked {
             self.usage.metric = index;
+            if index == 2 {
+                self.usage.now = chrono::Utc::now();
+                self.refresh_limits(true);
+            }
         }
 
         let body = Rect::from_min_max(Pos2::new(rect.left(), theme::TOPBAR_HEIGHT), rect.max);
         if self.usage.metric != 2 {
-            let note = "The cost and token charts are not ported to the native client yet.";
-            let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
-            widgets::text(
-                ui,
-                Pos2::new(body.center().x - width / 2.0, body.top() + 40.0),
-                note,
-                font(14.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
-                20.0,
-            );
+            self.usage_summary(ui, body);
             return;
         }
         let now = self.usage.now.timestamp_millis();
@@ -565,6 +532,81 @@ fn paint_segment(
             16.0,
         );
     }
+}
+
+/// A segmented group (`ToggleGroup variant="segmented"`) right-aligned at
+/// `right`; returns its left edge and the clicked index. A disabled group
+/// fades to 64% and ignores the pointer.
+pub(crate) fn segmented(
+    ui: &mut Ui,
+    right: f32,
+    top: f32,
+    labels: &[&str],
+    active: usize,
+    disabled: bool,
+    id: &str,
+) -> (f32, Option<usize>) {
+    let label_font = font(14.0, Weight::Medium);
+    let opacity = if disabled { 0.64 } else { 1.0 };
+    // Buttons are `px-2.5` with a transparent 1px border.
+    let text_widths: Vec<f32> = labels
+        .iter()
+        .map(|l| widgets::text_width(ui, l, label_font.clone()))
+        .collect();
+    let total =
+        text_widths.iter().map(|w| w + 22.0).sum::<f32>() + 2.0 * (labels.len() - 1) as f32 + 4.0;
+    let snap = |a: f32, b: f32| {
+        Rect::from_min_max(
+            Pos2::new(a.round(), top + 2.0),
+            Pos2::new(b.round(), top + 26.0),
+        )
+    };
+    let group = Rect::from_min_max(
+        Pos2::new((right - total).round(), top),
+        Pos2::new(right, top + 28.0),
+    );
+    ui.painter()
+        .rect_filled(group, CornerRadius::same(10), theme::white(0.032));
+    let mut x = right - total + 2.0;
+    let mut clicked = None;
+    for (index, (label, text_width)) in labels.iter().zip(&text_widths).enumerate() {
+        let button = snap(x, x + text_width + 22.0);
+        let text_x = x + 11.0;
+        x += text_width + 24.0;
+        let sense = if disabled {
+            Sense::hover()
+        } else {
+            Sense::click()
+        };
+        let response = ui.interact(button, ui.id().with((id, index)), sense);
+        let hovered = !disabled && response.hovered();
+        if index == active {
+            ui.painter().rect_filled(
+                button,
+                CornerRadius::same(8),
+                theme::alpha(theme::white(0.0576), opacity),
+            );
+        } else if hovered {
+            ui.painter()
+                .rect_filled(button, CornerRadius::same(8), theme::white(0.0256));
+        }
+        let color = if index == active || hovered {
+            theme::FOREGROUND
+        } else {
+            theme::MUTED_FOREGROUND
+        };
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(text_x, button.top()), button.max),
+            label,
+            label_font.clone(),
+            theme::alpha(color, opacity),
+        );
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    (right - total, clicked)
 }
 
 #[cfg(test)]

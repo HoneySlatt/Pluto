@@ -15,4 +15,5 @@ pub mod sidebar;
 pub mod surfaces;
 pub mod thread_menu;
 pub mod usage;
+pub mod usage_summary;
 pub mod widgets;

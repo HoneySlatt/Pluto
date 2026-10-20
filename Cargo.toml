@@ -6,6 +6,7 @@ license = "MIT"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+iana-time-zone = "0.1"
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
 egui_extras = { version = "0.36.2", features = ["svg"] }
 pulldown-cmark = { version = "0.13", default-features = false }

@@ -392,6 +392,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "link",
         "github",
         "arrow-down",
+        "opencode",
     )
 }
 

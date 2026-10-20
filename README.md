@@ -34,20 +34,21 @@ reads it from a file at startup instead; it is kept in memory only.
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
 | Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Archive page (unarchive, delete); the Keybindings page (read-only list) |
-| Usage | Header with the metric and period groups; the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown) |
+| Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice): the
 settings pages other than General, Keybindings and Archive, keybinding
 editing, settings search and scope pickers, the
-default model pickers in settings, project settings, pull requests, the usage Cost and Tokens charts (and
-limit sources, reset credits and segment popovers), the surfaces other than Diff
+default model pickers in settings, project settings, pull requests, usage limit sources, reset credits,
+segment popovers, keyboard shortcuts, price overrides and the environment filter, the surfaces other than Diff
 (browser, terminal, files, pull requests, agents, device), the branch
 diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom
 snooze times, project favicons, palette sub-actions (themes, go to file, git
 clone), and "New thread on <branch>" branch carry-over (it opens a draft in the
 thread's project on its current checkout).
 
+The Usage page's metric and period live in memory (upstream: local storage).
 Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`
 (upstream: local storage). The project scope and read/unread markers live in
 memory; upstream persists them in its UI state store.
@@ -59,7 +60,8 @@ text is rasterized by epaint, not the browser, so a few text-sized boxes land
 1px off (the card snooze menu, the header buttons next to Initialize Git).
 `tabular-nums` is emulated with fixed digit cells, so Geist's tabular "1"
 sits about 2px right, and "↻" (missing from Geist) comes from egui's fallback
-font, smaller than the browser's.
+font, smaller than the browser's. Scrollbars stay visible at rest; upstream
+fades them in on hover or scroll. The usage chart readout has no backdrop blur.
 
 ## Development
 

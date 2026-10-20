@@ -815,6 +815,16 @@ impl App {
         } else if key.starts_with("browse:") {
             self.browse
                 .insert(key, crate::ui::palette::Browse::from_result(result));
+        } else if key.starts_with("usage-summary:") {
+            self.usage.summaries.insert(key, result);
+        } else if let Some(summary) = key.strip_prefix("usage-rates:") {
+            // Pricing refreshed (or not): rescan the window either way.
+            let window = self.usage.window.clone().unwrap_or_default();
+            if summary == crate::ui::usage_summary::summary_key(&window) {
+                self.send_request(summary.to_owned(), "server.getUsageSummary", window);
+            }
+        } else if key == "usage-limits" {
+            self.usage.now = chrono::Utc::now();
         } else if key == "archived" {
             self.archived = Some(result);
         } else if key.starts_with("vcs-init:") {
