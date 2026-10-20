@@ -155,6 +155,17 @@ const CARD_WIDTH: f32 = 848.0;
 pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
+/// Pages with a native port; the others show a notice.
+const PORTED_PAGES: [usize; 6] = [
+    0,
+    KEYBINDINGS_PAGE,
+    SNAP_SHOT_PAGE,
+    STORAGE_PAGE,
+    CONNECTIONS_PAGE,
+    ARCHIVE_PAGE,
+];
+/// Index of the Connections page in `PAGES`.
+pub const CONNECTIONS_PAGE: usize = 8;
 /// Index of the SnapShots page in `PAGES`.
 pub const SNAP_SHOT_PAGE: usize = 3;
 /// Index of the Archive page in `PAGES`.
@@ -974,6 +985,137 @@ impl App {
         }
     }
 
+    /// `ConnectionsSettings`' Environments section with no saved remote
+    /// environment: the Add environment action and the empty state. Returns
+    /// the bottom of the section.
+    fn remote_environments(&mut self, ui: &mut Ui, left: f32, top: f32) -> f32 {
+        let width = 976.0;
+        widgets::text_in(
+            ui,
+            Rect::from_min_size(Pos2::new(left + 16.0, top), Vec2::new(width, 28.0)),
+            "Environments",
+            font(14.0, Weight::Regular),
+            theme::alpha(theme::FOREGROUND, 0.7),
+        );
+        // Ghost muted `xs` button with a plus.
+        let label_font = font(12.0, Weight::Medium);
+        let button_width =
+            (widgets::text_width(ui, "Add environment", label_font.clone()) + 28.0).round();
+        let button = Rect::from_min_size(
+            Pos2::new(left + width - 16.0 - button_width, top + 2.0),
+            Vec2::new(button_width, 24.0),
+        );
+        let response = ui.interact(button, ui.id().with("add-environment"), Sense::click());
+        let color = if response.hovered() {
+            ui.painter()
+                .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
+            theme::FOREGROUND
+        } else {
+            theme::MUTED_FOREGROUND
+        };
+        theme::paint_icon(
+            ui,
+            "plus",
+            Rect::from_min_size(
+                Pos2::new(button.left() + 6.0, button.top() + 6.0),
+                Vec2::splat(12.0),
+            ),
+            12.0,
+            color,
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(button.left() + 20.0, button.top()), button.max),
+            "Add environment",
+            label_font,
+            color,
+        );
+        if response.clicked() {
+            self.status = Some("Adding environments is not implemented yet".into());
+        }
+
+        let card = Rect::from_min_size(Pos2::new(left, top + 38.0), Vec2::new(width, 234.0));
+        ui.painter().rect(
+            card,
+            CornerRadius::same(14),
+            CARD_FILL,
+            Stroke::new(1.0, CARD_BORDER),
+            StrokeKind::Inside,
+        );
+        // `EmptyMedia variant="icon"`: two tilted tiles behind the icon tile.
+        let media = Rect::from_min_size(
+            Pos2::new(card.center().x - 18.0, card.top() + 49.0),
+            Vec2::splat(36.0),
+        );
+        for side in [-1.0f32, 1.0] {
+            let origin = Pos2::new(
+                if side < 0.0 {
+                    media.left()
+                } else {
+                    media.right()
+                },
+                media.bottom() - 1.0,
+            );
+            let (sin, cos) = (side * 10f32).to_radians().sin_cos();
+            let points: Vec<Pos2> = rounded_rect_points(media.translate(Vec2::new(0.0, -1.0)), 8.0)
+                .into_iter()
+                .map(|p| {
+                    let d = (p - origin) * 0.84;
+                    origin
+                        + Vec2::new(side * 2.0, 0.0)
+                        + Vec2::new(d.x * cos - d.y * sin, d.x * sin + d.y * cos)
+                })
+                .collect();
+            ui.painter().add(egui::Shape::convex_polygon(
+                points,
+                theme::CARD,
+                Stroke::new(1.0, theme::BORDER),
+            ));
+        }
+        ui.painter().rect(
+            media,
+            CornerRadius::same(8),
+            theme::CARD,
+            Stroke::new(1.0, theme::BORDER),
+            StrokeKind::Inside,
+        );
+        theme::paint_icon(
+            ui,
+            "chevrons-left-right-ellipsis",
+            media,
+            18.0,
+            theme::FOREGROUND,
+        );
+        for (text, size, weight, color, y) in [
+            (
+                "No saved remote environments",
+                20.0,
+                Weight::SemiBold,
+                theme::FOREGROUND,
+                133.0,
+            ),
+            (
+                "Click \u{201c}Add environment\u{201d} to pair another environment.",
+                14.0,
+                Weight::Regular,
+                theme::MUTED_FOREGROUND,
+                165.0,
+            ),
+        ] {
+            let text_font = font(size, weight);
+            let text_width = widgets::text_width(ui, text, text_font.clone());
+            widgets::text(
+                ui,
+                Pos2::new(card.center().x - text_width / 2.0, card.top() + y),
+                text,
+                text_font,
+                color,
+                widgets::line_height_for(size),
+            );
+        }
+        card.bottom()
+    }
+
     /// `SnapShotSettings` without the desktop bridge: the capture switch,
     /// unavailable outside the desktop app.
     fn snap_shot_sections(&self) -> Vec<Section> {
@@ -1371,15 +1513,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if ![
-            0,
-            ARCHIVE_PAGE,
-            KEYBINDINGS_PAGE,
-            STORAGE_PAGE,
-            SNAP_SHOT_PAGE,
-        ]
-        .contains(&page)
-        {
+        if !PORTED_PAGES.contains(&page) {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -1396,6 +1530,7 @@ impl App {
             ARCHIVE_PAGE => self.archive_sections(),
             STORAGE_PAGE => self.storage_sections(),
             SNAP_SHOT_PAGE => self.snap_shot_sections(),
+            CONNECTIONS_PAGE => connections_sections(),
             _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
@@ -1404,10 +1539,16 @@ impl App {
             .id_salt("settings-general")
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
-                let left = body.center().x - CARD_WIDTH / 2.0;
+                // `SettingsPageContainer width="wide"` on Connections.
+                let card_width = if page == CONNECTIONS_PAGE {
+                    976.0
+                } else {
+                    CARD_WIDTH
+                };
+                let left = body.center().x - card_width / 2.0;
                 let top = ui.max_rect().top();
                 // `SETTINGS_DEVICE_ONLY_PATHS` (Appearance, SnapShots, Connections) skip the scope.
-                let mut y = if [1, SNAP_SHOT_PAGE, 8].contains(&page) {
+                let mut y = if [1, SNAP_SHOT_PAGE, CONNECTIONS_PAGE].contains(&page) {
                     top + 24.0
                 } else {
                     scope_sentence(ui, left, top)
@@ -1417,7 +1558,7 @@ impl App {
                     ui.allocate_rect(
                         Rect::from_min_max(
                             Pos2::new(left, top),
-                            Pos2::new(left + CARD_WIDTH, y + 48.0),
+                            Pos2::new(left + card_width, y + 48.0),
                         ),
                         Sense::hover(),
                     );
@@ -1427,7 +1568,7 @@ impl App {
                     if section.title == LEGACY {
                         // A collapsible header (`Collapsible`, min-h-8) instead of a title.
                         let header =
-                            Rect::from_min_size(Pos2::new(left, y), Vec2::new(CARD_WIDTH, 32.0));
+                            Rect::from_min_size(Pos2::new(left, y), Vec2::new(card_width, 32.0));
                         let response =
                             ui.interact(header, ui.id().with("settings-legacy"), Sense::click());
                         let color = if response.hovered() {
@@ -1481,7 +1622,7 @@ impl App {
                             ui,
                             Rect::from_min_size(
                                 Pos2::new(title_left, y),
-                                Vec2::new(CARD_WIDTH, 28.0),
+                                Vec2::new(card_width, 28.0),
                             ),
                             &section.title,
                             font(14.0, Weight::Regular),
@@ -1505,7 +1646,7 @@ impl App {
                     let card = Rect::from_min_size(
                         Pos2::new(left, y),
                         Vec2::new(
-                            CARD_WIDTH,
+                            card_width,
                             heights.iter().sum::<f32>()
                                 + 2.0
                                 + if notice > 0.0 { notice + 6.0 } else { 0.0 },
@@ -1548,7 +1689,7 @@ impl App {
                     for (index, (row, height)) in section.rows.iter().zip(&heights).enumerate() {
                         let rect = Rect::from_min_size(
                             Pos2::new(card.left() + 1.0, row_top),
-                            Vec2::new(CARD_WIDTH - 2.0, *height),
+                            Vec2::new(card_width - 2.0, *height),
                         );
                         if index > 0 {
                             ui.painter().rect_filled(
@@ -1573,10 +1714,13 @@ impl App {
                     }
                     y = card.bottom() + 32.0;
                 }
+                if page == CONNECTIONS_PAGE {
+                    y = self.remote_environments(ui, left, y);
+                }
                 ui.allocate_rect(
                     Rect::from_min_max(
                         Pos2::new(left, top),
-                        Pos2::new(left + CARD_WIDTH, y + 48.0),
+                        Pos2::new(left + card_width, y + 48.0),
                     ),
                     Sense::hover(),
                 );
@@ -2723,6 +2867,51 @@ fn retention_width(ui: &Ui, text: &str) -> f32 {
         + widgets::text_width(ui, "days", font(12.0, Weight::Regular))
         + 8.0
         + 34.0
+}
+
+/// `ConnectionsSettings` for a session without `access:write`.
+fn connections_sections() -> Vec<Section> {
+    vec![Section {
+        title: "This machine".into(),
+        project: None,
+        unavailable: None,
+        rows: vec![Row {
+            id: "administrative-access".into(),
+            title: "Administrative access".into(),
+            description: "Pairing links and client-session management require the access:write scope for this backend.".into(),
+            status: None,
+            layers: false,
+            reset: false,
+            control: Control::None,
+        }],
+    }]
+}
+
+/// The outline of a rounded rectangle, clockwise from the top-left arc.
+fn rounded_rect_points(rect: Rect, radius: f32) -> Vec<Pos2> {
+    let corners = [
+        (
+            Pos2::new(rect.left() + radius, rect.top() + radius),
+            180.0f32,
+        ),
+        (Pos2::new(rect.right() - radius, rect.top() + radius), 270.0),
+        (
+            Pos2::new(rect.right() - radius, rect.bottom() - radius),
+            0.0,
+        ),
+        (
+            Pos2::new(rect.left() + radius, rect.bottom() - radius),
+            90.0,
+        ),
+    ];
+    let mut points = Vec::new();
+    for (center, start) in corners {
+        for step in 0..=6 {
+            let angle = (start + step as f32 * 15.0).to_radians();
+            points.push(center + Vec2::new(angle.cos(), angle.sin()) * radius);
+        }
+    }
+    points
 }
 
 #[cfg(test)]

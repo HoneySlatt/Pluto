@@ -395,6 +395,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "arrow-down",
         "opencode",
         "minus",
+        "chevrons-left-right-ellipsis",
     )
 }
 
