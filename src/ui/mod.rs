@@ -1,0 +1,16 @@
+pub mod changed_files;
+pub mod chat;
+pub mod composer;
+pub mod connect;
+pub mod context_menu;
+pub mod diff_panel;
+pub mod markdown;
+pub mod palette;
+pub mod pickers;
+pub mod project_icon;
+pub mod project_scope;
+pub mod requests_panel;
+pub mod sidebar;
+pub mod surfaces;
+pub mod thread_menu;
+pub mod widgets;
