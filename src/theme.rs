@@ -359,6 +359,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "bot",
         "smartphone",
         "settings-2",
+        "file-braces",
         "archive-x",
         "keyboard",
         "snap-shot",

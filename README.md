@@ -33,11 +33,12 @@ reads it from a file at startup instead; it is kept in memory only.
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
-| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Archive page (unarchive, delete) |
+| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Archive page (unarchive, delete); the Keybindings page (read-only list) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice): the
-settings pages other than General and Archive, settings search and scope pickers, the
+settings pages other than General, Keybindings and Archive, keybinding
+editing, settings search and scope pickers, the
 default model pickers in settings, project settings, pull requests, usage, the surfaces other than Diff
 (browser, terminal, files, pull requests, agents, device), the branch
 diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom

@@ -134,6 +134,8 @@ const SUBMODULES: [(&str, &str); 3] = [
 ];
 
 const CARD_WIDTH: f32 = 848.0;
+/// Index of the Keybindings page in `PAGES`.
+pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Archive page in `PAGES`.
 pub const ARCHIVE_PAGE: usize = 9;
 const LEGACY: &str = "Legacy features";
@@ -1130,7 +1132,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if page != 0 && page != ARCHIVE_PAGE {
+        if page != 0 && page != ARCHIVE_PAGE && page != KEYBINDINGS_PAGE {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -1156,37 +1158,18 @@ impl App {
             .show(&mut child, |ui| {
                 let left = body.center().x - CARD_WIDTH / 2.0;
                 let top = ui.max_rect().top();
-                // Scope sentence (`SettingsScopeSentence`); the pickers are not ported.
-                let mut y = top + 23.0;
-                let mut x = left + 16.0;
-                for (text, weight, color, chevron) in [
-                    (
-                        "Applying settings for",
-                        Weight::Regular,
-                        theme::MUTED_FOREGROUND,
-                        false,
-                    ),
-                    ("All projects", Weight::Medium, theme::FOREGROUND, true),
-                    ("across", Weight::Regular, theme::MUTED_FOREGROUND, false),
-                    ("All environments", Weight::Medium, theme::FOREGROUND, true),
-                ] {
-                    let width = widgets::text_width(ui, text, font(16.0, weight));
-                    widgets::text(ui, Pos2::new(x, y), text, font(16.0, weight), color, 24.0);
-                    x += width;
-                    if chevron {
-                        theme::paint_icon(
-                            ui,
-                            "chevron-down",
-                            Rect::from_min_size(Pos2::new(x + 6.0, y + 5.0), Vec2::splat(14.0)),
-                            14.0,
-                            theme::MUTED_FOREGROUND,
-                        );
-                        x += 26.0;
-                    } else {
-                        x += 6.0;
-                    }
+                let mut y = scope_sentence(ui, left, top);
+                if page == KEYBINDINGS_PAGE {
+                    y = self.keybindings_list(ui, left, y);
+                    ui.allocate_rect(
+                        Rect::from_min_max(
+                            Pos2::new(left, top),
+                            Pos2::new(left + CARD_WIDTH, y + 48.0),
+                        ),
+                        Sense::hover(),
+                    );
+                    return;
                 }
-                y += 25.0 + 32.0;
                 for section in &sections {
                     if section.title == LEGACY {
                         // A collapsible header (`Collapsible`, min-h-8) instead of a title.
@@ -2069,5 +2052,338 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+/// `SettingsScopeSentence` for the "All projects / All environments" scope
+/// (its pickers are not ported). Returns the top of the first section.
+fn scope_sentence(ui: &Ui, left: f32, top: f32) -> f32 {
+    let y = top + 23.0;
+    let mut x = left + 16.0;
+    for (text, weight, color, chevron) in [
+        (
+            "Applying settings for",
+            Weight::Regular,
+            theme::MUTED_FOREGROUND,
+            false,
+        ),
+        ("All projects", Weight::Medium, theme::FOREGROUND, true),
+        ("across", Weight::Regular, theme::MUTED_FOREGROUND, false),
+        ("All environments", Weight::Medium, theme::FOREGROUND, true),
+    ] {
+        let width = widgets::text_width(ui, text, font(16.0, weight));
+        widgets::text(ui, Pos2::new(x, y), text, font(16.0, weight), color, 24.0);
+        x += width;
+        if chevron {
+            theme::paint_icon(
+                ui,
+                "chevron-down",
+                Rect::from_min_size(Pos2::new(x + 6.0, y + 5.0), Vec2::splat(14.0)),
+                14.0,
+                theme::MUTED_FOREGROUND,
+            );
+            x += 26.0;
+        } else {
+            x += 6.0;
+        }
+    }
+    y + 25.0 + 32.0
+}
+
+/// Usage commands sort as one block in page order (`usageCommandOrder`).
+const USAGE_COMMANDS: [&str; 7] = [
+    "usage.cost",
+    "usage.tokens",
+    "usage.limits",
+    "usage.period.day",
+    "usage.period.week",
+    "usage.period.month",
+    "usage.period.quarter",
+];
+
+/// `commandLabel`: "chat.newLocal" reads "Chat: New Local".
+fn command_label(command: &str) -> String {
+    if command == "thread.copyReference" {
+        return "Pull Request: Copy Link or Thread ID".into();
+    }
+    let usage = [
+        ("usage.cost", "Usage: Cost"),
+        ("usage.tokens", "Usage: Tokens"),
+        ("usage.limits", "Usage: Limits"),
+        ("usage.period.day", "Usage: Period: Past 24h"),
+        ("usage.period.week", "Usage: Period: 7 days"),
+        ("usage.period.month", "Usage: Period: 30 days"),
+        ("usage.period.quarter", "Usage: Period: 90 days"),
+    ];
+    if let Some((_, label)) = usage.iter().find(|(c, _)| *c == command) {
+        return (*label).into();
+    }
+    let title_case = |segment: &str| -> String {
+        let mut spaced = String::new();
+        let mut previous: Option<char> = None;
+        for c in segment.chars() {
+            if c.is_uppercase() && previous.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit())
+            {
+                spaced.push(' ');
+            }
+            spaced.push(c);
+            previous = Some(c);
+        }
+        spaced
+            .split(|c: char| c == '-' || c == '_' || c.is_whitespace())
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut chars = w.chars();
+                chars
+                    .next()
+                    .map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if let Some(script) = command
+        .strip_prefix("script.")
+        .and_then(|rest| rest.strip_suffix(".run"))
+    {
+        return format!("Run Script: {}", title_case(script));
+    }
+    command
+        .split('.')
+        .map(title_case)
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+/// `whenAstToExpression`.
+fn when_expression(node: &Value) -> String {
+    let wrap = |n: &Value| match n["type"].as_str() {
+        Some("identifier") | Some("not") => when_expression(n),
+        _ => format!("({})", when_expression(n)),
+    };
+    match node["type"].as_str() {
+        Some("identifier") => node["name"].as_str().unwrap_or_default().to_owned(),
+        Some("not") => format!("!{}", wrap(&node["node"])),
+        Some("and") => format!("{} && {}", wrap(&node["left"]), wrap(&node["right"])),
+        Some("or") => format!("{} || {}", wrap(&node["left"]), wrap(&node["right"])),
+        _ => String::new(),
+    }
+}
+
+/// `shortcutToKeybindingInput` split into `KeybindingPill` labels.
+fn shortcut_parts(shortcut: &Value) -> Vec<String> {
+    let mut parts = Vec::new();
+    for (flag, label) in [
+        ("modKey", "Ctrl"),
+        ("metaKey", "meta"),
+        ("ctrlKey", "\u{2303}"),
+        ("altKey", "Alt"),
+        ("shiftKey", "\u{21e7}"),
+    ] {
+        if shortcut[flag] == true {
+            parts.push(label.to_owned());
+        }
+    }
+    let key = shortcut["key"].as_str().unwrap_or_default();
+    let key = match key {
+        " " => "space".to_owned(),
+        "escape" => "esc".to_owned(),
+        k if k.chars().count() == 1 => k.to_uppercase(),
+        k => k.to_owned(),
+    };
+    parts.push(key);
+    parts
+}
+
+impl App {
+    /// `KeybindingsSettings` (read-only): the bindings, sorted by command,
+    /// with their when clause and keys. Editing, adding, search and the
+    /// JSON file action are not ported.
+    fn keybindings_list(&mut self, ui: &mut Ui, left: f32, mut y: f32) -> f32 {
+        let mut rows: Vec<(String, String, Vec<String>)> = self.state.config["keybindings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|binding| {
+                let command = binding["command"].as_str().unwrap_or_default().to_owned();
+                (
+                    command,
+                    when_expression(&binding["whenAst"]),
+                    shortcut_parts(&binding["shortcut"]),
+                )
+            })
+            .collect();
+        let order = |command: &str| -> (String, usize) {
+            match USAGE_COMMANDS.iter().position(|c| *c == command) {
+                Some(rank) => (USAGE_COMMANDS[0].to_owned(), rank),
+                None => (command.to_owned(), 0),
+            }
+        };
+        rows.sort_by(|a, b| {
+            order(&a.0).cmp(&order(&b.0)).then_with(|| {
+                a.2.join("+")
+                    .to_lowercase()
+                    .cmp(&b.2.join("+").to_lowercase())
+            })
+        });
+
+        // Header: title, binding count and the (unported) actions.
+        widgets::text_in(
+            ui,
+            Rect::from_min_size(Pos2::new(left + 16.0, y), Vec2::new(200.0, 28.0)),
+            "Keybindings",
+            font(14.0, Weight::Regular),
+            theme::alpha(theme::FOREGROUND, 0.7),
+        );
+        let mut x = left + CARD_WIDTH - 16.0;
+        for (icon, tip) in [
+            ("file-braces", "Open keybindings.json"),
+            ("plus", "Add keybinding"),
+            ("search", "Search keybindings"),
+        ] {
+            let button = Rect::from_min_size(Pos2::new(x - 24.0, y + 2.0), Vec2::splat(24.0));
+            x = button.left() - 6.0;
+            if widgets::icon_button(
+                ui,
+                button,
+                ("keybindings-action", icon),
+                icon,
+                14.0,
+                theme::MUTED_FOREGROUND,
+                tip,
+            )
+            .clicked()
+            {
+                self.status = Some(format!("{tip} is not implemented yet"));
+            }
+        }
+        let count = format!("{} bindings", rows.len());
+        let count_width = widgets::text_width(ui, &count, font(11.0, Weight::Regular));
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(x - count_width, y), Pos2::new(x, y + 28.0)),
+            &count,
+            font(11.0, Weight::Regular),
+            theme::MUTED_FOREGROUND,
+        );
+        y += 28.0 + 10.0;
+
+        let card = Rect::from_min_size(
+            Pos2::new(left, y),
+            Vec2::new(CARD_WIDTH, rows.len() as f32 * 72.0 + 2.0 - 1.0),
+        );
+        ui.painter().rect(
+            card,
+            CornerRadius::same(14),
+            CARD_FILL,
+            Stroke::new(1.0, CARD_BORDER),
+            StrokeKind::Inside,
+        );
+        let mut top = card.top() + 1.0;
+        for (index, (command, when, keys)) in rows.iter().enumerate() {
+            let height = if index == 0 { 71.0 } else { 72.0 };
+            let row = Rect::from_min_size(
+                Pos2::new(card.left() + 1.0, top),
+                Vec2::new(CARD_WIDTH - 2.0, height),
+            );
+            top += height;
+            if !ui.is_rect_visible(row) {
+                continue;
+            }
+            let inner_top = row.top() + if index == 0 { 0.0 } else { 1.0 } + ROW_PAD_Y;
+            if index > 0 {
+                ui.painter().rect_filled(
+                    Rect::from_min_size(row.min, Vec2::new(row.width(), 1.0)),
+                    0.0,
+                    ROW_DIVIDER,
+                );
+            }
+            let text_left = row.left() + ROW_PAD_X;
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(600.0, 20.0)),
+                &command_label(command),
+                font(14.0, Weight::Medium),
+                theme::FOREGROUND,
+            );
+            // "When" line (h-6): label, then the clause button.
+            let when_top = inner_top + 24.0;
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(Pos2::new(text_left, when_top), Vec2::new(40.0, 24.0)),
+                "When",
+                font(12.0, Weight::Regular),
+                theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+            );
+            let label = if when.is_empty() {
+                "Always"
+            } else {
+                when.as_str()
+            };
+            let mono = egui::FontId::monospace(11.0);
+            let label_width = widgets::text_width(ui, label, mono.clone());
+            let clause = Rect::from_min_size(
+                Pos2::new(text_left + 38.0, when_top + 2.0),
+                Vec2::new(label_width + 6.0 + 4.0 + 14.0 + 6.0, 20.0),
+            );
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(clause.left() + 6.0, clause.top()), clause.max),
+                label,
+                mono,
+                if when.is_empty() {
+                    theme::MUTED_FOREGROUND
+                } else {
+                    theme::FOREGROUND
+                },
+            );
+            theme::paint_icon(
+                ui,
+                "chevron-down",
+                Rect::from_min_size(
+                    Pos2::new(clause.left() + 6.0 + label_width + 2.0, clause.top()),
+                    Vec2::new(14.0, 20.0),
+                ),
+                14.0,
+                theme::MUTED_FOREGROUND,
+            );
+            // Keys: `KbdGroup` chips inside a 28px ghost button.
+            let chip_font = font(12.0, Weight::Medium);
+            let widths: Vec<f32> = keys
+                .iter()
+                .map(|k| {
+                    (widgets::text_width(ui, k, chip_font.clone()) + 8.0)
+                        .max(20.0)
+                        .ceil()
+                })
+                .collect();
+            let total = widths.iter().sum::<f32>() + 4.0 * (widths.len().saturating_sub(1)) as f32;
+            let right = row.right() - ROW_PAD_X;
+            let center_y = row.top() + (if index == 0 { 0.0 } else { 1.0 }) + 36.0
+                - if index == 0 { 0.5 } else { 0.0 };
+            // The chips end at the content edge; the button padding overhangs.
+            let mut chip_x = right - total;
+            for (key, width) in keys.iter().zip(&widths) {
+                let chip = Rect::from_min_size(
+                    Pos2::new(chip_x, center_y - 10.0),
+                    Vec2::new(*width, 20.0),
+                );
+                ui.painter()
+                    .rect_filled(chip, CornerRadius::same(4), theme::white(0.03));
+                let text_width = widgets::text_width(ui, key, chip_font.clone());
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(
+                        Pos2::new(chip.center().x - text_width / 2.0, chip.top()),
+                        chip.max,
+                    ),
+                    key,
+                    chip_font.clone(),
+                    theme::MUTED_FOREGROUND,
+                );
+                chip_x += width + 4.0;
+            }
+        }
+        card.bottom()
     }
 }
