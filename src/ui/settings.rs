@@ -1065,42 +1065,7 @@ impl App {
             }
         }
 
-        let back = Rect::from_min_size(
-            Pos2::new(left + 8.0, rect.bottom() - 36.0),
-            Vec2::new(239.0, 32.0),
-        );
-        let response = ui.interact(back, ui.id().with("settings-back"), Sense::click());
-        if response.hovered() {
-            ui.painter().rect_filled(
-                back,
-                CornerRadius::same(8),
-                theme::alpha(theme::SIDEBAR_FOREGROUND, 0.08),
-            );
-        }
-        // Back rests like an inactive item and lights up on hover.
-        let (back_icon, back_text) = if response.hovered() {
-            (theme::SIDEBAR_FOREGROUND, theme::SIDEBAR_FOREGROUND)
-        } else {
-            (theme::SIDEBAR_ICON, theme::alpha(theme::SIDEBAR_MUTED, 0.8))
-        };
-        theme::paint_icon(
-            ui,
-            "arrow-left",
-            Rect::from_min_size(
-                Pos2::new(back.left() + 10.0, back.center().y - 8.0),
-                Vec2::splat(16.0),
-            ),
-            16.0,
-            back_icon,
-        );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(back.left() + 34.0, back.top()), back.max),
-            "Back",
-            font(14.0, Weight::Medium),
-            back_text,
-        );
-        if response.clicked() {
+        if self.sidebar_back(ui, rect, "settings-back") {
             self.settings_page = None;
         }
     }

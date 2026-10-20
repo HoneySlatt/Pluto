@@ -34,12 +34,14 @@ reads it from a file at startup instead; it is kept in memory only.
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
 | Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Archive page (unarchive, delete); the Keybindings page (read-only list) |
+| Usage | Header with the metric and period groups; the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice): the
 settings pages other than General, Keybindings and Archive, keybinding
 editing, settings search and scope pickers, the
-default model pickers in settings, project settings, pull requests, usage, the surfaces other than Diff
+default model pickers in settings, project settings, pull requests, the usage Cost and Tokens charts (and
+limit sources, reset credits and segment popovers), the surfaces other than Diff
 (browser, terminal, files, pull requests, agents, device), the branch
 diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom
 snooze times, project favicons, palette sub-actions (themes, go to file, git
@@ -55,6 +57,9 @@ keywords, operators and identifiers are recolored to Shiki's scopes; other
 languages may still differ);
 text is rasterized by epaint, not the browser, so a few text-sized boxes land
 1px off (the card snooze menu, the header buttons next to Initialize Git).
+`tabular-nums` is emulated with fixed digit cells, so Geist's tabular "1"
+sits about 2px right, and "↻" (missing from Geist) comes from egui's fallback
+font, smaller than the browser's.
 
 ## Development
 

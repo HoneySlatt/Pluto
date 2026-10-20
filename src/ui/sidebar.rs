@@ -1,6 +1,6 @@
 //! Sidebar (`Sidebar.tsx`): wordmark, search, thread cards grouped into the
 //! pinned/active list and the settled shelf, footer shortcuts.
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::app::App;
 use crate::model::Thread;
@@ -173,6 +173,48 @@ impl App {
         );
     }
 
+    /// The footer's Back row of the settings and usage sidebars; returns
+    /// whether it was clicked.
+    pub(crate) fn sidebar_back(&mut self, ui: &mut Ui, rect: Rect, id: &str) -> bool {
+        let left = rect.left();
+        let back = Rect::from_min_size(
+            Pos2::new(left + 8.0, rect.bottom() - 36.0),
+            Vec2::new(239.0, 32.0),
+        );
+        let response = ui.interact(back, ui.id().with(id), Sense::click());
+        if response.hovered() {
+            ui.painter().rect_filled(
+                back,
+                CornerRadius::same(8),
+                theme::alpha(theme::SIDEBAR_FOREGROUND, 0.08),
+            );
+        }
+        // Back rests like an inactive item and lights up on hover.
+        let (back_icon, back_text) = if response.hovered() {
+            (theme::SIDEBAR_FOREGROUND, theme::SIDEBAR_FOREGROUND)
+        } else {
+            (theme::SIDEBAR_ICON, theme::alpha(theme::SIDEBAR_MUTED, 0.8))
+        };
+        theme::paint_icon(
+            ui,
+            "arrow-left",
+            Rect::from_min_size(
+                Pos2::new(back.left() + 10.0, back.center().y - 8.0),
+                Vec2::splat(16.0),
+            ),
+            16.0,
+            back_icon,
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(back.left() + 34.0, back.top()), back.max),
+            "Back",
+            font(14.0, Weight::Medium),
+            back_text,
+        );
+        response.clicked()
+    }
+
     pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         self.sidebar_chrome(ui, rect);
         let painter = ui.painter().clone();
@@ -289,7 +331,13 @@ impl App {
         );
         self.thread_list(ui, list_rect);
 
-        // Footer shortcuts.
+        // Footer shortcuts; the usage page swaps them for Back.
+        if self.usage_open {
+            if self.sidebar_back(ui, rect, "usage-back") {
+                self.usage_open = false;
+            }
+            return;
+        }
         let footer = [
             ("settings", "Settings"),
             ("git-pull-request-arrow", "Pull requests"),
@@ -313,6 +361,8 @@ impl App {
             {
                 if *icon == "settings" {
                     self.open_settings();
+                } else if *icon == "chart-no-axes-column" {
+                    self.open_usage();
                 } else {
                     self.status = Some(format!("{label} is not implemented yet"));
                 }

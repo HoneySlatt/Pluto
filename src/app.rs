@@ -77,6 +77,9 @@ pub struct App {
     pub(crate) search: String,
     /// The open settings page (index into `settings::PAGES`), if any.
     pub(crate) settings_page: Option<usize>,
+    /// The Usage page replaces the workspace (`/usage`).
+    pub(crate) usage_open: bool,
+    pub(crate) usage: crate::ui::usage::UsageState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
     pub(crate) client_settings_path: Option<std::path::PathBuf>,
@@ -188,6 +191,8 @@ impl App {
             question_collapsed: None,
             responding: Default::default(),
             settings_page: None,
+            usage_open: false,
+            usage: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
             ),
@@ -299,6 +304,7 @@ impl App {
     }
 
     pub(crate) fn select_thread(&mut self, id: Option<String>) {
+        self.usage_open = false;
         if self.selected == id {
             return;
         }
@@ -629,7 +635,8 @@ impl eframe::App for App {
                 let workspace =
                     Rect::from_min_max(Pos2::new(sidebar.right(), rect.top()), rect.max);
                 // The right panel keeps 360px for the chat column (`PreviewPanelShell`).
-                let panel_open = self.panel_open() && self.current_thread().is_some();
+                let panel_open =
+                    !self.usage_open && self.panel_open() && self.current_thread().is_some();
                 let main = if panel_open {
                     let max = (rect.width() * 0.7)
                         .min(workspace.width() - 360.0)
@@ -642,7 +649,11 @@ impl eframe::App for App {
                 } else {
                     workspace
                 };
-                self.main_area(ui, main);
+                if self.usage_open {
+                    self.usage_page(ui, main);
+                } else {
+                    self.main_area(ui, main);
+                }
                 if panel_open {
                     let panel = Rect::from_min_max(Pos2::new(main.right(), rect.top()), rect.max);
                     self.diff_panel(ui, panel);

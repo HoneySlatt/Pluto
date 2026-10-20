@@ -94,6 +94,54 @@ pub fn text_width(ui: &Ui, text: &str, font: FontId) -> f32 {
         .x
 }
 
+/// Geist's tabular figure advance (`tabular-nums`), in ems.
+const TABULAR_ADVANCE: f32 = 0.625;
+
+/// Lays out `text` with `tabular-nums`: each digit is centered in a fixed
+/// cell. Returns the glyph offsets and the total width.
+fn tabular_layout(ui: &Ui, text: &str, font: &FontId) -> (Vec<(char, f32, f32)>, f32) {
+    let mut x = 0.0;
+    let mut glyphs = Vec::new();
+    for c in text.chars() {
+        let width = text_width(ui, c.encode_utf8(&mut [0; 4]), font.clone());
+        let advance = if c.is_ascii_digit() {
+            font.size * TABULAR_ADVANCE
+        } else {
+            width
+        };
+        glyphs.push((c, x + (advance - width) / 2.0, width));
+        x += advance;
+    }
+    (glyphs, x)
+}
+
+pub fn tabular_width(ui: &Ui, text: &str, font: FontId) -> f32 {
+    tabular_layout(ui, text, &font).1
+}
+
+/// `text` with `tabular-nums`, its CSS line box starting at `pos`.
+pub fn tabular_text(
+    ui: &Ui,
+    pos: Pos2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    line_height: f32,
+) -> f32 {
+    let (glyphs, width) = tabular_layout(ui, text, &font);
+    for (c, x, _) in glyphs {
+        self::text(
+            ui,
+            Pos2::new(pos.x + x, pos.y),
+            c.encode_utf8(&mut [0; 4]),
+            font.clone(),
+            color,
+            line_height,
+        );
+    }
+    width
+}
+
 pub fn radius(r: f32) -> CornerRadius {
     CornerRadius::same(r.round() as u8)
 }
