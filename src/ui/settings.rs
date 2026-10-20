@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
+use crate::ui::context_menu;
 use crate::ui::widgets::{self, MenuEntry, MenuItem};
 
 /// `SETTINGS_SECTION_LABELS` with their icons (`SETTINGS_SECTION_ICONS`).
@@ -133,6 +134,8 @@ const SUBMODULES: [(&str, &str); 3] = [
 ];
 
 const CARD_WIDTH: f32 = 848.0;
+/// Index of the Archive page in `PAGES`.
+pub const ARCHIVE_PAGE: usize = 9;
 const LEGACY: &str = "Legacy features";
 /// A select trigger sized to its label (`w-auto`).
 const AUTO_WIDTH: f32 = 0.0;
@@ -168,11 +171,16 @@ enum Control {
         traits: Option<String>,
     },
     Button(&'static str),
+    /// `Button variant="outline" size="xs"` with a leading icon.
+    OutlineXs {
+        label: &'static str,
+        icon: &'static str,
+    },
     None,
 }
 
 struct Row {
-    id: &'static str,
+    id: String,
     title: String,
     description: String,
     status: Option<String>,
@@ -183,7 +191,9 @@ struct Row {
 }
 
 struct Section {
-    title: &'static str,
+    title: String,
+    /// Archive groups show their project's icon before the title.
+    project: Option<crate::model::Project>,
     rows: Vec<Row>,
 }
 
@@ -194,6 +204,8 @@ enum RowAction {
     Text(String),
     Reset,
     Click,
+    /// A secondary click at this position (archived rows).
+    Menu(Pos2),
 }
 
 fn options(list: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -288,10 +300,11 @@ impl App {
             .unwrap_or("recursive")
             .to_owned();
         let new_threads = Section {
-            title: "New threads",
+            title: "New threads".into(),
+                project: None,
             rows: vec![
                 Row {
-                    id: "default-model",
+                    id: "default-model".into(),
                     title: "Model".into(),
                     description: "Default model for new threads. Projects can override it.".into(),
                     status: self.state.config["settings"]["defaultModelSelection"]
@@ -306,7 +319,7 @@ impl App {
                     },
                 },
                 Row {
-                    id: "default-permissions",
+                    id: "default-permissions".into(),
                     title: "Permissions".into(),
                     description: "Default permissions for new threads. Projects can override them."
                         .into(),
@@ -324,7 +337,7 @@ impl App {
                     },
                 },
                 Row {
-                    id: "default-workspace",
+                    id: "default-workspace".into(),
                     title: "Workspace".into(),
                     description: "Where new threads start. Projects and their t3.json can override it."
                         .into(),
@@ -339,7 +352,7 @@ impl App {
                     },
                 },
                 Row {
-                    id: "worktree-submodules",
+                    id: "worktree-submodules".into(),
                     title: "Submodules".into(),
                     description: "How new worktrees populate git submodules. Projects and their t3.json can override it.".into(),
                     status: None,
@@ -358,7 +371,7 @@ impl App {
         let auto_settle_days = self.server_setting("sidebarAutoSettleAfterDays");
         let mut organization = vec![
             Row {
-                id: "project-grouping",
+                id: "project-grouping".into(),
                 title: "Project grouping".into(),
                 description: "Combine matching repositories across environments.".into(),
                 status: None,
@@ -367,7 +380,7 @@ impl App {
                 control: Control::Switch(self.client_setting("sidebarProjectGroupingMode") != "separate"),
             },
             Row {
-                id: "working-shelf",
+                id: "working-shelf".into(),
                 title: "Working section (beta)".into(),
                 description: "Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you.".into(),
                 status: None,
@@ -376,7 +389,7 @@ impl App {
                 control: switch("sidebarWorkingShelfEnabled"),
             },
             Row {
-                id: "auto-settle-merged-threads",
+                id: "auto-settle-merged-threads".into(),
                 title: "Auto-settle merged threads".into(),
                 description: "Settle a thread when its pull request merges. Closed pull requests still settle automatically.".into(),
                 status: None,
@@ -385,7 +398,7 @@ impl App {
                 control: Control::Switch(self.server_setting("sidebarAutoSettleOnMerge") == true),
             },
             Row {
-                id: "auto-settle-inactive-threads",
+                id: "auto-settle-inactive-threads".into(),
                 title: "Auto-settle inactive threads".into(),
                 description: "Sidebar threads with no activity for this long settle automatically."
                     .into(),
@@ -397,7 +410,7 @@ impl App {
         ];
         if let Some(days) = auto_settle_days.as_i64() {
             organization.push(Row {
-                id: "days-before-auto-settle",
+                id: "days-before-auto-settle".into(),
                 title: "Days of inactivity before auto-settle".into(),
                 description: "Any new activity un-settles a thread automatically.".into(),
                 status: None,
@@ -427,7 +440,7 @@ impl App {
             .to_owned();
         let behavior = vec![
             Row {
-                id: "thread-notifications",
+                id: "thread-notifications".into(),
                 title: "Thread notifications".into(),
                 description: "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while T3 Code is open.".into(),
                 status: None,
@@ -436,7 +449,7 @@ impl App {
                 control: client_select("notificationMode", &NOTIFICATION_MODES, 224.0),
             },
             Row {
-                id: "in-app-notifications",
+                id: "in-app-notifications".into(),
                 title: "In-app notifications".into(),
                 description: "Show a toast when another thread finishes, fails, or needs input or approval while this app has focus.".into(),
                 status: None,
@@ -445,7 +458,7 @@ impl App {
                 control: switch("inAppNotificationsEnabled"),
             },
             Row {
-                id: "time-format",
+                id: "time-format".into(),
                 title: "Time format".into(),
                 description: "System default follows your browser or OS clock preference.".into(),
                 status: None,
@@ -454,7 +467,7 @@ impl App {
                 control: client_select("timestampFormat", &TIMESTAMP_FORMATS, 160.0),
             },
             Row {
-                id: "response-streaming",
+                id: "response-streaming".into(),
                 title: "Response streaming".into(),
                 description: RESPONSE_STREAMING
                     .iter()
@@ -475,7 +488,7 @@ impl App {
                 },
             },
             Row {
-                id: "hide-whitespace-changes",
+                id: "hide-whitespace-changes".into(),
                 title: "Hide whitespace changes".into(),
                 description: "Set whether the diff panel ignores whitespace-only edits by default."
                     .into(),
@@ -485,7 +498,7 @@ impl App {
                 control: switch("diffIgnoreWhitespace"),
             },
             Row {
-                id: "default-diff-file-state",
+                id: "default-diff-file-state".into(),
                 title: "Default diff file state".into(),
                 description: "Start with files expanded or collapsed when opening diffs or a pull request's Code tab.".into(),
                 status: None,
@@ -503,7 +516,7 @@ impl App {
                 },
             },
             Row {
-                id: "diff-layout",
+                id: "diff-layout".into(),
                 title: "Diff layout".into(),
                 description: "Show diffs stacked or side by side. The toggle in the diff toolbar changes this too.".into(),
                 status: None,
@@ -512,7 +525,7 @@ impl App {
                 control: client_select("diffLayout", &DIFF_LAYOUTS, 160.0),
             },
             Row {
-                id: "proactive-panels",
+                id: "proactive-panels".into(),
                 title: "Proactive panels".into(),
                 description: "Open linked pull requests first. Otherwise, open the working tree diff for changes to at least 3 files or 50 lines.".into(),
                 status: None,
@@ -521,7 +534,7 @@ impl App {
                 control: switch("proactivePanelsEnabled"),
             },
             Row {
-                id: "skills-in-slash-menu",
+                id: "skills-in-slash-menu".into(),
                 title: "Show skills in slash menu".into(),
                 description: "Also include skills in the / command menu. Skills always appear when you type $.".into(),
                 status: None,
@@ -530,7 +543,7 @@ impl App {
                 control: switch("showSkillsInSlashMenu"),
             },
             Row {
-                id: "composer-rich-text",
+                id: "composer-rich-text".into(),
                 title: "Rich text composer".into(),
                 description: "Show formatted Markdown as you type.".into(),
                 status: None,
@@ -539,7 +552,7 @@ impl App {
                 control: switch("composerRichTextEnabled"),
             },
             Row {
-                id: "composer-collapse",
+                id: "composer-collapse".into(),
                 title: "Collapse composer on scroll".into(),
                 description: "Rest the composer of an existing thread into a single line when you scroll the conversation. Focus the composer or start typing to expand it again.".into(),
                 status: None,
@@ -548,7 +561,7 @@ impl App {
                 control: switch("composerCollapseOnScroll"),
             },
             Row {
-                id: "send-shortcut",
+                id: "send-shortcut".into(),
                 title: "Send shortcut".into(),
                 description: "Choose when Enter sends a prompt or inserts a new line".into(),
                 status: None,
@@ -557,7 +570,7 @@ impl App {
                 control: client_select("sendShortcut", &SEND_SHORTCUTS, AUTO_WIDTH),
             },
             Row {
-                id: "follow-up-behavior",
+                id: "follow-up-behavior".into(),
                 title: "Follow-up behavior".into(),
                 description: format!(
                     "Queue follow-ups while the agent runs or steer the current run. {follow_up_tail}"
@@ -568,7 +581,7 @@ impl App {
                 control: client_select("followUpBehavior", &FOLLOW_UPS, AUTO_WIDTH),
             },
             Row {
-                id: "provider-update-checks",
+                id: "provider-update-checks".into(),
                 title: "Provider update checks".into(),
                 description: "Check installed provider CLIs for newer available versions.".into(),
                 status: None,
@@ -577,7 +590,7 @@ impl App {
                 control: Control::Switch(self.server_setting("enableProviderUpdateChecks") == true),
             },
             Row {
-                id: "continue-threads-after-server-update",
+                id: "continue-threads-after-server-update".into(),
                 title: "Continue threads after restarts".into(),
                 description: "Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments.".into(),
                 status: None,
@@ -588,7 +601,7 @@ impl App {
                 ),
             },
             Row {
-                id: "background-activity",
+                id: "background-activity".into(),
                 title: "Background activity".into(),
                 description: BACKGROUND_PROFILES
                     .iter()
@@ -612,7 +625,7 @@ impl App {
 
         let projects = vec![
             Row {
-                id: "start-from-origin",
+                id: "start-from-origin".into(),
                 title: "Start from origin".into(),
                 description: "Creates the worktree from the latest matching branch on origin instead of your local branch.".into(),
                 status: None,
@@ -621,7 +634,7 @@ impl App {
                 control: Control::Switch(self.server_setting("newWorktreesStartFromOrigin") == true),
             },
             Row {
-                id: "add-project-starts-in",
+                id: "add-project-starts-in".into(),
                 title: "Add project starts in".into(),
                 description: "Leave empty to use \"~/\" when the Add Project browser opens.".into(),
                 status: None,
@@ -638,7 +651,7 @@ impl App {
 
         let confirmations = vec![
             Row {
-                id: "unpin-confirmation",
+                id: "unpin-confirmation".into(),
                 title: "Unpin confirmation".into(),
                 description: "Ask before unpinning a thread from the pinned section.".into(),
                 status: None,
@@ -647,7 +660,7 @@ impl App {
                 control: switch("confirmThreadUnpin"),
             },
             Row {
-                id: "archive-confirmation",
+                id: "archive-confirmation".into(),
                 title: "Archive confirmation".into(),
                 description: "Require a second click on the inline archive action before a thread is archived.".into(),
                 status: None,
@@ -656,7 +669,7 @@ impl App {
                 control: switch("confirmThreadArchive"),
             },
             Row {
-                id: "delete-confirmation",
+                id: "delete-confirmation".into(),
                 title: "Delete confirmation".into(),
                 description: "Ask before deleting a thread and its chat history.".into(),
                 status: None,
@@ -675,7 +688,7 @@ impl App {
             .unwrap_or_else(|| self.composer_model_selection(true));
             let (label, icon) = self.model_label(&selection);
             vec![Row {
-                id: "text-generation-model",
+                id: "text-generation-model".into(),
                 title: "Text generation model".into(),
                 description: "Used for thread titles and other generated text on connected devices with this provider. Source control can override it.".into(),
                 status: None,
@@ -692,29 +705,35 @@ impl App {
         vec![
             new_threads,
             Section {
-                title: "Organization",
+                title: "Organization".into(),
+                project: None,
                 rows: organization,
             },
             Section {
-                title: "Behavior",
+                title: "Behavior".into(),
+                project: None,
                 rows: behavior,
             },
             Section {
-                title: "Projects & threads",
+                title: "Projects & threads".into(),
+                project: None,
                 rows: projects,
             },
             Section {
-                title: "Confirmations",
+                title: "Confirmations".into(),
+                project: None,
                 rows: confirmations,
             },
             Section {
-                title: "Text generation",
+                title: "Text generation".into(),
+                project: None,
                 rows: text_generation,
             },
             Section {
-                title: "About",
+                title: "About".into(),
+                project: None,
                 rows: vec![Row {
-                    id: "about-version",
+                    id: "about-version".into(),
                     title: "Version".into(),
                     description: "Current version of the application.".into(),
                     status: None,
@@ -724,10 +743,11 @@ impl App {
                 }],
             },
             Section {
-                title: "Diagnostics",
+                title: "Diagnostics".into(),
+                project: None,
                 rows: vec![
                     Row {
-                        id: "diagnostics",
+                        id: "diagnostics".into(),
                         title: "Diagnostics".into(),
                         description:
                             "Inspect processes, resource use, and logs on this environment.".into(),
@@ -737,7 +757,7 @@ impl App {
                         control: Control::Button("View diagnostics"),
                     },
                     Row {
-                        id: "open-source-licenses",
+                        id: "open-source-licenses".into(),
                         title: "Open source licenses".into(),
                         description:
                             "Notices for dependencies, assets, and optional tools used by T3 Code."
@@ -750,11 +770,12 @@ impl App {
                 ],
             },
             Section {
-                title: LEGACY,
+                title: LEGACY.into(),
+                project: None,
                 rows: if self.settings_legacy_open {
                     vec![
                         Row {
-                            id: "legacy-plan-mode",
+                            id: "legacy-plan-mode".into(),
                             title: "Plan mode (legacy)".into(),
                             description: "Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode.".into(),
                             status: None,
@@ -763,7 +784,7 @@ impl App {
                             control: switch("planModeEnabled"),
                         },
                         Row {
-                            id: "legacy-context-window-indicator",
+                            id: "legacy-context-window-indicator".into(),
                             title: "Context window indicator (legacy)".into(),
                             description: "Shows context window usage as a circular indicator in the composer.".into(),
                             status: None,
@@ -772,7 +793,7 @@ impl App {
                             control: switch("contextWindowMeterEnabled"),
                         },
                         Row {
-                            id: "legacy-sidebar",
+                            id: "legacy-sidebar".into(),
                             title: "Sidebar (legacy)".into(),
                             description: "Restore per-project thread trees instead of the default flat sidebar.".into(),
                             status: None,
@@ -881,7 +902,7 @@ impl App {
                         Select(value) | Text(value) => json!(value),
                         Number(n) => json!(n),
                         Reset => default_client_settings()[key].clone(),
-                        Click => return,
+                        Click | Menu(_) => return,
                     };
                     client(self, key, value);
                 } else if let Some(key) = server_key {
@@ -890,7 +911,7 @@ impl App {
                         Select(value) | Text(value) => json!(value),
                         Number(n) => json!(n.max(1)),
                         Reset => default_server_setting(key),
-                        Click => return,
+                        Click | Menu(_) => return,
                     };
                     server(self, key, value);
                 }
@@ -903,7 +924,9 @@ impl App {
         let Some(page) = self.settings_page else {
             return;
         };
-        if ui.input(|i| i.key_pressed(Key::Escape)) && self.open_menu.is_none() {
+        let overlay =
+            self.open_menu.is_some() || self.archive_menu.is_some() || self.confirm.is_some();
+        if ui.input(|i| i.key_pressed(Key::Escape)) && !overlay {
             self.settings_page = None;
             return;
         }
@@ -913,6 +936,7 @@ impl App {
         ui.painter().rect_filled(main, 0.0, theme::BACKGROUND);
         self.settings_page_view(ui, main, page);
         self.settings_sidebar(ui, sidebar, page);
+        self.archive_context_menu(ui);
     }
 
     fn settings_sidebar(&mut self, ui: &mut Ui, rect: Rect, page: usize) {
@@ -997,6 +1021,9 @@ impl App {
             );
             if response.clicked() {
                 self.settings_page = Some(index);
+                if index == ARCHIVE_PAGE {
+                    self.request_archived();
+                }
             }
         }
 
@@ -1005,14 +1032,19 @@ impl App {
             Vec2::new(239.0, 32.0),
         );
         let response = ui.interact(back, ui.id().with("settings-back"), Sense::click());
-        ui.painter().rect_filled(
-            back,
-            CornerRadius::same(8),
-            theme::alpha(
-                theme::SIDEBAR_FOREGROUND,
-                if response.hovered() { 0.11 } else { 0.08 },
-            ),
-        );
+        if response.hovered() {
+            ui.painter().rect_filled(
+                back,
+                CornerRadius::same(8),
+                theme::alpha(theme::SIDEBAR_FOREGROUND, 0.08),
+            );
+        }
+        // Back rests like an inactive item and lights up on hover.
+        let (back_icon, back_text) = if response.hovered() {
+            (theme::SIDEBAR_FOREGROUND, theme::SIDEBAR_FOREGROUND)
+        } else {
+            (theme::SIDEBAR_ICON, theme::alpha(theme::SIDEBAR_MUTED, 0.8))
+        };
         theme::paint_icon(
             ui,
             "arrow-left",
@@ -1021,14 +1053,14 @@ impl App {
                 Vec2::splat(16.0),
             ),
             16.0,
-            theme::SIDEBAR_FOREGROUND,
+            back_icon,
         );
         widgets::text_in(
             ui,
             Rect::from_min_max(Pos2::new(back.left() + 34.0, back.top()), back.max),
             "Back",
             font(14.0, Weight::Medium),
-            theme::SIDEBAR_FOREGROUND,
+            back_text,
         );
         if response.clicked() {
             self.settings_page = None;
@@ -1098,7 +1130,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if page != 0 {
+        if page != 0 && page != ARCHIVE_PAGE {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -1111,8 +1143,12 @@ impl App {
             );
             return;
         }
-        let sections = self.general_sections();
-        let mut actions: Vec<(&'static str, RowAction)> = Vec::new();
+        let sections = if page == ARCHIVE_PAGE {
+            self.archive_sections()
+        } else {
+            self.general_sections()
+        };
+        let mut actions: Vec<(String, RowAction)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("settings-general")
@@ -1192,13 +1228,26 @@ impl App {
                             continue;
                         }
                     } else {
+                        // Archive groups lead with the project icon (`gap-2`).
+                        let mut title_left = left + 16.0;
+                        if let Some(project) = &section.project {
+                            crate::ui::project_icon::paint(
+                                ui,
+                                Rect::from_min_size(
+                                    Pos2::new(title_left, y + 6.0),
+                                    Vec2::splat(16.0),
+                                ),
+                                project,
+                            );
+                            title_left += 24.0;
+                        }
                         widgets::text_in(
                             ui,
                             Rect::from_min_size(
-                                Pos2::new(left + 16.0, y),
+                                Pos2::new(title_left, y),
                                 Vec2::new(CARD_WIDTH, 28.0),
                             ),
-                            section.title,
+                            &section.title,
                             font(14.0, Weight::Regular),
                             theme::alpha(theme::FOREGROUND, 0.7),
                         );
@@ -1236,7 +1285,7 @@ impl App {
                             );
                         }
                         if let Some(action) = self.settings_row(ui, rect, row, index > 0) {
-                            actions.push((row.id, action));
+                            actions.push((row.id.clone(), action));
                         }
                         row_top += height;
                     }
@@ -1251,7 +1300,11 @@ impl App {
                 );
             });
         for (id, action) in actions {
-            self.apply_general(id, action);
+            if page == ARCHIVE_PAGE {
+                self.apply_archive(&id, action);
+            } else {
+                self.apply_general(&id, action);
+            }
         }
     }
 
@@ -1265,7 +1318,31 @@ impl App {
         divided: bool,
     ) -> Option<RowAction> {
         let inner_top = rect.top() + if divided { 1.0 } else { 0.0 } + ROW_PAD_Y;
-        let left = rect.left() + ROW_PAD_X;
+        let mut left = rect.left() + ROW_PAD_X;
+        let base_left = left;
+        // Archived rows open Unarchive / Delete on a secondary click.
+        let mut menu = None;
+        if row.id.starts_with("archived:") {
+            let response = ui.interact(
+                rect,
+                ui.id().with(("settings-row", &row.id)),
+                Sense::click(),
+            );
+            if response.secondary_clicked() {
+                menu = response.interact_pointer_pos().map(RowAction::Menu);
+            }
+        }
+        // The empty archive row leads its title with the archive icon (`gap-2`).
+        if row.id == "archive-empty" && self.archived.is_some() {
+            theme::paint_icon(
+                ui,
+                "archive",
+                Rect::from_min_size(Pos2::new(left, inner_top), Vec2::new(14.0, 20.0)),
+                14.0,
+                theme::MUTED_FOREGROUND,
+            );
+            left += 22.0;
+        }
         let title_width = widgets::text_width(ui, &row.title, font(14.0, Weight::Medium));
         widgets::text_in(
             ui,
@@ -1298,7 +1375,7 @@ impl App {
             widgets::icon_button(
                 ui,
                 slot,
-                ("settings-info", row.id),
+                ("settings-info", &row.id),
                 "info",
                 14.0,
                 theme::MUTED_FOREGROUND,
@@ -1316,7 +1393,7 @@ impl App {
             if widgets::icon_button(
                 ui,
                 slot,
-                ("settings-reset", row.id),
+                ("settings-reset", &row.id),
                 "undo-2",
                 12.0,
                 theme::MUTED_FOREGROUND,
@@ -1327,7 +1404,13 @@ impl App {
                 action = Some(RowAction::Reset);
             }
         }
-        let mut y = inner_top + 20.0;
+        // A title with an inline icon is 22px tall (`inline-flex` line box).
+        let title_height = if row.id == "archive-empty" {
+            22.0
+        } else {
+            20.0
+        };
+        let mut y = inner_top + title_height;
         let control_width = control_width(ui, &row.control);
         let text_width =
             (rect.width() - 2.0 * ROW_PAD_X - 32.0 - control_width).min(DESCRIPTION_MAX);
@@ -1342,7 +1425,7 @@ impl App {
             );
             let height = galley.size().y;
             ui.painter().galley(
-                Pos2::new(left, y + 4.0),
+                Pos2::new(base_left, y + 4.0),
                 galley,
                 theme::alpha(theme::MUTED_FOREGROUND, 0.8),
             );
@@ -1351,7 +1434,7 @@ impl App {
         if let Some(status) = &row.status {
             widgets::text(
                 ui,
-                Pos2::new(left, y + 6.0),
+                Pos2::new(base_left, y + 6.0),
                 status,
                 font(12.0, Weight::Regular),
                 theme::MUTED_FOREGROUND,
@@ -1362,7 +1445,9 @@ impl App {
         let center_y = rect.top()
             + (if divided { 1.0 } else { 0.0 })
             + (rect.height() - if divided { 1.0 } else { 0.0 }) / 2.0;
-        self.settings_control(ui, row, right, center_y).or(action)
+        self.settings_control(ui, row, right, center_y)
+            .or(action)
+            .or(menu)
     }
 
     fn settings_control(
@@ -1380,7 +1465,7 @@ impl App {
                 );
                 let response = ui.interact(
                     track,
-                    ui.id().with(("settings-switch", row.id)),
+                    ui.id().with(("settings-switch", &row.id)),
                     Sense::click(),
                 );
                 ui.painter().rect_filled(
@@ -1419,7 +1504,7 @@ impl App {
                 let open = self.open_menu.as_deref() == Some(menu_id.as_str());
                 let response = ui.interact(
                     trigger,
-                    ui.id().with(("settings-select", row.id)),
+                    ui.id().with(("settings-select", &row.id)),
                     Sense::click(),
                 );
                 ui.painter().rect(
@@ -1506,10 +1591,13 @@ impl App {
                     .settings_edits
                     .entry(row.id.to_owned())
                     .or_insert_with(|| value.to_string());
-                let (changed, done, buffer) = number_or_text_field(ui, field, row.id, text, "");
-                *self.settings_edits.get_mut(row.id).expect("inserted above") = buffer.clone();
+                let (changed, done, buffer) = number_or_text_field(ui, field, &row.id, text, "");
+                *self
+                    .settings_edits
+                    .get_mut(&row.id)
+                    .expect("inserted above") = buffer.clone();
                 if done {
-                    self.settings_edits.remove(row.id);
+                    self.settings_edits.remove(&row.id);
                     return buffer
                         .trim()
                         .parse::<i64>()
@@ -1529,10 +1617,13 @@ impl App {
                     .settings_edits
                     .entry(row.id.to_owned())
                     .or_insert_with(|| value.clone());
-                let (_, done, buffer) = number_or_text_field(ui, field, row.id, text, "~/");
-                *self.settings_edits.get_mut(row.id).expect("inserted above") = buffer.clone();
+                let (_, done, buffer) = number_or_text_field(ui, field, &row.id, text, "~/");
+                *self
+                    .settings_edits
+                    .get_mut(&row.id)
+                    .expect("inserted above") = buffer.clone();
                 if done {
-                    self.settings_edits.remove(row.id);
+                    self.settings_edits.remove(&row.id);
                     return (buffer.trim() != value)
                         .then(|| RowAction::Text(buffer.trim().to_owned()));
                 }
@@ -1566,7 +1657,7 @@ impl App {
                     x = button.left() - 6.0;
                     let response = ui.interact(
                         button,
-                        ui.id().with(("settings-model", row.id, index)),
+                        ui.id().with(("settings-model", &row.id, index)),
                         Sense::click(),
                     );
                     if response.hovered() {
@@ -1609,6 +1700,30 @@ impl App {
                 clicked.then_some(RowAction::Click)
             }
             Control::None => None,
+            Control::OutlineXs { label, icon } => {
+                // A bare label (no `ml-0.5`) starts 2px closer to the icon.
+                let width = widgets::outline_button_width(ui, true, label) - 2.0;
+                let button = Rect::from_min_size(
+                    Pos2::new(right - width, center_y - 12.0),
+                    Vec2::new(width, 24.0),
+                );
+                let response = widgets::outline_button(
+                    ui,
+                    button,
+                    ("settings-outline", &row.id),
+                    Some((icon, theme::MUTED_FOREGROUND)),
+                    "",
+                    CornerRadius::same(8),
+                );
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(Pos2::new(button.left() + 22.0, button.top()), button.max),
+                    label,
+                    font(12.0, Weight::Medium),
+                    theme::FOREGROUND,
+                );
+                response.clicked().then_some(RowAction::Click)
+            }
             Control::Button(label) => {
                 let width = widgets::outline_button_width(ui, false, label) + 6.0;
                 let button = Rect::from_min_size(
@@ -1617,7 +1732,7 @@ impl App {
                 );
                 let response = ui.interact(
                     button,
-                    ui.id().with(("settings-button", row.id)),
+                    ui.id().with(("settings-button", &row.id)),
                     Sense::click(),
                 );
                 ui.painter().rect(
@@ -1721,6 +1836,7 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
             w(label) + traits.as_deref().map_or(0.0, |t| w(t) + 8.0)
         }
         Control::Button(label) => widgets::outline_button_width(ui, false, label) + 6.0,
+        Control::OutlineXs { label, .. } => widgets::outline_button_width(ui, true, label) - 2.0,
         Control::None => 0.0,
     }
 }
@@ -1730,7 +1846,12 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
 fn row_height(ui: &Ui, row: &Row) -> f32 {
     let text_width = (CARD_WIDTH - 2.0 - 2.0 * ROW_PAD_X - 32.0 - control_width(ui, &row.control))
         .min(DESCRIPTION_MAX);
-    let mut height = 2.0 * ROW_PAD_Y + 20.0;
+    let title = if row.id == "archive-empty" {
+        22.0
+    } else {
+        20.0
+    };
+    let mut height = 2.0 * ROW_PAD_Y + title;
     if !row.description.is_empty() {
         let galley = widgets::galley(
             ui,
@@ -1746,4 +1867,207 @@ fn row_height(ui: &Ui, row: &Row) -> f32 {
         height += 4.0 + 18.0;
     }
     height + 1.0
+}
+
+/// `formatRelativeTimeLabel`: "just now", "5m ago", "3h ago", "2d ago".
+fn relative_time_label(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(date) = crate::timeline::parse_time(iso) else {
+        return String::new();
+    };
+    let seconds = (now - date).num_seconds();
+    if seconds < 60 {
+        return "just now".into();
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m ago");
+    }
+    let hours = minutes / 60;
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+    format!("{}d ago", hours / 24)
+}
+
+impl App {
+    /// Loads the archived threads (`orchestration.getArchivedShellSnapshot`).
+    pub(crate) fn request_archived(&mut self) {
+        self.archived = None;
+        self.send_request(
+            "archived".into(),
+            "orchestration.getArchivedShellSnapshot",
+            json!({}),
+        );
+    }
+
+    /// `ArchivedThreadsPanel`: archived threads grouped by project, newest
+    /// archive first, or the empty, loading or error row.
+    fn archive_sections(&self) -> Vec<Section> {
+        let empty = |title: &str, description: String| {
+            vec![Section {
+                title: "Archived threads".into(),
+                project: None,
+                rows: vec![Row {
+                    id: "archive-empty".into(),
+                    title: title.into(),
+                    description,
+                    status: None,
+                    layers: false,
+                    reset: false,
+                    control: Control::None,
+                }],
+            }]
+        };
+        let snapshot = match &self.archived {
+            None => {
+                return empty(
+                    "Loading archived threads",
+                    "Checking connected environments.".into(),
+                );
+            }
+            Some(Err(error)) => return empty("Could not load archived threads", error.clone()),
+            Some(Ok(snapshot)) => snapshot,
+        };
+        let projects: Vec<crate::model::Project> = snapshot["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| serde_json::from_value(p.clone()).ok())
+            .collect();
+        let threads: Vec<&Value> = snapshot["threads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut sections = Vec::new();
+        for project in projects {
+            let mut project_threads: Vec<&&Value> = threads
+                .iter()
+                .filter(|t| t["projectId"] == project.id.as_str())
+                .collect();
+            if project_threads.is_empty() {
+                continue;
+            }
+            let key = |t: &Value| {
+                t["archivedAt"]
+                    .as_str()
+                    .or(t["createdAt"].as_str())
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            project_threads.sort_by(|a, b| {
+                key(b)
+                    .cmp(&key(a))
+                    .then_with(|| b["id"].as_str().cmp(&a["id"].as_str()))
+            });
+            let rows = project_threads
+                .iter()
+                .map(|thread| {
+                    let created = thread["createdAt"].as_str().unwrap_or_default();
+                    let archived = thread["archivedAt"].as_str().unwrap_or(created);
+                    Row {
+                        id: format!("archived:{}", thread["id"].as_str().unwrap_or_default()),
+                        title: thread["title"].as_str().unwrap_or_default().to_owned(),
+                        description: format!(
+                            "Archived {} \u{b7} Created {}",
+                            relative_time_label(archived, self.now),
+                            relative_time_label(created, self.now)
+                        ),
+                        status: None,
+                        layers: false,
+                        reset: false,
+                        control: Control::OutlineXs {
+                            label: "Unarchive",
+                            icon: "archive-x",
+                        },
+                    }
+                })
+                .collect();
+            sections.push(Section {
+                title: project.title.clone(),
+                project: Some(project),
+                rows,
+            });
+        }
+        if sections.is_empty() {
+            return empty(
+                "No archived threads",
+                "Archived threads will appear here.".into(),
+            );
+        }
+        sections
+    }
+
+    fn apply_archive(&mut self, id: &str, action: RowAction) {
+        let Some(thread_id) = id.strip_prefix("archived:") else {
+            return;
+        };
+        match action {
+            RowAction::Click => self.unarchive(thread_id),
+            RowAction::Menu(at) => {
+                self.archive_menu = Some((thread_id.to_owned(), context_menu::State::new(at)))
+            }
+            _ => {}
+        }
+    }
+
+    /// Unarchives a thread and drops it from the loaded list right away.
+    fn unarchive(&mut self, thread_id: &str) {
+        self.dispatch(crate::model::command("thread.unarchive", thread_id));
+        if let Some(Ok(snapshot)) = &mut self.archived
+            && let Some(threads) = snapshot["threads"].as_array_mut()
+        {
+            threads.retain(|t| t["id"] != thread_id);
+        }
+    }
+
+    /// The archived row's context menu: Unarchive, Delete.
+    fn archive_context_menu(&mut self, ui: &mut Ui) {
+        let Some((thread_id, state)) = self.archive_menu.take() else {
+            return;
+        };
+        let items = vec![
+            context_menu::Item::new("unarchive", "Unarchive"),
+            context_menu::Item {
+                destructive: true,
+                ..context_menu::Item::new("delete", "Delete")
+            },
+        ];
+        let mut open = Some(state);
+        let clicked = context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.archive_menu = Some((thread_id.clone(), state));
+        }
+        match clicked.as_deref() {
+            Some("unarchive") => self.unarchive(&thread_id),
+            Some("delete") => {
+                let title = self
+                    .archived
+                    .as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .and_then(|s| {
+                        s["threads"]
+                            .as_array()?
+                            .iter()
+                            .find(|t| t["id"] == thread_id.as_str())
+                            .and_then(|t| t["title"].as_str().map(str::to_owned))
+                    })
+                    .unwrap_or_default();
+                let command = crate::model::command("thread.delete", &thread_id);
+                if self.client_settings["confirmThreadDelete"] == false {
+                    self.dispatch(command);
+                    self.request_archived();
+                } else {
+                    self.confirm = Some(crate::ui::thread_menu::Confirm {
+                        title: format!("Delete thread \"{title}\"?"),
+                        message: "This permanently clears conversation history for this thread."
+                            .into(),
+                        confirm_label: "Delete",
+                        command,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
 }

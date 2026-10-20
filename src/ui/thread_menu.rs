@@ -436,6 +436,9 @@ impl App {
                     if deleted && thread_id == self.selected {
                         self.start_draft(None);
                     }
+                    if self.settings_page == Some(crate::ui::settings::ARCHIVE_PAGE) {
+                        self.request_archived();
+                    }
                 }
             }
             Some(false) => self.confirm = None,

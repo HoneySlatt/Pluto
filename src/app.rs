@@ -81,6 +81,9 @@ pub struct App {
     pub(crate) client_settings: Value,
     pub(crate) settings_search: String,
     pub(crate) settings_legacy_open: bool,
+    /// The archived shell snapshot for the Archive page; `None` while loading.
+    pub(crate) archived: Option<Result<Value, String>>,
+    pub(crate) archive_menu: Option<(String, crate::ui::context_menu::State)>,
     /// Settings text fields being edited, by row id.
     pub(crate) settings_edits: std::collections::HashMap<String, String>,
     pub(crate) highlighter: Highlighter,
@@ -185,6 +188,8 @@ impl App {
             client_settings: crate::ui::settings::default_client_settings(),
             settings_search: String::new(),
             settings_legacy_open: false,
+            archived: None,
+            archive_menu: None,
             settings_edits: Default::default(),
             vcs_init: None,
             reply_commands: Default::default(),
@@ -604,6 +609,7 @@ impl eframe::App for App {
             Screen::Main if self.settings_page.is_some() => {
                 self.settings_screen(ui, rect);
                 self.status_toast(ui, rect);
+                self.confirm_dialog(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();
@@ -789,6 +795,8 @@ impl App {
         } else if key.starts_with("browse:") {
             self.browse
                 .insert(key, crate::ui::palette::Browse::from_result(result));
+        } else if key == "archived" {
+            self.archived = Some(result);
         } else if key.starts_with("vcs-init:") {
             self.vcs_init = None;
             match result {
