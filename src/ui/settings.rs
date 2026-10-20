@@ -153,6 +153,8 @@ const SUBMODULES: [(&str, &str); 3] = [
 const CARD_WIDTH: f32 = 848.0;
 /// Index of the Keybindings page in `PAGES`.
 pub const KEYBINDINGS_PAGE: usize = 2;
+/// Index of the Storage page in `PAGES`.
+pub const STORAGE_PAGE: usize = 7;
 /// Index of the Archive page in `PAGES`.
 pub const ARCHIVE_PAGE: usize = 9;
 const LEGACY: &str = "Legacy features";
@@ -182,6 +184,8 @@ enum Control {
         icon: Option<&'static str>,
     },
     Number(i64),
+    /// `RetentionControl`: a day count with its switch, or "Off".
+    Retention(Option<i64>),
     Text(String),
     /// The default model buttons: model label with its provider glyph, traits.
     Model {
@@ -957,6 +961,205 @@ impl App {
         }
     }
 
+    /// `StorageSettingsPanel` at environment scope: worktree cleanup rules
+    /// and artifact retention from `storageCleanup`.
+    fn storage_sections(&self) -> Vec<Section> {
+        let cleanup = self.server_setting("storageCleanup");
+        let row = |id: &str, title: &str, description: &str, control: Control| Row {
+            id: id.into(),
+            title: title.into(),
+            description: description.into(),
+            status: None,
+            layers: false,
+            reset: false,
+            control,
+        };
+        let switch = |key: &str| Control::Switch(cleanup[key] == true);
+        let days = |key: &str| Control::Retention(cleanup[key].as_i64());
+        vec![
+            Section {
+                title: "Worktrees".into(),
+                project: None,
+                rows: vec![
+                    row(
+                        "worktreeOnDelete",
+                        "Delete worktrees with deleted threads",
+                        "Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept.",
+                        switch("worktreeOnDelete"),
+                    ),
+                    row(
+                        "worktreeAfterDays",
+                        "Delete inactive worktrees",
+                        "Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept.",
+                        days("worktreeAfterDays"),
+                    ),
+                    row(
+                        "worktreeOnMerge",
+                        "Delete merged worktrees",
+                        "Remove worktrees whose pull request is merged and whose commits are included in the default branch.",
+                        switch("worktreeOnMerge"),
+                    ),
+                    row(
+                        "worktreeUnchanged",
+                        "Delete unchanged worktrees",
+                        "Remove worktrees with no commits beyond the default branch.",
+                        switch("worktreeUnchanged"),
+                    ),
+                ],
+            },
+            Section {
+                title: "Artifacts and logs".into(),
+                project: None,
+                rows: vec![
+                    row(
+                        "browserArtifactsAfterDays",
+                        "Delete old browser artifacts",
+                        "Delete saved browser captures after this many days. Older capture links will no longer open.",
+                        days("browserArtifactsAfterDays"),
+                    ),
+                    row(
+                        "logsAfterDays",
+                        "Delete old rotated logs",
+                        "Delete inactive rotated log files after this many days. Current logs are kept.",
+                        days("logsAfterDays"),
+                    ),
+                ],
+            },
+        ]
+    }
+
+    /// Writes one `storageCleanup` rule; a retention switch turns on at 8 days.
+    fn apply_storage(&mut self, key: &str, action: RowAction) {
+        let retention = key.ends_with("Days");
+        let value = match action {
+            RowAction::Toggle(on) if retention => {
+                if on {
+                    json!(8)
+                } else {
+                    Value::Null
+                }
+            }
+            RowAction::Toggle(on) => json!(on),
+            RowAction::Number(days) => json!(days.clamp(1, 3650)),
+            _ => return,
+        };
+        let mut cleanup = self.server_setting("storageCleanup");
+        if !cleanup.is_object() {
+            cleanup = json!({});
+        }
+        cleanup[key] = value;
+        self.update_setting(Store::Server, "storageCleanup", cleanup);
+    }
+
+    /// `RetentionControl`'s day field ending at `right`: decrement, the
+    /// editable count, "days", increment.
+    fn retention_field(
+        &mut self,
+        ui: &mut Ui,
+        row: &Row,
+        right: f32,
+        center_y: f32,
+        days: i64,
+    ) -> Option<RowAction> {
+        let digits_font = font(14.0, Weight::Regular);
+        let draft = self
+            .settings_edits
+            .get(&row.id)
+            .cloned()
+            .unwrap_or_else(|| days.to_string());
+        let width = retention_width(ui, &draft);
+        let group = Rect::from_min_size(
+            Pos2::new(right - width, center_y - 14.0),
+            Vec2::new(width, 28.0),
+        );
+        ui.painter().rect(
+            group,
+            CornerRadius::same(10),
+            theme::CONTROL_SURFACE,
+            Stroke::new(1.0, theme::INPUT),
+            StrokeKind::Inside,
+        );
+        let mut action = None;
+        for (index, icon) in ["minus", "plus"].into_iter().enumerate() {
+            let button = if index == 0 {
+                Rect::from_min_size(group.min + Vec2::new(1.0, 1.0), Vec2::new(34.0, 26.0))
+            } else {
+                Rect::from_min_size(
+                    Pos2::new(group.right() - 35.0, group.top() + 1.0),
+                    Vec2::new(34.0, 26.0),
+                )
+            };
+            let response = ui.interact(
+                button,
+                ui.id().with(("retention", &row.id, index)),
+                Sense::click(),
+            );
+            if response.hovered() {
+                let radius = if index == 0 {
+                    CornerRadius {
+                        nw: 9,
+                        sw: 9,
+                        ne: 0,
+                        se: 0,
+                    }
+                } else {
+                    CornerRadius {
+                        nw: 0,
+                        sw: 0,
+                        ne: 9,
+                        se: 9,
+                    }
+                };
+                ui.painter().rect_filled(button, radius, theme::ACCENT);
+            }
+            theme::paint_icon(ui, icon, button, 16.0, theme::FOREGROUND);
+            if response.clicked() {
+                let next = if index == 0 { days - 1 } else { days + 1 };
+                self.settings_edits.remove(&row.id);
+                action = Some(RowAction::Number(next.clamp(1, 3650)));
+            }
+        }
+        let digits_width = widgets::tabular_width(ui, &draft, digits_font.clone()).max(7.0);
+        let digits = Rect::from_min_size(
+            Pos2::new(group.left() + 35.0 + 9.0, center_y - 10.0),
+            Vec2::new(digits_width, 20.0),
+        );
+        let mut buffer = draft.clone();
+        let mut child =
+            ui.new_child(egui::UiBuilder::new().max_rect(digits.expand2(Vec2::new(2.0, 0.0))));
+        let response = child.add(
+            egui::TextEdit::singleline(&mut buffer)
+                .id_salt(("retention-field", &row.id))
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .font(digits_font)
+                .text_color(theme::FOREGROUND)
+                .horizontal_align(egui::Align::Center)
+                .desired_width(digits.width() + 4.0),
+        );
+        if response.changed() {
+            buffer.retain(|c| c.is_ascii_digit());
+            self.settings_edits.insert(row.id.clone(), buffer.clone());
+        }
+        if response.lost_focus() {
+            self.settings_edits.remove(&row.id);
+            if let Ok(next) = buffer.trim().parse::<i64>()
+                && next != days
+            {
+                action = Some(RowAction::Number(next.clamp(1, 3650)));
+            }
+        }
+        widgets::text(
+            ui,
+            Pos2::new(digits.right() + 9.0, center_y - 8.0),
+            "days",
+            font(12.0, Weight::Regular),
+            theme::FOREGROUND,
+            16.0,
+        );
+        action
+    }
+
     /// The settings screen: its sidebar and the selected page.
     pub(crate) fn settings_screen(&mut self, ui: &mut Ui, screen: Rect) {
         let Some(page) = self.settings_page else {
@@ -1134,7 +1337,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if page != 0 && page != ARCHIVE_PAGE && page != KEYBINDINGS_PAGE {
+        if ![0, ARCHIVE_PAGE, KEYBINDINGS_PAGE, STORAGE_PAGE].contains(&page) {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -1147,10 +1350,10 @@ impl App {
             );
             return;
         }
-        let sections = if page == ARCHIVE_PAGE {
-            self.archive_sections()
-        } else {
-            self.general_sections()
+        let sections = match page {
+            ARCHIVE_PAGE => self.archive_sections(),
+            STORAGE_PAGE => self.storage_sections(),
+            _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
@@ -1285,10 +1488,10 @@ impl App {
                 );
             });
         for (id, action) in actions {
-            if page == ARCHIVE_PAGE {
-                self.apply_archive(&id, action);
-            } else {
-                self.apply_general(&id, action);
+            match page {
+                ARCHIVE_PAGE => self.apply_archive(&id, action),
+                STORAGE_PAGE => self.apply_storage(&id, action),
+                _ => self.apply_general(&id, action),
             }
         }
     }
@@ -1444,35 +1647,27 @@ impl App {
     ) -> Option<RowAction> {
         match &row.control {
             Control::Switch(on) => {
-                let track = Rect::from_min_size(
-                    Pos2::new(right - 30.0, center_y - 9.0),
-                    Vec2::new(30.0, 18.0),
-                );
-                let response = ui.interact(
-                    track,
-                    ui.id().with(("settings-switch", &row.id)),
-                    Sense::click(),
-                );
-                ui.painter().rect_filled(
-                    track,
-                    CornerRadius::same(9),
-                    if *on {
-                        theme::PRIMARY
-                    } else {
-                        theme::white(0.08)
-                    },
-                );
-                let thumb_x = if *on {
-                    track.left() + 14.0
-                } else {
-                    track.left() + 2.0
+                switch(ui, right, center_y, *on, &row.id).then_some(RowAction::Toggle(!on))
+            }
+            Control::Retention(days) => {
+                if switch(ui, right, center_y, days.is_some(), &row.id) {
+                    return Some(RowAction::Toggle(days.is_none()));
+                }
+                let control_right = right - 42.0;
+                let Some(days) = days else {
+                    let small = font(12.0, Weight::Regular);
+                    let width = widgets::text_width(ui, "Off", small.clone());
+                    widgets::text(
+                        ui,
+                        Pos2::new(control_right - width, center_y - 8.0),
+                        "Off",
+                        small,
+                        theme::MUTED_FOREGROUND,
+                        16.0,
+                    );
+                    return None;
                 };
-                ui.painter().rect_filled(
-                    Rect::from_min_size(Pos2::new(thumb_x, track.top() + 2.0), Vec2::splat(14.0)),
-                    CornerRadius::same(7),
-                    theme::BACKGROUND,
-                );
-                response.clicked().then_some(RowAction::Toggle(!on))
+                self.retention_field(ui, row, control_right, center_y, *days)
             }
             Control::Select {
                 value,
@@ -1815,6 +2010,10 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         Control::Switch(_) => 30.0,
         Control::Select { width, .. } => select_width(ui, control).unwrap_or(*width),
         Control::Number(_) => 96.0,
+        Control::Retention(None) => {
+            42.0 + widgets::text_width(ui, "Off", font(12.0, Weight::Regular))
+        }
+        Control::Retention(Some(days)) => 42.0 + retention_width(ui, &days.to_string()),
         Control::Text(_) => 288.0,
         Control::Model { label, traits, .. } => {
             let w = |t: &str| widgets::text_width(ui, t, font(14.0, Weight::Medium)) + 60.0;
@@ -2388,6 +2587,46 @@ impl App {
         }
         card.bottom()
     }
+}
+
+/// A settings `Switch` ending at `right`; returns whether it was clicked.
+fn switch(ui: &Ui, right: f32, center_y: f32, on: bool, id: &str) -> bool {
+    let track = Rect::from_min_size(
+        Pos2::new(right - 30.0, center_y - 9.0),
+        Vec2::new(30.0, 18.0),
+    );
+    let response = ui.interact(track, ui.id().with(("settings-switch", id)), Sense::click());
+    ui.painter().rect_filled(
+        track,
+        CornerRadius::same(9),
+        if on {
+            theme::PRIMARY
+        } else {
+            theme::white(0.08)
+        },
+    );
+    let thumb_x = if on {
+        track.left() + 14.0
+    } else {
+        track.left() + 2.0
+    };
+    ui.painter().rect_filled(
+        Rect::from_min_size(Pos2::new(thumb_x, track.top() + 2.0), Vec2::splat(14.0)),
+        CornerRadius::same(7),
+        theme::BACKGROUND,
+    );
+    response.clicked()
+}
+
+/// The `NumberField size="sm"` group of `RetentionControl`: decrement
+/// (34), the day count (`px-[9px]`, tabular), "days" (`pr-2`), increment.
+fn retention_width(ui: &Ui, text: &str) -> f32 {
+    2.0 + 34.0
+        + 18.0
+        + widgets::tabular_width(ui, text, font(14.0, Weight::Regular)).max(7.0)
+        + widgets::text_width(ui, "days", font(12.0, Weight::Regular))
+        + 8.0
+        + 34.0
 }
 
 #[cfg(test)]

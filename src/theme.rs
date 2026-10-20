@@ -393,6 +393,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "github",
         "arrow-down",
         "opencode",
+        "minus",
     )
 }
 
