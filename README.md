@@ -37,16 +37,23 @@ reads it from a file at startup instead; it is kept in memory only.
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
-Not ported yet (buttons for these show a "not implemented" notice): the
-Appearance and Providers settings pages, device setup (enabling the hub or agent access, adding hosts), the Git fetch interval and Bitbucket credentials panels, the source control writer model picker, the Connections administration (pairing links, client sessions, network access, adding remote environments), keybinding
-editing, settings search and scope pickers, the
-default model pickers in settings, project settings, pull requests, usage limit sources, reset credits,
-segment popovers, keyboard shortcuts, price overrides and the environment filter, the surfaces other than Diff
-(browser, terminal, files, pull requests, agents, device), the branch
-diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom
-snooze times, project favicons, palette sub-actions (themes, go to file, git
-clone), and "New thread on <branch>" branch carry-over (it opens a draft in the
-thread's project on its current checkout).
+Not ported yet (buttons for these show a "not implemented" notice):
+
+- settings: the Appearance and Providers pages, settings search and scope
+  pickers, the default and source control writer model pickers, keybinding
+  editing, project settings, device setup (enabling the hub or agent access,
+  adding hosts), the Git fetch interval and Bitbucket credentials panels, and
+  the Connections administration (pairing links, client sessions, network
+  access, adding remote environments);
+- usage: limit sources, reset credits, segment popovers, keyboard shortcuts,
+  price overrides and the environment filter;
+- the pull requests page and the surfaces other than Diff (browser, terminal,
+  files, pull requests, agents, device);
+- the branch diff's base-ref picker and expanding unchanged diff context;
+- attachments, queued messages, custom snooze times, project favicons, palette
+  sub-actions (themes, go to file, git clone), and "New thread on <branch>"
+  branch carry-over (it opens a draft in the thread's project on its current
+  checkout).
 
 The Usage page's metric and period live in memory (upstream: local storage).
 Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`
