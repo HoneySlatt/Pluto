@@ -263,6 +263,8 @@ impl App {
         );
         if response.clicked() {
             self.open_diff(turn_id, None);
+            // `onOpenTurnDiff(turnId, files[0]?.path)`: the tree selects the first file.
+            self.diff_tree_selected = files.first().map(|f| f.path.clone());
         }
         if has_dirs {
             let toggle = Rect::from_min_size(

@@ -31,6 +31,10 @@ pub struct Item {
     /// Option rows: a check (or an empty slot) takes the icon's place.
     pub checked: Option<bool>,
     pub separator_before: bool,
+    /// Radio value (`data-checked`): a faint surface instead of a check.
+    pub selected: bool,
+    /// Right-aligned muted text (`ml-auto text-xs`), e.g. a turn's time.
+    pub detail: Option<String>,
     pub children: Vec<Item>,
 }
 
@@ -62,6 +66,10 @@ pub struct State {
     focus: Option<(usize, usize)>,
     scroll: Vec<f32>,
     pointer_level: Option<usize>,
+    min_width: f32,
+    /// Base UI submenus open flush against their trigger row, raised so
+    /// their first item lines up with it; the DOM fallback leaves a 4px gap.
+    dropdown: bool,
 }
 
 impl State {
@@ -72,6 +80,17 @@ impl State {
             focus: None,
             scroll: vec![0.0],
             pointer_level: None,
+            min_width: MIN_WIDTH,
+            dropdown: false,
+        }
+    }
+
+    /// A dropdown (`MenuPopup`, `min-w-[10rem]`) opened below a trigger.
+    pub fn dropdown(at: Pos2) -> Self {
+        Self {
+            min_width: 160.0,
+            dropdown: true,
+            ..Self::new(at)
         }
     }
 }
@@ -99,8 +118,9 @@ fn clamp(screen: Rect, at: Pos2, size: Vec2) -> Pos2 {
     )
 }
 
-fn menu_size(ui: &Ui, items: &[Item], screen: Rect) -> (Vec2, f32) {
+fn menu_size(ui: &Ui, items: &[Item], screen: Rect, min_width: f32) -> (Vec2, f32) {
     let label_font = font(14.0, Weight::Regular);
+    let detail_font = font(12.0, Weight::Regular);
     let row_content = items
         .iter()
         .map(|item| {
@@ -110,14 +130,17 @@ fn menu_size(ui: &Ui, items: &[Item], screen: Rect) -> (Vec2, f32) {
                 0.0
             };
             let chevron = if item.children.is_empty() { 0.0 } else { 22.0 };
-            slot + widgets::text_width(ui, &item.label, label_font.clone()) + chevron
+            let detail = item.detail.as_ref().map_or(0.0, |d| {
+                8.0 + widgets::text_width(ui, d, detail_font.clone())
+            });
+            slot + widgets::text_width(ui, &item.label, label_font.clone()) + chevron + detail
         })
         .fold(0.0_f32, f32::max);
     let content = content_height(items);
     let height = content.min(MAX_HEIGHT.min(screen.height() * 0.7));
     let scrollbar = if content > height { SCROLLBAR } else { 0.0 };
     // Fractional like Chrome's layout; `show` snaps the painted edges.
-    let width = (row_content + 16.0 + PADDING * 2.0 + scrollbar + 2.0).clamp(MIN_WIDTH, MAX_WIDTH);
+    let width = (row_content + 16.0 + PADDING * 2.0 + scrollbar + 2.0).clamp(min_width, MAX_WIDTH);
     (Vec2::new(width, height + 2.0), content)
 }
 
@@ -155,7 +178,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
     // Lay out the open levels: the root at the pointer, each submenu next to
     // its trigger row (`rect.right + 4`, flipped left when it overflows).
     let mut levels: Vec<Level> = Vec::new();
-    let (size, content) = menu_size(ui, items, screen);
+    let (size, content) = menu_size(ui, items, screen, state.min_width);
     levels.push(Level {
         items,
         rect: Rect::from_min_size(clamp(screen, state.at, size), size),
@@ -176,10 +199,15 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
         else {
             break;
         };
-        let (size, content) = menu_size(ui, &item.children, screen);
-        let mut at = Pos2::new(trigger.right() + 4.0, trigger.top());
+        let (size, content) = menu_size(ui, &item.children, screen, state.min_width);
+        let (gap, rise) = if state.dropdown {
+            (0.0, 1.0 + PADDING)
+        } else {
+            (4.0, 0.0)
+        };
+        let mut at = Pos2::new(trigger.right() + gap, trigger.top() - rise);
         if at.x + size.x > screen.right() {
-            at.x = trigger.left() - size.x - 4.0;
+            at.x = trigger.left() - size.x - gap;
         }
         levels.push(Level {
             items: &item.children,
@@ -272,6 +300,13 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                         item.children.is_empty() && (item.destructive || item.id == "delete");
                     let highlighted = !item.disabled
                         && (focus == Some((depth, *index)) || hovered == Some((depth, *index)));
+                    if item.selected && !highlighted {
+                        painter.rect_filled(
+                            *row,
+                            CornerRadius::same(6),
+                            theme::alpha(theme::FOREGROUND, 0.08),
+                        );
+                    }
                     if highlighted {
                         painter.rect_filled(
                             *row,
@@ -308,13 +343,29 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                         x += 24.0;
                     }
                     let chevron = if item.children.is_empty() { 0.0 } else { 22.0 };
+                    let mut label_right = row.right() - 8.0 - chevron;
+                    if let Some(detail) = &item.detail {
+                        let detail_font = font(12.0, Weight::Regular);
+                        let width = widgets::text_width(ui, detail, detail_font.clone());
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(label_right - width, row.top()),
+                                Pos2::new(label_right, row.bottom()),
+                            ),
+                            detail,
+                            detail_font,
+                            theme::MUTED_FOREGROUND,
+                        );
+                        label_right -= width + 8.0;
+                    }
                     let galley = widgets::galley_truncated(
                         ui,
                         &item.label,
                         font(14.0, Weight::Regular),
                         text_color,
                         20.0,
-                        row.right() - 8.0 - chevron - x,
+                        label_right - x,
                     );
                     painter.galley(Pos2::new(x, row.center().y - 10.0), galley, text_color);
                     if !item.children.is_empty() {

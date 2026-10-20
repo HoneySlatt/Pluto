@@ -32,13 +32,13 @@ reads it from a file at startup instead; it is kept in memory only.
 | Composer | Prompt editor, model picker, traits and runtime menus, send (`thread.turn.start`), stop, new-thread drafts (`bootstrap.createThread`), checkout strip |
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
-| Diff panel | Per-turn diffs in unified or split view, change blocks realigned by similarity like @pierre/diffs, word emphasis, file headers, collapse, wrap and whitespace toggles, resizable panel |
+| Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice): settings
 and project settings, pull requests, usage, the surfaces other than Diff
-(browser, terminal, files, pull requests, agents, device), the diff file
-tree and working-tree diff scopes, attachments, queued messages, custom
+(browser, terminal, files, pull requests, agents, device), the branch
+diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom
 snooze times, project favicons, palette sub-actions (themes, go to file, git
 clone), and "New thread on <branch>" branch carry-over (it opens a draft in the
 thread's project on its current checkout).

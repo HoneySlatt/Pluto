@@ -49,7 +49,19 @@ pub struct App {
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) panel_width: f32,
-    pub(crate) diff_turn: Option<u64>,
+    /// Diff scope per thread (`diffPanelStore.ts`), Working tree by default.
+    pub(crate) diff_scopes: std::collections::HashMap<String, crate::ui::diff_panel::DiffScope>,
+    pub(crate) diff_scope_menu: Option<crate::ui::context_menu::State>,
+    /// Head and base refs of loaded branch diffs, by request key.
+    pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
+    pub(crate) diff_tree_open: bool,
+    /// Whether the diff file list overflowed (and showed a scrollbar) last frame.
+    pub(crate) diff_list_overflows: bool,
+    /// The file selected in the diff file tree.
+    pub(crate) diff_tree_selected: Option<String>,
+    /// Folders collapsed in the diff file tree (all start open).
+    pub(crate) diff_tree_collapsed: std::collections::BTreeSet<String>,
+    pub(crate) diff_scope_menu_suppress: bool,
     pub(crate) diffs: std::collections::HashMap<String, crate::ui::diff_panel::DiffLoad>,
     pub(crate) diff_open_files: std::collections::BTreeSet<String>,
     pub(crate) diff_wrap: bool,
@@ -142,7 +154,14 @@ impl App {
             last_row_click: None,
             confirm: None,
             panel_width: 540.0,
-            diff_turn: None,
+            diff_scopes: Default::default(),
+            diff_scope_menu: None,
+            diff_branch_refs: Default::default(),
+            diff_tree_open: false,
+            diff_list_overflows: false,
+            diff_tree_selected: None,
+            diff_tree_collapsed: Default::default(),
+            diff_scope_menu_suppress: false,
             diffs: Default::default(),
             diff_open_files: Default::default(),
             diff_wrap: true,
@@ -408,7 +427,7 @@ impl App {
             .cloned()
     }
 
-    fn workspace_cwd(&self) -> Option<String> {
+    pub(crate) fn workspace_cwd(&self) -> Option<String> {
         if let Some(thread) = self.current_thread() {
             if let Some(path) = thread.worktree_path {
                 return Some(path);
@@ -689,12 +708,16 @@ impl App {
                 .find(|c| c.turn_id == turn_id)
                 .map(|c| c.checkpoint_turn_count)
         });
-        self.diff_turn = count;
+        if let (Some(count), Some(thread)) = (count, self.selected.clone()) {
+            self.diff_scopes
+                .insert(thread, crate::ui::diff_panel::DiffScope::Turn(count));
+        }
         if let Some(panel) = self.panel_mut() {
             panel.open = true;
             panel.diff = true;
         }
         if let Some(file) = file {
+            self.diff_tree_selected = Some(file.clone());
             self.diff_reveal = Some(file);
         }
     }
@@ -729,6 +752,23 @@ impl App {
         if key.starts_with("diff:") {
             self.diffs
                 .insert(key, crate::ui::diff_panel::DiffLoad::from_result(result));
+        } else if let Some(rest) = key.strip_prefix("preview:") {
+            // "preview:<kind>:..." — one source of `review.getDiffPreview`.
+            let kind = rest.split(':').next().unwrap_or_default().to_owned();
+            if let Ok(value) = &result
+                && let Some(source) = value["sources"]
+                    .as_array()
+                    .and_then(|s| s.iter().find(|s| s["kind"] == kind.as_str()))
+                && let (Some(head), Some(base)) =
+                    (source["headRef"].as_str(), source["baseRef"].as_str())
+            {
+                self.diff_branch_refs
+                    .insert(key.clone(), (head.to_owned(), base.to_owned()));
+            }
+            self.diffs.insert(
+                key,
+                crate::ui::diff_panel::DiffLoad::from_preview(result, &kind),
+            );
         } else if key.starts_with("browse:") {
             self.browse
                 .insert(key, crate::ui::palette::Browse::from_result(result));

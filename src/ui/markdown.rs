@@ -769,7 +769,7 @@ impl RoundUi for f32 {
 
 /// Pierre file-type icon for a fence language, with its dark-theme color
 /// (`--trees-file-icon-color-*`). Languages without one show their name.
-fn language_icon(language: &str) -> Option<(&'static str, Color32)> {
+pub(crate) fn language_icon(language: &str) -> Option<(&'static str, Color32)> {
     let orange = Color32::from_rgb(0xff, 0xa3, 0x59);
     let yellow = Color32::from_rgb(0xff, 0xd4, 0x52);
     let green = Color32::from_rgb(0x5e, 0xcc, 0x71);

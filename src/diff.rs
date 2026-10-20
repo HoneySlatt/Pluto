@@ -437,36 +437,52 @@ fn emphasize(deletions: &mut [Line], additions: &mut [Line]) {
     }
 }
 
+/// jsdiff `diffWordsWithSpace` tokens: words, whitespace runs, and every
+/// other character on its own.
 fn tokens(text: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
-    let mut start = None;
-    for (i, c) in text.char_indices() {
-        let word = c.is_alphanumeric() || c == '_';
-        match (start, word) {
-            (None, true) => start = Some(i),
-            (Some(s), false) => {
-                out.push((s, i));
-                start = None;
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        let class = |c: char| {
+            if c.is_alphanumeric() || c == '_' {
+                1
+            } else if c.is_whitespace() {
+                2
+            } else {
+                0
             }
-            _ => {}
+        };
+        let kind = class(c);
+        let mut end = start + c.len_utf8();
+        if kind != 0 {
+            while let Some(&(i, next)) = chars.peek() {
+                if class(next) != kind {
+                    break;
+                }
+                end = i + next.len_utf8();
+                chars.next();
+            }
         }
-        if !word {
-            out.push((i, i + c.len_utf8()));
-        }
-    }
-    if let Some(s) = start {
-        out.push((s, text.len()));
+        out.push((start, end));
     }
     out
 }
 
 type Ranges = Vec<(usize, usize)>;
 
-/// Token-level LCS; returns the unmatched (changed) byte ranges of each side.
+/// Lines longer than this get no word emphasis (`maxLineDiffLength`).
+const MAX_LINE_DIFF_LENGTH: usize = 1000;
+
+/// `computeLineDiffDecorations` with `lineDiffType: "word-alt"`: a token LCS,
+/// then each side's spans, where a one-character unchanged gap between two
+/// changes joins them (`pushOrJoinSpan`). Returns the changed byte ranges.
 fn token_diff(old: &str, new: &str) -> (Ranges, Ranges) {
+    if old.len() > MAX_LINE_DIFF_LENGTH || new.len() > MAX_LINE_DIFF_LENGTH {
+        return (Vec::new(), Vec::new());
+    }
     let a = tokens(old);
     let b = tokens(new);
-    if a.len() * b.len() > 40_000 {
+    if a.len() * b.len() > 250_000 {
         return (Vec::new(), Vec::new());
     }
     let word = |text: &str, (s, e): (usize, usize)| text[s..e].to_owned();
@@ -480,42 +496,57 @@ fn token_diff(old: &str, new: &str) -> (Ranges, Ranges) {
             };
         }
     }
+    // Walk the LCS into (changed?, range) items per side, merging runs.
+    let mut old_items: Vec<(bool, (usize, usize))> = Vec::new();
+    let mut new_items: Vec<(bool, (usize, usize))> = Vec::new();
+    let push =
+        |items: &mut Vec<(bool, (usize, usize))>, changed: bool, range: (usize, usize)| match items
+            .last_mut()
+        {
+            Some((last_changed, last)) if *last_changed == changed && last.1 == range.0 => {
+                last.1 = range.1
+            }
+            _ => items.push((changed, range)),
+        };
     let (mut i, mut j) = (0, 0);
-    let mut old_changed = Vec::new();
-    let mut new_changed = Vec::new();
     while i < a.len() || j < b.len() {
         if i < a.len() && j < b.len() && word(old, a[i]) == word(new, b[j]) {
+            push(&mut old_items, false, a[i]);
+            push(&mut new_items, false, b[j]);
             i += 1;
             j += 1;
         } else if j < b.len() && (i >= a.len() || table[i][j + 1] >= table[i + 1][j]) {
-            new_changed.push(b[j]);
+            push(&mut new_items, true, b[j]);
             j += 1;
         } else {
-            old_changed.push(a[i]);
+            push(&mut old_items, true, a[i]);
             i += 1;
         }
     }
-    let merge = |ranges: Vec<(usize, usize)>, text: &str| {
-        let mut merged: Vec<(usize, usize)> = Vec::new();
-        for (s, e) in ranges {
-            if text[s..e].trim().is_empty() {
-                continue;
-            }
-            match merged.last_mut() {
-                Some(last) if last.1 == s => last.1 = e,
-                _ => merged.push((s, e)),
+    let spans = |items: Vec<(bool, (usize, usize))>, text: &str| -> Ranges {
+        let mut joined: Vec<(bool, (usize, usize))> = Vec::new();
+        let count = items.len();
+        for (index, (changed, range)) in items.into_iter().enumerate() {
+            let last_item = index + 1 == count;
+            match joined.last_mut() {
+                Some((last_changed, last)) if !last_item => {
+                    let one_char = text[range.0..range.1].chars().count() == 1;
+                    if changed == *last_changed || (!changed && one_char && *last_changed) {
+                        last.1 = range.1;
+                        continue;
+                    }
+                    joined.push((changed, range));
+                }
+                _ => joined.push((changed, range)),
             }
         }
-        merged
+        joined
+            .into_iter()
+            .filter(|(changed, _)| *changed)
+            .map(|(_, range)| range)
+            .collect()
     };
-    // A fully rewritten line reads better without emphasis.
-    let old_changed = merge(old_changed, old);
-    let new_changed = merge(new_changed, new);
-    let coverage: usize = new_changed.iter().map(|(s, e)| e - s).sum();
-    if coverage * 10 > new.trim().len() * 7 {
-        return (Vec::new(), Vec::new());
-    }
-    (old_changed, new_changed)
+    (spans(old_items, old), spans(new_items, new))
 }
 
 #[cfg(test)]
@@ -565,6 +596,13 @@ new file mode 100644
             .map(|(s, e)| &text[*s..*e])
             .collect();
         assert_eq!(emphasized, ["OLD", "8"]);
+    }
+
+    #[test]
+    fn one_character_gaps_join_changed_words() {
+        let (old, new) = token_diff("// app", "// edited first line");
+        assert_eq!(old, [(3, 6)]);
+        assert_eq!(new, [(3, 20)]);
     }
 
     fn change_shape(hunk: &Hunk) -> Vec<(usize, usize)> {

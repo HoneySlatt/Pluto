@@ -188,11 +188,36 @@ pub fn install(ctx: &egui::Context) {
             .insert(TextStyle::Heading, font(30.0, Weight::SemiBold));
         style.spacing.item_spacing = egui::vec2(0.0, 0.0);
         style.spacing.button_padding = egui::vec2(0.0, 0.0);
+        // Chromium's classic scrollbars: a 6px rounded thumb (`--app-scrollbar-thumb`)
+        // that stays visible, no track. Views that must keep the strip clear
+        // reserve it themselves.
         style.spacing.scroll = egui::style::ScrollStyle {
             bar_width: 6.0, // --app-scrollbar-width
             floating: true,
+            floating_width: 6.0,
+            floating_allocated_width: 0.0,
+            bar_inner_margin: 0.0,
+            bar_outer_margin: 0.0,
+            foreground_color: false,
+            dormant_background_opacity: 0.0,
+            active_background_opacity: 0.0,
+            interact_background_opacity: 0.0,
+            dormant_handle_opacity: 1.0,
+            active_handle_opacity: 1.0,
+            interact_handle_opacity: 1.0,
             ..egui::style::ScrollStyle::floating()
         };
+        // Scroll handles take these fills (no egui buttons or sliders are used).
+        style.visuals.widgets.inactive.bg_fill = white(0.078); // #ffffff14
+        style.visuals.widgets.hovered.bg_fill = white(0.122); // --app-scrollbar-thumb-hover
+        style.visuals.widgets.active.bg_fill = white(0.122);
+        for widget in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+        ] {
+            widget.corner_radius = egui::CornerRadius::same(3);
+        }
         style.visuals.panel_fill = BACKGROUND;
         style.visuals.window_fill = CARD;
         style.visuals.override_text_color = None;
