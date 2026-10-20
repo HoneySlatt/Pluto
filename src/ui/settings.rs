@@ -156,14 +156,17 @@ pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
 /// Pages with a native port; the others show a notice.
-const PORTED_PAGES: [usize; 6] = [
+const PORTED_PAGES: [usize; 7] = [
     0,
     KEYBINDINGS_PAGE,
     SNAP_SHOT_PAGE,
     STORAGE_PAGE,
     CONNECTIONS_PAGE,
     ARCHIVE_PAGE,
+    SOURCE_CONTROL_PAGE,
 ];
+/// Index of the Source Control page in `PAGES`.
+pub const SOURCE_CONTROL_PAGE: usize = 6;
 /// Index of the Connections page in `PAGES`.
 pub const CONNECTIONS_PAGE: usize = 8;
 /// Index of the SnapShots page in `PAGES`.
@@ -985,6 +988,169 @@ impl App {
         }
     }
 
+    /// `SourceControlSettingsPanel`'s settings: the Repositories defaults
+    /// (`ProjectDefaultsSettings category="source-control"`) and Text
+    /// generation (`SourceControlWritingSettingsSection`); the discovery
+    /// sections are drawn between them.
+    fn source_control_sections(&self) -> Vec<Section> {
+        let row = |id: &str, title: &str, description: &str, reset: bool, control: Control| Row {
+            id: id.into(),
+            title: title.into(),
+            description: description.into(),
+            status: None,
+            layers: true,
+            reset,
+            control,
+        };
+        let auto_pull = self.server_setting("defaultAutoPull") == true;
+        let merge = self.server_setting("pullRequestMergeMethod");
+        let style = self.server_setting("sourceControlWritingStyle");
+        let mode = style["mode"]
+            .as_str()
+            .unwrap_or("repo_conventions")
+            .to_owned();
+        let mode_description = match mode.as_str() {
+            "conventional_commits" => {
+                "Use Conventional Commit prefixes and keep change request text concise."
+            }
+            "custom" => {
+                "Use your instructions for change descriptions and change requests in every project."
+            }
+            _ => "In each project, matches recent change descriptions and change request titles.",
+        };
+        let style_dirty = mode != "repo_conventions"
+            || style["customInstructions"].as_str().unwrap_or_default() != "";
+        let templates = style["followChangeRequestTemplates"] != false;
+        vec![
+            Section {
+                title: "Repositories".into(),
+                project: None,
+                unavailable: None,
+                rows: vec![
+                    row(
+                        "automatic-pull",
+                        "Automatically pull",
+                        "Keeps the default branch current when the checkout has no local changes or commits. Projects can override it.",
+                        auto_pull,
+                        Control::Switch(auto_pull),
+                    ),
+                    row(
+                        "pull-request-merge-method",
+                        "Default merge method",
+                        "Pull requests start with this method. Last selected reuses whatever you chose most recently on this device.",
+                        !merge.is_null(),
+                        Control::Select {
+                            value: merge.as_str().unwrap_or("last").to_owned(),
+                            options: options(&[
+                                ("last", "Last selected"),
+                                ("merge", "Merge"),
+                                ("squash", "Squash and merge"),
+                                ("rebase", "Rebase and merge"),
+                            ]),
+                            width: 160.0,
+                            icon: None,
+                        },
+                    ),
+                ],
+            },
+            Section {
+                title: "Text generation".into(),
+                project: None,
+                unavailable: None,
+                rows: vec![
+                    row(
+                        "source-control-writing-style",
+                        "Source control writing style",
+                        mode_description,
+                        style_dirty,
+                        Control::Select {
+                            value: mode,
+                            options: options(&[
+                                ("repo_conventions", "Repository conventions"),
+                                ("conventional_commits", "Conventional Commits"),
+                                ("custom", "Custom instructions"),
+                            ]),
+                            width: 224.0,
+                            icon: None,
+                        },
+                    ),
+                    row(
+                        "follow-change-request-templates",
+                        "Follow change request templates",
+                        "Use the repository's template for change request descriptions when available.",
+                        !templates,
+                        Control::Switch(templates),
+                    ),
+                    row(
+                        "source-control-writer-model",
+                        "Source control writer model",
+                        "Model for source control text and branch or bookmark names. Off uses the environment's text generation model.",
+                        false,
+                        Control::Switch(
+                            !self
+                                .server_setting("sourceControlWriterModelSelection")
+                                .is_null(),
+                        ),
+                    ),
+                ],
+            },
+        ]
+    }
+
+    fn apply_source_control(&mut self, id: &str, action: RowAction) {
+        use RowAction::*;
+        let server =
+            |app: &mut App, key: &str, value: Value| app.update_setting(Store::Server, key, value);
+        let mut style = self.server_setting("sourceControlWritingStyle");
+        if !style.is_object() {
+            style = json!({"mode": "repo_conventions", "customInstructions": "", "followChangeRequestTemplates": true});
+        }
+        match (id, action) {
+            ("automatic-pull", Toggle(on)) => server(self, "defaultAutoPull", json!(on)),
+            ("automatic-pull", Reset) => server(self, "defaultAutoPull", json!(false)),
+            ("pull-request-merge-method", Select(value)) => server(
+                self,
+                "pullRequestMergeMethod",
+                if value == "last" {
+                    Value::Null
+                } else {
+                    json!(value)
+                },
+            ),
+            ("pull-request-merge-method", Reset) => {
+                server(self, "pullRequestMergeMethod", Value::Null)
+            }
+            ("source-control-writing-style", Select(mode)) => {
+                style["mode"] = json!(mode);
+                server(self, "sourceControlWritingStyle", style);
+            }
+            ("source-control-writing-style", Reset) => {
+                style["mode"] = json!("repo_conventions");
+                style["customInstructions"] = json!("");
+                server(self, "sourceControlWritingStyle", style);
+            }
+            ("follow-change-request-templates", Toggle(on)) => {
+                style["followChangeRequestTemplates"] = json!(on);
+                server(self, "sourceControlWritingStyle", style);
+            }
+            ("follow-change-request-templates", Reset) => {
+                style["followChangeRequestTemplates"] = json!(true);
+                server(self, "sourceControlWritingStyle", style);
+            }
+            ("source-control-writer-model", Toggle(false)) => {
+                server(self, "sourceControlWriterModelSelection", Value::Null)
+            }
+            ("source-control-writer-model", Toggle(true)) => {
+                // A dedicated writer starts from the text generation model.
+                let selection = self.server_setting("textGenerationModelSelection");
+                if selection.is_object() {
+                    server(self, "sourceControlWriterModelSelection", selection);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// `ConnectionsSettings`' Environments section with no saved remote
     /// environment: the Add environment action and the empty state. Returns
     /// the bottom of the section.
@@ -1441,6 +1607,9 @@ impl App {
                 if index == ARCHIVE_PAGE {
                     self.request_archived();
                 }
+                if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
+                    self.request_discovery();
+                }
             }
         }
 
@@ -1531,6 +1700,7 @@ impl App {
             STORAGE_PAGE => self.storage_sections(),
             SNAP_SHOT_PAGE => self.snap_shot_sections(),
             CONNECTIONS_PAGE => connections_sections(),
+            SOURCE_CONTROL_PAGE => self.source_control_sections(),
             _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
@@ -1553,6 +1723,8 @@ impl App {
                 } else {
                     scope_sentence(ui, left, top)
                 };
+                // The last card (or header) ends the content; `pb-12` follows.
+                let mut bottom = y;
                 if page == KEYBINDINGS_PAGE {
                     y = self.keybindings_list(ui, left, y);
                     ui.allocate_rect(
@@ -1565,6 +1737,10 @@ impl App {
                     return;
                 }
                 for section in &sections {
+                    // Discovery sits between Repositories and Text generation.
+                    if page == SOURCE_CONTROL_PAGE && section.title == "Text generation" {
+                        y = self.discovery_sections(ui, left, y);
+                    }
                     if section.title == LEGACY {
                         // A collapsible header (`Collapsible`, min-h-8) instead of a title.
                         let header =
@@ -1601,6 +1777,7 @@ impl App {
                             self.settings_legacy_open = !self.settings_legacy_open;
                         }
                         y += 32.0;
+                        bottom = y;
                         if section.rows.is_empty() {
                             continue;
                         }
@@ -1712,15 +1889,16 @@ impl App {
                         }
                         row_top += height;
                     }
-                    y = card.bottom() + 32.0;
+                    bottom = card.bottom();
+                    y = bottom + 32.0;
                 }
                 if page == CONNECTIONS_PAGE {
-                    y = self.remote_environments(ui, left, y);
+                    bottom = self.remote_environments(ui, left, y);
                 }
                 ui.allocate_rect(
                     Rect::from_min_max(
                         Pos2::new(left, top),
-                        Pos2::new(left + card_width, y + 48.0),
+                        Pos2::new(left + card_width, bottom + 48.0),
                     ),
                     Sense::hover(),
                 );
@@ -1729,6 +1907,7 @@ impl App {
             match page {
                 ARCHIVE_PAGE => self.apply_archive(&id, action),
                 STORAGE_PAGE => self.apply_storage(&id, action),
+                SOURCE_CONTROL_PAGE => self.apply_source_control(&id, action),
                 _ => self.apply_general(&id, action),
             }
         }

@@ -1,0 +1,563 @@
+//! The Source Control settings discovery (`SourceControlSettings.tsx`,
+//! `RedactedSensitiveText.tsx`): the server's version control systems and
+//! hosting integrations from `server.discoverSourceControl`, with their
+//! status dot, version, authentication summary and availability switch.
+//!
+//! Not ported: the Git fetch interval and Bitbucket credentials panels behind
+//! the row chevrons (the chevron shows a notice), and the scan button's
+//! tooltip. Accounts stay redacted (blurred placeholder) until clicked.
+use std::collections::HashSet;
+
+use eframe::egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use serde_json::{Value, json};
+
+use crate::app::App;
+use crate::theme::{self, Weight, font};
+use crate::ui::widgets;
+
+const CARD_WIDTH: f32 = 848.0;
+const CARD_FILL: Color32 = Color32::from_rgb(13, 13, 13);
+const CARD_BORDER: Color32 = Color32::from_rgb(22, 22, 22);
+const ROW_DIVIDER: Color32 = Color32::from_rgb(21, 21, 21);
+const SUCCESS: Color32 = Color32::from_rgb(0, 188, 125); // --success
+/// The summary column: the row minus padding, the switch and its gap.
+const SUMMARY_WIDTH: f32 = CARD_WIDTH - 2.0 - 32.0 - 30.0 - 12.0;
+
+/// Discovery state shared by the settings page.
+#[derive(Default)]
+pub struct Discovery {
+    pub result: Option<Result<Value, String>>,
+    pub pending: bool,
+    /// Accounts the user chose to reveal, by item kind.
+    pub revealed: HashSet<String>,
+}
+
+/// `Option` fields arrive as `{"_tag": "Some", "value": …}`.
+fn some(value: &Value) -> Option<&str> {
+    (value["_tag"] == "Some")
+        .then(|| value["value"].as_str())
+        .flatten()
+}
+
+fn is_provider(item: &Value) -> bool {
+    item.get("auth").is_some()
+}
+
+/// `isVcsNotReady`: a version control system the server does not drive yet.
+fn not_ready(item: &Value) -> bool {
+    !is_provider(item) && item["implemented"] != true
+}
+
+fn icon_name(item: &Value) -> Option<&'static str> {
+    Some(match item["kind"].as_str()? {
+        "git" => "vcs-git",
+        "jj" => "vcs-jj",
+        "github" => "sc-github",
+        "gitlab" => "sc-gitlab",
+        "azure-devops" => "sc-azure-devops",
+        "bitbucket" => "sc-bitbucket",
+        "forgejo" => "sc-forgejo",
+        _ => return None,
+    })
+}
+
+/// `itemStatusDot`.
+fn status_dot(item: &Value) -> Color32 {
+    if not_ready(item) {
+        theme::alpha(theme::MUTED_FOREGROUND, 0.35)
+    } else if item["status"] != "available"
+        || (is_provider(item) && item["auth"]["status"] != "authenticated")
+    {
+        theme::WARNING
+    } else {
+        SUCCESS
+    }
+}
+
+/// `redactedPlaceholder`: a stable stand-in of the same shape (FNV-1a seed,
+/// then a murmur-style mix per character), with JavaScript's 32-bit math.
+pub(crate) fn redacted_placeholder(value: &str) -> String {
+    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
+    let mut state: i32 = 0x811c9dc5u32 as i32;
+    for unit in value.encode_utf16() {
+        state ^= i32::from(unit);
+        state = state.wrapping_mul(0x01000193);
+    }
+    let mut next = || {
+        state = (state ^ ((state as u32) >> 13) as i32).wrapping_mul(0x85ebca6bu32 as i32);
+        state = (state ^ ((state as u32) >> 16) as i32).wrapping_mul(0xc2b2ae35u32 as i32);
+        let index = (i64::from(state).abs() % ALPHABET.len() as i64) as usize;
+        ALPHABET[index] as char
+    };
+    value
+        .chars()
+        .map(|c| if "@.-_".contains(c) { c } else { next() })
+        .collect()
+}
+
+/// The summary line(s) of a row (`itemSummary`), as plain text; `None` for
+/// the authenticated account line, which is laid out separately.
+fn summary(item: &Value) -> Option<String> {
+    let label = item["label"].as_str().unwrap_or_default();
+    let hint = item["installHint"].as_str().unwrap_or_default();
+    if not_ready(item) {
+        return Some(format!("Support for {label} is coming soon."));
+    }
+    if item["status"] != "available" {
+        return Some(format!("Not available on this server: {hint}"));
+    }
+    if !is_provider(item) {
+        return Some("Available".into());
+    }
+    let auth = &item["auth"];
+    match auth["status"].as_str() {
+        Some("authenticated") => None,
+        Some("unauthenticated") => Some(match item["executable"].as_str() {
+            None => format!("Available. {hint}"),
+            Some(tool) => format!(
+                "{label} is not authenticated on this server. Sign in or configure credentials using the {tool} tool on the server host to enable change request features."
+            ),
+        }),
+        _ => Some(format!(
+            "Could not verify {label}. {}",
+            some(&auth["detail"]).unwrap_or(hint)
+        )),
+    }
+}
+
+fn summary_font() -> eframe::egui::FontId {
+    font(12.0, Weight::Regular)
+}
+
+fn summary_color() -> Color32 {
+    theme::alpha(theme::MUTED_FOREGROUND, 0.8)
+}
+
+/// Rows with a details panel show a chevron before the switch.
+fn has_details(item: &Value) -> bool {
+    matches!(item["kind"].as_str(), Some("git" | "bitbucket"))
+}
+
+/// A `Badge variant="warning" size="sm"`; returns its width.
+fn warning_badge(ui: &Ui, pos: Pos2, text: &str, fade: f32) -> f32 {
+    let badge_font = font(10.0, Weight::Medium);
+    let width = widgets::text_width(ui, text, badge_font.clone()) + 8.0;
+    let rect = Rect::from_min_size(pos, Vec2::new(width, 16.0));
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(4),
+        theme::alpha(theme::WARNING, 0.16 * fade),
+    );
+    widgets::text(
+        ui,
+        Pos2::new(rect.left() + 4.0, rect.top() + 3.0),
+        text,
+        badge_font,
+        theme::alpha(theme::WARNING_FOREGROUND, fade),
+        10.0,
+    );
+    width
+}
+
+impl App {
+    pub(crate) fn request_discovery(&mut self) {
+        self.discovery.pending = true;
+        self.send_request(
+            "source-control-discovery".into(),
+            "server.discoverSourceControl",
+            json!({}),
+        );
+    }
+
+    fn row_height(&self, ui: &Ui, item: &Value, first: bool) -> f32 {
+        let lines = summary(item).map_or(18.0, |text| {
+            let width = SUMMARY_WIDTH - if has_details(item) { 32.0 } else { 0.0 };
+            widgets::galley(ui, &text, summary_font(), summary_color(), 18.0, width)
+                .size()
+                .y
+        });
+        12.0 + 20.0 + 4.0 + lines + 12.0 + if first { 0.0 } else { 1.0 }
+    }
+
+    /// The Version Control and Source Control Providers sections from
+    /// `top`; returns the top of the next section.
+    pub(crate) fn discovery_sections(&mut self, ui: &mut Ui, left: f32, top: f32) -> f32 {
+        let result = self.discovery.result.clone();
+        let Some(Ok(result)) = result else {
+            let (title, text) = match &self.discovery.result {
+                Some(Err(error)) => ("Could not scan the server environment", error.clone()),
+                _ if self.discovery.pending => ("Version Control", "Scanning…".to_owned()),
+                _ => ("Version Control", String::new()),
+            };
+            self.discovery_header(ui, left, top, title, true);
+            let card =
+                Rect::from_min_size(Pos2::new(left, top + 38.0), Vec2::new(CARD_WIDTH, 68.0));
+            paint_card(ui, card);
+            widgets::text(
+                ui,
+                Pos2::new(card.left() + 16.0, card.top() + 24.0),
+                &text,
+                font(14.0, Weight::Regular),
+                theme::MUTED_FOREGROUND,
+                20.0,
+            );
+            return card.bottom() + 32.0;
+        };
+        let systems: Vec<Value> = result["versionControlSystems"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let providers: Vec<Value> = result["sourceControlProviders"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut y = top;
+        if !systems.is_empty() {
+            y = self.discovery_section(ui, left, y, "Version Control", true, &systems);
+        }
+        if !providers.is_empty() {
+            y = self.discovery_section(
+                ui,
+                left,
+                y,
+                "Source Control Providers",
+                systems.is_empty(),
+                &providers,
+            );
+        }
+        y
+    }
+
+    /// A section title with the optional rescan button (`ghost-muted`
+    /// `icon-xs`).
+    fn discovery_header(&mut self, ui: &mut Ui, left: f32, top: f32, title: &str, scan: bool) {
+        widgets::text_in(
+            ui,
+            Rect::from_min_size(Pos2::new(left + 16.0, top), Vec2::new(CARD_WIDTH, 28.0)),
+            title,
+            font(14.0, Weight::Regular),
+            theme::alpha(theme::FOREGROUND, 0.7),
+        );
+        if scan {
+            let button = Rect::from_min_size(
+                Pos2::new(left + CARD_WIDTH - 40.0, top + 2.0),
+                Vec2::splat(24.0),
+            );
+            if widgets::icon_button(
+                ui,
+                button,
+                "rescan-source-control",
+                "refresh-cw",
+                14.0,
+                theme::MUTED_FOREGROUND,
+                "Rescan Git and hosting integrations",
+            )
+            .clicked()
+                && !self.discovery.pending
+            {
+                self.request_discovery();
+            }
+        }
+    }
+
+    fn discovery_section(
+        &mut self,
+        ui: &mut Ui,
+        left: f32,
+        top: f32,
+        title: &str,
+        scan: bool,
+        items: &[Value],
+    ) -> f32 {
+        self.discovery_header(ui, left, top, title, scan);
+        let heights: Vec<f32> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| self.row_height(ui, item, i == 0))
+            .collect();
+        let card = Rect::from_min_size(
+            Pos2::new(left, top + 38.0),
+            Vec2::new(CARD_WIDTH, heights.iter().sum::<f32>() + 2.0),
+        );
+        paint_card(ui, card);
+        let mut row_top = card.top() + 1.0;
+        for (index, (item, height)) in items.iter().zip(&heights).enumerate() {
+            let rect = Rect::from_min_size(
+                Pos2::new(card.left() + 1.0, row_top),
+                Vec2::new(CARD_WIDTH - 2.0, *height),
+            );
+            self.discovery_row(ui, rect, item, index, items.len());
+            row_top += height;
+        }
+        card.bottom() + 32.0
+    }
+
+    /// `DiscoveryItemRow`.
+    fn discovery_row(&mut self, ui: &mut Ui, rect: Rect, item: &Value, index: usize, count: usize) {
+        let kind = item["kind"].as_str().unwrap_or_default().to_owned();
+        let painter = ui.painter().clone();
+        // Hover tint, rounded with the card at its ends.
+        if ui.rect_contains_pointer(rect) {
+            let radius = CornerRadius {
+                nw: if index == 0 { 13 } else { 0 },
+                ne: if index == 0 { 13 } else { 0 },
+                sw: if index + 1 == count { 13 } else { 0 },
+                se: if index + 1 == count { 13 } else { 0 },
+            };
+            painter.rect_filled(rect, radius, theme::alpha(theme::MUTED, 0.2));
+        }
+        let mut top = rect.top();
+        if index > 0 {
+            painter.rect_filled(
+                Rect::from_min_size(rect.min, Vec2::new(rect.width(), 1.0)),
+                0.0,
+                ROW_DIVIDER,
+            );
+            top += 1.0;
+        }
+        // Rows not yet supported fade to 80%.
+        let fade = if not_ready(item) { 0.8 } else { 1.0 };
+        let left = rect.left() + 16.0;
+        let line = top + 12.0;
+        if let Some(icon) = icon_name(item) {
+            let tint = if kind == "github" {
+                theme::alpha(theme::FOREGROUND, 0.8 * fade)
+            } else {
+                theme::alpha(Color32::WHITE, fade)
+            };
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_min_size(Pos2::new(left + 1.0, line + 1.0), Vec2::splat(18.0)),
+                18.0,
+                tint,
+            );
+        }
+        // Status dot with a 2px background ring, at the mark's top-left.
+        let dot = Pos2::new(left + 2.0, line + 2.0);
+        painter.circle_filled(dot, 6.0, theme::alpha(theme::BACKGROUND, fade));
+        painter.circle_filled(dot, 4.0, theme::alpha(status_dot(item), fade));
+        let label = item["label"].as_str().unwrap_or_default();
+        let label_font = font(14.0, Weight::Medium);
+        widgets::text(
+            ui,
+            Pos2::new(left + 28.0, line),
+            label,
+            label_font.clone(),
+            theme::alpha(theme::FOREGROUND, fade),
+            20.0,
+        );
+        let mut x = left + 28.0 + widgets::text_width(ui, label, label_font) + 8.0;
+        if let Some(version) = some(&item["version"]) {
+            widgets::text(
+                ui,
+                Pos2::new(x, line + 2.0),
+                version,
+                theme::mono(12.0),
+                theme::alpha(theme::MUTED_FOREGROUND, fade),
+                16.0,
+            );
+            x += widgets::text_width(ui, version, theme::mono(12.0)) + 8.0;
+        }
+        if not_ready(item) {
+            x += warning_badge(ui, Pos2::new(x, line + 2.0), "Coming Soon", fade) + 8.0;
+        }
+        if is_provider(item) && item["auth"]["status"] == "unauthenticated" {
+            warning_badge(ui, Pos2::new(x, line + 2.0), "Not authenticated", fade);
+        }
+
+        let summary_top = line + 24.0;
+        match summary(item) {
+            Some(text) => {
+                let width = SUMMARY_WIDTH - if has_details(item) { 32.0 } else { 0.0 };
+                let galley = widgets::galley(
+                    ui,
+                    &text,
+                    summary_font(),
+                    theme::alpha(summary_color(), fade),
+                    18.0,
+                    width,
+                );
+                painter.galley(Pos2::new(left, summary_top), galley, summary_color());
+            }
+            None => self.account_line(ui, Pos2::new(left, summary_top), item, &kind),
+        }
+
+        // Controls: the details chevron and the read-only availability switch.
+        let center_y = rect.center().y + if index > 0 { 0.5 } else { 0.0 };
+        let right = rect.right() - 16.0;
+        if has_details(item) {
+            let button = Rect::from_min_size(
+                Pos2::new(right - 30.0 - 8.0 - 24.0, center_y - 12.0),
+                Vec2::splat(24.0),
+            );
+            if widgets::icon_button(
+                ui,
+                button,
+                ("source-control-details", &kind),
+                "chevron-down",
+                14.0,
+                theme::MUTED_FOREGROUND,
+                "",
+            )
+            .clicked()
+            {
+                self.status = Some(format!("{label} details are not implemented yet"));
+            }
+        }
+        if !not_ready(item) {
+            let enabled = item["status"] == "available"
+                && if is_provider(item) {
+                    item["auth"]["status"] == "authenticated"
+                } else {
+                    item["implemented"] == true
+                };
+            let track = Rect::from_min_size(
+                Pos2::new(right - 30.0, center_y - 9.0),
+                Vec2::new(30.0, 18.0),
+            );
+            // Disabled: 64%.
+            let track_color = if enabled {
+                theme::PRIMARY
+            } else {
+                theme::white(0.08)
+            };
+            painter.rect_filled(
+                track,
+                CornerRadius::same(9),
+                theme::alpha(track_color, 0.64),
+            );
+            let thumb_x = if enabled {
+                track.left() + 14.0
+            } else {
+                track.left() + 2.0
+            };
+            painter.rect_filled(
+                Rect::from_min_size(Pos2::new(thumb_x, track.top() + 2.0), Vec2::splat(14.0)),
+                CornerRadius::same(7),
+                theme::BACKGROUND,
+            );
+        }
+    }
+
+    /// "Authenticated as <account>", the account redacted until clicked.
+    fn account_line(&mut self, ui: &mut Ui, pos: Pos2, item: &Value, kind: &str) {
+        let small = summary_font();
+        let mut x = pos.x;
+        for word in ["Authenticated", "as"] {
+            widgets::text(
+                ui,
+                Pos2::new(x, pos.y),
+                word,
+                small.clone(),
+                summary_color(),
+                18.0,
+            );
+            x += widgets::text_width(ui, word, small.clone()) + 4.0;
+            if some(&item["auth"]["account"]).is_none() {
+                return;
+            }
+        }
+        let Some(account) = some(&item["auth"]["account"]) else {
+            return;
+        };
+        let revealed = self.discovery.revealed.contains(kind);
+        let shown = if revealed {
+            account.to_owned()
+        } else {
+            redacted_placeholder(account)
+        };
+        let mono = theme::mono(11.0);
+        let width = widgets::text_width(ui, &shown, mono.clone());
+        let button = Rect::from_min_size(Pos2::new(x, pos.y + 1.0), Vec2::new(width, 17.0));
+        let response = ui
+            .interact(
+                button,
+                ui.id().with(("reveal-account", kind)),
+                Sense::click(),
+            )
+            .on_hover_text(if revealed {
+                "Click to hide account"
+            } else {
+                "Click to reveal account"
+            });
+        let color = if response.hovered() {
+            theme::FOREGROUND
+        } else {
+            theme::MUTED_FOREGROUND
+        };
+        if revealed {
+            widgets::text(ui, Pos2::new(x, pos.y + 1.0), &shown, mono, color, 16.5);
+        } else {
+            // `blur-xs` (4px): the text smeared over two rings of offsets.
+            let mut offsets = vec![(0.0f32, 0.0f32)];
+            for (radius, count) in [(1.3f32, 6), (2.8, 12)] {
+                for step in 0..count {
+                    let angle = std::f32::consts::TAU * step as f32 / count as f32;
+                    offsets.push((angle.cos() * radius, angle.sin() * radius));
+                }
+            }
+            let alpha = 1.4 / offsets.len() as f32;
+            for (dx, dy) in offsets {
+                widgets::text(
+                    ui,
+                    Pos2::new(x + dx, pos.y + 1.0 + dy),
+                    &shown,
+                    mono.clone(),
+                    theme::alpha(color, alpha),
+                    16.5,
+                );
+            }
+        }
+        if response.clicked() {
+            if revealed {
+                self.discovery.revealed.remove(kind);
+            } else {
+                self.discovery.revealed.insert(kind.to_owned());
+            }
+        }
+    }
+}
+
+fn paint_card(ui: &Ui, card: Rect) {
+    ui.painter().rect(
+        card,
+        CornerRadius::same(14),
+        CARD_FILL,
+        Stroke::new(1.0, CARD_BORDER),
+        StrokeKind::Inside,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn placeholders_keep_separators_and_length() {
+        let placeholder = redacted_placeholder("jane.doe@example.com");
+        assert_eq!(placeholder.len(), "jane.doe@example.com".len());
+        assert_eq!(placeholder.chars().nth(4), Some('.'));
+        assert_eq!(placeholder.chars().nth(8), Some('@'));
+        assert_eq!(placeholder, redacted_placeholder("jane.doe@example.com"));
+        assert_ne!(placeholder, "jane.doe@example.com");
+    }
+
+    #[test]
+    fn summaries_follow_status_and_auth() {
+        let missing = json!({"label": "GitLab", "status": "missing", "installHint": "Install glab.", "auth": {"status": "unknown"}});
+        assert_eq!(
+            summary(&missing).as_deref(),
+            Some("Not available on this server: Install glab.")
+        );
+        let api = json!({"label": "Bitbucket", "status": "available", "installHint": "Add a token.", "auth": {"status": "unauthenticated"}});
+        assert_eq!(summary(&api).as_deref(), Some("Available. Add a token."));
+        let jj = json!({"label": "Jujutsu", "kind": "jj", "implemented": false, "status": "missing", "installHint": ""});
+        assert_eq!(
+            summary(&jj).as_deref(),
+            Some("Support for Jujutsu is coming soon.")
+        );
+        let signed_in = json!({"status": "available", "auth": {"status": "authenticated"}});
+        assert_eq!(summary(&signed_in), None);
+    }
+}

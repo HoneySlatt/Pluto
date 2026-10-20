@@ -79,6 +79,8 @@ pub struct App {
     pub(crate) settings_page: Option<usize>,
     /// The Usage page replaces the workspace (`/usage`).
     pub(crate) usage_open: bool,
+    /// `server.discoverSourceControl` for the Source Control settings.
+    pub(crate) discovery: crate::ui::source_control::Discovery,
     pub(crate) usage: crate::ui::usage::UsageState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
@@ -192,6 +194,7 @@ impl App {
             responding: Default::default(),
             settings_page: None,
             usage_open: false,
+            discovery: Default::default(),
             usage: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
@@ -825,6 +828,9 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key == "source-control-discovery" {
+            self.discovery.pending = false;
+            self.discovery.result = Some(result);
         } else if key == "archived" {
             self.archived = Some(result);
         } else if key.starts_with("vcs-init:") {

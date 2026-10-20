@@ -396,6 +396,13 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "opencode",
         "minus",
         "chevrons-left-right-ellipsis",
+        "vcs-git",
+        "vcs-jj",
+        "sc-github",
+        "sc-gitlab",
+        "sc-azure-devops",
+        "sc-bitbucket",
+        "sc-forgejo",
     )
 }
 

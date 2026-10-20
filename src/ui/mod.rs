@@ -12,6 +12,7 @@ pub mod project_scope;
 pub mod requests_panel;
 pub mod settings;
 pub mod sidebar;
+pub mod source_control;
 pub mod surfaces;
 pub mod thread_menu;
 pub mod usage;
