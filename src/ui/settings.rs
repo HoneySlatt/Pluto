@@ -155,6 +155,8 @@ const CARD_WIDTH: f32 = 848.0;
 pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
+/// Index of the SnapShots page in `PAGES`.
+pub const SNAP_SHOT_PAGE: usize = 3;
 /// Index of the Archive page in `PAGES`.
 pub const ARCHIVE_PAGE: usize = 9;
 const LEGACY: &str = "Legacy features";
@@ -217,6 +219,8 @@ struct Section {
     title: String,
     /// Archive groups show their project's icon before the title.
     project: Option<crate::model::Project>,
+    /// `SettingsUnavailableGroup`: a warning notice above rows dimmed to 64%.
+    unavailable: Option<&'static str>,
     rows: Vec<Row>,
 }
 
@@ -344,6 +348,7 @@ impl App {
         let new_threads = Section {
             title: "New threads".into(),
                 project: None,
+                unavailable: None,
             rows: vec![
                 Row {
                     id: "default-model".into(),
@@ -749,31 +754,37 @@ impl App {
             Section {
                 title: "Organization".into(),
                 project: None,
+                unavailable: None,
                 rows: organization,
             },
             Section {
                 title: "Behavior".into(),
                 project: None,
+                unavailable: None,
                 rows: behavior,
             },
             Section {
                 title: "Projects & threads".into(),
                 project: None,
+                unavailable: None,
                 rows: projects,
             },
             Section {
                 title: "Confirmations".into(),
                 project: None,
+                unavailable: None,
                 rows: confirmations,
             },
             Section {
                 title: "Text generation".into(),
                 project: None,
+                unavailable: None,
                 rows: text_generation,
             },
             Section {
                 title: "About".into(),
                 project: None,
+                unavailable: None,
                 rows: vec![Row {
                     id: "about-version".into(),
                     title: "Version".into(),
@@ -787,6 +798,7 @@ impl App {
             Section {
                 title: "Diagnostics".into(),
                 project: None,
+                unavailable: None,
                 rows: vec![
                     Row {
                         id: "diagnostics".into(),
@@ -814,6 +826,7 @@ impl App {
             Section {
                 title: LEGACY.into(),
                 project: None,
+                unavailable: None,
                 rows: if self.settings_legacy_open {
                     vec![
                         Row {
@@ -961,6 +974,25 @@ impl App {
         }
     }
 
+    /// `SnapShotSettings` without the desktop bridge: the capture switch,
+    /// unavailable outside the desktop app.
+    fn snap_shot_sections(&self) -> Vec<Section> {
+        vec![Section {
+            title: "SnapShots".into(),
+            project: None,
+            unavailable: Some("Only available in the desktop app."),
+            rows: vec![Row {
+                id: "snap-shot-enabled".into(),
+                title: "SnapShots".into(),
+                description: "Capture a window and attach it to your current draft.".into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: Control::Switch(self.client_setting("snapShotEnabled") == true),
+            }],
+        }]
+    }
+
     /// `StorageSettingsPanel` at environment scope: worktree cleanup rules
     /// and artifact retention from `storageCleanup`.
     fn storage_sections(&self) -> Vec<Section> {
@@ -980,6 +1012,7 @@ impl App {
             Section {
                 title: "Worktrees".into(),
                 project: None,
+                unavailable: None,
                 rows: vec![
                     row(
                         "worktreeOnDelete",
@@ -1010,6 +1043,7 @@ impl App {
             Section {
                 title: "Artifacts and logs".into(),
                 project: None,
+                unavailable: None,
                 rows: vec![
                     row(
                         "browserArtifactsAfterDays",
@@ -1337,7 +1371,15 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if ![0, ARCHIVE_PAGE, KEYBINDINGS_PAGE, STORAGE_PAGE].contains(&page) {
+        if ![
+            0,
+            ARCHIVE_PAGE,
+            KEYBINDINGS_PAGE,
+            STORAGE_PAGE,
+            SNAP_SHOT_PAGE,
+        ]
+        .contains(&page)
+        {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -1353,6 +1395,7 @@ impl App {
         let sections = match page {
             ARCHIVE_PAGE => self.archive_sections(),
             STORAGE_PAGE => self.storage_sections(),
+            SNAP_SHOT_PAGE => self.snap_shot_sections(),
             _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
@@ -1363,7 +1406,12 @@ impl App {
             .show(&mut child, |ui| {
                 let left = body.center().x - CARD_WIDTH / 2.0;
                 let top = ui.max_rect().top();
-                let mut y = scope_sentence(ui, left, top);
+                // `SETTINGS_DEVICE_ONLY_PATHS` (Appearance, SnapShots, Connections) skip the scope.
+                let mut y = if [1, SNAP_SHOT_PAGE, 8].contains(&page) {
+                    top + 24.0
+                } else {
+                    scope_sentence(ui, left, top)
+                };
                 if page == KEYBINDINGS_PAGE {
                     y = self.keybindings_list(ui, left, y);
                     ui.allocate_rect(
@@ -1448,9 +1496,20 @@ impl App {
                         .enumerate()
                         .map(|(i, row)| row_height(ui, row) - if i == 0 { 1.0 } else { 0.0 })
                         .collect();
+                    // The unavailable group pads by 6 and leads with its notice.
+                    let notice = if section.unavailable.is_some() {
+                        6.0 + 35.5
+                    } else {
+                        0.0
+                    };
                     let card = Rect::from_min_size(
                         Pos2::new(left, y),
-                        Vec2::new(CARD_WIDTH, heights.iter().sum::<f32>() + 2.0),
+                        Vec2::new(
+                            CARD_WIDTH,
+                            heights.iter().sum::<f32>()
+                                + 2.0
+                                + if notice > 0.0 { notice + 6.0 } else { 0.0 },
+                        ),
                     );
                     ui.painter().rect(
                         card,
@@ -1459,7 +1518,33 @@ impl App {
                         Stroke::new(1.0, CARD_BORDER),
                         StrokeKind::Inside,
                     );
-                    let mut row_top = card.top() + 1.0;
+                    if let Some(message) = section.unavailable {
+                        let group = card.shrink(1.0);
+                        ui.painter().rect_filled(
+                            group,
+                            CornerRadius::same(13),
+                            theme::alpha(theme::MUTED, 0.2),
+                        );
+                        theme::paint_icon(
+                            ui,
+                            "info",
+                            Rect::from_min_size(
+                                Pos2::new(group.left() + 16.0, group.top() + 16.0),
+                                Vec2::splat(14.0),
+                            ),
+                            14.0,
+                            theme::WARNING,
+                        );
+                        widgets::text(
+                            ui,
+                            Pos2::new(group.left() + 38.0, group.top() + 14.0),
+                            message,
+                            font(12.0, Weight::Regular),
+                            theme::MUTED_FOREGROUND,
+                            19.5,
+                        );
+                    }
+                    let mut row_top = card.top() + 1.0 + notice;
                     for (index, (row, height)) in section.rows.iter().zip(&heights).enumerate() {
                         let rect = Rect::from_min_size(
                             Pos2::new(card.left() + 1.0, row_top),
@@ -1472,7 +1557,16 @@ impl App {
                                 ROW_DIVIDER,
                             );
                         }
-                        if let Some(action) = self.settings_row(ui, rect, row, index > 0) {
+                        let action = ui
+                            .scope(|ui| {
+                                if section.unavailable.is_some() {
+                                    ui.visuals_mut().disabled_alpha = 0.64;
+                                    ui.disable();
+                                }
+                                self.settings_row(ui, rect, row, index > 0)
+                            })
+                            .inner;
+                        if let Some(action) = action {
                             actions.push((row.id.clone(), action));
                         }
                         row_top += height;
@@ -2091,6 +2185,7 @@ impl App {
             vec![Section {
                 title: "Archived threads".into(),
                 project: None,
+                unavailable: None,
                 rows: vec![Row {
                     id: "archive-empty".into(),
                     title: title.into(),
@@ -2170,6 +2265,7 @@ impl App {
             sections.push(Section {
                 title: project.title.clone(),
                 project: Some(project),
+                unavailable: None,
                 rows,
             });
         }

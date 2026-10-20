@@ -17,6 +17,7 @@ pub const SIDEBAR_ICON: Color32 = Color32::from_rgb(84, 84, 84); // --sidebar-ic
 pub const PRIMARY: Color32 = Color32::from_rgb(52, 107, 241); // --primary
 pub const DIFF_ADDITION: Color32 = Color32::from_rgb(0, 212, 146); // --diff-addition-foreground
 pub const DIFF_DELETION: Color32 = Color32::from_rgb(255, 100, 103); // --diff-deletion-foreground
+pub const WARNING: Color32 = Color32::from_rgb(254, 154, 0); // --warning
 pub const WARNING_FOREGROUND: Color32 = Color32::from_rgb(255, 185, 0); // --warning-foreground
 pub const ERROR_FOREGROUND: Color32 = Color32::from_rgb(255, 100, 103); // --destructive-foreground
 pub const SKY_400: Color32 = Color32::from_rgb(0, 188, 255);

@@ -33,12 +33,12 @@ reads it from a file at startup instead; it is kept in memory only.
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
-| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Storage page (worktree cleanup and retention rules); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
+| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Storage page (worktree cleanup and retention rules); the SnapShots page (unavailable outside the desktop app, like the web client); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice): the
-settings pages other than General, Keybindings, Storage and Archive, keybinding
+settings pages other than General, Keybindings, SnapShots, Storage and Archive, keybinding
 editing, settings search and scope pickers, the
 default model pickers in settings, project settings, pull requests, usage limit sources, reset credits,
 segment popovers, keyboard shortcuts, price overrides and the environment filter, the surfaces other than Diff
