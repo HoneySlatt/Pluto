@@ -10,6 +10,7 @@ pub mod pickers;
 pub mod project_icon;
 pub mod project_scope;
 pub mod requests_panel;
+pub mod settings;
 pub mod sidebar;
 pub mod surfaces;
 pub mod thread_menu;

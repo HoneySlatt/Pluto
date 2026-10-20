@@ -235,6 +235,13 @@ impl App {
                 self.status = Some("Project settings are not implemented yet".into())
             }
             "archive" => self.dispatch(command("thread.archive", id)),
+            // `confirmThreadDelete` asks first unless it was turned off.
+            "delete" if self.client_settings["confirmThreadDelete"] == false => {
+                self.dispatch(command("thread.delete", id));
+                if self.selected.as_deref() == Some(id) {
+                    self.start_draft(None);
+                }
+            }
             "delete" => {
                 self.confirm = Some(Confirm {
                     title: format!("Delete thread \"{}\"?", thread.title),

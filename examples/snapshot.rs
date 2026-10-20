@@ -56,11 +56,11 @@ fn main() {
         std::thread::sleep(Duration::from_millis(30));
     }
     // `--click x,y` clicks once, then waits for the server to answer.
-    // Interactions, in order: --click/--rclick/--dclick/--move x,y, --type text, --key Enter|Escape.
+    // Interactions, in order: --click/--rclick/--dclick/--move x,y, --scroll dy, --type text, --key Enter|Escape.
     let mut ops = args.iter().skip(4).peekable();
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
-            "--click" | "--rclick" | "--dclick" | "--move" | "--type" | "--key" => {
+            "--click" | "--rclick" | "--dclick" | "--move" | "--scroll" | "--type" | "--key" => {
                 ops.next().cloned().unwrap_or_default()
             }
             _ => continue,
@@ -101,6 +101,13 @@ fn main() {
                 }
             }
             "--move" => harness.event(egui::Event::PointerMoved(point())),
+            // `--scroll dy` scrolls the content under the pointer down by dy points.
+            "--scroll" => harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -value.parse::<f32>().expect("dy")),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }),
             "--type" => harness.event(egui::Event::Text(value.clone())),
             "--key" => {
                 let (mods, name) = value.rsplit_once('+').unwrap_or(("", value.as_str()));

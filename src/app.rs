@@ -75,6 +75,14 @@ pub struct App {
     pub(crate) responding: std::collections::HashSet<String>,
     reply_commands: std::collections::HashMap<String, String>,
     pub(crate) search: String,
+    /// The open settings page (index into `settings::PAGES`), if any.
+    pub(crate) settings_page: Option<usize>,
+    /// Client settings (`ClientSettings`), in memory.
+    pub(crate) client_settings: Value,
+    pub(crate) settings_search: String,
+    pub(crate) settings_legacy_open: bool,
+    /// Settings text fields being edited, by row id.
+    pub(crate) settings_edits: std::collections::HashMap<String, String>,
     pub(crate) highlighter: Highlighter,
     pub(crate) now: chrono::DateTime<chrono::Utc>,
     vcs: Option<(String, Value)>,
@@ -173,6 +181,11 @@ impl App {
             question_index: 0,
             question_collapsed: None,
             responding: Default::default(),
+            settings_page: None,
+            client_settings: crate::ui::settings::default_client_settings(),
+            settings_search: String::new(),
+            settings_legacy_open: false,
+            settings_edits: Default::default(),
             vcs_init: None,
             reply_commands: Default::default(),
             search: String::new(),
@@ -588,6 +601,10 @@ impl eframe::App for App {
         let rect = ui.max_rect();
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
+            Screen::Main if self.settings_page.is_some() => {
+                self.settings_screen(ui, rect);
+                self.status_toast(ui, rect);
+            }
             Screen::Main => {
                 self.sync_vcs_watch();
                 self.mark_open_thread_visited();

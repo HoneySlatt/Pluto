@@ -628,7 +628,7 @@ impl App {
             })
     }
 
-    fn model_label(&self, selection: &ModelSelection) -> (String, Option<&'static str>) {
+    pub(crate) fn model_label(&self, selection: &ModelSelection) -> (String, Option<&'static str>) {
         let label = self
             .model_entry(selection)
             .and_then(|m| {
@@ -646,7 +646,7 @@ impl App {
     }
 
     /// Label of the first select trait (reasoning effort), like `TraitsPicker`.
-    fn traits_label(&self, selection: &ModelSelection) -> Option<String> {
+    pub(crate) fn traits_label(&self, selection: &ModelSelection) -> Option<String> {
         let model = self.model_entry(selection)?;
         let descriptor = model["capabilities"]["optionDescriptors"]
             .as_array()?
@@ -654,10 +654,14 @@ impl App {
             .find(|d| d["type"] == "select")?
             .clone();
         let id = descriptor["id"].as_str()?;
+        // Options arrive as `[{id, value}]` (the contract) or as an id map.
         let chosen = selection
             .options
             .as_ref()
-            .and_then(|o| o.get(id))
+            .and_then(|o| match o {
+                Value::Array(list) => list.iter().find(|e| e["id"] == id).map(|e| &e["value"]),
+                _ => o.get(id),
+            })
             .and_then(Value::as_str)
             .map(str::to_owned)
             .or_else(|| descriptor["currentValue"].as_str().map(str::to_owned))?;

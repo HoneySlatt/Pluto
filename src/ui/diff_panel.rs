@@ -391,7 +391,12 @@ impl App {
                 },
             );
             if response.clicked() {
-                self.diff_split = is_split;
+                // The toolbar toggle changes the `diffLayout` setting too.
+                self.update_setting(
+                    crate::ui::settings::Store::Client,
+                    "diffLayout",
+                    json!(if is_split { "split" } else { "stacked" }),
+                );
             }
         }
         x = segmented.left() - 4.0;

@@ -33,18 +33,20 @@ reads it from a file at startup instead; it is kept in memory only.
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
+| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings` |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
-Not ported yet (buttons for these show a "not implemented" notice): settings
-and project settings, pull requests, usage, the surfaces other than Diff
+Not ported yet (buttons for these show a "not implemented" notice): the
+settings pages other than General, settings search and scope pickers, the
+default model pickers in settings, project settings, pull requests, usage, the surfaces other than Diff
 (browser, terminal, files, pull requests, agents, device), the branch
 diff's base-ref picker, expanding unchanged diff context, attachments, queued messages, custom
 snooze times, project favicons, palette sub-actions (themes, go to file, git
 clone), and "New thread on <branch>" branch carry-over (it opens a draft in the
 thread's project on its current checkout).
 
-The project scope and read/unread markers live in memory; upstream persists
-them in its UI state store.
+The project scope, read/unread markers and client settings live in memory;
+upstream persists them in its UI state store and local storage.
 
 Known differences: syntect grammars tokenize differently from Shiki (Rust
 keywords, operators and identifiers are recolored to Shiki's scopes; other

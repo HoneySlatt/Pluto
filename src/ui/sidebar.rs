@@ -124,7 +124,9 @@ fn status(thread: &Thread) -> Status {
 }
 
 impl App {
-    pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
+    /// The sidebar surface, its right border and the toggle + wordmark header,
+    /// shared by the app and settings sidebars.
+    pub(crate) fn sidebar_chrome(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
         painter.rect_filled(rect, 0.0, theme::SIDEBAR);
         // Right border: 1px of white 7.8% over the app background.
@@ -169,6 +171,12 @@ impl App {
             code,
             theme::SIDEBAR_MUTED,
         );
+    }
+
+    pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
+        self.sidebar_chrome(ui, rect);
+        let painter = ui.painter().clone();
+        let left = rect.left();
 
         // Search field and project actions.
         let search_rect = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(151.0, 32.0));
@@ -303,7 +311,11 @@ impl App {
             )
             .clicked()
             {
-                self.status = Some(format!("{label} is not implemented yet"));
+                if *icon == "settings" {
+                    self.open_settings();
+                } else {
+                    self.status = Some(format!("{label} is not implemented yet"));
+                }
             }
         }
     }
