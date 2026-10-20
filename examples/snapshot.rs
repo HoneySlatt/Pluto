@@ -25,6 +25,7 @@ fn main() {
     let options = Options {
         server: (!offline).then(|| args[1].clone()),
         token: (!offline).then(|| Zeroizing::new(token.trim().to_owned())),
+        client_settings_path: None,
     };
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))

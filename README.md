@@ -46,8 +46,9 @@ snooze times, project favicons, palette sub-actions (themes, go to file, git
 clone), and "New thread on <branch>" branch carry-over (it opens a draft in the
 thread's project on its current checkout).
 
-The project scope, read/unread markers and client settings live in memory;
-upstream persists them in its UI state store and local storage.
+Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`
+(upstream: local storage). The project scope and read/unread markers live in
+memory; upstream persists them in its UI state store.
 
 Known differences: syntect grammars tokenize differently from Shiki (Rust
 keywords, operators and identifiers are recolored to Shiki's scopes; other

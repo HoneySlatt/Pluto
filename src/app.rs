@@ -79,6 +79,7 @@ pub struct App {
     pub(crate) settings_page: Option<usize>,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
+    pub(crate) client_settings_path: Option<std::path::PathBuf>,
     pub(crate) settings_search: String,
     pub(crate) settings_legacy_open: bool,
     /// The archived shell snapshot for the Archive page; `None` while loading.
@@ -119,6 +120,8 @@ pub(crate) struct ConnectForm {
 pub struct Options {
     pub server: Option<String>,
     pub token: Option<Zeroizing<String>>,
+    /// Where client settings persist; `None` keeps them in memory (tests).
+    pub client_settings_path: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -185,7 +188,10 @@ impl App {
             question_collapsed: None,
             responding: Default::default(),
             settings_page: None,
-            client_settings: crate::ui::settings::default_client_settings(),
+            client_settings: crate::ui::settings::load_client_settings(
+                options.client_settings_path.as_deref(),
+            ),
+            client_settings_path: options.client_settings_path.clone(),
             settings_search: String::new(),
             settings_legacy_open: false,
             archived: None,
@@ -199,6 +205,9 @@ impl App {
             vcs: None,
             watched_vcs: None,
         };
+        // The diff panel starts from the saved client defaults.
+        app.diff_split = app.client_settings["diffLayout"] == "split";
+        app.diff_ignore_whitespace = app.client_settings["diffIgnoreWhitespace"] != false;
         if let (Some(_), Some(token)) = (options.server, options.token) {
             app.connect.token = token;
             app.connect_now(&cc.egui_ctx);

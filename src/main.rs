@@ -4,9 +4,16 @@ use zeroize::Zeroizing;
 /// The token file is read once at startup and kept in memory only.
 fn main() -> eframe::Result<()> {
     let mut args = std::env::args().skip(1);
+    // Client settings (local-storage settings upstream) persist beside the
+    // user's other app config. Nothing secret is stored there.
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
     let mut options = t3_code_rust::app::Options {
         server: None,
         token: None,
+        client_settings_path: config_home
+            .map(|d| d.join("t3-code-rust").join("client-settings.json")),
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {

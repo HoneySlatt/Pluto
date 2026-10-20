@@ -59,6 +59,23 @@ pub fn default_client_settings() -> Value {
     })
 }
 
+/// Client settings saved at `path`, over the defaults; unknown or
+/// unreadable files fall back to the defaults.
+pub fn load_client_settings(path: Option<&std::path::Path>) -> Value {
+    let mut settings = default_client_settings();
+    let saved = path
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    if let (Some(Value::Object(saved)), Some(defaults)) = (saved, settings.as_object_mut()) {
+        for (key, value) in saved {
+            if defaults.contains_key(&key) {
+                defaults.insert(key, value);
+            }
+        }
+    }
+    settings
+}
+
 /// `DEFAULT_SERVER_SETTINGS` for the server keys with a reset button.
 fn default_server_setting(key: &str) -> Value {
     match key {
@@ -244,6 +261,7 @@ impl App {
         match store {
             Store::Client => {
                 self.client_settings[key] = value.clone();
+                self.save_client_settings();
                 // The diff panel starts from these client defaults.
                 match key {
                     "diffIgnoreWhitespace" => {
@@ -264,6 +282,24 @@ impl App {
                     json!({ "patch": { key: value } }),
                 );
             }
+        }
+    }
+
+    /// Writes the client settings next to the other app config (atomic rename).
+    pub(crate) fn save_client_settings(&self) {
+        let Some(path) = self.client_settings_path.as_deref() else {
+            return;
+        };
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let temp = path.with_extension("json.tmp");
+            std::fs::write(&temp, serde_json::to_vec_pretty(&self.client_settings)?)?;
+            std::fs::rename(temp, path)
+        };
+        if let Err(error) = write() {
+            eprintln!("could not save client settings: {error}");
         }
     }
 
@@ -1126,6 +1162,7 @@ impl App {
             );
             if response.clicked() && changed {
                 self.client_settings = default_client_settings();
+                self.save_client_settings();
                 self.diff_ignore_whitespace = true;
                 self.diff_split = false;
             }
@@ -2385,5 +2422,23 @@ impl App {
             }
         }
         card.bottom()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_client_settings_override_defaults_and_drop_unknown_keys() {
+        let path =
+            std::env::temp_dir().join(format!("t3-client-settings-{}.json", std::process::id()));
+        std::fs::write(&path, r#"{"diffLayout":"split","bogus":1}"#).unwrap();
+        let settings = load_client_settings(Some(&path));
+        std::fs::remove_file(&path).ok();
+        assert_eq!(settings["diffLayout"], "split");
+        assert_eq!(settings["confirmThreadDelete"], true);
+        assert!(settings.get("bogus").is_none());
+        assert_eq!(load_client_settings(None), default_client_settings());
     }
 }
