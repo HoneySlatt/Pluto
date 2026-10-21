@@ -369,8 +369,19 @@ pub(crate) fn pick_files(incoming: &Incoming, ctx: &egui::Context) {
             .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"])
             .add_filter("All files", &["*"])
             .pick_files();
-        if let Some(paths) = picked {
-            add_files(&incoming, &ctx, paths);
+        match picked {
+            Some(paths) => add_files(&incoming, &ctx, paths),
+            // A cancel is `Some([])`; None means no chooser could open
+            // (rfd loads libdbus at runtime to reach the portal).
+            None => {
+                if let Ok(mut incoming) = incoming.lock() {
+                    incoming.push(Err(
+                        "The file chooser could not open: no desktop portal (libdbus) was found."
+                            .into(),
+                    ));
+                }
+                ctx.request_repaint();
+            }
         }
     });
 }
