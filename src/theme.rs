@@ -653,6 +653,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "lang-sass",
         "lang-graphql",
         "lang-docker",
+        "lang-svg",
+        "lang-image",
         "shield",
         "chevron-left",
         "triangle-alert",

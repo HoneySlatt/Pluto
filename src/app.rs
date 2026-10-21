@@ -72,6 +72,8 @@ pub struct App {
     pub(crate) last_script: std::collections::HashMap<String, String>,
     /// The open "Choose project icon" dialog.
     pub(crate) icon_picker: Option<crate::ui::icon_picker::IconPicker>,
+    /// The UI context, for work finishing off the UI thread (favicon fetches).
+    pub(crate) egui_ctx: Option<egui::Context>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -294,6 +296,7 @@ impl App {
             action_editor: None,
             last_script: Default::default(),
             icon_picker: None,
+            egui_ctx: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
@@ -767,6 +770,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.now = chrono::Utc::now();
         self.poll_events();
+        self.egui_ctx = Some(ui.ctx().clone());
+        if self.connected() {
+            self.request_favicons();
+        }
         self.sync_theme(ui.ctx());
         let rect = ui.max_rect();
         match self.screen {
@@ -779,6 +786,7 @@ impl eframe::App for App {
                 self.add_instance_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
                 self.icon_picker_dialog(ui, rect);
+                self.command_palette(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();
@@ -986,7 +994,11 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
-        if key.starts_with("diff:") {
+        if let Some(project) = key.strip_prefix("favicon:") {
+            if let Some(ctx) = self.egui_ctx.clone() {
+                self.favicon_url(project, result, &ctx);
+            }
+        } else if key.starts_with("diff:") {
             self.diffs
                 .insert(key, crate::ui::diff_panel::DiffLoad::from_result(result));
         } else if let Some(rest) = key.strip_prefix("preview:") {

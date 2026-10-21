@@ -3,8 +3,9 @@
 //! the scope hint, name and icon, the project's new-thread defaults
 //! (`ProjectDefaultsSettings category="project"`), its actions, and removal.
 //!
-//! The icon pickers (`ProjectIconPickerDialog`, `ProjectFaviconPickerDialog`)
-//! and editing actions (`ProjectActionsSettings`) are not ported.
+//! "Choose icon" opens `icon_picker`, "Choose file" the palette's favicon
+//! mode; the desktop app's "Open in <file manager>" image picker is not
+//! ported.
 
 use eframe::egui::{CornerRadius, Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::{Value, json};
@@ -12,6 +13,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::model::Project;
 use crate::theme::{self, Weight, font};
+use crate::ui::palette::View;
 use crate::ui::settings::{
     Control, Row, RowAction, card_border, card_fill, row_divider, row_height,
 };
@@ -421,7 +423,7 @@ impl App {
                 self.open_icon_picker(project);
             }
             ("project-icon", RowAction::Select(_)) => {
-                self.status = Some("Choosing a project icon file is not implemented yet".into());
+                self.toggle_palette(View::Favicon(project.id.clone()));
             }
             ("project-actions", RowAction::Click) => self.open_action_editor(&project.id, None),
             (id, RowAction::Click) if id.starts_with("project-action:") => {

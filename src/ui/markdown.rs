@@ -803,6 +803,9 @@ pub(crate) fn language_icon(language: &str) -> Option<(&'static str, Color32)> {
         "scss" | "sass" => ("lang-sass", pink),
         "graphql" | "gql" => ("lang-graphql", pink),
         "dockerfile" | "docker" => ("lang-docker", blue),
+        "svg" => ("lang-svg", orange),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "icns" | "tif"
+        | "tiff" => ("lang-image", pink),
         _ => return None,
     })
 }

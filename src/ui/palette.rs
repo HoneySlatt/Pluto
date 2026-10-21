@@ -37,6 +37,9 @@ pub enum View {
     Files,
     /// Project content search, also a mode of its own.
     Content,
+    /// The project icon file picker (`ProjectFaviconPickerDialog.tsx`) for
+    /// a project id: image files only, Esc closes it.
+    Favicon(String),
 }
 
 #[derive(Default)]
@@ -57,7 +60,7 @@ impl PaletteState {
 
     /// Modes replace the palette rather than nest in it: no back button.
     fn in_mode(&self) -> bool {
-        matches!(self.view(), View::Files | View::Content)
+        matches!(self.view(), View::Files | View::Content | View::Favicon(_))
     }
 }
 
@@ -78,6 +81,8 @@ enum Action {
     BrowseInto(String),
     AddPath(String),
     OpenFile(String),
+    /// Sets the project's favicon path: (project id, path).
+    SetFavicon(String, String),
     OpenSetting(usize, String),
     Call(fn(&mut App)),
     Missing(&'static str),
@@ -533,6 +538,57 @@ impl App {
                 }]
             }
             View::Content => Vec::new(),
+            View::Favicon(project_id) => {
+                let target = self
+                    .state
+                    .project(&project_id)
+                    .map(|p| (p.workspace_root.clone(), p.title.clone()));
+                let searching = !query.trim().is_empty();
+                match target {
+                    None => Vec::new(),
+                    Some((cwd, project)) => match self.search_files(&cwd, &query, true) {
+                        None => {
+                            empty = Some(if searching {
+                                "Searching project files…".to_owned()
+                            } else {
+                                "Indexing project files…".to_owned()
+                            });
+                            Vec::new()
+                        }
+                        Some(Err(error)) => {
+                            empty = Some(error);
+                            Vec::new()
+                        }
+                        Some(Ok(paths)) => {
+                            if paths.is_empty() {
+                                empty = Some(if searching {
+                                    "No matching image files.".to_owned()
+                                } else {
+                                    "No image files found.".to_owned()
+                                });
+                            }
+                            let fuzzy = fuzzy_query(&query);
+                            let items = paths
+                                .into_iter()
+                                .map(|path| {
+                                    let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                                    let action =
+                                        Action::SetFavicon(project_id.clone(), path.clone());
+                                    let mut item = Item::new("file", &name, action);
+                                    item.icon = Icon::File(path.clone());
+                                    item.subtitle = Some(path);
+                                    item.fuzzy = (!fuzzy.is_empty()).then(|| fuzzy.clone());
+                                    item
+                                })
+                                .collect();
+                            vec![Group {
+                                label: project,
+                                items,
+                            }]
+                        }
+                    },
+                }
+            }
             View::Files => {
                 // `useActiveProjectTarget`; drafts have no right panel here yet.
                 let target = self.current_thread().and_then(|thread| {
@@ -545,7 +601,7 @@ impl App {
                         empty = Some("Open a project to search its files.".to_owned());
                         Vec::new()
                     }
-                    Some((cwd, project)) => match self.search_files(&cwd, &query) {
+                    Some((cwd, project)) => match self.search_files(&cwd, &query, false) {
                         None => {
                             empty = Some(if searching {
                                 "Searching workspace files…".to_owned()
@@ -683,7 +739,7 @@ impl App {
         } else {
             list_height
         };
-        let view_is_files = self.palette.view() == View::Files;
+        let view_is_files = matches!(self.palette.view(), View::Files | View::Favicon(_));
         // The file list keeps `CommandList`'s full `p-2` below its rows.
         let bottom_pad = if view_is_files && !groups.is_empty() {
             8.0
@@ -799,6 +855,7 @@ impl App {
                     View::Root => "Search commands, projects, and threads...".to_owned(),
                     View::Browse => "Enter project path (e.g. ~/projects/my-app)".to_owned(),
                     View::Files => "Search files…".to_owned(),
+                    View::Favicon(_) => "Search image files…".to_owned(),
                     View::Content => match &content_target {
                         Some((_, project)) => format!("Search in {project}"),
                         None => "Search project contents…".to_owned(),
@@ -966,20 +1023,23 @@ impl App {
                     x + width
                 };
                 x = key_chip(ui, x, "arrow-up", true) + 4.0;
-                x = key_chip(ui, x, "arrow-down", true) + 6.0;
+                x = key_chip(ui, x, "arrow-down", true) + 4.0;
                 x = label(ui, x, "Navigate") + 12.0;
                 if matches!(view, View::Files | View::Content) {
-                    x = key_chip(ui, x, "Enter", false) + 6.0;
+                    x = key_chip(ui, x, "Enter", false) + 4.0;
                     x = label(ui, x, "Open file") + 12.0;
+                } else if matches!(view, View::Favicon(_)) {
+                    x = key_chip(ui, x, "Enter", false) + 4.0;
+                    x = label(ui, x, "Select icon") + 12.0;
                 } else if view != View::Browse {
-                    x = key_chip(ui, x, "Enter", false) + 6.0;
+                    x = key_chip(ui, x, "Enter", false) + 4.0;
                     x = label(ui, x, "Select") + 12.0;
                 }
                 if in_submenu {
-                    x = key_chip(ui, x, "Backspace", false) + 6.0;
+                    x = key_chip(ui, x, "Backspace", false) + 4.0;
                     x = label(ui, x, "Back") + 12.0;
                 }
-                x = key_chip(ui, x, "Esc", false) + 6.0;
+                x = key_chip(ui, x, "Esc", false) + 4.0;
                 let escape = if matches!(view, View::Files | View::Content) {
                     "Back"
                 } else {
@@ -1047,6 +1107,16 @@ impl App {
             Action::OpenFile(path) => {
                 self.palette = PaletteState::default();
                 self.open_file(path);
+            }
+            Action::SetFavicon(project_id, path) => {
+                self.palette = PaletteState::default();
+                self.dispatch(json!({
+                    "type": "project.meta.update",
+                    "commandId": uuid::Uuid::new_v4().to_string(),
+                    "projectId": project_id,
+                    "faviconPath": path,
+                    "projectIcon": null,
+                }));
             }
             Action::OpenSetting(page, target) => {
                 self.palette = PaletteState::default();

@@ -161,17 +161,24 @@ impl App {
     }
 
     /// File paths matching `query` (`useProjectFilePickerQuery`: kind "file",
-    /// empty queries allowed); `None` while the search is pending.
+    /// empty queries allowed, optionally images only); `None` while the
+    /// search is pending.
     pub(crate) fn search_files(
         &mut self,
         cwd: &str,
         query: &str,
+        image_only: bool,
     ) -> Option<Result<Vec<String>, String>> {
-        let key = format!("{cwd}\0file\0{query}");
+        let kind = if image_only { "image" } else { "file" };
+        let key = format!("{cwd}\0{kind}\0{query}");
+        let mut params = json!({"cwd": cwd, "query": query, "limit": 200, "kind": "file"});
+        if image_only {
+            params["imageOnly"] = json!(true);
+        }
         self.files_request(
             format!("files-search:{key}"),
             "projects.searchEntries",
-            json!({"cwd": cwd, "query": query, "limit": 200, "kind": "file"}),
+            params,
         );
         let found = self.files.searches.get(&key)?;
         Some(

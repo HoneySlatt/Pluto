@@ -130,6 +130,8 @@ pub fn paint(ui: &Ui, rect: Rect, project: &Project) {
             let emoji = icon.and_then(|i| i["emoji"].as_str()).unwrap_or_default();
             crate::ui::emoji::paint(ui, rect.center(), rect.height() * 0.8, emoji);
         }
+        // No chosen icon: the favicon, else the monogram.
+        _ if icon.is_none() && crate::ui::favicon::paint(ui, rect, project, Color32::WHITE) => {}
         _ => paint_identity(ui, rect, identity(project)),
     }
 }
@@ -173,6 +175,8 @@ pub fn paint_dimmed(ui: &Ui, rect: Rect, project: &Project) {
             let emoji = icon.and_then(|i| i["emoji"].as_str()).unwrap_or_default();
             crate::ui::emoji::paint_dimmed(ui, rect.center(), rect.height() * 0.8, emoji);
         }
+        _ if icon.is_none()
+            && crate::ui::favicon::paint(ui, rect, project, theme::alpha(Color32::WHITE, 0.4)) => {}
         _ => {
             let mut identity = identity(project);
             identity.color = gray(identity.color);
