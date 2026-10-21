@@ -31,6 +31,9 @@ use crate::ui::settings::{
 };
 use crate::ui::widgets;
 
+mod environment;
+pub(crate) use environment::EnvDraft;
+
 const WIDTH: f32 = 976.0;
 /// `providerCardHeightClassName`: the list and editor share a fixed height.
 const CARD_HEIGHT: f32 = 704.0;
@@ -1282,26 +1285,9 @@ impl App {
             }
         }
 
-        // Environment variables (values are credentials and are not shown).
+        // Environment variables (sensitive values never reach the client).
         section_title(ui, Pos2::new(left + 16.0, y), "Environment");
-        let variables = vec![Row {
-            id: format!("provider:{}:variables", row.id),
-            title: "Variables".into(),
-            description: "API keys, base URLs, and other per-instance CLI settings.".into(),
-            status: None,
-            layers: false,
-            reset: false,
-            control: Control::OutlineIcon {
-                label: "Add variable",
-                icon: "plus",
-                icon_size: 12.0,
-            },
-        }];
-        let actions = self.provider_card_rows(ui, left, y + 38.0, width, &variables);
-        if !actions.is_empty() {
-            self.status = Some("Editing environment variables is not implemented yet".into());
-        }
-        y += 38.0 + self.rows_height(ui, &variables, width) + 24.0;
+        y += 38.0 + self.provider_environment(ui, row, left, y + 38.0, width) + 24.0;
 
         // Models.
         section_title(ui, Pos2::new(left + 16.0, y), "Models");

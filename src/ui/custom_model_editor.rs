@@ -894,7 +894,7 @@ fn input(
     );
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field));
     child.set_clip_rect(field.intersect(ui.clip_rect()));
-    child.add(
+    let response = child.add(
         egui::TextEdit::singleline(text)
             .id(egui::Id::new(("custom-model-editor", id)))
             .frame(egui::Frame::NONE)
@@ -902,14 +902,21 @@ fn input(
             .font(text_font.clone())
             .text_color(theme::foreground())
             .vertical_align(egui::Align::Center)
-            .hint_text(
-                egui::RichText::new(placeholder)
-                    .font(text_font)
-                    .color(theme::alpha(theme::muted_foreground(), 0.72)),
-            )
             .desired_width(field.width())
             .min_size(Vec2::new(0.0, field.height())),
-    )
+    );
+    // Painted like the settings fields: egui's hint text renders lighter.
+    if text.is_empty() {
+        let clipped = ui.painter().with_clip_rect(field.intersect(ui.clip_rect()));
+        let galley = ui.painter().layout_no_wrap(
+            placeholder.to_owned(),
+            text_font,
+            theme::muted_foreground(),
+        );
+        let pos = Pos2::new(field.left(), field.center().y - galley.size().y / 2.0);
+        clipped.galley(pos, galley, theme::muted_foreground());
+    }
+    response
 }
 
 /// `SelectTrigger size="compact"`: the value at 8px and a chevron.

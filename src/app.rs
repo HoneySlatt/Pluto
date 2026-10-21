@@ -56,6 +56,8 @@ pub struct App {
     pub(crate) accent_picker: Option<crate::ui::accent_picker::AccentPicker>,
     /// The open custom model editor.
     pub(crate) custom_model_editor: Option<crate::ui::custom_model_editor::CustomModelEditor>,
+    /// Environment variable drafts per provider instance.
+    pub(crate) env_drafts: std::collections::HashMap<String, crate::ui::providers::EnvDraft>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -270,6 +272,7 @@ impl App {
             custom_model_input: None,
             accent_picker: None,
             custom_model_editor: None,
+            env_drafts: Default::default(),
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
