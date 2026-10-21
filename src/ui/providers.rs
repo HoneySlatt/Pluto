@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
+use crate::ui::accent_picker::{self, AccentPicker, PickerEvent};
 use crate::ui::settings::{
     Control, Row, RowAction, Store, card_border, card_fill, number_or_text_field, row_divider,
     row_height, switch,
@@ -393,6 +394,58 @@ fn paint_card(ui: &Ui, rect: Rect) {
 
 /// A `ghost-muted` `xs` button with an optional leading icon; returns
 /// whether it was clicked.
+/// `ProviderInstanceIcon`'s badge when the instance has an accent color:
+/// the initials on the accent, overlapping the 20px mark's bottom-right
+/// corner by 2px, ringed with the card color.
+fn paint_accent_badge(ui: &Ui, row: &InstanceRow, min: Pos2, fade: f32) {
+    let Some(accent) = row.instance["accentColor"]
+        .as_str()
+        .and_then(accent_picker::parse)
+    else {
+        return;
+    };
+    let initials = instance_initials(&row.display_name());
+    let badge_font = font(7.0, Weight::SemiBold);
+    let width = (widgets::text_width(ui, &initials, badge_font.clone()) + 6.0).max(12.0);
+    let rect = Rect::from_min_max(
+        Pos2::new(min.x + 22.0 - width, min.y + 10.0),
+        Pos2::new(min.x + 22.0, min.y + 22.0),
+    );
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(6),
+        theme::alpha(accent, fade),
+        Stroke::new(1.0, theme::alpha(theme::card(), fade)),
+        StrokeKind::Inside,
+    );
+    let text_width = widgets::text_width(ui, &initials, badge_font.clone());
+    widgets::text(
+        ui,
+        Pos2::new(rect.center().x - text_width / 2.0, rect.center().y - 3.5),
+        &initials,
+        badge_font,
+        theme::alpha(Color32::WHITE, fade),
+        7.0,
+    );
+}
+
+/// `providerInstanceInitials`: two letters of one word, or the first
+/// letters of the first two words.
+fn instance_initials(label: &str) -> String {
+    let cleaned = label.replace(['_', '-'], " ");
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    match words.as_slice() {
+        [] => String::new(),
+        [word] => word.chars().take(2).collect::<String>().to_uppercase(),
+        _ => words
+            .iter()
+            .take(2)
+            .filter_map(|w| w.chars().next())
+            .collect::<String>()
+            .to_uppercase(),
+    }
+}
+
 /// `readCustomModelEntries`: slugs (strings or `{slug, name}`), first
 /// occurrence wins; returns (slug, name).
 fn custom_model_entries(value: &Value) -> Vec<(String, String)> {
@@ -536,6 +589,22 @@ impl App {
     /// Saves one instance (`buildProviderInstanceUpdatePatch`).
     fn save_instance(&mut self, row: &InstanceRow, instance: Value) {
         self.patch_server_settings(json!({"providerInstances": {row.id.clone(): instance}}));
+    }
+
+    /// `updateAccentColor`: set when valid, otherwise dropped from the instance.
+    fn save_accent_color(&mut self, row: &InstanceRow, value: &str) {
+        let mut instance = row.instance.clone();
+        if let Some(object) = instance.as_object_mut() {
+            match accent_picker::normalize(value) {
+                Some(color) => {
+                    object.insert("accentColor".into(), json!(color));
+                }
+                None => {
+                    object.remove("accentColor");
+                }
+            }
+        }
+        self.save_instance(row, instance);
     }
 
     /// `updateCustomModels`: the instance config's `customModels`, kept
@@ -938,6 +1007,7 @@ impl App {
         // `min-h-18 items-center`: short rows center their content.
         let line = top + 12.0 + ((height - natural) / 2.0).ceil();
         self.paint_provider_mark(ui, &row.driver, Pos2::new(left + 16.0, line), fade);
+        paint_accent_badge(ui, row, Pos2::new(left + 16.0, line), fade);
         let name = row.display_name();
         let name_font = font(14.0, Weight::Medium);
         widgets::text(
@@ -1037,6 +1107,7 @@ impl App {
 
         // Title: mark, name, badge, version and the update marker.
         self.paint_provider_mark(ui, &row.driver, Pos2::new(left + 16.0, top + 4.0), 1.0);
+        paint_accent_badge(ui, row, Pos2::new(left + 16.0, top + 4.0), 1.0);
         section_title(ui, Pos2::new(left + 44.0, top), &name);
         let mut x = right - 16.0;
         if enabled && update_available(live.as_ref()) {
@@ -1111,15 +1182,23 @@ impl App {
             Pos2::new(input.left() - 8.0 - 28.0, input.top()),
             Vec2::splat(28.0),
         );
-        let accent = row.instance["accentColor"]
-            .as_str()
-            .and_then(|hex| {
-                let hex = hex.strip_prefix('#')?;
-                let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
-                Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?))
-            })
+        let accent = self
+            .accent_picker
+            .as_ref()
+            .filter(|p| p.row == row.id)
+            .map(|p| p.value.clone())
+            .or_else(|| row.instance["accentColor"].as_str().map(str::to_owned))
+            .and_then(|hex| accent_picker::parse(&hex))
             .unwrap_or(ACCENT_DEFAULT);
         let pick = ui.interact(pipette, ui.id().with(("accent", &row.id)), Sense::click());
+        let scale = if pick.is_pointer_button_down_on() {
+            0.95
+        } else if pick.hovered() {
+            1.05
+        } else {
+            1.0
+        };
+        let pipette = Rect::from_center_size(pipette.center(), pipette.size() * scale);
         ui.painter().rect(
             pipette,
             CornerRadius::same(8),
@@ -1134,8 +1213,24 @@ impl App {
             12.0,
             theme::alpha(Color32::WHITE, 0.7),
         );
-        if pick.clicked() {
-            self.status = Some("The accent color picker is not implemented yet".into());
+        let picker_open = self.accent_picker.as_ref().is_some_and(|p| p.row == row.id);
+        if pick.clicked() && !picker_open {
+            self.accent_picker = Some(AccentPicker::new(
+                row.id.clone(),
+                row.instance["accentColor"].as_str(),
+            ));
+        }
+        if let Some(picker) = self.accent_picker.as_mut().filter(|p| p.row == row.id) {
+            match picker.show(ui, pipette) {
+                PickerEvent::None => {}
+                PickerEvent::Commit(value) => self.save_accent_color(row, &value),
+                PickerEvent::Close(pending) => {
+                    self.accent_picker = None;
+                    if let Some(value) = pending {
+                        self.save_accent_color(row, &value);
+                    }
+                }
+            }
         }
         let edit_key = format!("provider:{}:displayName", row.id);
         let current = row.instance["displayName"]
@@ -2051,6 +2146,13 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initials_follow_upstream() {
+        assert_eq!(instance_initials("Codex"), "CO");
+        assert_eq!(instance_initials("codex_personal work"), "CP");
+        assert_eq!(instance_initials("  "), "");
+    }
 
     #[test]
     fn custom_model_entries_dedupe_and_name() {

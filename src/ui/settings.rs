@@ -1948,8 +1948,12 @@ impl App {
         let Some(page) = self.settings_page else {
             return;
         };
-        let overlay =
-            self.open_menu.is_some() || self.archive_menu.is_some() || self.confirm.is_some();
+        // Popovers and the custom model field take Escape first (`preventDefault`).
+        let overlay = self.open_menu.is_some()
+            || self.archive_menu.is_some()
+            || self.confirm.is_some()
+            || self.accent_picker.is_some()
+            || (self.custom_model_input.is_some() && ui.memory(|m| m.focused().is_some()));
         if ui.input(|i| i.key_pressed(Key::Escape)) && !overlay {
             self.settings_page = None;
             return;

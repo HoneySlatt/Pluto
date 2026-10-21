@@ -52,6 +52,8 @@ pub struct App {
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
     /// The custom model being added: instance, typed slug and its error.
     pub(crate) custom_model_input: Option<(String, String, Option<String>)>,
+    /// The open provider accent color picker.
+    pub(crate) accent_picker: Option<crate::ui::accent_picker::AccentPicker>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -264,6 +266,7 @@ impl App {
             snooze_dialog: None,
             prices_dialog: None,
             custom_model_input: None,
+            accent_picker: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
