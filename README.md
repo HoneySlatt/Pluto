@@ -44,8 +44,9 @@ Not ported yet (buttons for these show a "not implemented" notice):
   appearance controls), adding or deleting provider instances, the provider
   accent color picker, provider environment variables and custom models,
   usage limit hubs, provider update installs and setup flows, settings scope
-  pickers, adding keybindings and their search, project settings, device setup (enabling the hub or agent access,
-  adding hosts), the Git fetch interval and Bitbucket credentials panels, and
+  pickers, adding keybindings and their search, project settings, device
+  setup (enabling the hub or agent access, adding hosts), the Git fetch
+  interval and Bitbucket credentials panels, and
   the Connections administration (pairing links, client sessions, network
   access, adding remote environments);
 - usage: limit sources, reset credits, segment popovers, keyboard shortcuts,
