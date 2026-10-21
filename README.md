@@ -56,7 +56,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
   search filters loaded rows), author and label filters, line-count backfill,
   paging past 99 rows per repository and avatars (initials are shown);
 - the surfaces other than Diff, Files, Terminal and Agents (browser, pull requests,
-  device), the Agents workflow script viewer, file editing, previews and "Open in editor", and terminal
+  device), the Agents workflow script viewer (populated Agents rows are ported from source but not compared with the reference: the fixture has no subagents), file editing, previews and "Open in editor", and terminal
   splits, the bottom drawer, selection and copy, links and font settings;
 - the branch diff's base-ref picker;
 - attachments, queued messages, project favicons, palette
