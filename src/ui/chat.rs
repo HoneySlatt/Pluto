@@ -117,34 +117,14 @@ impl App {
             }
             right = self.split_button(ui, right, "Open", "zed", "open-in", compact);
             right -= gap;
-            let label = if compact { "" } else { "Add action" };
-            let width = if compact {
-                24.0
-            } else {
-                widgets::outline_button_width(ui, true, label)
-            };
-            let rect_button =
-                Rect::from_min_size(Pos2::new(right - width, 14.0), Vec2::new(width, 24.0));
-            if widgets::outline_button(
-                ui,
-                rect_button,
-                "add-action",
-                Some(("plus", theme::muted_foreground())),
-                label,
-                CornerRadius::same(8),
-            )
-            .clicked()
-            {
-                // `ProjectScriptsControl` with no actions: the editor.
-                let target = project
-                    .as_ref()
-                    .map(|p| p.id.clone())
-                    .or_else(|| self.draft_project().map(|p| p.id));
-                if let Some(id) = target {
-                    self.open_action_editor(&id, None);
-                }
+            // `ProjectScriptsControl`: the actions, or "Add action".
+            let target = project
+                .as_ref()
+                .map(|p| p.id.clone())
+                .or_else(|| self.draft_project().map(|p| p.id));
+            if let Some(id) = target {
+                right = self.project_actions_control(ui, right, &id, compact);
             }
-            right = rect_button.left();
         }
 
         // Breadcrumb: project / thread title.

@@ -56,6 +56,25 @@ impl App {
         drawer.open = !drawer.open;
     }
 
+    /// Opens the drawer of `thread` (`setTerminalOpen(true)`); returns its
+    /// active terminal.
+    pub(crate) fn open_terminal_drawer(&mut self, thread: &str) -> String {
+        let drawer = self
+            .drawers
+            .entry(thread.to_owned())
+            .or_insert_with(|| Drawer {
+                open: false,
+                height: DEFAULT_HEIGHT,
+                groups: vec![Group {
+                    ids: vec!["default".into()],
+                    vertical: false,
+                }],
+                active: "default".into(),
+            });
+        drawer.open = true;
+        drawer.active.clone()
+    }
+
     /// The open drawer's height for the current thread.
     pub(crate) fn drawer_height(&self, available: f32) -> Option<f32> {
         let drawer = self.drawers.get(self.selected.as_ref()?)?;

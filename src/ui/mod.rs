@@ -16,6 +16,7 @@ pub mod keybindings;
 pub mod markdown;
 pub mod palette;
 pub mod pickers;
+pub mod project_actions;
 pub mod project_icon;
 pub mod project_scope;
 pub mod projects_page;

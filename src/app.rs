@@ -68,6 +68,8 @@ pub struct App {
     pub(crate) settings_scope: crate::ui::settings_scope::SettingsScope,
     /// The open Add/Edit Action dialog.
     pub(crate) action_editor: Option<crate::ui::action_editor::ActionEditor>,
+    /// The last action run per project (`lastInvokedScriptByProjectId`).
+    pub(crate) last_script: std::collections::HashMap<String, String>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -288,6 +290,7 @@ impl App {
             bitbucket: Default::default(),
             settings_scope: Default::default(),
             action_editor: None,
+            last_script: Default::default(),
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,

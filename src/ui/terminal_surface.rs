@@ -170,6 +170,8 @@ pub struct Terminals {
     focused: Option<String>,
     /// The open selection or right-click menu: its terminal and state.
     menu: Option<(String, crate::ui::context_menu::State)>,
+    /// Input typed once a terminal has attached (a project action's command).
+    pending: HashMap<String, String>,
 }
 
 impl App {
@@ -487,6 +489,21 @@ impl App {
         }
     }
 
+    /// Types `data` into a terminal now, or once it has attached.
+    pub(crate) fn queue_terminal_input(&mut self, thread: &str, id: &str, data: String) {
+        let key = format!("term:{thread}\0{id}");
+        let ready = self
+            .terminals
+            .views
+            .get(&key)
+            .is_some_and(|view| view.status != "starting");
+        if ready {
+            self.terminal_write(thread, id, &data);
+        } else {
+            self.terminals.pending.insert(key, data);
+        }
+    }
+
     fn terminal_write(&mut self, thread: &str, id: &str, data: &str) {
         self.send_request(
             "term-write".into(),
@@ -531,6 +548,15 @@ impl App {
                 method: "terminal.attach",
                 payload: json!({"threadId": thread, "terminalId": id, "cwd": cwd, "cols": cols, "rows": rows, "restartIfNotRunning": true}),
             });
+        }
+        // Queued input goes out once the session has attached.
+        let attached = self
+            .terminals
+            .views
+            .get(&key)
+            .is_some_and(|view| view.status != "starting");
+        if attached && let Some(data) = self.terminals.pending.remove(&key) {
+            self.terminal_write(&thread, id, &data);
         }
         // Follow the panel's size.
         let resized = self
