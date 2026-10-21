@@ -4,7 +4,8 @@
 //! background thread; the server's "missing" marker keeps the monogram.
 //!
 //! Only plain-HTTP servers (this computer) are fetched; favicons from an
-//! HTTPS server stay monograms.
+//! HTTPS server stay monograms. Raster favicons are downscaled on the CPU and
+//! fitted into the icon box (`object-contain`); SVGs are rasterized by egui.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -25,7 +26,12 @@ const MISSING: &str = "project-favicon-missing";
 enum Favicon {
     Pending,
     Missing,
-    Image { uri: String, bytes: Arc<[u8]> },
+    Image {
+        uri: String,
+        bytes: Arc<[u8]>,
+        /// The decoded raster image (None for SVG).
+        raster: Option<Arc<image::RgbaImage>>,
+    },
 }
 
 /// Favicons by project id, with the (cwd, favicon path) they were asked for.
@@ -42,12 +48,14 @@ fn key(project: &Project) -> String {
     )
 }
 
+type Loaded = (String, Arc<[u8]>, Option<Arc<image::RgbaImage>>);
+
 /// The project's loaded favicon, if any.
-fn image(project: &Project) -> Option<(String, Arc<[u8]>)> {
+fn image(project: &Project) -> Option<Loaded> {
     let cache = cache().lock().ok()?;
     match cache.get(&project.id) {
-        Some((key_, Favicon::Image { uri, bytes })) if *key_ == key(project) => {
-            Some((uri.clone(), bytes.clone()))
+        Some((key_, Favicon::Image { uri, bytes, raster })) if *key_ == key(project) => {
+            Some((uri.clone(), bytes.clone(), raster.clone()))
         }
         _ => None,
     }
@@ -55,9 +63,13 @@ fn image(project: &Project) -> Option<(String, Arc<[u8]>)> {
 
 /// Paints the favicon into `rect` (`object-contain`); false when there is none.
 pub fn paint(ui: &Ui, rect: Rect, project: &Project, tint: egui::Color32) -> bool {
-    let Some((uri, bytes)) = image(project) else {
+    let Some((uri, bytes, raster)) = image(project) else {
         return false;
     };
+    if let Some(raster) = raster {
+        crate::ui::attachments::paint_contain(ui, rect, &uri, &raster, tint);
+        return true;
+    }
     egui::Image::from_bytes(uri, egui::load::Bytes::Shared(bytes))
         .fit_to_exact_size(rect.size())
         .maintain_aspect_ratio(true)
@@ -183,6 +195,7 @@ impl App {
                         .unwrap_or_default();
                     Favicon::Image {
                         uri: format!("bytes://favicon/{id}/{name}"),
+                        raster: crate::ui::attachments::decode(&bytes).map(Arc::new),
                         bytes: bytes.into(),
                     }
                 }

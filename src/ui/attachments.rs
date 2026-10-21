@@ -70,6 +70,35 @@ fn cover(source: &image::RgbaImage, width: u32, height: u32) -> image::RgbaImage
     )
 }
 
+/// A texture of `key` at `width`x`height` pixels, made once per size.
+fn sized_texture(
+    ui: &Ui,
+    key: &str,
+    width: u32,
+    height: u32,
+    make: impl FnOnce() -> image::RgbaImage,
+) -> Option<TextureHandle> {
+    type Textures = HashMap<(String, u32, u32), TextureHandle>;
+    static TEXTURES: OnceLock<Mutex<Textures>> = OnceLock::new();
+    let mut textures = TEXTURES.get_or_init(Default::default).lock().ok()?;
+    Some(
+        textures
+            .entry((key.to_owned(), width, height))
+            .or_insert_with(|| {
+                let image = make();
+                ui.ctx().load_texture(
+                    format!("sized:{key}:{width}x{height}"),
+                    egui::ColorImage::from_rgba_premultiplied(
+                        [image.width() as usize, image.height() as usize],
+                        image.as_raw(),
+                    ),
+                    egui::TextureOptions::LINEAR,
+                )
+            })
+            .clone(),
+    )
+}
+
 /// Paints `image` into `rect`, cropped to fill it, with rounded corners.
 pub(crate) fn paint_cover(
     ui: &Ui,
@@ -78,31 +107,44 @@ pub(crate) fn paint_cover(
     image: &image::RgbaImage,
     corner_radius: CornerRadius,
 ) {
-    type Textures = HashMap<(String, u32, u32), TextureHandle>;
-    static TEXTURES: OnceLock<Mutex<Textures>> = OnceLock::new();
     let ppp = ui.ctx().pixels_per_point();
     let width = (rect.width() * ppp).round() as u32;
     let height = (rect.height() * ppp).round() as u32;
-    let Ok(mut textures) = TEXTURES.get_or_init(Default::default).lock() else {
+    let Some(texture) = sized_texture(ui, key, width, height, || cover(image, width, height))
+    else {
         return;
     };
-    let texture = textures
-        .entry((key.to_owned(), width, height))
-        .or_insert_with(|| {
-            let resized = cover(image, width, height);
-            ui.ctx().load_texture(
-                format!("cover:{key}:{width}x{height}"),
-                egui::ColorImage::from_rgba_premultiplied(
-                    [resized.width() as usize, resized.height() as usize],
-                    resized.as_raw(),
-                ),
-                egui::TextureOptions::LINEAR,
-            )
-        })
-        .clone();
     egui::Image::new((texture.id(), rect.size()))
         .corner_radius(corner_radius)
         .paint_at(ui, rect);
+}
+
+/// Paints `image` fitted inside `rect` and centered (`object-contain`),
+/// one texel per physical pixel.
+pub(crate) fn paint_contain(
+    ui: &Ui,
+    rect: Rect,
+    key: &str,
+    image: &image::RgbaImage,
+    tint: egui::Color32,
+) {
+    let ppp = ui.ctx().pixels_per_point();
+    let scale = (rect.width() / image.width().max(1) as f32)
+        .min(rect.height() / image.height().max(1) as f32)
+        * ppp;
+    let width = ((image.width() as f32 * scale).round() as u32).max(1);
+    let height = ((image.height() as f32 * scale).round() as u32).max(1);
+    let Some(texture) = sized_texture(ui, key, width, height, || {
+        image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
+    }) else {
+        return;
+    };
+    let size = egui::vec2(width as f32, height as f32);
+    let origin = rect.center().to_vec2() * ppp - size / 2.0;
+    let min = egui::pos2(origin.x.round(), origin.y.round()) / ppp;
+    egui::Image::new((texture.id(), size / ppp))
+        .tint(tint)
+        .paint_at(ui, Rect::from_min_size(min, size / ppp));
 }
 
 /// The message's image attachments (`isImageAttachment`).
