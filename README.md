@@ -50,7 +50,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
   interval and Bitbucket credentials panels, and
   the Connections administration (pairing links, client sessions, network
   access, adding remote environments);
-- usage: limit sources, reset credits, segment popovers, keyboard shortcuts,
+- usage: limit sources, reset credits, segment popovers,
   price overrides and the environment filter;
 - the pull request detail and right panels, searching on the hosts (the
   search filters loaded rows), author and label filters, line-count backfill,
