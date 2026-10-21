@@ -83,15 +83,25 @@ fn catalog() -> Vec<(Item, String)> {
         .collect()
 }
 
+/// A search result.
+pub(crate) struct Found {
+    pub title: String,
+    pub page: usize,
+    pub target: String,
+    /// The search fields after the title (section, terms), for the palette.
+    pub fields: Vec<String>,
+    pub secondary: bool,
+}
+
 /// `searchSettings`: every token in some field, ranked by how the title
-/// matches, secondary results last. Returns (title, page, target) triples.
-pub(crate) fn search(query: &str, auto_settlement: bool) -> Vec<(String, usize, String)> {
+/// matches, secondary results last.
+pub(crate) fn search(query: &str, auto_settlement: bool) -> Vec<Found> {
     let query = normalize(query);
     if query.is_empty() {
         return Vec::new();
     }
     let tokens: Vec<&str> = query.split(' ').collect();
-    let mut ranked: Vec<(bool, u8, usize, String, usize, String)> = catalog()
+    let mut ranked: Vec<(bool, u8, usize, Found)> = catalog()
         .into_iter()
         .enumerate()
         .filter(|(_, (item, _))| auto_settlement || !item.auto_settlement)
@@ -125,18 +135,22 @@ pub(crate) fn search(query: &str, auto_settlement: bool) -> Vec<(String, usize, 
             } else {
                 item.target.to_owned()
             };
-            Some((item.secondary, rank, index, title_text, item.page, target))
+            let found = Found {
+                title: title_text,
+                page: item.page,
+                target,
+                fields: fields[1..].to_vec(),
+                secondary: item.secondary,
+            };
+            Some((item.secondary, rank, index, found))
         })
         .collect();
     ranked.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
-    ranked
-        .into_iter()
-        .map(|(_, _, _, title, page, target)| (title, page, target))
-        .collect()
+    ranked.into_iter().map(|(_, _, _, found)| found).collect()
 }
 
 impl App {
-    fn auto_settlement_available(&self) -> bool {
+    pub(crate) fn auto_settlement_available(&self) -> bool {
         self.state.config["environment"]["capabilities"]["threadAutoSettlement"] == true
     }
 
@@ -232,8 +246,8 @@ impl App {
                 if up {
                     self.settings_search_active = (self.settings_search_active + count - 1) % count;
                 }
-                if enter && let Some((_, page, target)) = results.get(self.settings_search_active) {
-                    self.open_settings_result(*page, target.clone());
+                if enter && let Some(found) = results.get(self.settings_search_active) {
+                    self.open_settings_result(found.page, found.target.clone());
                 }
             }
         }
@@ -277,7 +291,8 @@ impl App {
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
                 let origin = ui.max_rect().min;
-                for (index, (title, page, target)) in results.iter().enumerate() {
+                for (index, found) in results.iter().enumerate() {
+                    let (title, page, target) = (&found.title, &found.page, &found.target);
                     let row = Rect::from_min_size(
                         Pos2::new(left + 8.0, origin.y + index as f32 * 56.0),
                         Vec2::new(239.0, 52.0),
@@ -355,7 +370,7 @@ impl App {
     }
 
     /// `handleSearchResultClick`: clears the search and jumps to the row.
-    fn open_settings_result(&mut self, page: usize, target: String) {
+    pub(crate) fn open_settings_result(&mut self, page: usize, target: String) {
         self.settings_search.clear();
         self.settings_search_active = 0;
         self.open_settings_page(page);

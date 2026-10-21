@@ -21,8 +21,8 @@ const FOOTER: f32 = 40.0;
 const GROUP: f32 = 28.0;
 const ROW: f32 = 32.0;
 const ROW_TALL: f32 = 50.0;
-const ROW_FILE: f32 = 48.0;
-const LIST_MAX: f32 = 322.0;
+const ROW_DESCRIBED: f32 = 48.0;
+const LIST_MAX: f32 = 319.0;
 fn surface() -> Color32 {
     theme::shade(12)
 }
@@ -78,6 +78,7 @@ enum Action {
     BrowseInto(String),
     AddPath(String),
     OpenFile(String),
+    OpenSetting(usize, String),
     Call(fn(&mut App)),
     Missing(&'static str),
 }
@@ -105,6 +106,8 @@ struct Item {
     terms: Vec<String>,
     /// The normalized query whose subsequence is emphasized (file rows).
     fuzzy: Option<String>,
+    /// Sorts after every other match (keybinding settings).
+    secondary: bool,
     action: Action,
 }
 
@@ -123,15 +126,16 @@ impl Item {
             badge: None,
             terms: vec![title.to_lowercase()],
             fuzzy: None,
+            secondary: false,
             action,
         }
     }
 
     fn height(&self) -> f32 {
-        if matches!(self.icon, Icon::File(_)) {
-            ROW_FILE
-        } else if self.subtitle.is_some() || self.thread.is_some() {
+        if self.thread.is_some() {
             ROW_TALL
+        } else if self.subtitle.is_some() {
+            ROW_DESCRIBED
         } else {
             ROW
         }
@@ -404,6 +408,27 @@ impl App {
                             items: projects,
                         },
                         Group {
+                            label: "Settings".into(),
+                            items: crate::ui::settings_search::search(
+                                &query,
+                                self.auto_settlement_available(),
+                            )
+                            .into_iter()
+                            .map(|found| {
+                                let section = crate::ui::settings::PAGES[found.page].0;
+                                let mut item = Item::new(
+                                    "settings",
+                                    &found.title,
+                                    Action::OpenSetting(found.page, found.target),
+                                );
+                                item.subtitle = Some(format!("Settings · {section}"));
+                                item.terms.extend(found.fields);
+                                item.secondary = found.secondary;
+                                item
+                            })
+                            .collect(),
+                        },
+                        Group {
                             label: "Threads".into(),
                             items: self.thread_items(None),
                         },
@@ -573,18 +598,23 @@ impl App {
             .split_whitespace()
             .map(str::to_owned)
             .collect();
+        let phrase = tokens.join(" ");
         let filtered = groups
             .into_iter()
-            .map(|group| Group {
-                label: group.label,
-                items: group
+            .map(|group| {
+                let mut items: Vec<Item> = group
                     .items
                     .into_iter()
                     .filter(|item| {
                         let haystack = item.terms.join(" ");
                         tokens.iter().all(|t| haystack.contains(t.as_str()))
                     })
-                    .collect(),
+                    .collect();
+                items.sort_by_key(|item| (item.secondary, -match_rank(item, &phrase, &tokens)));
+                Group {
+                    label: group.label,
+                    items,
+                }
             })
             .filter(|g| !g.items.is_empty())
             .collect();
@@ -688,6 +718,7 @@ impl App {
         let keyboard_moved = self.palette.keyboard_moved;
         let view = self.palette.view();
         let mut query = std::mem::take(&mut self.palette.query);
+        let typed_from = query.clone();
         let focus = std::mem::take(&mut self.palette.focus);
         let mut hovered_row = None;
         let mut clicked_row = None;
@@ -862,10 +893,11 @@ impl App {
                                 {
                                     hovered_row = Some(index);
                                 }
-                                if index == highlight
-                                    && (!matches!(view, View::Browse | View::Files)
-                                        || keyboard_moved)
-                                {
+                                // Typed queries keep their first result unmarked
+                                // (Enter still runs it) until the arrows move.
+                                let unmarked = matches!(view, View::Browse | View::Files)
+                                    || view == View::Root && !query.trim().is_empty();
+                                if index == highlight && (!unmarked || keyboard_moved) {
                                     ui.painter().rect_filled(
                                         row,
                                         CornerRadius::same(6),
@@ -970,6 +1002,10 @@ impl App {
                 };
                 label(ui, x, escape);
             });
+        if query != typed_from {
+            self.palette.keyboard_moved = false;
+            self.palette.highlight = 0;
+        }
         self.palette.query = query;
         if let Some(index) = hovered_row {
             self.palette.highlight = index;
@@ -1027,6 +1063,11 @@ impl App {
                 self.palette = PaletteState::default();
                 self.open_file(path);
             }
+            Action::OpenSetting(page, target) => {
+                self.palette = PaletteState::default();
+                self.open_settings();
+                self.open_settings_result(page, target);
+            }
             Action::Call(open) => {
                 self.palette = PaletteState::default();
                 open(self);
@@ -1074,6 +1115,33 @@ impl App {
         self.select_thread(None);
         self.draft_project_id = Some(project_id);
     }
+}
+
+/// `rankCommandPaletteItemMatch`: the first search field holding every
+/// token ranks the item, earlier fields and closer matches first. Thread
+/// titles share a tier so their recency order stands.
+fn match_rank(item: &Item, phrase: &str, tokens: &[String]) -> i32 {
+    let fields = item.terms.iter().filter(|t| !t.is_empty());
+    for (index, field) in fields.enumerate() {
+        let field = normalize(field);
+        if !tokens.iter().all(|t| field.contains(t.as_str())) {
+            continue;
+        }
+        let field_rank = if field == phrase {
+            3
+        } else if field.starts_with(phrase) {
+            2
+        } else if field.contains(phrase) {
+            1
+        } else {
+            0
+        };
+        if index == 0 && item.thread.is_some() {
+            return 1_000 + i32::from(field_rank == 3);
+        }
+        return 1_000 - index as i32 * 100 + field_rank;
+    }
+    0
 }
 
 fn relative_ago(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
