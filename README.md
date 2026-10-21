@@ -31,7 +31,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Markdown | Paragraphs, headings, lists, inline code chips, links, quotes, tables, fenced code with the pierre-dark theme |
 | Composer | Prompt editor, model picker, traits and runtime menus, send (`thread.turn.start`), stop, new-thread drafts (`bootstrap.createThread`), checkout strip |
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
-| Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), surface tabs and the "+" surface menu; the Files surface (project tree from `projects.listEntries`, search, read-only highlighted file view with line numbers, wrapping and the tree toggle) |
+| Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), surface tabs and the "+" surface menu; the Files surface (project tree from `projects.listEntries`, search, read-only highlighted file view with line numbers, wrapping and the tree toggle); the Terminal surface (`terminal.attach` stream into a VT screen with scrollback, alternate screen and 16/256/truecolor SGR, Ghostty's default palette, keyboard and paste through `terminal.write`, resizing, new and close; a locally installed Symbols Nerd Font is used for prompt glyphs) |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
 | Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Source Control page (repository defaults, `server.discoverSourceControl` version control and hosting integrations with redacted accounts, text generation style); the Providers page (instance list with status, version and enable switch; the editor's display name with the redacted account, runtime fields, models with favorites, visibility and order; the health check interval); the Integrations page (agent browser access, the desktop-only browser defaults, device hub and hosts from `subscribeDeviceState`, read-only); the Storage page (worktree cleanup and retention rules); the SnapShots page (unavailable outside the desktop app, like the web client); the Connections page as a session without `access:write` sees it (administrative access notice, empty remote environments); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
@@ -54,8 +54,9 @@ Not ported yet (buttons for these show a "not implemented" notice):
 - the pull request detail and right panels, searching on the hosts (the
   search filters loaded rows), author and label filters, line-count backfill,
   paging past 99 rows per repository and avatars (initials are shown);
-- the surfaces other than Diff and Files (browser, terminal, pull requests,
-  agents, device), and file editing, previews and "Open in editor";
+- the surfaces other than Diff, Files and Terminal (browser, pull requests,
+  agents, device), file editing, previews and "Open in editor", and terminal
+  splits, the bottom drawer, selection and copy, links and font settings;
 - the branch diff's base-ref picker and expanding unchanged diff context;
 - attachments, queued messages, custom snooze times, project favicons, palette
   sub-actions (themes, go to file, git clone), and "New thread on <branch>"

@@ -131,6 +131,11 @@ impl App {
         self.launcher_focused = false;
         self.panel_tab_bar(ui, inner);
         self.panel_controls(ui, rect.right());
+        if let crate::app::PanelTab::Terminal { id, .. } = &active {
+            let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
+            self.terminal_surface(ui, body, id);
+            return;
+        }
         if let crate::app::PanelTab::Files { file } = active {
             let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
             self.files_surface(ui, body, file);

@@ -417,6 +417,43 @@ pub fn apply_palette(ctx: &egui::Context) {
     });
 }
 
+/// The bytes of `SymbolsNerdFontMono-Regular.ttf` from the usual font
+/// directories, if installed.
+fn installed_symbols_font() -> Option<Vec<u8>> {
+    const NAME: &str = "SymbolsNerdFontMono-Regular.ttf";
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut roots: Vec<std::path::PathBuf> = vec![
+        "/usr/share/fonts".into(),
+        "/usr/local/share/fonts".into(),
+        "/run/current-system/sw/share/fonts".into(),
+        format!("/etc/profiles/per-user/{user}/share/fonts").into(),
+    ];
+    if let Some(home) = home {
+        roots.push(home.join(".local/share/fonts"));
+        roots.push(home.join(".fonts"));
+        roots.push(home.join(".nix-profile/share/fonts"));
+    }
+    fn find(dir: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {
+        let entries = std::fs::read_dir(dir).ok()?;
+        let mut dirs = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|n| n == NAME) {
+                return Some(path);
+            }
+            if depth > 0 && path.is_dir() {
+                dirs.push(path);
+            }
+        }
+        dirs.into_iter().find_map(|d| find(&d, depth - 1))
+    }
+    roots
+        .iter()
+        .find_map(|root| find(root, 4))
+        .and_then(|path| std::fs::read(path).ok())
+}
+
 pub fn install(ctx: &egui::Context) {
     egui_extras::install_image_loaders(ctx);
     let mut fonts = FontDefinitions::empty();
@@ -451,6 +488,15 @@ pub fn install(ctx: &egui::Context) {
     // egui's bundled fonts stay as fallbacks for glyphs Geist lacks.
     let defaults = FontDefinitions::default();
     let mut fallback = Vec::new();
+    // Prompt symbols and devicons (the terminal's glyph fallback): a locally
+    // installed Symbols Nerd Font, as upstream prefers one before its bundled copy.
+    if let Some(bytes) = installed_symbols_font() {
+        fonts.font_data.insert(
+            "Symbols Nerd Font Mono".into(),
+            FontData::from_owned(bytes).into(),
+        );
+        fallback.push("Symbols Nerd Font Mono".into());
+    }
     for (name, data) in defaults.font_data {
         fallback.push(name.clone());
         fonts.font_data.insert(name, data);
@@ -688,6 +734,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-grok",
         "circle-arrow-up",
         "pipette",
+        "square-split-vertical",
+        "square-split-horizontal",
         "circle-slash",
         "eye-off",
         "calendar-arrow-up",

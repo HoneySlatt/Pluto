@@ -98,6 +98,8 @@ impl App {
                     *t == crate::app::PanelTab::Diff
                 });
             }
+        } else if label == "Terminal" {
+            self.open_terminal_tab();
         } else if label == "Files" {
             if let Some(panel) = self.panel_mut() {
                 panel.show(crate::app::PanelTab::Files { file: None }, |t| {
@@ -268,6 +270,11 @@ impl App {
                 crate::app::PanelTab::Files { file: None } => {
                     ("Files".to_owned(), "files", theme::foreground())
                 }
+                crate::app::PanelTab::Terminal { number, .. } => (
+                    format!("Terminal {number}"),
+                    "square-terminal",
+                    theme::foreground(),
+                ),
                 crate::app::PanelTab::Files { file: Some(path) } => {
                     let name = path.rsplit('/').next().unwrap_or(path).to_owned();
                     let extension = name.rsplit('.').next().unwrap_or_default().to_owned();
@@ -328,7 +335,13 @@ impl App {
                 select = Some(index);
             }
         }
-        if let Some(panel) = self.panel_mut() {
+        // Closing a terminal's tab ends its session.
+        if let Some(index) = close
+            && let Some(crate::app::PanelTab::Terminal { id, .. }) = panel.tabs.get(index)
+            && let Some(thread) = self.selected.clone()
+        {
+            self.close_terminal(&thread, &id.clone());
+        } else if let Some(panel) = self.panel_mut() {
             if let Some(index) = close {
                 panel.close(index);
             } else if let Some(index) = select {

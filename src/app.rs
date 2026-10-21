@@ -93,6 +93,8 @@ pub struct App {
     pub(crate) prs: crate::ui::pull_requests::PullRequestsState,
     /// The Files surface's reads and view state.
     pub(crate) files: crate::ui::files::FilesState,
+    /// Terminal sessions of the Terminal surface.
+    pub(crate) terminals: crate::ui::terminal_surface::Terminals,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
     pub(crate) client_settings_path: Option<std::path::PathBuf>,
@@ -127,6 +129,11 @@ pub(crate) enum PanelTab {
     /// The file browser, with the file it previews.
     Files {
         file: Option<String>,
+    },
+    /// A terminal session (`terminalId`), shown as "Terminal N".
+    Terminal {
+        id: String,
+        number: usize,
     },
 }
 
@@ -250,6 +257,7 @@ impl App {
             pull_requests_open: false,
             prs: Default::default(),
             files: Default::default(),
+            terminals: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
             ),
@@ -475,7 +483,7 @@ impl App {
         self.send(Action::Dispatch(command));
     }
 
-    fn send(&mut self, action: Action) {
+    pub(crate) fn send(&mut self, action: Action) {
         if let Some(connection) = &self.connection {
             let _ = connection.actions.send(action);
         }
@@ -909,6 +917,8 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key.starts_with("term") {
+            self.terminals.receive(&key, result);
         } else if key.starts_with("files-") {
             self.files.receive(&key, result);
         } else if key.starts_with("prs:") {

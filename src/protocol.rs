@@ -32,6 +32,14 @@ pub enum Action {
     },
     /// Follows the VCS status of a working directory; `None` stops watching.
     WatchVcs(Option<String>),
+    /// A streaming RPC (no receipt deadline); each value arrives as
+    /// `Route::Rpc(key)` until `StopStream(key)`.
+    Stream {
+        key: String,
+        method: &'static str,
+        payload: Value,
+    },
+    StopStream(String),
 }
 
 pub enum Event {
@@ -252,6 +260,35 @@ fn run(
                             payload,
                             false,
                         )?;
+                    }
+                    Action::Stream {
+                        key,
+                        method,
+                        payload,
+                    } => {
+                        subscribe(
+                            &mut socket,
+                            &mut pending,
+                            Route::Rpc(key),
+                            method,
+                            payload,
+                            true,
+                        )?;
+                    }
+                    Action::StopStream(key) => {
+                        let route = Route::Rpc(key);
+                        let ids: Vec<_> = pending
+                            .iter()
+                            .filter(|(_, (r, _))| *r == route)
+                            .map(|(id, _)| *id)
+                            .collect();
+                        for id in ids {
+                            send(
+                                &mut socket,
+                                json!({"_tag":"Interrupt","requestId":id.to_string()}),
+                            )?;
+                            pending.remove(&id);
+                        }
                     }
                     Action::WatchVcs(cwd) => {
                         let obsolete: Vec<_> = pending

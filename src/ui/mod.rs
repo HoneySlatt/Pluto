@@ -17,6 +17,7 @@ pub mod settings;
 pub mod sidebar;
 pub mod source_control;
 pub mod surfaces;
+pub mod terminal_surface;
 pub mod thread_menu;
 pub mod usage;
 pub mod usage_summary;
