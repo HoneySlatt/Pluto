@@ -79,8 +79,8 @@ pub fn load_client_settings(path: Option<&std::path::Path>) -> Value {
     settings
 }
 
-/// `DEFAULT_SERVER_SETTINGS` for the server keys with a reset button.
-fn default_server_setting(key: &str) -> Value {
+/// `DEFAULT_SERVER_SETTINGS` for the keys of the ported settings rows.
+pub(crate) fn default_server_setting(key: &str) -> Value {
     match key {
         "responseStreamingMode" => json!("paragraph"),
         "enableProviderUpdateChecks" => json!(true),
@@ -89,6 +89,29 @@ fn default_server_setting(key: &str) -> Value {
         "sidebarAutoSettleAfterDays" => json!(3),
         "newWorktreesStartFromOrigin" => json!(true),
         "addProjectBaseDirectory" => json!(""),
+        "defaultRuntimeMode" => json!("full-access"),
+        "defaultAutoPull" | "enableAgentDeviceAccess" | "enableDeviceSupport" => json!(false),
+        "enableAgentBrowserAccess" => json!(true),
+        "defaultProjectScripts" => json!([]),
+        "backgroundActivity" => json!({"schemaVersion": 1, "profile": "balanced", "overrides": {}}),
+        "textGenerationModelSelection" => json!({
+            "instanceId": "codex",
+            "model": "gpt-6-luna",
+            "options": [{"id": "reasoningEffort", "value": "low"}],
+        }),
+        "sourceControlWritingStyle" => json!({
+            "mode": "repo_conventions",
+            "customInstructions": "",
+            "followChangeRequestTemplates": true,
+        }),
+        "storageCleanup" => json!({
+            "worktreeAfterDays": null,
+            "worktreeOnMerge": false,
+            "worktreeOnDelete": false,
+            "worktreeUnchanged": false,
+            "browserArtifactsAfterDays": null,
+            "logsAfterDays": null,
+        }),
         _ => Value::Null,
     }
 }
@@ -2537,12 +2560,16 @@ impl App {
         let environment_wide = project_scope && !keys.is_empty() && scoped.is_empty();
         if row.layers {
             let slot = Rect::from_min_size(Pos2::new(slot_x, inner_top), Vec2::splat(20.0));
-            let tint = if overridden {
-                theme::primary()
+            if keys.is_empty() {
+                let tint = if overridden {
+                    theme::primary()
+                } else {
+                    theme::muted_foreground()
+                };
+                theme::paint_icon(ui, "layers", slot, 12.0, tint);
             } else {
-                theme::muted_foreground()
-            };
-            theme::paint_icon(ui, "layers", slot, 12.0, tint);
+                self.setting_inheritance(ui, slot, &row.id, keys, overridden);
+            }
             slot_x += 26.0;
         }
         let (show_reset, tooltip) = if project_scope && !scoped.is_empty() {

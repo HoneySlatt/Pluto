@@ -158,6 +158,22 @@ impl App {
             .is_none_or(|p| p["enabled"] != false)
     }
 
+    /// Whether `key`'s effective value comes from the scoped project's
+    /// override (`resolveProjectSettings`' "project" source).
+    pub(crate) fn project_source(&self, key: &str) -> bool {
+        let Some(project) = self.settings_project() else {
+            return false;
+        };
+        let entry = &self.state.config["settings"]["projectSettingsOverrides"][&project.id];
+        entry.get(key).is_some_and(|value| {
+            !matches!(
+                key,
+                "textGenerationModelSelection" | "defaultModelSelection"
+            ) || value.is_null()
+                || self.model_provider_enabled(value)
+        })
+    }
+
     /// Whether the scoped project overrides any of `keys`.
     pub(crate) fn project_overrides(&self, keys: &[&str]) -> bool {
         let Some(project) = self.settings_project() else {
@@ -242,6 +258,21 @@ impl App {
             entry.remove(*key);
         }
         self.save_project_overrides(&project.id, entry);
+    }
+
+    /// `planProjectOverridesClear`: drops `keys` from the named projects'
+    /// entries (no side effects, unlike a project scope's reset).
+    pub(crate) fn clear_overrides_of(&mut self, project_ids: &[String], keys: &[&str]) {
+        for project_id in project_ids {
+            let mut entry = self.state.config["settings"]["projectSettingsOverrides"][project_id]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            for key in keys {
+                entry.remove(*key);
+            }
+            self.save_project_overrides(project_id, entry);
+        }
     }
 
     /// Replaces the project's entry (the server replaces entries rather than

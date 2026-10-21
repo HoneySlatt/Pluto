@@ -27,6 +27,7 @@ pub mod projects_page;
 pub mod providers;
 pub mod pull_requests;
 pub mod requests_panel;
+pub mod setting_inheritance;
 pub mod settings;
 pub mod settings_scope;
 pub mod settings_search;
