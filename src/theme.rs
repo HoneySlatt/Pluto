@@ -758,6 +758,11 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "git-merge",
         "git-pull-request-closed",
         "git-pull-request-draft",
+        "trash-2",
+        "provider-copilot",
+        "provider-gemini",
+        "provider-acp",
+        "provider-pi",
     )
 }
 

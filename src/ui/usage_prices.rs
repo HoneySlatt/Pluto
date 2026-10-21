@@ -159,7 +159,7 @@ impl App {
         (changes, errors)
     }
 
-    fn environment_label(&self) -> String {
+    pub(crate) fn environment_label(&self) -> String {
         self.state.config["environment"]["label"]
             .as_str()
             .unwrap_or("this environment")

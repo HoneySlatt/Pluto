@@ -31,7 +31,9 @@ use crate::ui::settings::{
 };
 use crate::ui::widgets;
 
+mod add_instance;
 mod environment;
+pub(crate) use add_instance::AddInstance;
 pub(crate) use environment::EnvDraft;
 
 const WIDTH: f32 = 976.0;
@@ -556,9 +558,37 @@ impl App {
         self.providers().into_iter().find(|p| p["instanceId"] == id)
     }
 
-    /// Saves one instance (`buildProviderInstanceUpdatePatch`).
+    /// Saves one instance (`buildProviderInstanceUpdatePatch`). The server
+    /// replaces `providerInstances` wholesale, so the patch carries every
+    /// instance, with this one updated.
     fn save_instance(&mut self, row: &InstanceRow, instance: Value) {
-        self.patch_server_settings(json!({"providerInstances": {row.id.clone(): instance}}));
+        let mut instances = self.provider_instances_map();
+        instances.insert(row.id.clone(), instance);
+        self.replace_provider_instances(instances);
+    }
+
+    /// `deleteProviderInstance`: every instance but this one.
+    fn delete_instance(&mut self, id: &str) {
+        let mut instances = self.provider_instances_map();
+        instances.remove(id);
+        self.replace_provider_instances(instances);
+    }
+
+    fn provider_instances_map(&self) -> serde_json::Map<String, Value> {
+        self.state.config["settings"]["providerInstances"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn replace_provider_instances(&mut self, instances: serde_json::Map<String, Value>) {
+        // Replace locally first: the settings patch merges, and would keep
+        // removed instances or keys until the server's echo.
+        if !self.state.config["settings"].is_object() {
+            self.state.config["settings"] = json!({});
+        }
+        self.state.config["settings"]["providerInstances"] = Value::Object(instances.clone());
+        self.patch_server_settings(json!({"providerInstances": instances}));
     }
 
     /// `updateAccentColor`: set when valid, otherwise dropped from the instance.
@@ -614,7 +644,7 @@ impl App {
         )
         .clicked()
         {
-            self.status = Some("Adding provider instances is not implemented yet".into());
+            self.open_add_instance();
         }
         let checked = self
             .providers()
@@ -1080,6 +1110,32 @@ impl App {
         paint_accent_badge(ui, row, Pos2::new(left + 16.0, top + 4.0), 1.0);
         section_title(ui, Pos2::new(left + 44.0, top), &name);
         let mut x = right - 16.0;
+        // Custom instances can be deleted (`Trash2Icon`, ghost-destructive).
+        if row.id != row.driver {
+            let button =
+                Rect::from_min_size(Pos2::new(x + 6.0 - 24.0, top + 2.0), Vec2::splat(24.0));
+            let response = ui.interact(
+                button,
+                ui.id().with(("delete-instance", &row.id)),
+                Sense::click(),
+            );
+            let color = if response.hovered() {
+                let destructive = Color32::from_rgb(251, 65, 74);
+                ui.painter().rect_filled(
+                    button,
+                    CornerRadius::same(6),
+                    theme::alpha(destructive, 0.1),
+                );
+                destructive
+            } else {
+                theme::muted_foreground()
+            };
+            theme::paint_icon(ui, "trash-2", button, 14.0, color);
+            if response.clicked() {
+                self.delete_instance(&row.id);
+            }
+            x = button.left() - 2.0;
+        }
         if enabled && update_available(live.as_ref()) {
             let button = Rect::from_min_size(Pos2::new(x - 24.0, top + 2.0), Vec2::splat(24.0));
             if widgets::icon_button(

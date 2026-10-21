@@ -58,6 +58,8 @@ pub struct App {
     pub(crate) custom_model_editor: Option<crate::ui::custom_model_editor::CustomModelEditor>,
     /// Environment variable drafts per provider instance.
     pub(crate) env_drafts: std::collections::HashMap<String, crate::ui::providers::EnvDraft>,
+    /// The open "Add provider instance" wizard.
+    pub(crate) add_instance: Option<crate::ui::providers::AddInstance>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -273,6 +275,7 @@ impl App {
             accent_picker: None,
             custom_model_editor: None,
             env_drafts: Default::default(),
+            add_instance: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
@@ -755,6 +758,7 @@ impl eframe::App for App {
                 self.status_toast(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
+                self.add_instance_dialog(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();

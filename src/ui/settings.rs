@@ -1959,6 +1959,7 @@ impl App {
             || self.confirm.is_some()
             || self.accent_picker.is_some()
             || self.custom_model_editor.is_some()
+            || self.add_instance.is_some()
             || (self.custom_model_input.is_some() && ui.memory(|m| m.focused().is_some()));
         if ui.input(|i| i.key_pressed(Key::Escape)) && !overlay {
             self.settings_page = None;
