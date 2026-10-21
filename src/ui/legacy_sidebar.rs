@@ -232,6 +232,278 @@ impl App {
             Pos2::new(rect.right() - 1.0, rect.bottom() - 48.0),
         );
         self.legacy_project_list(ui, list);
+        self.legacy_project_menu(ui);
+    }
+
+    /// The project header's context menu: Rename, Copy Path, Project
+    /// settings, Remove ("Group into..." needs project grouping, not ported).
+    fn legacy_project_menu(&mut self, ui: &mut Ui) {
+        use crate::ui::context_menu::{self, Item};
+        let Some((project_id, state)) = self.legacy_project_menu.take() else {
+            return;
+        };
+        let Some(project) = self.state.project(&project_id).cloned() else {
+            return;
+        };
+        let items = [
+            Item::new("rename", "Rename"),
+            Item::new("copy-path", "Copy Path"),
+            Item::new("project-settings", "Project settings").icon("settings"),
+            Item {
+                destructive: true,
+                ..Item::new("delete", "Remove").icon("trash")
+            },
+        ];
+        let mut open = Some(state);
+        let clicked = context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.legacy_project_menu = Some((project_id, state));
+        }
+        match clicked.as_deref() {
+            Some("rename") => {
+                self.legacy_project_rename = Some((project.id.clone(), project.title.clone(), true))
+            }
+            Some("copy-path") => {
+                ui.ctx().copy_text(project.workspace_root.clone());
+                self.status = Some(format!("Path copied: {}", project.workspace_root));
+            }
+            Some("project-settings") => self.open_project_settings(&project.id),
+            Some("delete") => self.confirm_legacy_remove(&project),
+            _ => {}
+        }
+    }
+
+    /// `handleRemoveProject`'s confirmation. Upstream first warns that a
+    /// project with threads is not empty, with "Delete anyway" leading here.
+    fn confirm_legacy_remove(&mut self, project: &Project) {
+        let threads = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| t.project_id == project.id)
+            .count();
+        let title = if threads > 0 {
+            format!(
+                "Remove project \"{}\" and delete its {threads} thread{}?",
+                project.title,
+                if threads == 1 { "" } else { "s" }
+            )
+        } else {
+            format!("Remove project \"{}\"?", project.title)
+        };
+        let mut lines = vec![format!("Path: {}", project.workspace_root)];
+        if let Some(label) = self.state.config["environment"]["label"].as_str() {
+            lines.push(format!("Environment: {label}"));
+        }
+        if threads > 0 {
+            lines.push("This permanently clears conversation history for those threads and any archived threads.".into());
+            lines.push("This removes only this project entry.".into());
+            lines.push("This action cannot be undone.".into());
+        } else {
+            lines.push("This permanently clears any archived conversation history.".into());
+            lines.push("This removes only this project entry.".into());
+        }
+        self.confirm = Some(crate::ui::thread_menu::Confirm {
+            title,
+            message: lines.join("\n"),
+            confirm_label: "Remove",
+            command: json!({
+                "type": "project.delete",
+                "commandId": uuid::Uuid::new_v4().to_string(),
+                "projectId": project.id,
+                "force": threads > 0,
+            }),
+        });
+    }
+
+    /// The "Rename project" dialog.
+    pub(crate) fn legacy_rename_dialog(&mut self, ui: &mut Ui, screen: Rect) {
+        let Some((project_id, mut title, focus)) = self.legacy_project_rename.clone() else {
+            return;
+        };
+        let Some(project) = self.state.project(&project_id).cloned() else {
+            self.legacy_project_rename = None;
+            return;
+        };
+        let environment = self.state.config["environment"]["label"]
+            .as_str()
+            .map(str::to_owned);
+        let mut decision = None;
+        // Measured on the reference: a 512px `DialogPopup`, the header to 84px,
+        // the panel, then the footer band.
+        let description = format!("Update the title for {}.", project.workspace_root);
+        let description_height = widgets::galley(
+            ui,
+            &description,
+            font(14.0, Weight::Regular),
+            theme::muted_foreground(),
+            20.0,
+            462.0,
+        )
+        .size()
+        .y;
+        let panel_top = 53.0 + description_height + 12.0;
+        let footer_top = panel_top
+            + 4.0
+            + 16.0
+            + 6.0
+            + 32.0
+            + if environment.is_some() {
+                16.0 + 16.0
+            } else {
+                0.0
+            }
+            + 24.0;
+        let d = Rect::from_center_size(screen.center(), Vec2::new(512.0, footer_top + 65.0));
+        egui::Area::new(ui.id().with("legacy-rename-dialog"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ui.ctx(), |ui| {
+                let (backdrop, backdrop_response) =
+                    ui.allocate_exact_size(screen.size(), Sense::click());
+                ui.painter().rect_filled(
+                    backdrop,
+                    0.0,
+                    theme::alpha(theme::background(), 200.0 / 255.0),
+                );
+                if backdrop_response.clicked() && !ui.rect_contains_pointer(d) {
+                    decision = Some(false);
+                }
+                ui.painter().rect(
+                    d,
+                    CornerRadius::same(18),
+                    theme::shade(12),
+                    Stroke::new(1.0, theme::input()),
+                    StrokeKind::Inside,
+                );
+                let close = Rect::from_min_size(
+                    Pos2::new(d.right() - 41.0, d.top() + 9.0),
+                    Vec2::splat(32.0),
+                );
+                if widgets::icon_button(
+                    ui,
+                    close,
+                    "legacy-rename-close",
+                    "x",
+                    16.0,
+                    theme::muted_foreground(),
+                    "",
+                )
+                .clicked()
+                {
+                    decision = Some(false);
+                }
+                let left = d.left() + 25.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(left, d.top() + 25.0),
+                    "Rename project",
+                    font(20.0, Weight::SemiBold),
+                    theme::foreground(),
+                    20.0,
+                );
+                let galley = widgets::galley(
+                    ui,
+                    &description,
+                    font(14.0, Weight::Regular),
+                    theme::muted_foreground(),
+                    20.0,
+                    462.0,
+                );
+                ui.painter().galley(
+                    Pos2::new(left, d.top() + 53.0),
+                    galley,
+                    theme::muted_foreground(),
+                );
+                let mut y = d.top() + panel_top + 4.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(left, y),
+                    "Project title",
+                    font(12.0, Weight::Medium),
+                    theme::foreground(),
+                    16.0,
+                );
+                y += 16.0 + 6.0;
+                let field = Rect::from_min_size(Pos2::new(left, y), Vec2::new(462.0, 32.0));
+                let edit = crate::ui::action_editor::input(
+                    ui,
+                    field,
+                    "legacy-rename-title",
+                    &mut title,
+                    "",
+                    false,
+                );
+                if focus {
+                    edit.request_focus();
+                }
+                y += 32.0 + 16.0;
+                if let Some(label) = &environment {
+                    widgets::text(
+                        ui,
+                        Pos2::new(left, y),
+                        &format!("Environment: {label}"),
+                        font(12.0, Weight::Regular),
+                        theme::muted_foreground(),
+                        16.0,
+                    );
+                }
+                // `DialogFooter`: a lighter band under a hairline.
+                let band = Rect::from_min_max(
+                    Pos2::new(d.left() + 1.0, d.top() + footer_top),
+                    d.max - Vec2::splat(1.0),
+                );
+                ui.painter().rect_filled(
+                    band,
+                    CornerRadius {
+                        nw: 0,
+                        ne: 0,
+                        sw: 17,
+                        se: 17,
+                    },
+                    theme::overlay(0.016),
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(band.min, Vec2::new(band.width(), 1.0)),
+                    0.0,
+                    theme::overlay(0.07),
+                );
+                use crate::ui::action_editor::{Kind, footer_button, footer_rect};
+                let top = band.top() + 16.0;
+                let save = footer_rect(ui, d.right() - 25.0, top, "Save");
+                let cancel = footer_rect(ui, save.left() - 8.0, top, "Cancel");
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if footer_button(ui, save, "Save", Kind::Primary) || enter {
+                    decision = Some(true);
+                }
+                if footer_button(ui, cancel, "Cancel", Kind::Outline)
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    decision = Some(false);
+                }
+            });
+        match decision {
+            Some(true) => {
+                // `submitProjectRename`: a trimmed, non-empty, changed title.
+                let trimmed = title.trim().to_owned();
+                if trimmed.is_empty() {
+                    self.status = Some("Project title cannot be empty".into());
+                    self.legacy_project_rename = Some((project_id, title, true));
+                    return;
+                }
+                if trimmed != project.title {
+                    self.dispatch(json!({
+                        "type": "project.meta.update",
+                        "commandId": uuid::Uuid::new_v4().to_string(),
+                        "projectId": project.id,
+                        "title": trimmed,
+                    }));
+                }
+                self.legacy_project_rename = None;
+            }
+            Some(false) => self.legacy_project_rename = None,
+            None => self.legacy_project_rename = Some((project_id, title, false)),
+        }
     }
 
     fn legacy_project_list(&mut self, ui: &mut Ui, rect: Rect) {
@@ -511,6 +783,13 @@ impl App {
             ui.id().with(("legacy-project", &project.id)),
             Sense::click(),
         );
+        if response.secondary_clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            self.open_menu = None;
+            self.legacy_project_menu =
+                Some((project.id.clone(), crate::ui::context_menu::State::new(at)));
+        }
         let hovered = ui.rect_contains_pointer(rect);
         if response.hovered() {
             ui.painter()
@@ -631,21 +910,25 @@ impl App {
             Pos2::new(x, rect.top()),
             Pos2::new(rect.left() + 154.0, rect.bottom()),
         );
-        widgets::text_in(
-            ui,
-            title_rect,
-            &thread.title,
-            font(
-                14.0,
-                if active {
-                    Weight::Medium
-                } else {
-                    Weight::Regular
-                },
-            ),
-            title_color,
-        );
-        if ui.rect_contains_pointer(title_rect) {
+        // Double click renames inline.
+        let renaming = self.rename_editor(ui, &thread.id, title_rect);
+        if !renaming {
+            widgets::text_in(
+                ui,
+                title_rect,
+                &thread.title,
+                font(
+                    14.0,
+                    if active {
+                        Weight::Medium
+                    } else {
+                        Weight::Regular
+                    },
+                ),
+                title_color,
+            );
+        }
+        if !renaming && ui.rect_contains_pointer(title_rect) {
             response.clone().on_hover_text(&thread.title);
         }
         let confirming = self.legacy_confirm_archive.as_deref() == Some(thread.id.as_str());

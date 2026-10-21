@@ -958,7 +958,7 @@ fn label(ui: &Ui, pos: Pos2, text: &str) {
 
 /// The dialog `Input` (32px) or `Textarea`; the placeholder is painted like
 /// the settings fields (egui's hint text renders lighter).
-fn input(
+pub(crate) fn input(
     ui: &mut Ui,
     rect: Rect,
     id: &str,
@@ -1045,13 +1045,13 @@ fn toggle_row(ui: &mut Ui, rect: Rect, index: usize, text: &str, on: bool, enabl
     clicked && enabled
 }
 
-fn footer_rect(ui: &Ui, right: f32, top: f32, label: &str) -> Rect {
+pub(crate) fn footer_rect(ui: &Ui, right: f32, top: f32, label: &str) -> Rect {
     let width = (widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 24.0).ceil();
     Rect::from_min_size(Pos2::new(right - width, top), Vec2::new(width, 32.0))
 }
 
 #[derive(Clone, Copy)]
-enum Kind {
+pub(crate) enum Kind {
     Primary,
     Outline,
     Destructive,
@@ -1059,7 +1059,7 @@ enum Kind {
 }
 
 /// A dialog footer `Button`.
-fn footer_button(ui: &Ui, rect: Rect, label: &str, kind: Kind) -> bool {
+pub(crate) fn footer_button(ui: &Ui, rect: Rect, label: &str, kind: Kind) -> bool {
     let response = ui.interact(rect, ui.id().with(("action-footer", label)), Sense::click());
     let hovered = response.hovered();
     let color = match kind {

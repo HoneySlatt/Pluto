@@ -65,6 +65,9 @@ pub struct App {
     pub(crate) legacy_project_expanded: std::collections::HashMap<String, bool>,
     pub(crate) legacy_thread_lists: std::collections::HashSet<String>,
     pub(crate) legacy_confirm_archive: Option<String>,
+    pub(crate) legacy_project_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// The "Rename project" dialog: project, edited title, focus request.
+    pub(crate) legacy_project_rename: Option<(String, String, bool)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -314,6 +317,8 @@ impl App {
             legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
+            legacy_project_menu: None,
+            legacy_project_rename: None,
             confirm: None,
             snooze_dialog: None,
             prices_dialog: None,
@@ -901,6 +906,7 @@ impl eframe::App for App {
                 self.thread_menu(ui);
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
+                self.legacy_rename_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);

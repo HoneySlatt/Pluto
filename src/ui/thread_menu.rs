@@ -37,8 +37,34 @@ impl App {
         self.state.config["environment"]["capabilities"][name] == true
     }
 
+    /// The legacy sidebar's thread menu (`LegacySidebar.tsx`).
+    fn legacy_thread_menu_items(thread: &Thread) -> Vec<Item> {
+        let mut items = Vec::new();
+        if let Some(branch) = &thread.branch {
+            items.push(Item::new(
+                "new-thread-on-branch",
+                format!("New thread on {branch}"),
+            ));
+        }
+        items.extend([
+            Item::new("rename", "Rename thread"),
+            Item::new("mark-unread", "Mark unread"),
+            Item::new("copy-path", "Copy Path"),
+            Item::new("copy-thread-id", "Copy Thread ID"),
+            Item::new("project-settings", "Project settings"),
+            Item {
+                destructive: true,
+                ..Item::new("delete", "Delete").icon("trash")
+            },
+        ]);
+        items
+    }
+
     /// `buildThreadActionMenuItems` for a sidebar row.
     fn thread_menu_items(&self, thread: &Thread) -> Vec<Item> {
+        if self.client_setting("legacySidebarEnabled") == true {
+            return Self::legacy_thread_menu_items(thread);
+        }
         let now = self.now;
         let pinned = thread.pinned_at.is_some();
         let settled = thread.settled_override.as_deref() == Some("settled");
