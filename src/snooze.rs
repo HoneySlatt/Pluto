@@ -198,9 +198,59 @@ pub fn wake_label(until: &str, now: DateTime<Utc>) -> String {
     }
 }
 
+/// `CustomSnoozeInput`: a local date and time, or an elapsed duration.
+pub enum CustomSnooze {
+    At(chrono::NaiveDateTime),
+    /// An amount of minutes, hours or days (unit 0, 1, 2).
+    For(String, usize),
+}
+
+/// `resolveCustomSnooze`: the wake time in the future, or `None` for a past,
+/// nonexistent (DST gap) or non-positive choice.
+pub fn resolve_custom(input: &CustomSnooze, now: DateTime<Utc>) -> Option<String> {
+    let wake = match input {
+        CustomSnooze::For(amount, unit) => {
+            let amount: f64 = amount.trim().parse().ok().filter(|a: &f64| a.is_finite())?;
+            if amount <= 0.0 {
+                return None;
+            }
+            let unit_ms = [60_000.0, 3_600_000.0, 86_400_000.0][(*unit).min(2)];
+            now + Duration::milliseconds((amount * unit_ms) as i64)
+        }
+        CustomSnooze::At(naive) => Local
+            .from_local_datetime(naive)
+            .single()?
+            .with_timezone(&Utc),
+    };
+    (wake > now).then(|| iso(wake))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_snoozes_must_lie_ahead() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 10, 0, 0).unwrap();
+        assert_eq!(
+            resolve_custom(&CustomSnooze::For("2".into(), 1), now).as_deref(),
+            Some("2026-10-21T12:00:00.000Z")
+        );
+        assert_eq!(
+            resolve_custom(&CustomSnooze::For("1.5".into(), 0), now).as_deref(),
+            Some("2026-10-21T10:01:30.000Z")
+        );
+        assert!(resolve_custom(&CustomSnooze::For("0".into(), 2), now).is_none());
+        assert!(resolve_custom(&CustomSnooze::For("x".into(), 2), now).is_none());
+        let past = (now - Duration::hours(30))
+            .with_timezone(&Local)
+            .naive_local();
+        assert!(resolve_custom(&CustomSnooze::At(past), now).is_none());
+        let ahead = (now + Duration::hours(30))
+            .with_timezone(&Local)
+            .naive_local();
+        assert!(resolve_custom(&CustomSnooze::At(ahead), now).is_some());
+    }
 
     fn local(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Local> {
         Local.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()

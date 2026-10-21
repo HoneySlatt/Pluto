@@ -734,6 +734,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-grok",
         "circle-arrow-up",
         "pipette",
+        "calendar",
         "square-split-vertical",
         "square-split-horizontal",
         "circle-slash",

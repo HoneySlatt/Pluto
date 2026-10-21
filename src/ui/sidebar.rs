@@ -900,7 +900,7 @@ impl App {
                 cmd["snoozedUntil"] = serde_json::json!(crate::snooze::until_iso(&presets[index]));
                 self.dispatch(cmd);
             }
-            Some(_) => self.status = Some("Custom snooze is not implemented yet".into()),
+            Some(_) => self.request_custom_snooze(vec![thread.id.clone()]),
             None => {}
         }
     }

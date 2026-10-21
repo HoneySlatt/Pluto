@@ -48,6 +48,7 @@ pub struct App {
     pub(crate) rename_focus: bool,
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
+    pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) panel_width: f32,
     /// Diff scope per thread (`diffPanelStore.ts`), Working tree by default.
     pub(crate) diff_scopes: std::collections::HashMap<String, crate::ui::diff_panel::DiffScope>,
@@ -232,6 +233,7 @@ impl App {
             rename_focus: false,
             last_row_click: None,
             confirm: None,
+            snooze_dialog: None,
             panel_width: 540.0,
             diff_scopes: Default::default(),
             diff_scope_menu: None,
@@ -702,6 +704,7 @@ impl eframe::App for App {
                 self.settings_screen(ui, rect);
                 self.status_toast(ui, rect);
                 self.confirm_dialog(ui, rect);
+                self.snooze_dialog(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();
@@ -744,6 +747,7 @@ impl eframe::App for App {
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.confirm_dialog(ui, rect);
+                self.snooze_dialog(ui, rect);
             }
         }
         // Relative times tick; repaint at least once a minute.

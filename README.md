@@ -24,7 +24,7 @@ reads it from a file at startup instead; it is kept in memory only.
 |---|---|
 | Theme | Dark theme tokens, Geist fonts, Lucide 0.564 icons, pierre file-type icons; follows the environment theme (`t3 theme set`, published as `environmentThemesUpdated`), with `pierre-light` code under light themes |
 | Sidebar | Wordmark, search filter, project scope filter, thread cards (project monogram, Approval/Input/Working/Failed/Done/Woke status, time, branch, provider glyph), active/pinned ordering, snoozed and settled shelves, settle/snooze/wake/un-settle actions, inline rename |
-| Thread menu | The full context menu with Snooze, Auto-settle and Copy submenus, mark unread, filter by project, archive, delete with confirmation |
+| Thread menu | The full context menu with Snooze, Auto-settle and Copy submenus, mark unread, filter by project, archive, delete with confirmation; the custom snooze dialog (date with the month calendar and segmented time, or a duration) from the menu and the card snooze button |
 | Command palette | Ctrl+K actions and recent threads, project and thread search, new thread in project, add project with folder browsing, "Go to file" (Ctrl+P: `projects.searchEntries` with fuzzy highlights, opening the file in the right panel and revealing it in the tree), "Search project contents" (Ctrl+Shift+F: `projects.searchContents` with case, whole-word and regex options, results grouped by file with sticky headers, highlighted lines and match marks; opening a match centers and selects its line), settings results while typing (ranked like `filterCommandPaletteGroups`), and the pull requests, usage (Ctrl+U) and settings screens |
 | Header | Breadcrumb, Add action, Open, git quick action from live VCS status, Initialize Git, panel toggles |
 | Timeline | User bubbles, assistant markdown, settled-turn folds ("Worked for…"), tool rows and group summaries, changed-files card, working indicator, hover meta (time, copy) |
@@ -58,7 +58,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
   agents, device), file editing, previews and "Open in editor", and terminal
   splits, the bottom drawer, selection and copy, links and font settings;
 - the branch diff's base-ref picker and expanding unchanged diff context;
-- attachments, queued messages, custom snooze times, project favicons, palette
+- attachments, queued messages, project favicons, palette
   sub-actions (themes, git clone; "Go to file" and content search from a
   draft without a thread), and "New thread on <branch>"
   branch carry-over (it opens a draft in the thread's project on its current

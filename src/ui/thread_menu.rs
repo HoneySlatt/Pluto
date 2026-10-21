@@ -1,6 +1,6 @@
 //! Per-thread actions (`threadActionMenu.logic.ts`, `useThreadActions.ts`):
 //! the sidebar context menu, inline rename and the delete confirmation.
-//! Custom snooze times and project settings are not ported yet.
+//! Project settings are not ported yet.
 use eframe::egui::{
     self, Color32, CornerRadius, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -174,7 +174,7 @@ impl App {
                     cmd["snoozedUntil"] = json!(crate::snooze::until_iso(preset));
                     self.dispatch(cmd);
                 }
-                None => self.status = Some("Custom snooze is not implemented yet".into()),
+                None => self.request_custom_snooze(vec![thread.id.clone()]),
             }
             return;
         }
