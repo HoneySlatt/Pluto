@@ -223,9 +223,18 @@ impl App {
     /// panel's active surface.
     pub(crate) fn terminal_focused(&self) -> bool {
         let panel = self.panel();
-        self.terminals.focused.is_some()
-            && panel.open
-            && matches!(panel.active_tab(), Some(PanelTab::Terminal { .. }))
+        let in_drawer = self.selected.as_ref().is_some_and(|thread| {
+            self.drawers.get(thread).is_some_and(|drawer| {
+                drawer.open
+                    && drawer.groups.iter().flat_map(|g| g.ids.iter()).any(|id| {
+                        self.terminals.focused.as_deref() == Some(&format!("term:{thread}\0{id}"))
+                    })
+            })
+        });
+        in_drawer
+            || self.terminals.focused.is_some()
+                && panel.open
+                && matches!(panel.active_tab(), Some(PanelTab::Terminal { .. }))
     }
 }
 
@@ -305,34 +314,57 @@ fn key_bytes(key: Key, modifiers: Modifiers, app_cursor: bool) -> Option<String>
 /// `MAX_TERMINALS_PER_GROUP`.
 const MAX_TERMINALS_PER_GROUP: usize = 4;
 
-/// The next free session id: "default" first, then "terminal-N".
-fn next_terminal_id(tabs: &[PanelTab]) -> String {
-    let used: Vec<usize> = tabs
-        .iter()
-        .filter_map(|t| match t {
-            PanelTab::Terminal { id, split, .. } => Some(std::iter::once(id).chain(split.iter())),
-            _ => None,
-        })
-        .flatten()
-        .map(|id| {
-            if id == "default" {
-                1
-            } else {
-                id.strip_prefix("terminal-")
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or(0)
-            }
-        })
-        .collect();
-    match used.iter().max() {
-        None => "default".to_owned(),
-        Some(max) => format!("terminal-{}", max + 1),
+/// The next free session id (`nextTerminalId`): "default" while unused,
+/// then the lowest unused "term-N".
+pub(crate) fn next_terminal_id<'a>(used: impl IntoIterator<Item = &'a String>) -> String {
+    let used: Vec<&String> = used.into_iter().collect();
+    if !used.iter().any(|id| *id == "default") {
+        return "default".to_owned();
+    }
+    (1..)
+        .map(|n| format!("term-{n}"))
+        .find(|id| !used.contains(&id))
+        .unwrap_or_default()
+}
+
+/// `getTerminalLabel`: "term-3" reads "Terminal 3".
+pub(crate) fn terminal_label(id: &str) -> String {
+    let suffix = id
+        .strip_prefix("term-")
+        .or_else(|| id.strip_prefix("terminal-"))
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    match suffix {
+        Some(n) => format!("Terminal {n}"),
+        None => id.to_owned(),
+    }
+}
+
+impl App {
+    /// Every terminal session id the thread's panel tabs and drawer use.
+    pub(crate) fn used_terminal_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .panel()
+            .tabs
+            .iter()
+            .filter_map(|t| match t {
+                PanelTab::Terminal { id, split, .. } => {
+                    Some(std::iter::once(id.clone()).chain(split.iter().cloned()))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if let Some(drawer) = self.selected.as_ref().and_then(|id| self.drawers.get(id)) {
+            ids.extend(drawer.groups.iter().flat_map(|g| g.ids.iter().cloned()));
+        }
+        ids
     }
 }
 
 impl App {
     /// Opens a new terminal tab in the current panel.
     pub(crate) fn open_terminal_tab(&mut self) {
+        let id = next_terminal_id(&self.used_terminal_ids());
         let Some(panel) = self.panel_mut() else {
             return;
         };
@@ -346,7 +378,6 @@ impl App {
             .max()
             .unwrap_or(0)
             + 1;
-        let id = next_terminal_id(&panel.tabs);
         panel.tabs.push(PanelTab::Terminal {
             id,
             number,
@@ -360,10 +391,10 @@ impl App {
     /// `splitPanelTerminal`: a new session beside the group's (at most four),
     /// stacked when `vertical`; it becomes the active one.
     fn split_terminal(&mut self, vertical: bool) {
+        let next = next_terminal_id(&self.used_terminal_ids());
         let Some(panel) = self.panel_mut() else {
             return;
         };
-        let next = next_terminal_id(&panel.tabs);
         let index = panel.active.min(panel.tabs.len().saturating_sub(1));
         if let Some(PanelTab::Terminal {
             split,
@@ -444,7 +475,16 @@ impl App {
                 }
             }
         }
-        self.terminal_toolbar(ui, body, &ids[active], ids.len());
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        match terminal_toolbar(ui, body, ids.len()) {
+            Some(0) => self.split_terminal(false),
+            Some(1) => self.split_terminal(true),
+            Some(2) => self.open_terminal_tab(),
+            Some(3) => self.close_terminal(&thread, &ids[active]),
+            _ => {}
+        }
     }
 
     fn terminal_write(&mut self, thread: &str, id: &str, data: &str) {
@@ -456,7 +496,7 @@ impl App {
     }
 
     /// One session's grid in `body` for the terminal `id`.
-    fn terminal_view(&mut self, ui: &mut Ui, body: Rect, id: &str) {
+    pub(crate) fn terminal_view(&mut self, ui: &mut Ui, body: Rect, id: &str) {
         ui.painter().rect_filled(body, 0.0, theme::background());
         let (Some(thread), Some(cwd)) = (self.selected.clone(), self.workspace_cwd()) else {
             widgets::text(
@@ -816,12 +856,12 @@ impl App {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));
     }
+}
 
-    /// The floating toolbar: split right, split down, new terminal, close.
-    fn terminal_toolbar(&mut self, ui: &mut Ui, body: Rect, id: &str, sessions: usize) {
-        let Some(thread) = self.selected.clone() else {
-            return;
-        };
+/// The floating toolbar (split right, split down, new terminal, close);
+/// returns the clicked action's index. Splits stop at four sessions.
+pub(crate) fn terminal_toolbar(ui: &mut Ui, body: Rect, sessions: usize) -> Option<usize> {
+    {
         let background = theme::background();
         let foreground = theme::foreground();
         let bar = Rect::from_min_size(
@@ -886,15 +926,11 @@ impl App {
                 action = Some(index);
             }
         }
-        match action {
-            Some(0) => self.split_terminal(false),
-            Some(1) => self.split_terminal(true),
-            Some(2) => self.open_terminal_tab(),
-            Some(3) => self.close_terminal(&thread, id),
-            _ => {}
-        }
+        action
     }
+}
 
+impl App {
     /// Closes the terminal session and its tab.
     pub(crate) fn close_terminal(&mut self, thread: &str, id: &str) {
         let key = format!("term:{thread}\0{id}");
@@ -944,16 +980,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_ids_count_every_group() {
+    fn session_ids_take_the_lowest_free_slot() {
         assert_eq!(next_terminal_id(&[]), "default");
-        let tabs = [PanelTab::Terminal {
-            id: "default".into(),
-            number: 1,
-            split: vec!["terminal-3".into()],
-            active: 0,
-            vertical: false,
-        }];
-        assert_eq!(next_terminal_id(&tabs), "terminal-4");
+        let used = [
+            "default".to_owned(),
+            "term-1".to_owned(),
+            "term-3".to_owned(),
+        ];
+        assert_eq!(next_terminal_id(&used), "term-2");
+        assert_eq!(terminal_label("term-2"), "Terminal 2");
+        assert_eq!(terminal_label("default"), "default");
     }
 
     #[test]

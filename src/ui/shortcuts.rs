@@ -4,7 +4,7 @@
 //! when clauses evaluated against this window's state.
 //!
 //! Handled: the palette modes, Usage and its metric and period keys, new
-//! threads, the right panel and diff toggles, closing a surface, thread
+//! threads, the terminal drawer, the right panel and diff toggles, closing a surface, thread
 //! traversal and jumps, settle and pin. Other commands (the terminal drawer,
 //! previews, composer controls, themes) are not ported and fall through.
 use eframe::egui::{self, Key, Modifiers, Ui};
@@ -148,6 +148,7 @@ impl App {
             // With several projects the new-thread shortcut asks where.
             "chat.new" if self.state.projects.len() > 1 => self.toggle_palette(View::NewThreadIn),
             "chat.new" | "chat.newLocal" => self.start_draft(None),
+            "terminal.toggle" if thread.is_some() => self.toggle_terminal_drawer(),
             "rightPanel.toggle" if thread.is_some() => {
                 if let Some(panel) = self.panel_mut() {
                     panel.open = !panel.open;

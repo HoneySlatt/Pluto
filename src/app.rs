@@ -49,6 +49,8 @@ pub struct App {
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
+    /// The bottom terminal drawer per thread.
+    pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
     pub(crate) keybinding_edit: Option<crate::ui::keybindings::KeybindingEdit>,
     pub(crate) new_keybinding: Option<crate::ui::keybindings::KeybindingEdit>,
@@ -257,6 +259,7 @@ impl App {
             last_row_click: None,
             confirm: None,
             snooze_dialog: None,
+            drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
             new_keybinding: None,
@@ -768,6 +771,19 @@ impl eframe::App for App {
                     self.usage_page(ui, main);
                 } else if self.pull_requests_open {
                     self.pull_requests_page(ui, main);
+                } else if let Some(height) = self
+                    .drawer_height(main.height())
+                    .filter(|_| self.current_thread().is_some())
+                {
+                    let split = main.bottom() - height;
+                    self.main_area(
+                        ui,
+                        Rect::from_min_max(main.min, Pos2::new(main.right(), split)),
+                    );
+                    self.terminal_drawer(
+                        ui,
+                        Rect::from_min_max(Pos2::new(main.left(), split), main.max),
+                    );
                 } else {
                     self.main_area(ui, main);
                 }

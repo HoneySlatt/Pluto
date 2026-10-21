@@ -23,6 +23,7 @@ pub mod sidebar;
 pub mod snooze_dialog;
 pub mod source_control;
 pub mod surfaces;
+pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod thread_menu;
 pub mod usage;
