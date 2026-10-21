@@ -867,7 +867,13 @@ impl App {
             ),
             Vec2::new(128.0, 28.0),
         );
-        if let Some(next) = self.interval_field(ui, field, seconds) {
+        if let Some(next) = self.interval_field(
+            ui,
+            field,
+            seconds,
+            "provider-health-interval",
+            HEALTH_STEP_SECONDS,
+        ) {
             self.patch_server_settings(
                 json!({"providerHealthRefreshInterval": next.max(0) * 1000}),
             );
@@ -2168,7 +2174,16 @@ impl App {
 
     /// A `NumberField size="sm" w-32` with a 30-second step; returns the
     /// committed value.
-    fn interval_field(&mut self, ui: &mut Ui, rect: Rect, value: i64) -> Option<i64> {
+    /// A `NumberField size="sm"` of seconds (decrement, digits, increment);
+    /// returns the new value.
+    pub(crate) fn interval_field(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        value: i64,
+        key: &str,
+        step: i64,
+    ) -> Option<i64> {
         ui.painter().rect(
             rect,
             CornerRadius::same(10),
@@ -2186,8 +2201,7 @@ impl App {
                     Vec2::new(34.0, 26.0),
                 )
             };
-            let response =
-                ui.interact(button, ui.id().with(("health-step", index)), Sense::click());
+            let response = ui.interact(button, ui.id().with((key, "step", index)), Sense::click());
             if response.hovered() {
                 let radius = if index == 0 {
                     CornerRadius {
@@ -2208,15 +2222,11 @@ impl App {
             }
             theme::paint_icon(ui, icon, button, 16.0, theme::foreground());
             if response.clicked() {
-                let step = if index == 0 {
-                    -HEALTH_STEP_SECONDS
-                } else {
-                    HEALTH_STEP_SECONDS
-                };
-                result = Some((value + step).max(0));
+                let delta = if index == 0 { -step } else { step };
+                result = Some((value + delta).max(0));
             }
         }
-        let key = "provider-health-interval".to_owned();
+        let key = key.to_owned();
         let digits = Rect::from_min_max(
             Pos2::new(rect.left() + 35.0, rect.top() + 4.0),
             Pos2::new(rect.right() - 35.0, rect.bottom() - 4.0),
@@ -2229,7 +2239,7 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(digits));
         let response = child.add(
             egui::TextEdit::singleline(&mut buffer)
-                .id_salt("provider-health-field")
+                .id_salt((&key, "field"))
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
                 .font(font(14.0, Weight::Regular))

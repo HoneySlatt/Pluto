@@ -153,6 +153,97 @@ fn has_details(item: &Value) -> bool {
     matches!(item["kind"].as_str(), Some("git" | "bitbucket"))
 }
 
+/// `GIT_FETCH_INTERVAL_STEP_SECONDS`.
+const GIT_FETCH_STEP: i64 = 5;
+
+/// The Git fetch interval of a background activity profile, in seconds
+/// (`getBackgroundActivityPresetSettings`).
+fn preset_git_fetch(profile: &str) -> i64 {
+    match profile {
+        "performance" => 15,
+        "battery-saver" => 0,
+        _ => 30,
+    }
+}
+
+/// `getBackgroundActivityBaseProfile`.
+fn base_profile(activity: &Value) -> String {
+    let profile = activity["profile"].as_str().unwrap_or("balanced");
+    if profile == "custom" {
+        activity["baseProfile"]
+            .as_str()
+            .unwrap_or("balanced")
+            .to_owned()
+    } else {
+        profile.to_owned()
+    }
+}
+
+/// The resolved Git fetch interval and its profile default, in seconds
+/// (`resolveServerBackgroundActivitySettings`, with the legacy fields read
+/// while `backgroundActivity` is untouched).
+fn git_fetch_seconds(settings: &Value) -> (i64, i64) {
+    let activity = &settings["backgroundActivity"];
+    let default = preset_git_fetch(&base_profile(activity));
+    let untouched = activity["profile"].as_str().unwrap_or("balanced") == "balanced"
+        && activity["baseProfile"].is_null()
+        && activity["overrides"]
+            .as_object()
+            .is_none_or(|o| o.is_empty());
+    let legacy_git = settings["automaticGitFetchInterval"]
+        .as_i64()
+        .unwrap_or(30_000);
+    let legacy_profile = settings["backgroundActivityProfile"]
+        .as_str()
+        .unwrap_or("balanced");
+    let legacy_health = settings["providerHealthRefreshInterval"]
+        .as_i64()
+        .unwrap_or(300_000);
+    if untouched
+        && (legacy_profile != "balanced" || legacy_git != 30_000 || legacy_health != 300_000)
+    {
+        return (legacy_git / 1000, default);
+    }
+    let overridden = (activity["profile"] == "custom")
+        .then(|| activity["overrides"]["automaticGitFetchInterval"].as_i64())
+        .flatten();
+    (overridden.map_or(default, |ms| ms / 1000), default)
+}
+
+/// `backgroundActivityOverrideSettings` (Source Control's): the current
+/// overrides with the Git interval set (or dropped), as a custom profile.
+fn git_fetch_patch(activity: &Value, seconds: Option<i64>) -> Value {
+    let mut overrides = activity["overrides"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    match seconds {
+        Some(seconds) => {
+            overrides.insert(
+                "automaticGitFetchInterval".into(),
+                json!(seconds.max(0) * 1000),
+            );
+        }
+        None => {
+            overrides.remove("automaticGitFetchInterval");
+        }
+    }
+    json!({"backgroundActivity": {
+        "schemaVersion": 1,
+        "profile": "custom",
+        "baseProfile": base_profile(activity),
+        "overrides": overrides,
+    }})
+}
+
+/// The height of a row's expanded details (`px-4 pb-4 pt-1`).
+fn details_height(item: &Value) -> f32 {
+    match item["kind"].as_str() {
+        Some("git") => 4.0 + 43.5 + 16.0,
+        _ => 0.0,
+    }
+}
+
 /// A `Badge variant="warning" size="sm"`; returns its width.
 fn warning_badge(ui: &Ui, pos: Pos2, text: &str, fade: f32) -> f32 {
     let badge_font = font(10.0, Weight::Medium);
@@ -191,7 +282,13 @@ impl App {
                 .size()
                 .y
         });
-        12.0 + 20.0 + 4.0 + lines + 12.0 + if first { 0.0 } else { 1.0 }
+        let kind = item["kind"].as_str().unwrap_or_default();
+        let details = if has_details(item) && self.source_control_expanded.contains(kind) {
+            details_height(item)
+        } else {
+            0.0
+        };
+        12.0 + 20.0 + 4.0 + lines + 12.0 + if first { 0.0 } else { 1.0 } + details
     }
 
     /// The Version Control and Source Control Providers sections from
@@ -399,7 +496,9 @@ impl App {
         }
 
         // Controls: the details chevron and the read-only availability switch.
-        let center_y = rect.center().y + if index > 0 { 0.5 } else { 0.0 };
+        let expanded = has_details(item) && self.source_control_expanded.contains(&kind);
+        let details = if expanded { details_height(item) } else { 0.0 };
+        let center_y = rect.center().y - details / 2.0 + if index > 0 { 0.5 } else { 0.0 };
         let right = rect.right() - 16.0;
         if has_details(item) {
             let button = Rect::from_min_size(
@@ -410,14 +509,19 @@ impl App {
                 ui,
                 button,
                 ("source-control-details", &kind),
-                "chevron-down",
+                if expanded {
+                    "chevron-up"
+                } else {
+                    "chevron-down"
+                },
                 14.0,
                 theme::muted_foreground(),
                 "",
             )
             .clicked()
+                && !self.source_control_expanded.remove(&kind)
             {
-                self.status = Some(format!("{label} details are not implemented yet"));
+                self.source_control_expanded.insert(kind.clone());
             }
         }
         if !not_ready(item) {
@@ -452,6 +556,91 @@ impl App {
                 CornerRadius::same(7),
                 theme::background(),
             );
+        }
+        if expanded && kind == "git" {
+            let top = rect.bottom() - details + 4.0;
+            self.git_fetch_interval(ui, rect.left() + 16.0, rect.right() - 16.0, top);
+        }
+    }
+
+    /// `GitFetchIntervalSettings`: title, policy tooltip, reset, the
+    /// description, and the seconds field.
+    fn git_fetch_interval(&mut self, ui: &mut Ui, left: f32, right: f32, top: f32) {
+        let settings = self.state.config["settings"].clone();
+        let (seconds, default) = git_fetch_seconds(&settings);
+        let title = "Git fetch interval";
+        let title_font = font(12.0, Weight::Medium);
+        widgets::text(
+            ui,
+            Pos2::new(left, top + 2.0),
+            title,
+            title_font.clone(),
+            theme::foreground(),
+            16.0,
+        );
+        let info = Rect::from_min_size(
+            Pos2::new(left + widgets::text_width(ui, title, title_font) + 4.0, top),
+            Vec2::splat(20.0),
+        );
+        widgets::icon_button(
+            ui,
+            info,
+            "git-fetch-policy",
+            "info",
+            14.0,
+            theme::muted_foreground(),
+            "This interval is configured for Git only. The shared Background activity policy still decides whether Git refreshes may run when the timer fires. Custom intervals appear as Advanced in General settings.",
+        );
+        let mut next: Option<Option<i64>> = None;
+        if seconds != default {
+            let reset = Rect::from_min_size(Pos2::new(info.right() + 4.0, top), Vec2::splat(20.0));
+            if widgets::icon_button(
+                ui,
+                reset,
+                "git-fetch-reset",
+                "undo-2",
+                12.0,
+                theme::muted_foreground(),
+                "Reset fetch interval",
+            )
+            .clicked()
+            {
+                next = Some(None);
+            }
+        }
+        widgets::text(
+            ui,
+            Pos2::new(left, top + 24.0),
+            "Refresh remote branches in the background. Set to 0 to avoid automatic Git prompts.",
+            font(12.0, Weight::Regular),
+            theme::muted_foreground(),
+            19.5,
+        );
+        let unit_width = widgets::text_width(ui, "seconds", font(12.0, Weight::Regular));
+        let field = Rect::from_min_size(
+            Pos2::new(right - unit_width - 8.0 - 128.0, top),
+            Vec2::new(128.0, 28.0),
+        );
+        if let Some(value) =
+            self.interval_field(ui, field, seconds, "git-fetch-interval", GIT_FETCH_STEP)
+        {
+            next = Some(Some(value));
+        }
+        widgets::text(
+            ui,
+            Pos2::new(field.right() + 8.0, top + 6.0),
+            "seconds",
+            font(12.0, Weight::Regular),
+            theme::muted_foreground(),
+            16.0,
+        );
+        if let Some(value) = next {
+            let patch = git_fetch_patch(&settings["backgroundActivity"], value);
+            // Replace locally: the settings patch merges and would keep a
+            // dropped override until the server's echo.
+            self.state.config["settings"]["backgroundActivity"] =
+                patch["backgroundActivity"].clone();
+            self.patch_server_settings(patch);
         }
     }
 
@@ -560,6 +749,28 @@ fn paint_card(ui: &Ui, card: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_fetch_interval_resolves_like_upstream() {
+        assert_eq!(git_fetch_seconds(&json!({})), (30, 30));
+        assert_eq!(
+            git_fetch_seconds(&json!({"automaticGitFetchInterval": 60_000})),
+            (60, 30)
+        );
+        let custom = json!({"backgroundActivity": {"profile": "custom", "baseProfile": "performance",
+            "overrides": {"automaticGitFetchInterval": 45_000}}});
+        assert_eq!(git_fetch_seconds(&custom), (45, 15));
+        assert_eq!(
+            git_fetch_seconds(&json!({"backgroundActivity": {"profile": "battery-saver"}})),
+            (0, 0)
+        );
+        let patch = git_fetch_patch(&custom["backgroundActivity"], None);
+        assert_eq!(
+            patch,
+            json!({"backgroundActivity": {"schemaVersion": 1, "profile": "custom",
+                "baseProfile": "performance", "overrides": {}}})
+        );
+    }
 
     #[test]
     fn placeholders_keep_separators_and_length() {
