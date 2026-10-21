@@ -17,6 +17,10 @@ pub struct App {
     /// Project of the open new-thread draft; `None` follows the latest project.
     pub(crate) draft_project_id: Option<String>,
     pub(crate) composer: String,
+    /// Images attached to the composer, sent with the next message.
+    pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
+    /// Clipboard and dropped images read off the UI thread.
+    pub(crate) incoming_images: crate::ui::attachments::Incoming,
     pub(crate) status: Option<String>,
     pub(crate) expansion: Expansion,
     pub(crate) settled_expanded: bool,
@@ -257,6 +261,8 @@ impl App {
             selected: None,
             draft_project_id: None,
             composer: String::new(),
+            composer_images: Vec::new(),
+            incoming_images: Default::default(),
             status: None,
             expansion: Expansion::default(),
             settled_expanded: false,

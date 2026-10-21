@@ -7,6 +7,10 @@
 //!
 //! Only plain-HTTP servers are fetched; an HTTPS server's images keep their
 //! name placeholder. Expanding an image (the lightbox) is not ported.
+//!
+//! Also the composer's images (`addComposerAttachments`): pasted from the
+//! clipboard (read with `wl-paste`, or `xclip` on X11, since egui only
+//! pastes text) or dropped, and sent inline as data URLs.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -170,9 +174,226 @@ impl App {
     }
 }
 
+/// `PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES`.
+const SUPPORTED_IMAGE_TYPES: [&str; 4] = ["image/gif", "image/jpeg", "image/png", "image/webp"];
+/// `PROVIDER_SEND_TURN_MAX_IMAGE_BYTES`.
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+/// `PROVIDER_SEND_TURN_MAX_ATTACHMENTS`.
+const MAX_ATTACHMENTS: usize = 100;
+
+/// An image attached to the composer (`ComposerImageAttachment`).
+pub(crate) struct ComposerImage {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) mime_type: String,
+    pub(crate) bytes: Arc<Vec<u8>>,
+    pub(crate) preview: Arc<image::RgbaImage>,
+}
+
+/// Images read off the UI thread, or why one was refused.
+pub(crate) type Incoming = Arc<Mutex<Vec<Result<ComposerImage, String>>>>;
+
+/// The supported image type of a file name, by extension.
+fn mime_for_name(name: &str) -> Option<&'static str> {
+    let extension = name.rsplit('.').next()?.to_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+/// Checks and decodes an image for the composer (`addComposerAttachments`):
+/// a supported type within the wire cap. Larger images are refused, where
+/// upstream downscales them to fit.
+fn composer_image(name: &str, mime_type: &str, bytes: Vec<u8>) -> Result<ComposerImage, String> {
+    if !SUPPORTED_IMAGE_TYPES.contains(&mime_type) {
+        return Err(format!(
+            "'{name}' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images."
+        ));
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!("'{name}' is too large to attach."));
+    }
+    let mut preview =
+        decode(&bytes).ok_or_else(|| format!("'{name}' could not be read as an image."))?;
+    // The thumbnail never needs more than a few hundred pixels.
+    if preview.width().max(preview.height()) > 256 {
+        let scale = 256.0 / preview.width().max(preview.height()) as f32;
+        preview = image::imageops::resize(
+            &preview,
+            ((preview.width() as f32 * scale).round() as u32).max(1),
+            ((preview.height() as f32 * scale).round() as u32).max(1),
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    Ok(ComposerImage {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.to_owned(),
+        mime_type: mime_type.to_owned(),
+        bytes: Arc::new(bytes),
+        preview: Arc::new(preview),
+    })
+}
+
+/// The clipboard's image as (mime type, bytes): `wl-paste` on Wayland,
+/// `xclip` on X11. None when it holds no image, or text as well.
+fn clipboard_image() -> Option<Result<(String, Vec<u8>), String>> {
+    let run = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| output.stdout)
+    };
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let types = if wayland {
+        run("wl-paste", &["--list-types"])
+    } else {
+        run("xclip", &["-selection", "clipboard", "-t", "TARGETS", "-o"])
+    }?;
+    let types = String::from_utf8_lossy(&types).to_string();
+    let types: Vec<&str> = types.lines().map(str::trim).collect();
+    // egui already pasted the clipboard's text (upstream lets an image win).
+    if types
+        .iter()
+        .any(|t| t.starts_with("text/plain") || *t == "UTF8_STRING")
+    {
+        return None;
+    }
+    let Some(mime) = SUPPORTED_IMAGE_TYPES
+        .iter()
+        .find(|mime| types.contains(mime))
+        .copied()
+    else {
+        return types.iter().any(|t| t.starts_with("image/")).then(|| {
+            Err(
+                "'image' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images."
+                    .to_owned(),
+            )
+        });
+    };
+    let bytes = if wayland {
+        run("wl-paste", &["--no-newline", "--type", mime])
+    } else {
+        run("xclip", &["-selection", "clipboard", "-t", mime, "-o"])
+    }?;
+    Some(Ok((mime.to_owned(), bytes)))
+}
+
+/// Reads the clipboard's image on a background thread (a paste the text
+/// clipboard could not serve).
+pub(crate) fn paste_clipboard_image(incoming: &Incoming, ctx: &egui::Context) {
+    let incoming = incoming.clone();
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let Some(read) = clipboard_image() else {
+            return;
+        };
+        // Clipboard images are named like the browser names them.
+        let image = read.and_then(|(mime, bytes)| {
+            let extension = mime.trim_start_matches("image/").replace("jpeg", "jpg");
+            composer_image(&format!("image.{extension}"), &mime, bytes)
+        });
+        if let Ok(mut incoming) = incoming.lock() {
+            incoming.push(image);
+        }
+        ctx.request_repaint();
+    });
+}
+
+/// Reads dropped image files on a background thread.
+pub(crate) fn add_dropped_files(
+    incoming: &Incoming,
+    ctx: &egui::Context,
+    files: Vec<egui::DroppedFileHandle>,
+) {
+    let incoming = incoming.clone();
+    let ctx = ctx.clone();
+    let paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    std::thread::spawn(move || {
+        for path in paths {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "file".to_owned());
+            let image = match (std::fs::read(&path).ok(), mime_for_name(&name)) {
+                (Some(bytes), Some(mime)) => composer_image(&name, mime, bytes),
+                (None, _) => Err(format!("'{name}' could not be read as an image.")),
+                (Some(_), None) => Err(format!(
+                    "'{name}' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images."
+                )),
+            };
+            if let Ok(mut incoming) = incoming.lock() {
+                incoming.push(image);
+            }
+        }
+        ctx.request_repaint();
+    });
+}
+
+/// The composer images as `UploadChatImageAttachment`s (inline data URLs).
+pub(crate) fn upload_payload(images: &[ComposerImage]) -> Vec<Value> {
+    use base64::Engine;
+    images
+        .iter()
+        .map(|image| {
+            let data = base64::engine::general_purpose::STANDARD.encode(image.bytes.as_slice());
+            json!({
+                "type": "image",
+                "name": image.name,
+                "mimeType": image.mime_type,
+                "sizeBytes": image.bytes.len(),
+                "dataUrl": format!("data:{};base64,{data}", image.mime_type),
+            })
+        })
+        .collect()
+}
+
+impl App {
+    /// Moves read images into the composer, reporting refusals.
+    pub(crate) fn take_incoming_images(&mut self) {
+        let arrived: Vec<_> = match self.incoming_images.lock() {
+            Ok(mut incoming) => incoming.drain(..).collect(),
+            Err(_) => return,
+        };
+        for image in arrived {
+            match image {
+                Ok(_) if self.composer_images.len() >= MAX_ATTACHMENTS => {
+                    self.status = Some(format!(
+                        "You can attach up to {MAX_ATTACHMENTS} files per message."
+                    ));
+                }
+                Ok(image) => self.composer_images.push(image),
+                Err(error) => self.status = Some(error),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uploads_are_data_urls() {
+        let image = ComposerImage {
+            id: "a".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            bytes: Arc::new(vec![1, 2, 3]),
+            preview: Arc::new(image::RgbaImage::new(1, 1)),
+        };
+        let payload = upload_payload(&[image]);
+        assert_eq!(payload[0]["dataUrl"], "data:image/png;base64,AQID");
+        assert_eq!(payload[0]["sizeBytes"], 3);
+        assert_eq!(mime_for_name("Shot.JPG"), Some("image/jpeg"));
+        assert_eq!(mime_for_name("photo.heic"), None);
+    }
 
     #[test]
     fn grids_follow_upstream() {

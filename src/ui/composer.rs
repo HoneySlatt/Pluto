@@ -98,9 +98,23 @@ impl App {
         galley.size().y.clamp(MIN_TEXT_HEIGHT, MAX_TEXT_HEIGHT)
     }
 
+    /// The attached images' row above the prompt (`mb-3 flex flex-wrap
+    /// gap-2` of 64px thumbnails), wrapping to the editor width.
+    fn image_strip_height(&self, width: f32) -> f32 {
+        if self.composer_images.is_empty() {
+            return 0.0;
+        }
+        let per_row = (((width - 34.0 + 8.0) / 72.0).floor() as usize).max(1);
+        let rows = self.composer_images.len().div_ceil(per_row) as f32;
+        rows * 64.0 + (rows - 1.0) * 8.0 + 12.0
+    }
+
     fn surface_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
+        let strip = self.image_strip_height(width);
         match mode {
-            Mode::Normal => 17.0 + self.composer_text_height(ui, width) + 10.0 + 28.0 + 19.0,
+            Mode::Normal => {
+                17.0 + strip + self.composer_text_height(ui, width) + 10.0 + 28.0 + 19.0
+            }
             Mode::Question(_) => 17.0 + self.composer_text_height(ui, width) + 16.0 + 28.0 + 17.0,
             Mode::Approval(..) => 17.0 + 32.0 + 17.0,
         }
@@ -183,8 +197,19 @@ impl App {
             StrokeKind::Inside,
         );
 
+        self.take_incoming_images();
+        // Answers to agent questions take no attachments here.
+        let normal = matches!(mode, Mode::Normal);
+        let strip_height = if normal {
+            self.image_strip_height(width)
+        } else {
+            0.0
+        };
+        if strip_height > 0.0 {
+            self.composer_image_strip(ui, surface.min + Vec2::new(17.0, 17.0), width - 34.0);
+        }
         let text_rect = Rect::from_min_size(
-            surface.min + Vec2::new(17.0, 17.0),
+            surface.min + Vec2::new(17.0, 17.0 + strip_height),
             Vec2::new(width - 34.0, text_height),
         );
         let placeholder = match mode {
@@ -194,7 +219,10 @@ impl App {
             }
             Mode::Normal => "Ask for changes, send follow-ups, or attach images",
         };
-        if self.composer.is_empty() || matches!(mode, Mode::Approval(..)) {
+        // Attached images count as context, which hides the placeholder.
+        if (self.composer.is_empty() && self.composer_images.is_empty())
+            || matches!(mode, Mode::Approval(..))
+        {
             // Painted here so it shares the editor's 22.75px line box.
             widgets::text(
                 ui,
@@ -243,6 +271,28 @@ impl App {
                         }),
                 );
             });
+
+        // An image paste: egui only pastes text, and drops a paste the text
+        // clipboard cannot serve, but still reports the V key's release.
+        let pasted = normal
+            && focused
+            && ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: Key::V, pressed: false, modifiers, .. }
+                        if modifiers.command)
+                })
+            });
+        if pasted {
+            crate::ui::attachments::paste_clipboard_image(&self.incoming_images, ui.ctx());
+        }
+        // Image files dropped on the composer.
+        let dropped = ui.input(|i| i.raw.dropped_files.clone());
+        let over = ui
+            .input(|i| i.pointer.latest_pos())
+            .is_none_or(|pos| surface.contains(pos));
+        if normal && !dropped.is_empty() && over {
+            crate::ui::attachments::add_dropped_files(&self.incoming_images, ui.ctx(), dropped);
+        }
 
         // Toolbar.
         let bar_top = text_rect.bottom()
@@ -314,7 +364,68 @@ impl App {
         )
         .clicked()
         {
-            self.status = Some("Attachments are not implemented yet".into());
+            self.status = Some(
+                "Choosing files to attach is not implemented yet; paste or drop images".into(),
+            );
+        }
+    }
+
+    /// The attached images: 64px thumbnails (`h-16 w-16 rounded-lg border
+    /// border-border/80 bg-background`) with their remove button.
+    fn composer_image_strip(&mut self, ui: &mut Ui, origin: Pos2, width: f32) {
+        let per_row = (((width + 8.0) / 72.0).floor() as usize).max(1);
+        let mut remove = None;
+        for (index, image) in self.composer_images.iter().enumerate() {
+            let cell = Rect::from_min_size(
+                origin
+                    + Vec2::new(
+                        (index % per_row) as f32 * 72.0,
+                        (index / per_row) as f32 * 72.0,
+                    ),
+                Vec2::splat(64.0),
+            );
+            let radius = CornerRadius::same(8);
+            ui.painter().rect_filled(cell, radius, theme::background());
+            crate::ui::attachments::paint_cover(
+                ui,
+                cell.shrink(1.0),
+                &format!("composer:{}", image.id),
+                &image.preview,
+                CornerRadius::same(7),
+            );
+            ui.painter().rect_stroke(
+                cell,
+                radius,
+                Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
+                StrokeKind::Inside,
+            );
+            // `variant="media-close" size="icon-xs"` at `right-1 top-1`.
+            let close = Rect::from_min_size(
+                Pos2::new(cell.right() - 4.0 - 24.0, cell.top() + 4.0),
+                Vec2::splat(24.0),
+            );
+            let response = ui
+                .interact(
+                    close,
+                    ui.id().with(("composer-image-remove", &image.id)),
+                    Sense::click(),
+                )
+                .on_hover_text(format!("Remove {}", image.name));
+            let fill = if response.hovered() { 0.8 } else { 0.65 };
+            ui.painter().rect(
+                close,
+                CornerRadius::same(6),
+                theme::alpha(Color32::BLACK, fill),
+                Stroke::new(1.0, theme::alpha(Color32::WHITE, 0.2)),
+                StrokeKind::Outside,
+            );
+            theme::paint_icon(ui, "x", close, 14.0, Color32::WHITE);
+            if response.clicked() {
+                remove = Some(index);
+            }
+        }
+        if let Some(index) = remove {
+            self.composer_images.remove(index);
         }
     }
 
@@ -346,7 +457,8 @@ impl App {
             }
             return send.left();
         }
-        let can_send = !self.composer.trim().is_empty() && self.connected();
+        let can_send = (!self.composer.trim().is_empty() || !self.composer_images.is_empty())
+            && self.connected();
         let response = ui.interact(
             send,
             ui.id().with("send"),
@@ -737,16 +849,21 @@ impl App {
 
     fn send_message(&mut self, draft: bool) {
         let text = self.composer.trim().to_owned();
-        if text.is_empty() {
+        if text.is_empty() && self.composer_images.is_empty() {
             return;
         }
         let selection = self.composer_model_selection(draft);
         let runtime = self.composer_runtime_mode(draft);
         let now = now_iso();
+        // An image-only message is titled after its first image.
+        let seed = match self.composer_images.first() {
+            Some(image) if text.is_empty() => format!("Image: {}", image.name),
+            _ => text.clone(),
+        };
         let title = {
-            let chars: Vec<char> = text.chars().collect();
+            let chars: Vec<char> = seed.chars().collect();
             if chars.len() <= 50 {
-                text.clone()
+                seed.clone()
             } else {
                 format!("{}...", chars[..50].iter().collect::<String>())
             }
@@ -785,7 +902,7 @@ impl App {
                 "messageId": uuid::Uuid::new_v4().to_string(),
                 "role": "user",
                 "text": text,
-                "attachments": [],
+                "attachments": crate::ui::attachments::upload_payload(&self.composer_images),
             },
             "modelSelection": model,
             "titleSeed": title,
@@ -798,6 +915,7 @@ impl App {
         }
         self.dispatch(command);
         self.composer.clear();
+        self.composer_images.clear();
         if draft {
             self.select_thread(Some(thread_id));
         }

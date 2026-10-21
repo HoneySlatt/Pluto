@@ -8,6 +8,20 @@ use egui_kittest::Harness;
 use t3_code_rust::app::{App, Options};
 use zeroize::Zeroizing;
 
+/// A file dropped on the window by `--drop path`.
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // A server of "-" renders the connection screen.
@@ -58,12 +72,13 @@ fn main() {
     }
     // `--click x,y` clicks once, then waits for the server to answer.
     // Interactions, in order: --click/--rclick/--dclick/--move x,y, --drag x1,y1,x2,y2,
-    // --scroll dy, --type text, --key Enter|Escape.
+    // --scroll dy, --type text, --key Enter|Escape, --drop path (a file dropped
+    // at the pointer).
     let mut ops = args.iter().skip(4).peekable();
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
             "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
-            | "--key" => ops.next().cloned().unwrap_or_default(),
+            | "--key" | "--drop" => ops.next().cloned().unwrap_or_default(),
             _ => continue,
         };
         let point = || {
@@ -136,6 +151,10 @@ fn main() {
                 modifiers: egui::Modifiers::NONE,
             }),
             "--type" => harness.event(egui::Event::Text(value.clone())),
+            "--drop" => harness
+                .input_mut()
+                .dropped_files
+                .push(std::sync::Arc::new(Dropped(value.clone().into()))),
             "--key" => {
                 let (mods, name) = value.rsplit_once('+').unwrap_or(("", value.as_str()));
                 let mut modifiers = egui::Modifiers::NONE;

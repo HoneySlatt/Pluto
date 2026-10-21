@@ -3671,6 +3671,7 @@ dependencies = [
 name = "t3-code-rust"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "eframe",
  "egui_extras",
