@@ -244,6 +244,7 @@ fn bar_color(driver: &str) -> Color32 {
 impl App {
     pub(crate) fn open_usage(&mut self) {
         self.usage_open = true;
+        self.pull_requests_open = false;
         self.usage.now = chrono::Utc::now();
         self.open_menu = None;
         if self.usage.metric == 2 {

@@ -35,6 +35,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
 | Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Source Control page (repository defaults, `server.discoverSourceControl` version control and hosting integrations with redacted accounts, text generation style); the Providers page (instance list with status, version and enable switch; the editor's display name with the redacted account, runtime fields, models with favorites, visibility and order; the health check interval); the Integrations page (agent browser access, the desktop-only browser defaults, device hub and hosts from `subscribeDeviceState`, read-only); the Storage page (worktree cleanup and retention rules); the SnapShots page (unavailable outside the desktop app, like the web client); the Connections page as a session without `access:write` sees it (administrative access notice, empty remote environments); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
+| Pull requests | The page with search, sort, filters (state, involvement, draft, review, checks, project) and provider menus; `pullRequests.list` grouped by involvement and sorted like upstream; rows with state, conflict, checks and review glyphs, line counts, author, repository, labels and update time; loading, empty and error states |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice):
@@ -50,8 +51,11 @@ Not ported yet (buttons for these show a "not implemented" notice):
   access, adding remote environments);
 - usage: limit sources, reset credits, segment popovers, keyboard shortcuts,
   price overrides and the environment filter;
-- the pull requests page and the surfaces other than Diff (browser, terminal,
-  files, pull requests, agents, device);
+- the pull request detail and right panels, searching on the hosts (the
+  search filters loaded rows), author and label filters, line-count backfill,
+  paging past 99 rows per repository and avatars (initials are shown);
+- the surfaces other than Diff (browser, terminal, files, pull requests,
+  agents, device);
 - the branch diff's base-ref picker and expanding unchanged diff context;
 - attachments, queued messages, custom snooze times, project favicons, palette
   sub-actions (themes, go to file, git clone), and "New thread on <branch>"

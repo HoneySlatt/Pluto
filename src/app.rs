@@ -88,6 +88,9 @@ pub struct App {
     /// A `server.refreshProviders` from the Providers page is in flight.
     pub(crate) providers_refreshing: bool,
     pub(crate) usage: crate::ui::usage::UsageState,
+    /// The Pull requests page replaces the workspace (`/pull-requests`).
+    pub(crate) pull_requests_open: bool,
+    pub(crate) prs: crate::ui::pull_requests::PullRequestsState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
     pub(crate) client_settings_path: Option<std::path::PathBuf>,
@@ -205,6 +208,8 @@ impl App {
             providers_selected: None,
             providers_refreshing: false,
             usage: Default::default(),
+            pull_requests_open: false,
+            prs: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
             ),
@@ -318,6 +323,7 @@ impl App {
 
     pub(crate) fn select_thread(&mut self, id: Option<String>) {
         self.usage_open = false;
+        self.pull_requests_open = false;
         if self.selected == id {
             return;
         }
@@ -649,8 +655,10 @@ impl eframe::App for App {
                 let workspace =
                     Rect::from_min_max(Pos2::new(sidebar.right(), rect.top()), rect.max);
                 // The right panel keeps 360px for the chat column (`PreviewPanelShell`).
-                let panel_open =
-                    !self.usage_open && self.panel_open() && self.current_thread().is_some();
+                let panel_open = !self.usage_open
+                    && !self.pull_requests_open
+                    && self.panel_open()
+                    && self.current_thread().is_some();
                 let main = if panel_open {
                     let max = (rect.width() * 0.7)
                         .min(workspace.width() - 360.0)
@@ -665,6 +673,8 @@ impl eframe::App for App {
                 };
                 if self.usage_open {
                     self.usage_page(ui, main);
+                } else if self.pull_requests_open {
+                    self.pull_requests_page(ui, main);
                 } else {
                     self.main_area(ui, main);
                 }
@@ -859,6 +869,9 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key.starts_with("prs:") {
+            self.prs.refreshing = false;
+            self.prs.results.insert(key, result);
         } else if key == "providers-refresh" {
             self.providers_refreshing = false;
         } else if key == "device-state" {

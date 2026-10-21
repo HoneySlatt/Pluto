@@ -335,9 +335,10 @@ impl App {
         self.thread_list(ui, list_rect);
 
         // Footer shortcuts; the usage page swaps them for Back.
-        if self.usage_open {
-            if self.sidebar_back(ui, rect, "usage-back") {
+        if self.usage_open || self.pull_requests_open {
+            if self.sidebar_back(ui, rect, "page-back") {
                 self.usage_open = false;
+                self.pull_requests_open = false;
             }
             return;
         }
@@ -366,6 +367,8 @@ impl App {
                     self.open_settings();
                 } else if *icon == "chart-no-axes-column" {
                     self.open_usage();
+                } else if *icon == "git-pull-request-arrow" {
+                    self.open_pull_requests();
                 } else {
                     self.status = Some(format!("{label} is not implemented yet"));
                 }
