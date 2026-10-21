@@ -787,3 +787,18 @@ pub fn combobox_search(ui: &mut Ui, rect: Rect, query: &mut String, hint: &str) 
     response.request_focus();
     response
 }
+
+/// Opens an http(s) URL in the system browser (`shell.openExternal`); this
+/// build has no `links` feature, so `xdg-open` stands in for it.
+pub fn open_external(url: &str) {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return;
+    }
+    let _ = std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}

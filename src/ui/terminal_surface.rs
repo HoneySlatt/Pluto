@@ -83,6 +83,42 @@ pub struct TerminalView {
     selection: Option<((usize, usize), (usize, usize))>,
 }
 
+/// `extractTerminalLinks`' URL matches: the URL covering `col` in a line,
+/// as (start, end, text) columns, trailing punctuation and unbalanced
+/// closers trimmed.
+fn url_at(line: &[char], col: usize) -> Option<(usize, usize, String)> {
+    let text: String = line.iter().collect();
+    let lower = text.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(found) = lower[search..].find("http") {
+        let start_byte = search + found;
+        search = start_byte + 4;
+        let rest = &lower[start_byte..];
+        if !(rest.starts_with("http://") || rest.starts_with("https://")) {
+            continue;
+        }
+        let start = text[..start_byte].chars().count();
+        let mut end = start;
+        while end < line.len() && !line[end].is_whitespace() && !"\"'`<>".contains(line[end]) {
+            end += 1;
+        }
+        let mut url: String = line[start..end].iter().collect();
+        while url.ends_with(['.', ',', ';', '!', '?']) {
+            url.pop();
+        }
+        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+            while url.ends_with(close) && url.matches(open).count() < url.matches(close).count() {
+                url.pop();
+            }
+        }
+        let end = start + url.chars().count();
+        if col >= start && col < end {
+            return Some((start, end, url));
+        }
+    }
+    None
+}
+
 impl TerminalView {
     /// The selected text: each line's cells trimmed at the end, joined by
     /// newlines (`getSelection`).
@@ -397,6 +433,29 @@ impl App {
         {
             self.terminals.menu = Some((key.clone(), crate::ui::context_menu::State::new(pos)));
         }
+        // Links: a URL under the pointer underlines and opens on click.
+        let mut hovered_link = None;
+        if let Some(pos) = response.hover_pos()
+            && let Some(view) = self.terminals.views.get(&key)
+        {
+            let (line, _) = cell_at(view, pos);
+            let screen = &view.terminal.screen;
+            let cells: Option<&Vec<terminal::Cell>> =
+                screen.scrollback.iter().chain(screen.grid.iter()).nth(line);
+            if let Some(cells) = cells {
+                let chars: Vec<char> = cells.iter().map(|c| c.c).collect();
+                let col = (((pos.x - origin.x) / cell_width).floor().max(0.0)) as usize;
+                if let Some((start, end, url)) = url_at(&chars, col) {
+                    hovered_link = Some((line, start, end, url));
+                }
+            }
+        }
+        if let Some((_, _, _, url)) = &hovered_link {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                crate::ui::widgets::open_external(url);
+            }
+        }
         if response.clicked()
             && let Some(view) = self.terminals.views.get_mut(&key)
         {
@@ -572,6 +631,17 @@ impl App {
                 col = end;
             }
         }
+        if let Some((line, start, end, _)) = &hovered_link
+            && *line >= first_line
+            && *line < first_line + screen.rows
+        {
+            let y = origin.y + (line - first_line) as f32 * CELL_HEIGHT + CELL_HEIGHT - 3.0;
+            painter.hline(
+                origin.x + *start as f32 * cell_width..=origin.x + *end as f32 * cell_width,
+                y,
+                Stroke::new(1.0, foreground),
+            );
+        }
         // The cursor: a block while focused, an outline otherwise.
         if screen.cursor_visible && view.offset == 0 {
             let cursor = Rect::from_min_size(
@@ -712,6 +782,15 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn urls_trim_like_terminal_links() {
+        let line: Vec<char> = "see (https://example.com/a_(b)). next".chars().collect();
+        let (start, end, url) = url_at(&line, 10).unwrap();
+        assert_eq!(url, "https://example.com/a_(b)");
+        assert_eq!((start, end), (5, 30));
+        assert!(url_at(&line, 2).is_none());
+    }
 
     #[test]
     fn selections_read_trimmed_lines() {

@@ -57,7 +57,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
   paging past 99 rows per repository and avatars (initials are shown);
 - the surfaces other than Diff, Files, Terminal and Agents (browser, pull requests,
   device), the Agents workflow script viewer (populated Agents rows are ported from source but not compared with the reference: the fixture has no subagents), file editing, previews and "Open in editor", and terminal
-  splits, the bottom drawer, the terminal's "Add to chat", links and font settings;
+  splits, the bottom drawer, the terminal's "Add to chat" and file-path links (URLs open in the browser rather than a preview), and font settings;
 - attachments, queued messages, project favicons, palette
   sub-actions (themes, git clone; "Go to file" and content search from a
   draft without a thread), and "New thread on <branch>"

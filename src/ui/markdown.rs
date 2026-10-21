@@ -396,7 +396,7 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
             if let Some(url) = section.and_then(|s| inlines.links.get(s).cloned().flatten()) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 if response.clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                    widgets::open_external(&url);
                 }
             }
         }
