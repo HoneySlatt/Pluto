@@ -998,6 +998,10 @@ impl App {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.favicon_url(project, result, &ctx);
             }
+        } else if let Some(id) = key.strip_prefix("attachment:") {
+            if let Some(ctx) = self.egui_ctx.clone() {
+                self.attachment_url(id, result, &ctx);
+            }
         } else if key.starts_with("diff:") {
             self.diffs
                 .insert(key, crate::ui::diff_panel::DiffLoad::from_result(result));

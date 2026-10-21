@@ -88,6 +88,8 @@ pub struct Message {
     pub id: String,
     pub role: String,
     pub text: String,
+    /// `ChatAttachment`s (an open union, kept as sent).
+    pub attachments: Vec<Value>,
     pub turn_id: Option<String>,
     pub streaming: bool,
     pub created_at: String,
@@ -559,6 +561,9 @@ fn apply_message(thread: &mut Value, payload: &Value, occurred_at: Value) {
         if !streaming {
             entry["updatedAt"] = payload["updatedAt"].clone();
         }
+        if let Some(attachments) = payload.get("attachments") {
+            entry["attachments"] = attachments.clone();
+        }
     } else {
         messages.push(json!({
             "id": payload["messageId"],
@@ -566,6 +571,7 @@ fn apply_message(thread: &mut Value, payload: &Value, occurred_at: Value) {
             "text": text,
             "turnId": payload.get("turnId").cloned().unwrap_or(Value::Null),
             "streaming": streaming,
+            "attachments": payload.get("attachments").cloned().unwrap_or(json!([])),
             "createdAt": payload["createdAt"],
             "updatedAt": payload["updatedAt"],
         }));

@@ -7,7 +7,7 @@ use crate::model::{Message, Project};
 use crate::theme::{self, Weight, font};
 use crate::timeline::{self, Row, WorkEntry};
 use crate::ui::markdown::Markdown;
-use crate::ui::{project_icon, widgets};
+use crate::ui::{attachments, project_icon, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
 
@@ -332,7 +332,7 @@ impl App {
             .stick_to_bottom(!std::mem::take(&mut self.keep_scroll))
             .show(&mut child, |ui| {
                 ui.set_width(rect.width());
-                ui.add_space(22.0);
+                ui.add_space(24.0);
                 let inner = Rect::from_min_size(
                     Pos2::new(column_left, ui.cursor().top()),
                     Vec2::new(column, f32::INFINITY),
@@ -409,6 +409,37 @@ impl App {
         }
     }
 
+    /// One image cell (`aspect-[4/3] overflow-hidden rounded-lg border
+    /// border-border/80 bg-background/70`): the image cropped to fill it, or
+    /// its name while it loads.
+    fn attachment_cell(&mut self, ui: &mut Ui, rect: Rect, image: &serde_json::Value) {
+        let radius = CornerRadius::same(8);
+        ui.painter()
+            .rect_filled(rect, radius, theme::alpha(theme::background(), 0.7));
+        let id = image["id"].as_str().unwrap_or_default();
+        if let Some(decoded) = self.attachment_image(image) {
+            attachments::paint_cover(ui, rect.shrink(1.0), id, &decoded, CornerRadius::same(7));
+        } else {
+            let name = image["name"].as_str().unwrap_or_default();
+            let text_font = font(10.0, Weight::Regular);
+            let text_width =
+                widgets::text_width(ui, name, text_font.clone()).min(rect.width() - 16.0);
+            widgets::text_in(
+                ui,
+                Rect::from_center_size(rect.center(), Vec2::new(text_width + 1.0, 16.0)),
+                name,
+                text_font,
+                theme::secondary_label(),
+            );
+        }
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
     fn user_row(&mut self, ui: &mut Ui, message: &Message, width: f32) {
         let max_width = (width * 0.8).floor();
         let galley = widgets::galley(
@@ -419,7 +450,18 @@ impl App {
             MESSAGE_LINE,
             max_width - 24.0,
         );
-        let bubble_size = Vec2::new(galley.size().x + 24.0, galley.size().y + 24.0);
+        // Image attachments sit above the text (`mb-2`).
+        let images = attachments::images(&message.attachments);
+        let (grid_height, cell) = attachments::grid_size(images.len(), max_width - 24.0);
+        let grid = if images.is_empty() {
+            Vec2::ZERO
+        } else {
+            Vec2::new(2.0 * cell.x + 8.0, grid_height + 8.0)
+        };
+        let bubble_size = Vec2::new(
+            galley.size().x.max(grid.x) + 24.0,
+            grid.y + galley.size().y + 24.0,
+        );
         let (row_rect, response) =
             ui.allocate_exact_size(Vec2::new(width, bubble_size.y + 4.0 + 24.0), Sense::hover());
         let bubble = Rect::from_min_size(
@@ -428,8 +470,23 @@ impl App {
         );
         ui.painter()
             .rect_filled(bubble, CornerRadius::same(18), theme::message_surface());
-        ui.painter()
-            .galley(bubble.min + Vec2::splat(12.0), galley, theme::foreground());
+        for (index, image) in images.iter().enumerate() {
+            let cell_rect = Rect::from_min_size(
+                bubble.min
+                    + Vec2::splat(12.0)
+                    + Vec2::new(
+                        (index % 2) as f32 * (cell.x + 8.0),
+                        (index / 2) as f32 * (cell.y + 8.0),
+                    ),
+                cell,
+            );
+            self.attachment_cell(ui, cell_rect, image);
+        }
+        ui.painter().galley(
+            bubble.min + Vec2::new(12.0, 12.0 + grid.y),
+            galley,
+            theme::foreground(),
+        );
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
             let meta_top = bubble.bottom() + 4.0;
             let copy = Rect::from_min_size(

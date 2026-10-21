@@ -51,14 +51,18 @@ fn decode(emoji: &str) -> Option<(image::RgbaImage, f32)> {
     let mut image = image::load_from_memory_with_format(png, image::ImageFormat::Png)
         .ok()?
         .to_rgba8();
-    // Premultiplied, so filtering does not bleed the transparent black in.
+    premultiply(&mut image);
+    let ems = bitmap.height as f32 / bitmap.ppem_y.max(1.0);
+    Some((image, ems))
+}
+
+/// Premultiplies alpha, so filtering does not bleed transparent black in.
+pub(crate) fn premultiply(image: &mut image::RgbaImage) {
     for pixel in image.pixels_mut() {
         let [r, g, b, a] = pixel.0;
         let scale = |c: u8| ((c as u16 * a as u16 + 127) / 255) as u8;
         pixel.0 = [scale(r), scale(g), scale(b), a];
     }
-    let ems = bitmap.height as f32 / bitmap.ppem_y.max(1.0);
-    Some((image, ems))
 }
 
 /// The decoded bitmap and em height, once per emoji.

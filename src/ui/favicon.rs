@@ -67,7 +67,7 @@ pub fn paint(ui: &Ui, rect: Rect, project: &Project, tint: egui::Color32) -> boo
 }
 
 /// A plain HTTP/1.1 GET (`Connection: close`); the body on a 200.
-fn http_get(url: &url::Url) -> Option<Vec<u8>> {
+pub(crate) fn http_get(url: &url::Url) -> Option<Vec<u8>> {
     if url.scheme() != "http" {
         return None;
     }

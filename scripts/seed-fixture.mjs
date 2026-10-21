@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import zlib from "node:zlib";
 
 const [baseDir, workspaces] = process.argv.slice(2);
 if (!baseDir || !workspaces) {
@@ -61,11 +62,11 @@ function thread(projectId, title, minutesAgo, branch = "main") {
   return threadId;
 }
 
-function message(threadId, role, text, minutesAgo, turnId = null) {
+function message(threadId, role, text, minutesAgo, turnId = null, attachments = []) {
   const createdAt = at(minutesAgo);
   const messageId = randomUUID();
   emit("thread", threadId, "thread.message-sent", createdAt, {
-    threadId, messageId, role, text, attachments: [], turnId,
+    threadId, messageId, role, text, attachments, turnId,
     streaming: false, createdAt, updatedAt: createdAt,
   }, role === "user" ? "client" : "provider");
   return messageId;
@@ -172,7 +173,51 @@ const nix2 = thread(nixos, "Fix Amane Font Patch Build Failure", 1500);
 message(nix2, "user", "Le build du patch de police Amane échoue.", 1500);
 
 const web1 = thread(web, "Générer une image de pomme", 90);
-message(web1, "user", "Génère une image de pomme en SVG.", 90);
+message(web1, "user", "Génère une image de pomme en SVG, comme celle-ci.", 90, null, [
+  imageAttachment(web1, "pomme.png"),
+]);
+
+// A synthetic 320x240 PNG (a red disc on a sky gradient), stored like an
+// uploaded image (`<thread segment>-<uuid>.png` in the attachments dir).
+function imageAttachment(threadId, name) {
+  const width = 320;
+  const height = 240;
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width * 3 + 1)] = 0;
+    for (let x = 0; x < width; x++) {
+      const inside = (x - 160) ** 2 + (y - 130) ** 2 < 70 ** 2;
+      const offset = y * (width * 3 + 1) + 1 + x * 3;
+      raw[offset] = inside ? 220 : 120 + (y * 80) / height;
+      raw[offset + 1] = inside ? 40 : 170 + (y * 60) / height;
+      raw[offset + 2] = inside ? 50 : 230;
+    }
+  }
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  const id = `${threadId.toLowerCase()}-${randomUUID()}`;
+  const dir = path.join(baseDir, "userdata", "attachments");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.png`), png);
+  return { type: "image", id, name, mimeType: "image/png", sizeBytes: png.length };
+}
 
 function request(threadId, turnId, kind, summary, payload, minutesAgo) {
   const createdAt = at(minutesAgo);

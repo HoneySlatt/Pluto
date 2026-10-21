@@ -909,6 +909,7 @@ mod tests {
             id: id.into(),
             role: role.into(),
             text: "text".into(),
+            attachments: Vec::new(),
             turn_id: turn.map(Into::into),
             streaming: false,
             created_at: at.into(),

@@ -27,7 +27,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Thread menu | The full context menu with Snooze, Auto-settle and Copy submenus, mark unread, filter by project, archive, delete with confirmation; the custom snooze dialog (date with the month calendar and segmented time, or a duration) from the menu and the card snooze button |
 | Command palette | Ctrl+K actions and recent threads, project and thread search, new thread in project, add project with folder browsing, "Go to file" (Ctrl+P: `projects.searchEntries` with fuzzy highlights, opening the file in the right panel and revealing it in the tree), "Search project contents" (Ctrl+Shift+F: `projects.searchContents` with case, whole-word and regex options, results grouped by file with sticky headers, highlighted lines and match marks; opening a match centers and selects its line), settings results while typing (ranked like `filterCommandPaletteGroups`), and the pull requests, usage (Ctrl+U) and settings screens |
 | Header | Breadcrumb, Add action, Open, git quick action from live VCS status, Initialize Git, panel toggles |
-| Timeline | User bubbles, assistant markdown, settled-turn folds ("Worked for…"), tool rows and group summaries, changed-files card, working indicator, hover meta (time, copy) |
+| Timeline | User bubbles with their image attachments (signed asset URLs fetched from plain-HTTP servers, cropped to their cells), assistant markdown, settled-turn folds ("Worked for…"), tool rows and group summaries, changed-files card, working indicator, hover meta (time, copy) |
 | Markdown | Paragraphs, headings, lists, inline code chips, links, quotes, tables, fenced code with the pierre-dark theme |
 | Composer | Prompt editor, model picker, traits and runtime menus, send (`thread.turn.start`), stop, new-thread drafts (`bootstrap.createThread`), checkout strip (static: drafts always start on the current checkout, without the workspace and branch pickers) |
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
@@ -60,7 +60,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
 - the surfaces other than Diff, Files, Terminal and Agents (browser, pull requests,
   device), the Agents workflow script viewer (populated Agents rows are ported from source but not compared with the reference: the fixture has no subagents), file editing, previews and "Open in editor", and terminal
   persisting the bottom drawer's groups, the terminal's "Add to chat" and file-path links (URLs open in the browser rather than a preview), and font settings;
-- attachments, queued messages, palette
+- sending attachments, expanding an attached image, file attachments and context chips in user messages, queued messages, palette
   sub-actions (themes, git clone; "Go to file" and content search from a
   draft without a thread), and "New thread on <branch>"
   branch carry-over (it opens a draft in the thread's project on its current
