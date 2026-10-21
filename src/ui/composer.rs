@@ -406,10 +406,9 @@ impl App {
             "Attach files",
         )
         .clicked()
+            && matches!(mode, Mode::Normal)
         {
-            self.status = Some(
-                "Choosing files to attach is not implemented yet; paste or drop images".into(),
-            );
+            crate::ui::attachments::pick_files(&self.incoming_images, ui.ctx());
         }
     }
 
@@ -418,6 +417,7 @@ impl App {
     fn composer_image_strip(&mut self, ui: &mut Ui, origin: Pos2, width: f32) {
         let per_row = (((width + 8.0) / 72.0).floor() as usize).max(1);
         let mut remove = None;
+        let mut preview = None;
         for (index, image) in self.composer_images.iter().enumerate() {
             let cell = Rect::from_min_size(
                 origin
@@ -428,6 +428,19 @@ impl App {
                 Vec2::splat(64.0),
             );
             let radius = CornerRadius::same(8);
+            let cell_response = ui
+                .interact(
+                    cell,
+                    ui.id().with(("composer-image", &image.id)),
+                    Sense::click(),
+                )
+                .on_hover_text(format!("Preview {}", image.name));
+            if cell_response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+            }
+            if cell_response.clicked() {
+                preview = Some(index);
+            }
             ui.painter().rect_filled(cell, radius, theme::background());
             crate::ui::attachments::paint_cover(
                 ui,
@@ -469,6 +482,20 @@ impl App {
         }
         if let Some(index) = remove {
             self.composer_images.remove(index);
+        } else if let Some(index) = preview {
+            // The full images, decoded from the attachments' bytes.
+            let items = self
+                .composer_images
+                .iter()
+                .filter_map(|image| {
+                    Some(crate::ui::lightbox::Item {
+                        name: image.name.clone(),
+                        key: format!("composer:{}", image.id),
+                        image: std::sync::Arc::new(crate::ui::attachments::decode(&image.bytes)?),
+                    })
+                })
+                .collect();
+            self.open_lightbox(items, index);
         }
     }
 

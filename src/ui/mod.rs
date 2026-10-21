@@ -17,6 +17,7 @@ pub mod files;
 pub mod icon_picker;
 pub mod instance_badge;
 pub mod keybindings;
+pub mod lightbox;
 pub mod lucide;
 pub mod markdown;
 pub mod palette;

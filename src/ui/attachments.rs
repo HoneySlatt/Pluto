@@ -10,7 +10,8 @@
 //!
 //! Also the composer's images (`addComposerAttachments`): pasted from the
 //! clipboard (read with `wl-paste`, or `xclip` on X11, since egui only
-//! pastes text) or dropped, and sent inline as data URLs.
+//! pastes text), dropped, or picked with the attach button (the desktop
+//! portal's file chooser), and sent inline as data URLs.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -71,7 +72,7 @@ fn cover(source: &image::RgbaImage, width: u32, height: u32) -> image::RgbaImage
 }
 
 /// A texture of `key` at `width`x`height` pixels, made once per size.
-fn sized_texture(
+pub(crate) fn sized_texture(
     ui: &Ui,
     key: &str,
     width: u32,
@@ -354,9 +355,30 @@ pub(crate) fn add_dropped_files(
     ctx: &egui::Context,
     files: Vec<egui::DroppedFileHandle>,
 ) {
+    let paths = files.iter().map(|f| f.path().to_path_buf()).collect();
+    add_files(incoming, ctx, paths);
+}
+
+/// The attach button (`<input type="file" multiple>`): the portal's file
+/// chooser, off the UI thread, then the chosen files like dropped ones.
+pub(crate) fn pick_files(incoming: &Incoming, ctx: &egui::Context) {
     let incoming = incoming.clone();
     let ctx = ctx.clone();
-    let paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+    std::thread::spawn(move || {
+        let picked = rfd::FileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"])
+            .add_filter("All files", &["*"])
+            .pick_files();
+        if let Some(paths) = picked {
+            add_files(&incoming, &ctx, paths);
+        }
+    });
+}
+
+/// Reads image files on a background thread.
+fn add_files(incoming: &Incoming, ctx: &egui::Context, paths: Vec<std::path::PathBuf>) {
+    let incoming = incoming.clone();
+    let ctx = ctx.clone();
     std::thread::spawn(move || {
         for path in paths {
             let name = path

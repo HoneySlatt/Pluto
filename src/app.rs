@@ -21,6 +21,8 @@ pub struct App {
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
     /// Clipboard and dropped images read off the UI thread.
     pub(crate) incoming_images: crate::ui::attachments::Incoming,
+    /// The expanded image preview.
+    pub(crate) lightbox: Option<crate::ui::lightbox::Lightbox>,
     /// Messages queued while a turn runs.
     pub(crate) queues: crate::ui::queue::Queues,
     block_turn_starts: bool,
@@ -270,6 +272,7 @@ impl App {
             composer_images: Vec::new(),
             incoming_images: Default::default(),
             queues: Default::default(),
+            lightbox: None,
             block_turn_starts: options.block_turn_starts,
             status: None,
             expansion: Expansion::default(),
@@ -810,6 +813,9 @@ impl eframe::App for App {
             Screen::Main => {
                 self.sync_vcs_watch();
                 self.mark_open_thread_visited();
+                // The image preview takes its keys before the rest of the
+                // window; its layer stays on top.
+                self.lightbox_dialog(ui, rect);
                 self.palette_shortcuts(ui);
                 let sidebar =
                     Rect::from_min_size(rect.min, Vec2::new(theme::SIDEBAR_WIDTH, rect.height()));

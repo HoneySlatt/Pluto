@@ -414,13 +414,27 @@ impl App {
     /// One image cell (`aspect-[4/3] overflow-hidden rounded-lg border
     /// border-border/80 bg-background/70`): the image cropped to fill it, or
     /// its name while it loads.
-    fn attachment_cell(&mut self, ui: &mut Ui, rect: Rect, image: &serde_json::Value) {
+    /// Returns whether the loaded image was clicked (`cursor-zoom-in`).
+    fn attachment_cell(&mut self, ui: &mut Ui, rect: Rect, image: &serde_json::Value) -> bool {
         let radius = CornerRadius::same(8);
+        let mut clicked = false;
         ui.painter()
             .rect_filled(rect, radius, theme::alpha(theme::background(), 0.7));
         let id = image["id"].as_str().unwrap_or_default();
         if let Some(decoded) = self.attachment_image(image) {
             attachments::paint_cover(ui, rect.shrink(1.0), id, &decoded, CornerRadius::same(7));
+            let name = image["name"].as_str().unwrap_or_default();
+            let response = ui
+                .interact(
+                    rect,
+                    ui.id().with(("attachment-preview", id)),
+                    Sense::click(),
+                )
+                .on_hover_text(format!("Preview {name}"));
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+            }
+            clicked = response.clicked();
         } else {
             let name = image["name"].as_str().unwrap_or_default();
             let text_font = font(10.0, Weight::Regular);
@@ -440,6 +454,7 @@ impl App {
             egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
             egui::StrokeKind::Inside,
         );
+        clicked
     }
 
     fn user_row(&mut self, ui: &mut Ui, message: &Message, width: f32) {
@@ -482,7 +497,24 @@ impl App {
                     ),
                 cell,
             );
-            self.attachment_cell(ui, cell_rect, image);
+            if self.attachment_cell(ui, cell_rect, image) {
+                // `buildExpandedImagePreview`: the message's loaded images.
+                let mut items = Vec::new();
+                let mut start = 0;
+                for (other_index, other) in images.iter().enumerate() {
+                    if let Some(decoded) = self.attachment_image(other) {
+                        if other_index == index {
+                            start = items.len();
+                        }
+                        items.push(crate::ui::lightbox::Item {
+                            name: other["name"].as_str().unwrap_or_default().to_owned(),
+                            key: other["id"].as_str().unwrap_or_default().to_owned(),
+                            image: decoded,
+                        });
+                    }
+                }
+                self.open_lightbox(items, start);
+            }
         }
         ui.painter().galley(
             bubble.min + Vec2::new(12.0, 12.0 + grid.y),
