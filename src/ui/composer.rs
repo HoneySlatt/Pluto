@@ -255,6 +255,16 @@ impl App {
         let selection = self.composer_model_selection(draft);
         let (model_label, provider_icon) = self.model_label(&selection);
         let model_rect = self.picker(ui, x, bar_top, provider_icon, &model_label, "model-picker");
+        if provider_icon.is_some()
+            && let Some(badge) = self.instance_badge(&selection.instance_id)
+        {
+            // Ringed with `--contrast-input`.
+            let icon = Rect::from_min_size(
+                Pos2::new(model_rect.left() + 11.0, bar_top + 6.0),
+                Vec2::splat(16.0),
+            );
+            crate::ui::instance_badge::paint(ui, icon, 2.0, &badge, theme::input(), 1.0);
+        }
         x = model_rect.right() + 6.0;
         let mut traits_rect = None;
         if let Some(trait_label) = self.traits_label(&selection) {

@@ -71,6 +71,8 @@ impl Default for UsageState {
 struct Account {
     driver: String,
     display_name: Option<String>,
+    /// The instance's accent color, which fills the initials badge.
+    accent: Option<Color32>,
     email: Option<String>,
     plan: Option<String>,
     /// The environment it is signed in on.
@@ -183,6 +185,9 @@ fn limit_pools(providers: &[Value], now: i64, environment: Option<&str>) -> Vec<
         let account = Account {
             driver: driver.clone(),
             display_name: text(&provider["displayName"]),
+            accent: provider["accentColor"]
+                .as_str()
+                .and_then(crate::ui::accent_picker::parse),
             email: text(&provider["auth"]["email"]),
             plan: text(&provider["auth"]["label"]),
             signed_in: environment.map(str::to_owned),
@@ -710,8 +715,11 @@ impl App {
                         Pos2::new(icon.left(), icon.top() + 4.0),
                         Vec2::new(18.0, 14.0),
                     );
-                    ui.painter()
-                        .rect_filled(badge, CornerRadius::same(7), theme::popover());
+                    ui.painter().rect_filled(
+                        badge,
+                        CornerRadius::same(7),
+                        column_account.accent.unwrap_or_else(theme::popover),
+                    );
                     let width = widgets::text_width(ui, &initials, font(8.0, Weight::SemiBold));
                     widgets::text_in(
                         ui,
@@ -721,7 +729,11 @@ impl App {
                         ),
                         &initials,
                         font(8.0, Weight::SemiBold),
-                        theme::muted_foreground(),
+                        if column_account.accent.is_some() {
+                            Color32::WHITE
+                        } else {
+                            theme::muted_foreground()
+                        },
                     );
                 }
                 widgets::text_in(

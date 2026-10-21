@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::accent_picker::{self, AccentPicker, PickerEvent};
+use crate::ui::instance_badge;
 use crate::ui::settings::{
     Control, Row, RowAction, Store, card_border, card_fill, number_or_text_field, row_divider,
     row_height, switch,
@@ -394,9 +395,8 @@ fn paint_card(ui: &Ui, rect: Rect) {
 
 /// A `ghost-muted` `xs` button with an optional leading icon; returns
 /// whether it was clicked.
-/// `ProviderInstanceIcon`'s badge when the instance has an accent color:
-/// the initials on the accent, overlapping the 20px mark's bottom-right
-/// corner by 2px, ringed with the card color.
+/// `ProviderInstanceIcon`'s badge on the Providers page, shown only with an
+/// accent color (`showBadge={Boolean(accentColor)}`), ringed with the card.
 fn paint_accent_badge(ui: &Ui, row: &InstanceRow, min: Pos2, fade: f32) {
     let Some(accent) = row.instance["accentColor"]
         .as_str()
@@ -404,46 +404,12 @@ fn paint_accent_badge(ui: &Ui, row: &InstanceRow, min: Pos2, fade: f32) {
     else {
         return;
     };
-    let initials = instance_initials(&row.display_name());
-    let badge_font = font(7.0, Weight::SemiBold);
-    let width = (widgets::text_width(ui, &initials, badge_font.clone()) + 6.0).max(12.0);
-    let rect = Rect::from_min_max(
-        Pos2::new(min.x + 22.0 - width, min.y + 10.0),
-        Pos2::new(min.x + 22.0, min.y + 22.0),
-    );
-    ui.painter().rect(
-        rect,
-        CornerRadius::same(6),
-        theme::alpha(accent, fade),
-        Stroke::new(1.0, theme::alpha(theme::card(), fade)),
-        StrokeKind::Inside,
-    );
-    let text_width = widgets::text_width(ui, &initials, badge_font.clone());
-    widgets::text(
-        ui,
-        Pos2::new(rect.center().x - text_width / 2.0, rect.center().y - 3.5),
-        &initials,
-        badge_font,
-        theme::alpha(Color32::WHITE, fade),
-        7.0,
-    );
-}
-
-/// `providerInstanceInitials`: two letters of one word, or the first
-/// letters of the first two words.
-fn instance_initials(label: &str) -> String {
-    let cleaned = label.replace(['_', '-'], " ");
-    let words: Vec<&str> = cleaned.split_whitespace().collect();
-    match words.as_slice() {
-        [] => String::new(),
-        [word] => word.chars().take(2).collect::<String>().to_uppercase(),
-        _ => words
-            .iter()
-            .take(2)
-            .filter_map(|w| w.chars().next())
-            .collect::<String>()
-            .to_uppercase(),
-    }
+    let badge = instance_badge::Badge {
+        initials: instance_badge::initials(&row.display_name()),
+        accent: Some(accent),
+    };
+    let icon = Rect::from_min_size(min, Vec2::splat(20.0));
+    instance_badge::paint(ui, icon, 2.0, &badge, theme::card(), fade);
 }
 
 /// `readCustomModelEntries`: slugs (strings or `{slug, name}`), first
@@ -2146,13 +2112,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn initials_follow_upstream() {
-        assert_eq!(instance_initials("Codex"), "CO");
-        assert_eq!(instance_initials("codex_personal work"), "CP");
-        assert_eq!(instance_initials("  "), "");
-    }
 
     #[test]
     fn custom_model_entries_dedupe_and_name() {

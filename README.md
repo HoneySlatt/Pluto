@@ -37,13 +37,13 @@ reads it from a file at startup instead; it is kept in memory only.
 | Keybindings | The server's resolved bindings drive the global shortcuts with their when clauses (the last match wins): palette modes, Usage and its metric and period keys, new threads, the right panel and diff toggles, closing a surface, previous, next and numbered threads, settle and pin |
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`); segment popovers (account with its redacted email, plan, environment, share left, reset time and the share it restores); the environments breadcrumb menu and the Model prices dialog (`usagePriceOverrides` edited per cell, reset to automatic, saved as a settings patch) |
 | Pull requests | The page with search, sort, filters (state, involvement, draft, review, checks, project) and provider menus; `pullRequests.list` grouped by involvement and sorted like upstream; rows with state, conflict, checks and review glyphs, line counts, author, repository, labels and update time; loading, empty and error states |
+| Provider instances | Display names and the account badge like `providerInstanceDisplay.ts` (accent color, or several instances of one driver) on the sidebar thread rows, the composer and settings model triggers, the model picker rail and the usage account popover |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice):
 
 - settings: the Appearance page (built-in themes, contrast and the other
-  appearance controls), adding or deleting provider instances, the accent
-  badges outside the Providers page (sidebar, composer, model picker, usage), provider environment variables, editing a custom model's name and options,
+  appearance controls), adding or deleting provider instances, provider environment variables, editing a custom model's name and options,
   usage limit hubs, provider update installs and setup flows, settings scope
   pickers, the keybindings.json file action, project settings, device
   setup (enabling the hub or agent access, adding hosts), the Git fetch

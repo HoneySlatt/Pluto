@@ -313,7 +313,9 @@ impl App {
                 theme::foreground(),
                 active == FAVORITES,
                 rail.right(),
-            ) {
+            )
+            .clicked()
+            {
                 switch_provider = Some(FAVORITES.into());
             }
             ui.painter().rect_filled(
@@ -334,7 +336,7 @@ impl App {
                 let (icon, tint) =
                     provider_icon(driver).unwrap_or(("circle-alert", theme::muted_foreground()));
                 let slot = Rect::from_min_size(Pos2::new(rail.left() + 12.0, y), Vec2::splat(20.0));
-                if rail_button(
+                let response = rail_button(
                     ui,
                     slot,
                     &format!("rail-{id}"),
@@ -342,7 +344,19 @@ impl App {
                     tint,
                     active == id,
                     rail.right(),
-                ) {
+                );
+                if let Some(badge) = self.instance_badge(&id) {
+                    // `indicatorBackground`: the hover, the selection or the rail.
+                    let ring = if response.hovered() {
+                        theme::muted()
+                    } else if active == id {
+                        theme::background()
+                    } else {
+                        theme::alpha(theme::muted(), 0.3)
+                    };
+                    crate::ui::instance_badge::paint(ui, slot, 2.0, &badge, ring, 1.0);
+                }
+                if response.clicked() {
                     switch_provider = Some(id);
                 }
                 y += 40.0;
@@ -603,7 +617,7 @@ fn rail_button(
     tint: Color32,
     active: bool,
     rail_right: f32,
-) -> bool {
+) -> eframe::egui::Response {
     let hit = slot.expand(8.0);
     let response = ui.interact(hit, ui.id().with(id), Sense::click());
     if response.hovered() && !active {
@@ -628,5 +642,5 @@ fn rail_button(
             StrokeKind::Inside,
         );
     }
-    response.clicked()
+    response
 }

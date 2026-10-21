@@ -8,6 +8,7 @@ pub mod content_search;
 pub mod context_menu;
 pub mod diff_panel;
 pub mod files;
+pub mod instance_badge;
 pub mod keybindings;
 pub mod markdown;
 pub mod palette;
