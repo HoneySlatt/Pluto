@@ -506,7 +506,9 @@ impl App {
         }
     }
 
-    fn legacy_project_list(&mut self, ui: &mut Ui, rect: Rect) {
+    /// Each project's tree, in sidebar order (`sortedProjects` with their
+    /// rendered threads), decided before painting.
+    fn legacy_trees(&self) -> Vec<Tree> {
         let project_order = self.client_setting("sidebarProjectSortOrder");
         let project_order = project_order.as_str().unwrap_or("updated_at").to_owned();
         let thread_order = self.client_setting("sidebarThreadSortOrder");
@@ -516,30 +518,16 @@ impl App {
             .as_u64()
             .unwrap_or(6)
             .clamp(1, 15) as usize;
-        let threads: Vec<Thread> = self
+        let thread_refs: Vec<&Thread> = self
             .state
             .threads
             .iter()
             .filter(|t| t.archived_at.is_none())
-            .cloned()
             .collect();
-        let thread_refs: Vec<&Thread> = threads.iter().collect();
-        let projects_owned = self.state.projects.clone();
-        let mut projects: Vec<&Project> = projects_owned.iter().collect();
+        let mut projects: Vec<&Project> = self.state.projects.iter().collect();
         sort_projects(&mut projects, &thread_refs, &project_order);
-
-        // Each project's rows, decided before painting so the content height is known.
-        struct Tree<'a> {
-            project: &'a Project,
-            expanded: bool,
-            rows: Vec<&'a Thread>,
-            empty: bool,
-            /// None, or (list expanded, the hidden threads' pill).
-            more: Option<(bool, Option<Pill>)>,
-            pill: Option<Pill>,
-        }
-        let selected = self.selected.clone();
-        let trees: Vec<Tree> = projects
+        let selected = self.selected.as_deref();
+        projects
             .iter()
             .map(|project| {
                 let mut own: Vec<&Thread> = thread_refs
@@ -553,7 +541,7 @@ impl App {
                     .then(|| {
                         own.iter()
                             .copied()
-                            .find(|t| selected.as_deref() == Some(t.id.as_str()))
+                            .find(|t| selected == Some(t.id.as_str()))
                     })
                     .flatten();
                 let list_open = self.legacy_thread_lists.contains(&project.id);
@@ -563,9 +551,9 @@ impl App {
                 } else {
                     own[..preview].to_vec()
                 };
-                let rows = match pinned {
-                    Some(thread) => vec![thread],
-                    None if expanded => shown.clone(),
+                let rows: Vec<Thread> = match pinned {
+                    Some(thread) => vec![thread.clone()],
+                    None if expanded => shown.iter().map(|t| (*t).clone()).collect(),
                     None => Vec::new(),
                 };
                 let visible: HashSet<&str> = shown
@@ -578,7 +566,7 @@ impl App {
                     .copied()
                     .filter(|t| !visible.contains(t.id.as_str()));
                 Tree {
-                    project,
+                    project: (*project).clone(),
                     expanded,
                     empty: expanded && own.is_empty(),
                     more: (expanded && overflowing)
@@ -587,7 +575,56 @@ impl App {
                     rows,
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// The rendered rows in order, which `thread.jump.N` follows.
+    pub(crate) fn legacy_visible_thread_ids(&self) -> Vec<String> {
+        self.legacy_trees()
+            .into_iter()
+            .flat_map(|tree| tree.rows.into_iter().map(|t| t.id))
+            .collect()
+    }
+
+    /// `buildThreadJumpLabelMap`, while held modifiers match a jump
+    /// shortcut's (`shouldShowThreadJumpHintsForModifiers`); never while the
+    /// terminal has focus.
+    fn legacy_jump_labels(&self, ui: &Ui) -> HashMap<String, String> {
+        let modifiers = ui.input(|i| i.modifiers);
+        if self.terminal_focused() || modifiers.is_none() {
+            return HashMap::new();
+        }
+        let bindings = &self.state.config["keybindings"];
+        let context = [("isDesktop", true)];
+        let held = (1..=9).any(|n| {
+            crate::ui::shortcuts::effective_shortcut(
+                bindings,
+                &format!("thread.jump.{n}"),
+                &context,
+            )
+            .is_some_and(|shortcut| crate::ui::shortcuts::modifiers_match(&shortcut, modifiers))
+        });
+        if !held {
+            return HashMap::new();
+        }
+        self.legacy_visible_thread_ids()
+            .into_iter()
+            .take(9)
+            .enumerate()
+            .filter_map(|(index, id)| {
+                crate::ui::shortcuts::effective_shortcut_label(
+                    bindings,
+                    &format!("thread.jump.{}", index + 1),
+                    &context,
+                )
+                .map(|label| (id, label))
+            })
+            .collect()
+    }
+
+    fn legacy_project_list(&mut self, ui: &mut Ui, rect: Rect) {
+        let trees = self.legacy_trees();
+        let jump_labels = self.legacy_jump_labels(ui);
         let panel_height = |tree: &Tree| -> f32 {
             let mut items: Vec<f32> = tree.rows.iter().map(|_| ROW).collect();
             if tree.empty {
@@ -693,7 +730,7 @@ impl App {
                     match self.legacy_project_header(
                         ui,
                         header,
-                        tree.project,
+                        &tree.project,
                         tree.expanded,
                         tree.pill,
                     ) {
@@ -732,7 +769,8 @@ impl App {
                                 Vec2::new(218.0, ROW),
                             );
                             if ui.is_rect_visible(row) {
-                                self.legacy_thread_row(ui, row, thread);
+                                let jump = jump_labels.get(&thread.id).map(String::as_str);
+                                self.legacy_thread_row(ui, row, thread, jump);
                             }
                             row_y += ROW + GAP;
                         }
@@ -876,7 +914,7 @@ impl App {
 
     /// A thread row: status label, title, and the relative time that the
     /// archive button replaces on hover.
-    fn legacy_thread_row(&mut self, ui: &mut Ui, rect: Rect, thread: &Thread) {
+    fn legacy_thread_row(&mut self, ui: &mut Ui, rect: Rect, thread: &Thread, jump: Option<&str>) {
         let id = ui.id().with(("legacy-thread", &thread.id));
         let response = ui.interact(rect, id, Sense::click());
         let hovered = ui.rect_contains_pointer(rect);
@@ -981,6 +1019,8 @@ impl App {
                     archive = true;
                 }
             }
+        } else if let Some(label) = jump {
+            jump_chip(ui, label, rect.right() - 8.0, rect.center().y);
         } else {
             let at = thread
                 .latest_user_message_at
@@ -1170,6 +1210,17 @@ impl App {
     }
 }
 
+/// A project's tree in the legacy sidebar.
+struct Tree {
+    project: Project,
+    expanded: bool,
+    rows: Vec<Thread>,
+    empty: bool,
+    /// None, or (list expanded, the hidden threads' pill).
+    more: Option<(bool, Option<Pill>)>,
+    pill: Option<Pill>,
+}
+
 enum HeaderAction {
     Toggle,
     NewThread,
@@ -1222,6 +1273,31 @@ fn legacy_more_row(
         theme::sidebar_foreground(),
     );
     response.clicked()
+}
+
+/// A thread jump hint: a 20px pill (`border-border/80 bg-background/90`,
+/// 10px mono) ending at `right`.
+fn jump_chip(ui: &Ui, label: &str, right: f32, center_y: f32) {
+    let label_font = theme::mono(10.0);
+    let text_width = widgets::text_width(ui, label, label_font.clone());
+    let rect = Rect::from_min_size(
+        Pos2::new(right - text_width - 12.0, center_y - 10.0),
+        Vec2::new(text_width + 12.0, 20.0),
+    );
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(10),
+        theme::alpha(theme::background(), 0.9),
+        Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
+        StrokeKind::Inside,
+    );
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(Pos2::new(rect.left() + 6.0, rect.top()), rect.max),
+        label,
+        label_font,
+        theme::foreground(),
+    );
 }
 
 /// A `Kbd` chip (h-5, px-1, `bg-background`, 12px medium) ending at `right`.

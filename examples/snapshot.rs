@@ -103,7 +103,7 @@ fn main() {
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
             "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
-            | "--key" | "--drop" => ops.next().cloned().unwrap_or_default(),
+            | "--key" | "--drop" | "--hold" => ops.next().cloned().unwrap_or_default(),
             "--size" => {
                 ops.next();
                 continue;
@@ -189,6 +189,20 @@ fn main() {
                 .input_mut()
                 .dropped_files
                 .push(std::sync::Arc::new(Dropped(value.clone().into()))),
+            // `--hold Ctrl` keeps a modifier down from here on.
+            "--hold" => {
+                let mut modifiers = egui::Modifiers::NONE;
+                if value.contains("Ctrl") {
+                    modifiers |= egui::Modifiers::COMMAND | egui::Modifiers::CTRL;
+                }
+                if value.contains("Shift") {
+                    modifiers |= egui::Modifiers::SHIFT;
+                }
+                if value.contains("Alt") {
+                    modifiers |= egui::Modifiers::ALT;
+                }
+                harness.event(egui::Event::ModifiersChanged(modifiers));
+            }
             "--key" => {
                 let (mods, name) = value.rsplit_once('+').unwrap_or(("", value.as_str()));
                 let mut modifiers = egui::Modifiers::NONE;

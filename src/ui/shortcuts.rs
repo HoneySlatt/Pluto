@@ -23,7 +23,7 @@ fn event_key(key: Key) -> Option<String> {
 }
 
 /// `matchesShortcutModifiers` off macOS: `mod` is Ctrl and nothing maps to Meta.
-fn modifiers_match(shortcut: &Value, modifiers: Modifiers) -> bool {
+pub(crate) fn modifiers_match(shortcut: &Value, modifiers: Modifiers) -> bool {
     let flag = |name: &str| shortcut[name] == true;
     !flag("metaKey")
         && modifiers.ctrl == (flag("ctrlKey") || flag("modKey"))
@@ -73,6 +73,17 @@ pub(crate) fn effective_shortcut_label(
     command: &str,
     context: &[(&str, bool)],
 ) -> Option<String> {
+    effective_shortcut(bindings, command, context)
+        .map(|shortcut| crate::ui::action_editor::format_shortcut(&shortcut))
+}
+
+/// `findEffectiveShortcutForCommand`: the shortcut behind
+/// [`effective_shortcut_label`].
+pub(crate) fn effective_shortcut(
+    bindings: &Value,
+    command: &str,
+    context: &[(&str, bool)],
+) -> Option<Value> {
     let mut claimed = std::collections::HashSet::new();
     for binding in bindings.as_array()?.iter().rev() {
         if !when_matches(&binding["whenAst"], context) {
@@ -91,7 +102,7 @@ pub(crate) fn effective_shortcut_label(
             continue;
         }
         if binding["command"] == command {
-            return Some(crate::ui::action_editor::format_shortcut(shortcut));
+            return Some(shortcut.clone());
         }
     }
     None
@@ -296,6 +307,9 @@ impl App {
 
     /// `orderedThreads`: pinned, active, then the shelves as rendered.
     pub(crate) fn ordered_sidebar_threads(&self) -> Vec<String> {
+        if self.client_setting("legacySidebarEnabled") == true {
+            return self.legacy_visible_thread_ids();
+        }
         let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
         let threads: Vec<crate::model::Thread> = self
