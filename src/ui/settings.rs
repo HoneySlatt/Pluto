@@ -315,7 +315,7 @@ impl App {
     }
 
     fn server_setting(&self, key: &str) -> Value {
-        let value = &self.state.config["settings"][key];
+        let value = &self.scoped_settings()[key];
         if value.is_null() {
             default_server_setting(key)
         } else {
@@ -340,6 +340,14 @@ impl App {
                 }
             }
             Store::Server => {
+                // A project scope writes the project's override; keys it
+                // cannot override are not written (their rows are inert).
+                if self.is_project_scope() {
+                    if crate::ui::settings_scope::is_project_scoped(key) {
+                        self.write_project_override(key, value);
+                    }
+                    return;
+                }
                 if !self.state.config["settings"].is_object() {
                     self.state.config["settings"] = json!({});
                 }
@@ -444,10 +452,18 @@ impl App {
         let server_default = |key: &str| self.server_setting(key) == default_server_setting(key);
         let switch = |key: &str| Control::Switch(self.client_setting(key) == true);
 
-        // New threads (`ProjectDefaultsSettings`, category "general").
-        let selection = self.composer_model_selection(true);
+        // New threads (`ProjectDefaultsSettings`, category "general"),
+        // read at the selected scope.
+        let scoped = self.scoped_settings();
+        let project_scope = self.is_project_scope();
+        let selection = serde_json::from_value::<crate::model::ModelSelection>(
+            scoped["defaultModelSelection"].clone(),
+        )
+        .ok()
+        .filter(|s| !s.model.is_empty())
+        .unwrap_or_else(|| self.composer_model_selection(true));
         let (model, model_icon) = self.model_label(&selection);
-        let runtime = self.state.config["settings"]["defaultRuntimeMode"]
+        let runtime = scoped["defaultRuntimeMode"]
             .as_str()
             .unwrap_or("full-access")
             .to_owned();
@@ -455,11 +471,11 @@ impl App {
             .iter()
             .find(|m| m.0 == runtime)
             .map(|m| m.2);
-        let env_mode = self.state.config["settings"]["defaultThreadEnvMode"]
+        let env_mode = scoped["defaultThreadEnvMode"]
             .as_str()
             .unwrap_or("local")
             .to_owned();
-        let submodules = self.state.config["settings"]["worktreeSubmodules"]
+        let submodules = scoped["worktreeSubmodules"]
             .as_str()
             .unwrap_or("recursive")
             .to_owned();
@@ -471,8 +487,13 @@ impl App {
                 Row {
                     id: "default-model".into(),
                     title: "Model".into(),
-                    description: "Default model for new threads. Projects can override it.".into(),
-                    status: self.state.config["settings"]["defaultModelSelection"]
+                    description: if project_scope {
+                        "Model for new threads in this project."
+                    } else {
+                        "Default model for new threads. Projects can override it."
+                    }
+                    .into(),
+                    status: scoped["defaultModelSelection"]
                         .is_null()
                         .then(|| "Automatic".to_owned()),
                     layers: true,
@@ -488,8 +509,12 @@ impl App {
                 Row {
                     id: "default-permissions".into(),
                     title: "Permissions".into(),
-                    description: "Default permissions for new threads. Projects can override them."
-                        .into(),
+                    description: if project_scope {
+                        "Permissions for new threads in this project."
+                    } else {
+                        "Default permissions for new threads. Projects can override them."
+                    }
+                    .into(),
                     status: None,
                     layers: true,
                     reset: false,
@@ -506,8 +531,12 @@ impl App {
                 Row {
                     id: "default-workspace".into(),
                     title: "Workspace".into(),
-                    description: "Where new threads start. Projects and their t3.json can override it."
-                        .into(),
+                    description: if project_scope {
+                        "Where new threads in this project start."
+                    } else {
+                        "Where new threads start. Projects and their t3.json can override it."
+                    }
+                    .into(),
                     status: None,
                     layers: true,
                     reset: false,
@@ -521,10 +550,15 @@ impl App {
                 Row {
                     id: "worktree-submodules".into(),
                     title: "Submodules".into(),
-                    description: "How new worktrees populate git submodules. Projects and their t3.json can override it.".into(),
+                    description: if project_scope {
+                        "How new worktrees in this project populate git submodules."
+                    } else {
+                        "How new worktrees populate git submodules. Projects and their t3.json can override it."
+                    }
+                    .into(),
                     status: None,
                     layers: true,
-                    reset: !self.state.config["settings"]["worktreeSubmodules"].is_null(),
+                    reset: !scoped["worktreeSubmodules"].is_null(),
                     control: Control::Select {
                         value: submodules,
                         options: options(&SUBMODULES),
@@ -848,7 +882,7 @@ impl App {
 
         let text_generation = {
             let selection = serde_json::from_value::<crate::model::ModelSelection>(
-                self.state.config["settings"]["textGenerationModelSelection"].clone(),
+                scoped["textGenerationModelSelection"].clone(),
             )
             .ok()
             .filter(|s| !s.model.is_empty())
@@ -1145,7 +1179,11 @@ impl App {
                     row(
                         "pull-request-merge-method",
                         "Default merge method",
-                        "Pull requests start with this method. Last selected reuses whatever you chose most recently on this device.",
+                        if self.is_project_scope() {
+                            "Pull requests in this project start with this method."
+                        } else {
+                            "Pull requests start with this method. Last selected reuses whatever you chose most recently on this device."
+                        },
                         !merge.is_null(),
                         Control::Select {
                             value: merge.as_str().unwrap_or("last").to_owned(),
@@ -1371,7 +1409,11 @@ impl App {
         let mut access_row = row(
             "agent-browser-access",
             "Agent browser access",
-            "Allow agents to use the shared browser. Projects can override it.",
+            if self.is_project_scope() {
+                "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
+            } else {
+                "Allow agents to use the shared browser. Projects can override it."
+            },
             true,
             Control::Switch(browser_access),
         );
@@ -2152,7 +2194,7 @@ impl App {
                 {
                     top + 24.0
                 } else {
-                    scope_sentence(ui, left, top)
+                    self.scope_sentence(ui, left, top)
                 };
                 // The last card (or header) ends the content; `pb-12` follows.
                 let mut bottom = y;
@@ -2438,12 +2480,35 @@ impl App {
             );
             slot_x += 26.0;
         }
+        // At a project scope, scopable rows show and reset the project's
+        // override; other server rows are environment-wide and inert.
+        let project_scope = self.is_project_scope();
+        let keys = crate::ui::settings_scope::row_server_keys(&row.id);
+        let scoped: Vec<&str> = keys
+            .iter()
+            .copied()
+            .filter(|k| crate::ui::settings_scope::is_project_scoped(k))
+            .collect();
+        let overridden = project_scope && self.project_overrides(&scoped);
+        let environment_wide = project_scope && !keys.is_empty() && scoped.is_empty();
         if row.layers {
             let slot = Rect::from_min_size(Pos2::new(slot_x, inner_top), Vec2::splat(20.0));
-            theme::paint_icon(ui, "layers", slot, 12.0, theme::muted_foreground());
+            let tint = if overridden {
+                theme::primary()
+            } else {
+                theme::muted_foreground()
+            };
+            theme::paint_icon(ui, "layers", slot, 12.0, tint);
             slot_x += 26.0;
         }
-        if row.reset {
+        let (show_reset, tooltip) = if project_scope && !scoped.is_empty() {
+            (overridden, "Reset to inherited value")
+        } else if environment_wide {
+            (false, "")
+        } else {
+            (row.reset, "Reset to default")
+        };
+        if show_reset {
             let slot = Rect::from_min_size(Pos2::new(slot_x, inner_top), Vec2::splat(20.0));
             if widgets::icon_button(
                 ui,
@@ -2452,11 +2517,15 @@ impl App {
                 "undo-2",
                 12.0,
                 theme::muted_foreground(),
-                "Reset to default",
+                tooltip,
             )
             .clicked()
             {
-                action = Some(RowAction::Reset);
+                if project_scope && !scoped.is_empty() {
+                    self.clear_project_overrides(&scoped);
+                } else {
+                    action = Some(RowAction::Reset);
+                }
             }
         }
         // A title with an inline icon is 22px tall (`inline-flex` line box).
@@ -2503,6 +2572,24 @@ impl App {
             + (rect.height() - extra - if divided { 1.0 } else { 0.0 }) / 2.0;
         if extra > 0.0 {
             self.row_children(ui, rect, row, extra);
+        }
+        if environment_wide {
+            // `inertControl`: dimmed, inert, explained on hover.
+            let control = Rect::from_min_max(
+                Pos2::new(right - control_width, rect.top()),
+                Pos2::new(right, rect.bottom()),
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            child.disable();
+            child.set_opacity(0.5);
+            self.settings_control(&mut child, row, right, center_y);
+            ui.interact(
+                control,
+                ui.id().with(("inert-control", &row.id)),
+                Sense::hover(),
+            )
+            .on_hover_text("Environment-wide setting. Select an environment to change it.");
+            return menu;
         }
         self.settings_control(ui, row, right, center_y)
             .or(action)
@@ -2976,7 +3063,8 @@ fn select_width(ui: &Ui, control: &Control) -> Option<f32> {
         .find(|(v, _)| v == value)
         .map_or(value.as_str(), |(_, l)| l.as_str());
     let icon = if icon.is_some() { 20.0 } else { 0.0 };
-    Some((widgets::text_width(ui, label, font(14.0, Weight::Regular)) + icon + 30.0).ceil())
+    // `px-2.5`, the value, `gap-1.5` and the chevron slot.
+    Some((widgets::text_width(ui, label, font(14.0, Weight::Regular)) + icon + 34.0).ceil())
 }
 
 /// A bordered single-line field; returns (changed, committed, text). Enter
@@ -3161,7 +3249,12 @@ impl App {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|p| serde_json::from_value(p.clone()).ok())
+            .filter_map(|p| serde_json::from_value::<crate::model::Project>(p.clone()).ok())
+            // A project scope lists only that project's threads.
+            .filter(|p| {
+                self.settings_project()
+                    .is_none_or(|scoped| scoped.id == p.id)
+            })
             .collect();
         let threads: Vec<&Value> = snapshot["threads"]
             .as_array()
@@ -3300,46 +3393,6 @@ impl App {
             _ => {}
         }
     }
-}
-
-/// `SettingsScopeSentence` for the "All projects / All environments" scope
-/// (its pickers are not ported). Returns the top of the first section.
-fn scope_sentence(ui: &Ui, left: f32, top: f32) -> f32 {
-    let y = top + 23.0;
-    let mut x = left + 16.0;
-    for (text, weight, color, chevron) in [
-        (
-            "Applying settings for",
-            Weight::Regular,
-            theme::muted_foreground(),
-            false,
-        ),
-        ("All projects", Weight::Medium, theme::foreground(), true),
-        ("across", Weight::Regular, theme::muted_foreground(), false),
-        (
-            "All environments",
-            Weight::Medium,
-            theme::foreground(),
-            true,
-        ),
-    ] {
-        let width = widgets::text_width(ui, text, font(16.0, weight));
-        widgets::text(ui, Pos2::new(x, y), text, font(16.0, weight), color, 24.0);
-        x += width;
-        if chevron {
-            theme::paint_icon(
-                ui,
-                "chevron-down",
-                Rect::from_min_size(Pos2::new(x + 6.0, y + 5.0), Vec2::splat(14.0)),
-                14.0,
-                theme::muted_foreground(),
-            );
-            x += 26.0;
-        } else {
-            x += 6.0;
-        }
-    }
-    y + 25.0 + 32.0
 }
 
 /// Usage commands sort as one block in page order (`usageCommandOrder`).

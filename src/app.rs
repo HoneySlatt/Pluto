@@ -64,6 +64,8 @@ pub struct App {
     pub(crate) source_control_expanded: std::collections::HashSet<String>,
     /// The Bitbucket credentials drafts (tokens are cleared once sent).
     pub(crate) bitbucket: crate::ui::bitbucket::BitbucketDraft,
+    /// The settings scope ("Applying settings for <project> across …").
+    pub(crate) settings_scope: crate::ui::settings_scope::SettingsScope,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -282,6 +284,7 @@ impl App {
             add_instance: None,
             source_control_expanded: Default::default(),
             bitbucket: Default::default(),
+            settings_scope: Default::default(),
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
