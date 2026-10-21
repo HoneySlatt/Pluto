@@ -236,14 +236,6 @@ fn git_fetch_patch(activity: &Value, seconds: Option<i64>) -> Value {
     }})
 }
 
-/// The height of a row's expanded details (`px-4 pb-4 pt-1`).
-fn details_height(item: &Value) -> f32 {
-    match item["kind"].as_str() {
-        Some("git") => 4.0 + 43.5 + 16.0,
-        _ => 0.0,
-    }
-}
-
 /// A `Badge variant="warning" size="sm"`; returns its width.
 fn warning_badge(ui: &Ui, pos: Pos2, text: &str, fade: f32) -> f32 {
     let badge_font = font(10.0, Weight::Medium);
@@ -284,7 +276,7 @@ impl App {
         });
         let kind = item["kind"].as_str().unwrap_or_default();
         let details = if has_details(item) && self.source_control_expanded.contains(kind) {
-            details_height(item)
+            self.details_height(ui, item)
         } else {
             0.0
         };
@@ -497,7 +489,11 @@ impl App {
 
         // Controls: the details chevron and the read-only availability switch.
         let expanded = has_details(item) && self.source_control_expanded.contains(&kind);
-        let details = if expanded { details_height(item) } else { 0.0 };
+        let details = if expanded {
+            self.details_height(ui, item)
+        } else {
+            0.0
+        };
         let center_y = rect.center().y - details / 2.0 + if index > 0 { 0.5 } else { 0.0 };
         let right = rect.right() - 16.0;
         if has_details(item) {
@@ -557,9 +553,24 @@ impl App {
                 theme::background(),
             );
         }
-        if expanded && kind == "git" {
-            let top = rect.bottom() - details + 4.0;
-            self.git_fetch_interval(ui, rect.left() + 16.0, rect.right() - 16.0, top);
+        let top = rect.bottom() - details + 4.0;
+        match kind.as_str() {
+            "git" if expanded => {
+                self.git_fetch_interval(ui, rect.left() + 16.0, rect.right() - 16.0, top);
+            }
+            "bitbucket" if expanded => {
+                self.bitbucket_form(ui, rect.left() + 16.0, rect.right() - 16.0, top);
+            }
+            _ => {}
+        }
+    }
+
+    /// The height of a row's expanded details (`px-4 pb-4 pt-1`).
+    fn details_height(&self, ui: &Ui, item: &Value) -> f32 {
+        match item["kind"].as_str() {
+            Some("git") => 4.0 + 43.5 + 16.0,
+            Some("bitbucket") => 4.0 + self.bitbucket_height(ui) + 16.0,
+            _ => 0.0,
         }
     }
 

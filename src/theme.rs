@@ -763,6 +763,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-gemini",
         "provider-acp",
         "provider-pi",
+        "external-link",
     )
 }
 

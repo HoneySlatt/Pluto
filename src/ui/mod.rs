@@ -1,5 +1,6 @@
 pub mod accent_picker;
 pub mod agents_panel;
+pub mod bitbucket;
 pub mod changed_files;
 pub mod chat;
 pub mod composer;
