@@ -60,6 +60,11 @@ pub struct App {
     pub(crate) renaming: Option<(String, String)>,
     pub(crate) rename_focus: bool,
     pub(crate) last_row_click: Option<(String, f64)>,
+    /// Legacy sidebar: collapsed or expanded projects (`projectExpandedById`,
+    /// persisted), projects showing all their threads, a pending archive.
+    pub(crate) legacy_project_expanded: std::collections::HashMap<String, bool>,
+    pub(crate) legacy_thread_lists: std::collections::HashSet<String>,
+    pub(crate) legacy_confirm_archive: Option<String>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -306,6 +311,9 @@ impl App {
             renaming: None,
             rename_focus: false,
             last_row_click: None,
+            legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()),
+            legacy_thread_lists: Default::default(),
+            legacy_confirm_archive: None,
             confirm: None,
             snooze_dialog: None,
             prices_dialog: None,
@@ -1188,6 +1196,30 @@ impl App {
 /// `visited.json` beside the client settings file.
 fn visits_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
     Some(settings?.with_file_name("visited.json"))
+}
+
+fn ui_state_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    Some(settings?.with_file_name("ui-state.json"))
+}
+
+/// The persisted UI state (upstream's `uiStateStore`): project expansion.
+fn load_ui_state(settings: Option<&std::path::Path>) -> std::collections::HashMap<String, bool> {
+    ui_state_path(settings)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| serde_json::from_value(value["projectExpandedById"].clone()).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn save_ui_state(app: &App) {
+    let Some(path) = ui_state_path(app.client_settings_path.as_deref()) else {
+        return;
+    };
+    let value = serde_json::json!({ "projectExpandedById": app.legacy_project_expanded });
+    let temp = path.with_extension("json.tmp");
+    if std::fs::write(&temp, value.to_string()).is_ok() {
+        let _ = std::fs::rename(&temp, &path);
+    }
 }
 
 /// The persisted thread visits (empty without a settings path).

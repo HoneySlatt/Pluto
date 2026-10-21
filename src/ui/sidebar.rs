@@ -220,6 +220,16 @@ impl App {
 
     pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         self.sidebar_chrome(ui, rect);
+        if self.client_setting("legacySidebarEnabled") == true {
+            self.legacy_sidebar(ui, rect);
+        } else {
+            self.inbox_sidebar(ui, rect);
+        }
+        self.sidebar_footer(ui, rect);
+    }
+
+    /// The default sidebar's search row and thread inbox.
+    fn inbox_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
         let left = rect.left();
 
@@ -333,8 +343,11 @@ impl App {
             Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER_HEIGHT),
         );
         self.thread_list(ui, list_rect);
+    }
 
-        // Footer shortcuts; the usage page swaps them for Back.
+    /// Footer shortcuts; the usage page swaps them for Back.
+    fn sidebar_footer(&mut self, ui: &mut Ui, rect: Rect) {
+        let left = rect.left();
         if self.usage_open || self.pull_requests_open {
             if self.sidebar_back(ui, rect, "page-back") {
                 self.usage_open = false;
@@ -1105,7 +1118,7 @@ impl App {
 impl App {
     /// Select on click; a second click on the same row within 400ms renames
     /// it (upstream renames on double click).
-    fn thread_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
+    pub(crate) fn thread_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
         let now = ui.input(|i| i.time);
         let double = self
             .last_row_click

@@ -1199,7 +1199,7 @@ fn match_rank(item: &Item, phrase: &str, tokens: &[String]) -> i32 {
     0
 }
 
-fn relative_ago(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn relative_ago(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let label = widgets::relative_time(iso, now);
     if label == "now" {
         "just now".into()

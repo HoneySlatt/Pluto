@@ -57,6 +57,9 @@ pub fn default_client_settings() -> Value {
         "planModeEnabled": false,
         "contextWindowMeterEnabled": false,
         "legacySidebarEnabled": false,
+        "sidebarProjectSortOrder": "updated_at",
+        "sidebarThreadSortOrder": "updated_at",
+        "sidebarThreadPreviewCount": 6,
         "favorites": [],
         "providerModelPreferences": {},
         // Typography (Settings → Appearance).
