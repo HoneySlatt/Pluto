@@ -344,10 +344,16 @@ impl App {
         }
         // Closing a terminal's tab ends its session.
         if let Some(index) = close
-            && let Some(crate::app::PanelTab::Terminal { id, .. }) = panel.tabs.get(index)
+            && let Some(crate::app::PanelTab::Terminal { id, split, .. }) = panel.tabs.get(index)
             && let Some(thread) = self.selected.clone()
         {
-            self.close_terminal(&thread, &id.clone());
+            for terminal in std::iter::once(id)
+                .chain(split.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                self.close_terminal(&thread, &terminal);
+            }
         } else if let Some(panel) = self.panel_mut() {
             if let Some(index) = close {
                 panel.close(index);

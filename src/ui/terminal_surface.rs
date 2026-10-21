@@ -302,6 +302,34 @@ fn key_bytes(key: Key, modifiers: Modifiers, app_cursor: bool) -> Option<String>
     })
 }
 
+/// `MAX_TERMINALS_PER_GROUP`.
+const MAX_TERMINALS_PER_GROUP: usize = 4;
+
+/// The next free session id: "default" first, then "terminal-N".
+fn next_terminal_id(tabs: &[PanelTab]) -> String {
+    let used: Vec<usize> = tabs
+        .iter()
+        .filter_map(|t| match t {
+            PanelTab::Terminal { id, split, .. } => Some(std::iter::once(id).chain(split.iter())),
+            _ => None,
+        })
+        .flatten()
+        .map(|id| {
+            if id == "default" {
+                1
+            } else {
+                id.strip_prefix("terminal-")
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0)
+            }
+        })
+        .collect();
+    match used.iter().max() {
+        None => "default".to_owned(),
+        Some(max) => format!("terminal-{}", max + 1),
+    }
+}
+
 impl App {
     /// Opens a new terminal tab in the current panel.
     pub(crate) fn open_terminal_tab(&mut self) {
@@ -318,13 +346,105 @@ impl App {
             .max()
             .unwrap_or(0)
             + 1;
-        let id = if number == 1 {
-            "default".to_owned()
-        } else {
-            format!("terminal-{number}")
-        };
-        panel.tabs.push(PanelTab::Terminal { id, number });
+        let id = next_terminal_id(&panel.tabs);
+        panel.tabs.push(PanelTab::Terminal {
+            id,
+            number,
+            split: Vec::new(),
+            active: 0,
+            vertical: false,
+        });
         panel.active = panel.tabs.len() - 1;
+    }
+
+    /// `splitPanelTerminal`: a new session beside the group's (at most four),
+    /// stacked when `vertical`; it becomes the active one.
+    fn split_terminal(&mut self, vertical: bool) {
+        let Some(panel) = self.panel_mut() else {
+            return;
+        };
+        let next = next_terminal_id(&panel.tabs);
+        let index = panel.active.min(panel.tabs.len().saturating_sub(1));
+        if let Some(PanelTab::Terminal {
+            split,
+            active,
+            vertical: stacked,
+            ..
+        }) = panel.tabs.get_mut(index)
+            && split.len() + 1 < MAX_TERMINALS_PER_GROUP
+        {
+            split.push(next.clone());
+            *active = split.len();
+            *stacked = vertical;
+            if let Some(thread) = self.selected.clone() {
+                self.terminals.focused = Some(format!("term:{thread}\0{next}"));
+            }
+        }
+    }
+
+    /// A terminal group: its sessions side by side (or stacked), each with a
+    /// border (`border-l` / `border-t`, full on the active one), and the
+    /// floating toolbar acting on the active session.
+    pub(crate) fn terminal_surface(&mut self, ui: &mut Ui, body: Rect, tab: &PanelTab) {
+        let PanelTab::Terminal {
+            id,
+            split,
+            active,
+            vertical,
+            ..
+        } = tab
+        else {
+            return;
+        };
+        let ids: Vec<String> = std::iter::once(id.clone())
+            .chain(split.iter().cloned())
+            .collect();
+        let active = (*active).min(ids.len() - 1);
+        let count = ids.len() as f32;
+        for (index, terminal) in ids.iter().enumerate() {
+            let cell = if *vertical {
+                let height = body.height() / count;
+                Rect::from_min_size(
+                    Pos2::new(body.left(), body.top() + index as f32 * height),
+                    Vec2::new(body.width(), height),
+                )
+            } else {
+                let width = body.width() / count;
+                Rect::from_min_size(
+                    Pos2::new(body.left() + index as f32 * width, body.top()),
+                    Vec2::new(width, body.height()),
+                )
+            };
+            self.terminal_view(ui, cell, terminal);
+            if index > 0 {
+                let border = if index == active {
+                    theme::border()
+                } else {
+                    theme::alpha(theme::border(), 0.7)
+                };
+                let edge = if *vertical {
+                    Rect::from_min_size(cell.min, Vec2::new(cell.width(), 1.0))
+                } else {
+                    Rect::from_min_size(cell.min, Vec2::new(1.0, cell.height()))
+                };
+                ui.painter().rect_filled(edge, 0.0, border);
+            }
+            // A press in a session makes it the group's active one.
+            if ids.len() > 1
+                && ui.input(|i| i.pointer.any_pressed())
+                && ui
+                    .input(|i| i.pointer.interact_pos())
+                    .is_some_and(|pos| cell.contains(pos))
+                && index != active
+                && let Some(panel) = self.panel_mut()
+            {
+                let tab_index = panel.active.min(panel.tabs.len().saturating_sub(1));
+                if let Some(PanelTab::Terminal { active, .. }) = panel.tabs.get_mut(tab_index) {
+                    *active = index;
+                }
+            }
+        }
+        self.terminal_toolbar(ui, body, &ids[active], ids.len());
     }
 
     fn terminal_write(&mut self, thread: &str, id: &str, data: &str) {
@@ -335,8 +455,8 @@ impl App {
         );
     }
 
-    /// The surface in `body` for the terminal `id`.
-    pub(crate) fn terminal_surface(&mut self, ui: &mut Ui, body: Rect, id: &str) {
+    /// One session's grid in `body` for the terminal `id`.
+    fn terminal_view(&mut self, ui: &mut Ui, body: Rect, id: &str) {
         ui.painter().rect_filled(body, 0.0, theme::background());
         let (Some(thread), Some(cwd)) = (self.selected.clone(), self.workspace_cwd()) else {
             widgets::text(
@@ -695,8 +815,15 @@ impl App {
         }
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(100));
+    }
 
-        // The floating toolbar: split right, split down, new terminal, close.
+    /// The floating toolbar: split right, split down, new terminal, close.
+    fn terminal_toolbar(&mut self, ui: &mut Ui, body: Rect, id: &str, sessions: usize) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let background = theme::background();
+        let foreground = theme::foreground();
         let bar = Rect::from_min_size(
             Pos2::new(body.right() - 97.0, body.top() + 8.0),
             Vec2::new(89.0, 23.0),
@@ -732,26 +859,36 @@ impl App {
                     theme::overlay(0.048),
                 );
             }
+            let enabled = index > 1 || sessions < MAX_TERMINALS_PER_GROUP;
             let response = ui
                 .interact(
                     button,
                     ui.id().with(("terminal-bar", index)),
-                    Sense::click(),
+                    if enabled {
+                        Sense::click()
+                    } else {
+                        Sense::hover()
+                    },
                 )
                 .on_hover_text(tip);
             if response.hovered() {
                 ui.painter()
                     .rect_filled(button, CornerRadius::same(6), theme::accent());
             }
-            theme::paint_icon(ui, icon, button, 13.0, theme::alpha(foreground, 0.9));
+            theme::paint_icon(
+                ui,
+                icon,
+                button,
+                13.0,
+                theme::alpha(foreground, if enabled { 0.9 } else { 0.4 }),
+            );
             if response.clicked() {
                 action = Some(index);
             }
         }
         match action {
-            Some(0) | Some(1) => {
-                self.status = Some("Split terminals are not implemented yet".into())
-            }
+            Some(0) => self.split_terminal(false),
+            Some(1) => self.split_terminal(true),
             Some(2) => self.open_terminal_tab(),
             Some(3) => self.close_terminal(&thread, id),
             _ => {}
@@ -768,12 +905,35 @@ impl App {
             "terminal.close",
             json!({"threadId": thread, "terminalId": id}),
         );
-        if let Some(panel) = self.panel_mut()
-            && let Some(index) = panel
-                .tabs
-                .iter()
-                .position(|t| matches!(t, PanelTab::Terminal { id: tid, .. } if tid == id))
+        // `closeTerminal`: the session leaves its group; an empty group's tab closes.
+        let Some(panel) = self.panel_mut() else {
+            return;
+        };
+        let Some(index) = panel.tabs.iter().position(|t| {
+            matches!(t, PanelTab::Terminal { id: tid, split, .. } if tid == id || split.iter().any(|s| s == id))
+        }) else {
+            return;
+        };
+        let mut empty = false;
+        if let Some(PanelTab::Terminal {
+            id: first,
+            split,
+            active,
+            ..
+        }) = panel.tabs.get_mut(index)
         {
+            if first == id {
+                if split.is_empty() {
+                    empty = true;
+                } else {
+                    *first = split.remove(0);
+                }
+            } else {
+                split.retain(|s| s != id);
+            }
+            *active = (*active).min(split.len());
+        }
+        if empty {
             panel.close(index);
         }
     }
@@ -782,6 +942,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_ids_count_every_group() {
+        assert_eq!(next_terminal_id(&[]), "default");
+        let tabs = [PanelTab::Terminal {
+            id: "default".into(),
+            number: 1,
+            split: vec!["terminal-3".into()],
+            active: 0,
+            vertical: false,
+        }];
+        assert_eq!(next_terminal_id(&tabs), "terminal-4");
+    }
 
     #[test]
     fn urls_trim_like_terminal_links() {

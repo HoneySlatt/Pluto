@@ -154,10 +154,15 @@ pub(crate) enum PanelTab {
     },
     /// The thread's subagents.
     Agents,
-    /// A terminal session (`terminalId`), shown as "Terminal N".
+    /// A terminal group (`terminalIds`), shown as "Terminal N": its first
+    /// session, the sessions split beside it, the active one and whether
+    /// the split stacks them (`splitDirection: "vertical"`).
     Terminal {
         id: String,
         number: usize,
+        split: Vec<String>,
+        active: usize,
+        vertical: bool,
     },
 }
 
