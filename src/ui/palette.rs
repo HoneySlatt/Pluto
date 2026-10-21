@@ -1,7 +1,8 @@
 //! Command palette (`CommandPalette.tsx`, `CommandPalette.logic.ts`): root
 //! actions and recent threads, "New thread in…", "Add project" with local
-//! folder browsing (`filesystem.browse`). Actions whose screens are not ported
-//! yet say so when run.
+//! folder browsing (`filesystem.browse`), and the "Go to file" mode
+//! (`files/ProjectFilePicker.tsx`). Actions whose screens are not ported yet
+//! say so when run.
 use eframe::egui::{
     self, Color32, CornerRadius, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -19,6 +20,7 @@ const FOOTER: f32 = 40.0;
 const GROUP: f32 = 28.0;
 const ROW: f32 = 32.0;
 const ROW_TALL: f32 = 50.0;
+const ROW_FILE: f32 = 48.0;
 const LIST_MAX: f32 = 322.0;
 fn surface() -> Color32 {
     theme::shade(12)
@@ -30,6 +32,8 @@ pub enum View {
     NewThreadIn,
     AddProject,
     Browse,
+    /// The file picker, a mode of its own: Esc closes it.
+    Files,
 }
 
 #[derive(Default)]
@@ -54,6 +58,8 @@ enum Icon {
     Lucide(&'static str),
     Project(Project),
     Brand(&'static str, Color32),
+    /// A pierre file-type icon for the path.
+    File(String),
 }
 
 #[derive(Clone)]
@@ -63,6 +69,8 @@ enum Action {
     OpenThread(String),
     BrowseInto(String),
     AddPath(String),
+    OpenFile(String),
+    Call(fn(&mut App)),
     Missing(&'static str),
 }
 
@@ -87,6 +95,8 @@ struct Item {
     time: Option<String>,
     badge: Option<&'static str>,
     terms: Vec<String>,
+    /// The normalized query whose subsequence is emphasized (file rows).
+    fuzzy: Option<String>,
     action: Action,
 }
 
@@ -104,12 +114,15 @@ impl Item {
             time: None,
             badge: None,
             terms: vec![title.to_lowercase()],
+            fuzzy: None,
             action,
         }
     }
 
     fn height(&self) -> f32 {
-        if self.subtitle.is_some() || self.thread.is_some() {
+        if matches!(self.icon, Icon::File(_)) {
+            ROW_FILE
+        } else if self.subtitle.is_some() || self.thread.is_some() {
             ROW_TALL
         } else {
             ROW
@@ -118,7 +131,7 @@ impl Item {
 }
 
 struct Group {
-    label: &'static str,
+    label: String,
     items: Vec<Item>,
 }
 
@@ -242,10 +255,12 @@ impl App {
             .collect()
     }
 
-    fn palette_groups(&mut self) -> (Vec<Group>, bool) {
+    /// The visible groups, and the message shown when there are none.
+    fn palette_groups(&mut self) -> (Vec<Group>, Option<String>) {
         let query = self.palette.query.trim().to_owned();
         let view = self.palette.view();
         let mut searchable = false;
+        let mut empty = None;
         let groups = match view {
             View::Root => {
                 let current = self
@@ -278,8 +293,7 @@ impl App {
                 );
                 scratch.shortcut = Some("Ctrl+Alt+N");
                 actions.push(scratch);
-                let mut file =
-                    Item::new("file-search", "Go to file", Action::Missing("Go to file"));
+                let mut file = Item::new("file-search", "Go to file", Action::Push(View::Files));
                 file.shortcut = Some("Ctrl+P");
                 actions.push(file);
                 let mut search = Item::new(
@@ -322,19 +336,19 @@ impl App {
                 actions.push(Item::new(
                     "git-pull-request-arrow",
                     "Open pull requests",
-                    Action::Missing("Pull requests"),
+                    Action::Call(App::open_pull_requests),
                 ));
                 let mut usage = Item::new(
                     "chart-no-axes-column",
                     "Open usage",
-                    Action::Missing("Usage"),
+                    Action::Call(App::open_usage),
                 );
                 usage.shortcut = Some("Ctrl+U");
                 actions.push(usage);
                 actions.push(Item::new(
                     "settings",
                     "Open settings",
-                    Action::Missing("Settings"),
+                    Action::Call(App::open_settings),
                 ));
                 if let Some(project) = &current {
                     let mut settings = Item::new(
@@ -349,11 +363,11 @@ impl App {
                 if query.is_empty() {
                     vec![
                         Group {
-                            label: "Actions",
+                            label: "Actions".into(),
                             items: actions,
                         },
                         Group {
-                            label: "Recent Threads",
+                            label: "Recent Threads".into(),
                             items: self.thread_items(Some(12)),
                         },
                     ]
@@ -373,15 +387,15 @@ impl App {
                         .collect();
                     vec![
                         Group {
-                            label: "Actions",
+                            label: "Actions".into(),
                             items: actions,
                         },
                         Group {
-                            label: "Projects",
+                            label: "Projects".into(),
                             items: projects,
                         },
                         Group {
-                            label: "Threads",
+                            label: "Threads".into(),
                             items: self.thread_items(None),
                         },
                     ]
@@ -402,7 +416,7 @@ impl App {
                     })
                     .collect();
                 vec![Group {
-                    label: "Projects",
+                    label: "Projects".into(),
                     items,
                 }]
             }
@@ -427,7 +441,7 @@ impl App {
                 github.icon = Icon::Brand("github", theme::foreground());
                 github.subtitle = Some("Clone GitHub owner/repo".into());
                 vec![Group {
-                    label: "Sources",
+                    label: "Sources".into(),
                     items: vec![new_project, local, git, github],
                 }]
             }
@@ -480,15 +494,69 @@ impl App {
                     _ => Vec::new(),
                 };
                 vec![Group {
-                    label: "Directories",
+                    label: "Directories".into(),
                     items,
                 }]
+            }
+            View::Files => {
+                // `useActiveProjectTarget`; drafts have no right panel here yet.
+                let target = self.current_thread().and_then(|thread| {
+                    let project = self.state.project(&thread.project_id)?.title.clone();
+                    Some((self.workspace_cwd()?, project))
+                });
+                let searching = !query.is_empty();
+                match target {
+                    None => {
+                        empty = Some("Open a project to search its files.".to_owned());
+                        Vec::new()
+                    }
+                    Some((cwd, project)) => match self.search_files(&cwd, &query) {
+                        None => {
+                            empty = Some(if searching {
+                                "Searching workspace files…".to_owned()
+                            } else {
+                                "Indexing workspace files…".to_owned()
+                            });
+                            Vec::new()
+                        }
+                        Some(Err(error)) => {
+                            empty = Some(error);
+                            Vec::new()
+                        }
+                        Some(Ok(paths)) => {
+                            if paths.is_empty() {
+                                empty = Some(if searching {
+                                    "No matching files.".to_owned()
+                                } else {
+                                    "No files found.".to_owned()
+                                });
+                            }
+                            let fuzzy = fuzzy_query(&query);
+                            let items = paths
+                                .into_iter()
+                                .map(|path| {
+                                    let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                                    let mut item =
+                                        Item::new("file", &name, Action::OpenFile(path.clone()));
+                                    item.icon = Icon::File(path.clone());
+                                    item.subtitle = Some(path);
+                                    item.fuzzy = (!fuzzy.is_empty()).then(|| fuzzy.clone());
+                                    item
+                                })
+                                .collect();
+                            vec![Group {
+                                label: project,
+                                items,
+                            }]
+                        }
+                    },
+                }
             }
         };
         if query.is_empty() || !searchable {
             return (
                 groups.into_iter().filter(|g| !g.items.is_empty()).collect(),
-                searchable,
+                empty,
             );
         }
         let tokens: Vec<String> = normalize(&query)
@@ -510,7 +578,7 @@ impl App {
             })
             .filter(|g| !g.items.is_empty())
             .collect();
-        (filtered, searchable)
+        (filtered, empty)
     }
 
     /// Global shortcuts that open the palette or start threads.
@@ -521,13 +589,20 @@ impl App {
         if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::O)) {
             self.start_draft(None);
         }
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::P)) {
+            self.toggle_palette(View::Files);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::U)) {
+            self.palette = PaletteState::default();
+            self.open_usage();
+        }
     }
 
     pub(crate) fn command_palette(&mut self, ui: &mut Ui, screen: Rect) {
         if !self.palette.open {
             return;
         }
-        let (groups, _) = self.palette_groups();
+        let (groups, empty) = self.palette_groups();
         let rows: Vec<&Item> = groups.iter().flat_map(|g| g.items.iter()).collect();
         let count = rows.len();
         self.palette.highlight = self.palette.highlight.min(count.saturating_sub(1));
@@ -559,7 +634,7 @@ impl App {
                 run = Some(item.action.clone());
             }
         }
-        let in_submenu = !self.palette.stack.is_empty();
+        let in_submenu = !self.palette.stack.is_empty() && self.palette.view() != View::Files;
         if escape {
             self.palette = PaletteState::default();
             return;
@@ -574,7 +649,20 @@ impl App {
             .map(|g| GROUP + g.items.iter().map(Item::height).sum::<f32>())
             .sum::<f32>()
             .min(LIST_MAX);
-        let height = SEARCH + 4.0 + list_height + 4.0 + FOOTER;
+        // The empty state (`py-10` around one `text-sm` line), as measured.
+        let list_height = if groups.is_empty() && empty.is_some() {
+            88.0
+        } else {
+            list_height
+        };
+        let view_is_files = self.palette.view() == View::Files;
+        // The file list keeps `CommandList`'s full `p-2` below its rows.
+        let bottom_pad = if view_is_files && !groups.is_empty() {
+            8.0
+        } else {
+            4.0
+        };
+        let height = SEARCH + 4.0 + list_height + bottom_pad + FOOTER;
         let rect = Rect::from_min_size(
             Pos2::new(screen.center().x - WIDTH / 2.0, TOP),
             Vec2::new(WIDTH, height),
@@ -671,6 +759,7 @@ impl App {
                 let placeholder = match view {
                     View::Root => "Search commands, projects, and threads...",
                     View::Browse => "Enter project path (e.g. ~/projects/my-app)",
+                    View::Files => "Search files…",
                     _ => "Search...",
                 };
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input));
@@ -719,7 +808,7 @@ impl App {
                             widgets::text_in(
                                 ui,
                                 Rect::from_min_max(header.min + Vec2::new(8.0, 0.0), header.max),
-                                group.label,
+                                &group.label,
                                 font(12.0, Weight::Medium),
                                 theme::muted_foreground(),
                             );
@@ -738,7 +827,10 @@ impl App {
                                 {
                                     hovered_row = Some(index);
                                 }
-                                if index == highlight && (view != View::Browse || keyboard_moved) {
+                                if index == highlight
+                                    && (!matches!(view, View::Browse | View::Files)
+                                        || keyboard_moved)
+                                {
                                     ui.painter().rect_filled(
                                         row,
                                         CornerRadius::same(6),
@@ -756,6 +848,21 @@ impl App {
                             }
                         }
                     });
+                if groups.is_empty()
+                    && let Some(message) = &empty
+                {
+                    let width = widgets::text_width(ui, message, font(14.0, Weight::Regular));
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_size(
+                            Pos2::new(list.center().x - width / 2.0, list.top() + 31.0),
+                            Vec2::new(width + 1.0, 20.0),
+                        ),
+                        message,
+                        font(14.0, Weight::Regular),
+                        theme::muted_foreground(),
+                    );
+                }
 
                 // Footer hints.
                 let footer = Rect::from_min_max(
@@ -809,7 +916,10 @@ impl App {
                 x = key_chip(ui, x, "arrow-up", true) + 4.0;
                 x = key_chip(ui, x, "arrow-down", true) + 6.0;
                 x = label(ui, x, "Navigate") + 12.0;
-                if view != View::Browse {
+                if view == View::Files {
+                    x = key_chip(ui, x, "Enter", false) + 6.0;
+                    x = label(ui, x, "Open file") + 12.0;
+                } else if view != View::Browse {
                     x = key_chip(ui, x, "Enter", false) + 6.0;
                     x = label(ui, x, "Select") + 12.0;
                 }
@@ -818,7 +928,7 @@ impl App {
                     x = label(ui, x, "Back") + 12.0;
                 }
                 x = key_chip(ui, x, "Esc", false) + 6.0;
-                label(ui, x, "Close");
+                label(ui, x, if view == View::Files { "Back" } else { "Close" });
             });
         self.palette.query = query;
         if let Some(index) = hovered_row {
@@ -870,6 +980,14 @@ impl App {
                 self.palette.focus = true;
             }
             Action::AddPath(path) => self.add_project(path.trim()),
+            Action::OpenFile(path) => {
+                self.palette = PaletteState::default();
+                self.open_file(path);
+            }
+            Action::Call(open) => {
+                self.palette = PaletteState::default();
+                open(self);
+            }
             Action::Missing(what) => {
                 self.palette = PaletteState::default();
                 self.status = Some(format!("{what} is not implemented yet"));
@@ -935,6 +1053,10 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         }
         Icon::Project(project) => project_icon::paint(ui, icon_rect, project),
         Icon::Brand(name, color) => theme::paint_icon(ui, name, icon_rect, 16.0, *color),
+        Icon::File(path) => {
+            let (name, color) = crate::ui::files::file_icon(path);
+            theme::paint_icon(ui, name, icon_rect, 16.0, color);
+        }
     }
     let mut right = row.right() - 8.0;
     if item.submenu {
@@ -996,13 +1118,18 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         );
         x += 10.0 + width + 6.0;
     }
-    let title_width = widgets::text_in(
-        ui,
-        Rect::from_min_max(Pos2::new(x, title_top), Pos2::new(right, title_top + 20.0)),
-        &item.title,
-        font(14.0, Weight::Regular),
-        theme::foreground(),
-    );
+    let title_rect =
+        Rect::from_min_max(Pos2::new(x, title_top), Pos2::new(right, title_top + 20.0));
+    let title_width = match &item.fuzzy {
+        Some(query) => fuzzy_text(ui, title_rect, &item.title, query, 14.0),
+        None => widgets::text_in(
+            ui,
+            title_rect,
+            &item.title,
+            font(14.0, Weight::Regular),
+            theme::foreground(),
+        ),
+    };
     if let Some(bold) = &item.bold {
         widgets::text_in(
             ui,
@@ -1075,6 +1202,80 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
             Pos2::new(row.left() + 32.0, sub_top),
             Pos2::new(right, sub_top + 16.0),
         );
-        widgets::text_in(ui, rect, subtitle, font(12.0, Weight::Regular), muted);
+        match &item.fuzzy {
+            Some(query) => {
+                fuzzy_text(ui, rect, subtitle, query, 12.0);
+            }
+            None => {
+                widgets::text_in(ui, rect, subtitle, font(12.0, Weight::Regular), muted);
+            }
+        }
+    }
+}
+
+/// The file picker's query normalization (`getProjectFilePickerMatches`):
+/// trimmed, leading `@./` dropped, lowercased, without whitespace.
+fn fuzzy_query(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches(['@', '.', '/'])
+        .to_lowercase()
+        .split_whitespace()
+        .collect()
+}
+
+/// `findMatchIndices`: the first ordered subsequence of `query` in
+/// `value`, as char indices; empty when `value` does not contain it.
+fn match_indices(value: &str, query: &str) -> Vec<usize> {
+    let query: Vec<char> = query.chars().collect();
+    let mut indices = Vec::new();
+    for (index, c) in value.to_lowercase().chars().enumerate() {
+        if query.get(indices.len()) == Some(&c) {
+            indices.push(index);
+            if indices.len() == query.len() {
+                return indices;
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// `HighlightedFuzzyText`: muted text with the matched characters in
+/// semibold foreground, truncated to `rect`; returns its width.
+fn fuzzy_text(ui: &Ui, rect: Rect, value: &str, query: &str, size: f32) -> f32 {
+    let line = widgets::line_height_for(size);
+    let indices = match_indices(value, query);
+    let mut job = egui::text::LayoutJob::default();
+    for (index, c) in value.chars().enumerate() {
+        let format = if indices.contains(&index) {
+            widgets::format(font(size, Weight::SemiBold), theme::foreground(), line)
+        } else {
+            widgets::format(font(size, Weight::Regular), theme::muted_foreground(), line)
+        };
+        job.append(c.encode_utf8(&mut [0; 4]), 0.0, format);
+    }
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let width = galley.size().x;
+    let pos = Pos2::new(rect.left(), (rect.center().y - line / 2.0).round());
+    ui.painter().galley(pos, galley, theme::muted_foreground());
+    width
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_queries_normalize_like_upstream() {
+        assert_eq!(fuzzy_query("  ./Src App "), "srcapp");
+        assert_eq!(fuzzy_query("@README"), "readme");
+    }
+
+    #[test]
+    fn match_indices_take_the_first_subsequence() {
+        assert_eq!(match_indices("src/app.rs", "sapp"), vec![0, 4, 5, 6]);
+        assert_eq!(match_indices("README.md", "rdm"), vec![0, 3, 4]);
+        assert!(match_indices("theme.rs", "xyz").is_empty());
+        assert!(match_indices("theme.rs", "").is_empty());
     }
 }

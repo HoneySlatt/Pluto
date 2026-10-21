@@ -25,7 +25,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Theme | Dark theme tokens, Geist fonts, Lucide 0.564 icons, pierre file-type icons; follows the environment theme (`t3 theme set`, published as `environmentThemesUpdated`), with `pierre-light` code under light themes |
 | Sidebar | Wordmark, search filter, project scope filter, thread cards (project monogram, Approval/Input/Working/Failed/Done/Woke status, time, branch, provider glyph), active/pinned ordering, snoozed and settled shelves, settle/snooze/wake/un-settle actions, inline rename |
 | Thread menu | The full context menu with Snooze, Auto-settle and Copy submenus, mark unread, filter by project, archive, delete with confirmation |
-| Command palette | Ctrl+K actions and recent threads, project and thread search, new thread in project, add project with folder browsing |
+| Command palette | Ctrl+K actions and recent threads, project and thread search, new thread in project, add project with folder browsing, "Go to file" (Ctrl+P: `projects.searchEntries` with fuzzy highlights, opening the file in the right panel), and the pull requests, usage (Ctrl+U) and settings screens |
 | Header | Breadcrumb, Add action, Open, git quick action from live VCS status, Initialize Git, panel toggles |
 | Timeline | User bubbles, assistant markdown, settled-turn folds ("Worked for…"), tool rows and group summaries, changed-files card, working indicator, hover meta (time, copy) |
 | Markdown | Paragraphs, headings, lists, inline code chips, links, quotes, tables, fenced code with the pierre-dark theme |
@@ -59,7 +59,8 @@ Not ported yet (buttons for these show a "not implemented" notice):
   splits, the bottom drawer, selection and copy, links and font settings;
 - the branch diff's base-ref picker and expanding unchanged diff context;
 - attachments, queued messages, custom snooze times, project favicons, palette
-  sub-actions (themes, go to file, git clone), and "New thread on <branch>"
+  sub-actions (themes, project content search, git clone; "Go to file" from a
+  draft without a thread), and "New thread on <branch>"
   branch carry-over (it opens a draft in the thread's project on its current
   checkout).
 

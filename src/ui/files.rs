@@ -92,6 +92,13 @@ fn sort_entries(entries: &mut [Entry]) {
     });
 }
 
+/// The pierre file-type icon of a path, with its color (`PierreEntryIcon`).
+pub(crate) fn file_icon(path: &str) -> (&'static str, Color32) {
+    let extension = name_of(path).rsplit('.').next().unwrap_or_default();
+    crate::ui::markdown::language_icon(extension)
+        .unwrap_or(("file-text", Color32::from_rgb(0xad, 0xad, 0xb1)))
+}
+
 fn name_of(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -148,6 +155,56 @@ impl App {
         if self.files.requested.insert(key.clone()) {
             self.send_request(key, method, payload);
         }
+    }
+
+    /// File paths matching `query` (`useProjectFilePickerQuery`: kind "file",
+    /// empty queries allowed); `None` while the search is pending.
+    pub(crate) fn search_files(
+        &mut self,
+        cwd: &str,
+        query: &str,
+    ) -> Option<Result<Vec<String>, String>> {
+        let key = format!("{cwd}\0file\0{query}");
+        self.files_request(
+            format!("files-search:{key}"),
+            "projects.searchEntries",
+            json!({"cwd": cwd, "query": query, "limit": 200, "kind": "file"}),
+        );
+        let found = self.files.searches.get(&key)?;
+        Some(
+            found
+                .as_ref()
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter(|e| !e.directory)
+                        .map(|e| e.path.clone())
+                        .collect()
+                })
+                .map_err(Clone::clone),
+        )
+    }
+
+    /// `rightPanelStore.openFile`: the file's tab replaces the standalone
+    /// explorer, reusing an open tab of the same file.
+    pub(crate) fn open_file(&mut self, path: String) {
+        let Some(panel) = self.panel_mut() else {
+            return;
+        };
+        panel
+            .tabs
+            .retain(|t| !matches!(t, PanelTab::Files { file: None }));
+        panel.open = true;
+        panel.show(
+            PanelTab::Files {
+                file: Some(path.clone()),
+            },
+            |t| {
+                *t == PanelTab::Files {
+                    file: Some(path.clone()),
+                }
+            },
+        );
     }
 
     fn files_list(&mut self, cwd: &str, directory: &str) {
@@ -678,12 +735,7 @@ impl App {
                             theme::alpha(CHEVRON, fade),
                         );
                     } else {
-                        let extension = name_of(&row.entry.path)
-                            .rsplit('.')
-                            .next()
-                            .unwrap_or_default();
-                        let (icon, color) = crate::ui::markdown::language_icon(extension)
-                            .unwrap_or(("file-text", Color32::from_rgb(0xad, 0xad, 0xb1)));
+                        let (icon, color) = file_icon(&row.entry.path);
                         theme::paint_icon(ui, icon, slot, 16.0, theme::alpha(color, fade));
                     }
                     widgets::text_in(
