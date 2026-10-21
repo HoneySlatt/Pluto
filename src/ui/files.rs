@@ -44,7 +44,7 @@ pub struct FilesState {
     /// Search results by `cwd\0query`.
     searches: HashMap<String, Result<Vec<Entry>, String>>,
     /// File reads by `cwd\0path`.
-    reads: HashMap<String, Result<Value, String>>,
+    pub(crate) reads: HashMap<String, Result<Value, String>>,
     requested: HashSet<String>,
     /// Expanded folders by `cwd\0path`.
     expanded: HashSet<String>,
@@ -154,7 +154,7 @@ impl FilesState {
 }
 
 impl App {
-    fn files_request(&mut self, key: String, method: &'static str, payload: Value) {
+    pub(crate) fn files_request(&mut self, key: String, method: &'static str, payload: Value) {
         if self.files.requested.insert(key.clone()) {
             self.send_request(key, method, payload);
         }

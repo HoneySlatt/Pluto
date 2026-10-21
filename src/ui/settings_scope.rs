@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use crate::app::App;
 use crate::model::Project;
 use crate::theme::{self, Weight, font};
-use crate::ui::{project_icon, widgets};
+use crate::ui::{project_file, project_icon, widgets};
 
 /// `PROJECT_SCOPED_SERVER_SETTING_KEYS`.
 pub(crate) const PROJECT_SCOPED_KEYS: [&str; 18] = [
@@ -121,16 +121,17 @@ impl App {
 
     /// `resolveProjectSettings`: the environment settings with the scoped
     /// project's overrides applied (a model on a disabled provider falls
-    /// back to the environment value).
+    /// back to the environment value); once the repository's t3.json is
+    /// read, file-backed keys left unset take its value, else the built-in.
     pub(crate) fn scoped_settings(&self) -> Value {
         let settings = self.state.config["settings"].clone();
         let Some(project) = self.settings_project() else {
             return settings;
         };
-        let overrides = &settings["projectSettingsOverrides"][&project.id];
-        let Some(entries) = overrides.as_object() else {
-            return settings;
-        };
+        let empty = Map::new();
+        let entries = settings["projectSettingsOverrides"][&project.id]
+            .as_object()
+            .unwrap_or(&empty);
         let mut effective = settings.clone();
         for key in PROJECT_SCOPED_KEYS {
             let Some(value) = entries.get(key) else {
@@ -146,7 +147,39 @@ impl App {
             }
             effective[key] = value.clone();
         }
+        if let Some(file) = self.project_file(&project.workspace_root) {
+            for key in PROJECT_SCOPED_KEYS {
+                let Some((field, builtin)) = project_file::file_backed(key) else {
+                    continue;
+                };
+                if effective[key].is_null() {
+                    effective[key] = file
+                        .as_ref()
+                        .and_then(|f| f.get(field).cloned())
+                        .unwrap_or_else(|| Value::from(builtin));
+                }
+            }
+        }
         effective
+    }
+
+    /// Whether `key`'s effective value comes from the repository's t3.json
+    /// (`resolveProjectFileBackedSetting`'s "t3.json" source).
+    pub(crate) fn project_file_source(&self, key: &str) -> bool {
+        let Some(project) = self.settings_project() else {
+            return false;
+        };
+        let Some((field, _)) = project_file::file_backed(key) else {
+            return false;
+        };
+        let settings = &self.state.config["settings"];
+        let set = |value: Option<&Value>| value.is_some_and(|v| !v.is_null());
+        !set(settings["projectSettingsOverrides"][&project.id].get(key))
+            && !set(settings.get(key))
+            && self
+                .project_file(&project.workspace_root)
+                .flatten()
+                .is_some_and(|file| file.get(field).is_some())
     }
 
     /// `isModelSelectionProviderEnabled`.

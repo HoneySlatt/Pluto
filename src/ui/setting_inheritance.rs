@@ -5,15 +5,13 @@
 //! scope, the environment, the repository's t3.json for file-backed keys, the
 //! built-in default), with the effective layer checked. At the environment
 //! scope it lists the projects overriding the row and resets them.
-//!
-//! The t3.json layer always reads "Inherits": repository files are not read
-//! (upstream shows the same until it has read them).
 
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::Value;
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
+use crate::ui::project_file::file_backed;
 use crate::ui::settings::default_server_setting;
 use crate::ui::settings_scope::is_project_scoped;
 use crate::ui::widgets;
@@ -30,13 +28,12 @@ struct Layer {
     set: bool,
 }
 
-/// `PROJECT_FILE_BACKED_SETTINGS`: a file-backed key's built-in value.
-fn file_backed_builtin(key: &str) -> Option<Value> {
-    match key {
-        "defaultThreadEnvMode" => Some(Value::from("local")),
-        "worktreeSubmodules" => Some(Value::from("recursive")),
-        _ => None,
-    }
+/// Where a target's value comes from (`ProjectSettingSource`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Source {
+    Project,
+    File,
+    Environment,
 }
 
 /// `formatValue`: the human label of a value in the chain.
@@ -93,30 +90,32 @@ fn format_value(key: &str, value: &Value) -> String {
 }
 
 /// `settingInheritanceLayers` for one target: `project` is whether the
-/// target is a project, `from_project` whether its value is the project's
-/// own, `value` its effective value.
+/// target is a project, `source` where its effective `value` comes from.
 fn layers(
     key: &str,
     project: bool,
-    from_project: bool,
+    source: Source,
     value: &Value,
     environment: &Value,
 ) -> Vec<Layer> {
     let scoped = is_project_scoped(key);
-    let from_project = scoped && from_project;
+    let source = if scoped { source } else { Source::Environment };
     let environment_set = *environment != default_server_setting(key);
-    let builtin = file_backed_builtin(key);
+    let builtin = file_backed(key).map(|(_, builtin)| Value::from(builtin));
+    let own = |layer: Source| {
+        if source == layer {
+            format_value(key, value)
+        } else {
+            "Inherits".to_owned()
+        }
+    };
     let mut layers = Vec::new();
     if project && scoped {
         layers.push(Layer {
             label: "Project",
-            value: if from_project {
-                format_value(key, value)
-            } else {
-                "Inherits".to_owned()
-            },
-            effective: from_project,
-            set: from_project,
+            value: own(Source::Project),
+            effective: source == Source::Project,
+            set: source == Source::Project,
         });
     }
     layers.push(Layer {
@@ -126,21 +125,21 @@ fn layers(
         } else {
             "Inherits".to_owned()
         },
-        effective: !from_project && environment_set,
+        effective: source == Source::Environment && environment_set,
         set: environment_set,
     });
     if builtin.is_some() && project {
         layers.push(Layer {
             label: "t3.json",
-            value: "Inherits".to_owned(),
-            effective: false,
-            set: false,
+            value: own(Source::File),
+            effective: source == Source::File,
+            set: source == Source::File,
         });
     }
     layers.push(Layer {
         label: "Default",
         value: format_value(key, &builtin.unwrap_or_else(|| default_server_setting(key))),
-        effective: !from_project && !environment_set,
+        effective: source == Source::Environment && !environment_set,
         set: true,
     });
     layers
@@ -186,6 +185,17 @@ fn inline_button(ui: &mut Ui, pos: Pos2, id: impl egui::AsIdSalt, label: &str, s
 }
 
 impl App {
+    /// `resolveProjectSettings`' source of `key` at the selected scope.
+    fn setting_source(&self, key: &str) -> Source {
+        if self.project_source(key) {
+            Source::Project
+        } else if self.project_file_source(key) {
+            Source::File
+        } else {
+            Source::Environment
+        }
+    }
+
     /// The layers button at `slot` for a row reading `keys`, and its
     /// popover; `overridden` tints it like the project override state.
     pub(crate) fn setting_inheritance(
@@ -227,13 +237,24 @@ impl App {
             }
         }
 
-        let from_project = project.is_some() && scoped.iter().all(|k| self.project_source(k));
+        // `scopedSettingsSource`: one source for every scoped key, or mixed.
+        let mut sources: Vec<Source> = Vec::new();
+        if project.is_some() {
+            for key in &scoped {
+                let source = self.setting_source(key);
+                if !sources.contains(&source) {
+                    sources.push(source);
+                }
+            }
+        }
         let customized = keys
             .iter()
             .any(|k| settings[*k] != default_server_setting(k));
-        let summary = if project.is_some() && !scoped.is_empty() && from_project {
+        let summary = if sources == [Source::Project] {
             "Overridden for this project".to_owned()
-        } else if project.is_some() && !scoped.is_empty() {
+        } else if sources == [Source::File] {
+            "Inherited from the repository's t3.json".to_owned()
+        } else if sources == [Source::Environment] {
             format!("Inherited from {environment_label}")
         } else if customized {
             "Set on the environment".to_owned()
@@ -278,7 +299,7 @@ impl App {
         let chain = layers(
             key,
             project.is_some(),
-            project.as_ref().is_some_and(|_| self.project_source(key)),
+            self.setting_source(key),
             &target_value,
             &settings[key],
         );
@@ -453,7 +474,7 @@ mod tests {
         let chain = layers(
             "defaultModelSelection",
             true,
-            false,
+            Source::Environment,
             &Value::Null,
             &Value::Null,
         );
@@ -472,7 +493,7 @@ mod tests {
         let chain = layers(
             "defaultThreadEnvMode",
             true,
-            true,
+            Source::Project,
             &json!("worktree"),
             &Value::Null,
         );
@@ -480,11 +501,25 @@ mod tests {
         assert!(chain[0].effective);
         assert_eq!(chain[2].label, "t3.json");
         assert_eq!(chain[3].value, "Current checkout");
+        // The repository's t3.json fills an unset project and environment.
+        let chain = layers(
+            "worktreeSubmodules",
+            true,
+            Source::File,
+            &json!("none"),
+            &Value::Null,
+        );
+        assert_eq!(chain[0].value, "Inherits");
+        assert_eq!(
+            (chain[2].value.as_str(), chain[2].effective),
+            ("Skip", true)
+        );
+        assert!(!chain[3].effective);
         // Environment-wide keys have no project layer.
         let chain = layers(
             "enableProviderUpdateChecks",
             true,
-            false,
+            Source::Project,
             &json!(false),
             &json!(false),
         );

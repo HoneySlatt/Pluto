@@ -2034,6 +2034,10 @@ impl App {
         let Some(page) = self.settings_page else {
             return;
         };
+        // `useMemberProjectFiles`: a project scope reads the repository's t3.json.
+        if let Some(project) = self.settings_project() {
+            self.request_project_file(&project.workspace_root);
+        }
         // Popovers and the custom model field take Escape first (`preventDefault`).
         let overlay = self.open_menu.is_some()
             || self.archive_menu.is_some()
