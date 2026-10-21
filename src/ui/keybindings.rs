@@ -648,3 +648,54 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
         "modelPickerOpen && isDesktop",
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shortcuts_round_trip_to_binding_strings() {
+        let shortcut = json!({"key": "a", "modKey": true, "altKey": true, "shiftKey": true});
+        assert_eq!(shortcut_input(&shortcut), "mod+alt+shift+a");
+        assert_eq!(shortcut_input(&json!({"key": " "})), "space");
+        assert_eq!(
+            pill_parts("mod+alt+shift+a"),
+            ["Ctrl", "Alt", "\u{21e7}", "A"]
+        );
+    }
+
+    #[test]
+    fn key_presses_record_like_the_web_client() {
+        let ctrl_shift = Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(
+            binding_from_key(Key::Y, ctrl_shift).as_deref(),
+            Some("mod+shift+y")
+        );
+        assert_eq!(
+            binding_from_key(Key::F5, Modifiers::NONE).as_deref(),
+            Some("f5")
+        );
+        assert_eq!(
+            binding_from_key(Key::OpenBracket, Modifiers::COMMAND).as_deref(),
+            Some("mod+[")
+        );
+        assert_eq!(binding_from_key(Key::Insert, Modifiers::NONE), None);
+    }
+
+    #[test]
+    fn defaults_are_not_custom_and_overlaps_conflict() {
+        let bindings = json!([
+            {"command": "sidebar.toggle", "shortcut": {"key": "b", "modKey": true}},
+            {"command": "terminal.toggle", "shortcut": {"key": "b", "modKey": true}},
+        ]);
+        let rows = build_rows(&bindings, |_| String::new());
+        assert!(!rows[0].custom);
+        assert!(rows[1].custom);
+        assert_eq!(rows[1].default_key.as_deref(), Some("mod+j"));
+        assert_eq!(rows[0].conflicts, ["Terminal: Toggle"]);
+    }
+}
