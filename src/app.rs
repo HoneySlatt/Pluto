@@ -60,6 +60,11 @@ pub struct App {
     pub(crate) diff_scope_menu: Option<crate::ui::context_menu::State>,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
+    /// Full new-side files of git previews, by `diff-contents:` key.
+    pub(crate) diff_contents: std::collections::HashMap<String, Result<Vec<String>, String>>,
+    /// Revealed context per (file key, gap): lines after the previous hunk
+    /// and before the next.
+    pub(crate) diff_expanded: std::collections::HashMap<(String, usize), (u32, u32)>,
     pub(crate) diff_tree_open: bool,
     /// Whether the diff file list overflowed (and showed a scrollbar) last frame.
     pub(crate) diff_list_overflows: bool,
@@ -247,6 +252,8 @@ impl App {
             diff_scopes: Default::default(),
             diff_scope_menu: None,
             diff_branch_refs: Default::default(),
+            diff_contents: Default::default(),
+            diff_expanded: Default::default(),
             diff_tree_open: false,
             diff_list_overflows: false,
             diff_tree_selected: None,
@@ -943,6 +950,13 @@ impl App {
             self.terminals.receive(&key, result);
         } else if key.starts_with("files-") {
             self.files.receive(&key, result);
+        } else if key.starts_with("diff-contents:") {
+            let lines = result.map(|value| {
+                let text = value["newContents"].as_str().unwrap_or_default();
+                let text = text.strip_suffix('\n').unwrap_or(text);
+                text.split('\n').map(str::to_owned).collect()
+            });
+            self.diff_contents.insert(key, lines);
         } else if key.starts_with("keybinding-") {
             if let Err(error) = result {
                 self.status = Some(format!("Could not save the keybinding: {error}"));

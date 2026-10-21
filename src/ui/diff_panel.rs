@@ -1,6 +1,8 @@
 //! Right panel with the diff (`RightPanelTabs.tsx`, `DiffPanel.tsx`), rendered
-//! like `@pierre/diffs` with the app's diff surface colors. The branch scope's
-//! base-ref picker is not ported: the base is shown, not chosen.
+//! like `@pierre/diffs` with the app's diff surface colors. Git previews
+//! expand unchanged context on demand (`review.getDiffFileContents`, Pierre's
+//! `expandHunk` with 100-line steps). The branch scope's base-ref picker is
+//! not ported: the base is shown, not chosen.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2, text::LayoutJob};
 use serde_json::{Value, json};
 
@@ -9,6 +11,18 @@ use crate::diff::{self, Block, FileDiff, FileStatus, LineKind};
 use crate::theme::{self, Weight, font};
 use crate::ui::context_menu::{self, Item};
 use crate::ui::widgets;
+
+/// Where a git preview's full files come from (`createGitDiffFileContentsLoader`).
+pub struct ContentsSource {
+    key: String,
+    cwd: String,
+    kind: &'static str,
+    base: Option<String>,
+    head: Option<String>,
+}
+
+/// Pierre's `expansionLineCount`.
+const EXPANSION: u32 = 100;
 
 pub enum DiffLoad {
     Loading,
@@ -537,6 +551,23 @@ impl App {
             let tree = Rect::from_min_max(Pos2::new(list.right(), body.top()), inner.max);
             self.diff_file_tree(ui, tree, &files, &key);
         }
+        let source = match (&cwd, turn_scope) {
+            (Some(cwd), false) => {
+                let refs = self.diff_branch_refs.get(&key).cloned();
+                Some(ContentsSource {
+                    key: key.clone(),
+                    cwd: cwd.clone(),
+                    kind: if scope == DiffScope::Branch {
+                        "branch-range"
+                    } else {
+                        "working-tree"
+                    },
+                    head: refs.as_ref().map(|(head, _)| head.clone()),
+                    base: refs.map(|(_, base)| base),
+                })
+            }
+            _ => None,
+        };
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         let output = egui::ScrollArea::vertical()
             .id_salt(("diff-files", &key))
@@ -554,7 +585,7 @@ impl App {
                         }
                     }
                     if open {
-                        self.diff_file_body(ui, file, list.width(), !turn_scope);
+                        self.diff_file_body(ui, file, list.width(), source.as_ref());
                         ui.add_space(8.0);
                     }
                 }
@@ -972,11 +1003,40 @@ impl App {
 
     /// A file's hunks, unified or side by side (`diffStyle`). Rows mirror
     /// @pierre/diffs: a 4px change bar, the number gutter, then the code.
-    /// `partial`: a git preview patch, whose files end with "More unchanged
-    /// context may be available" (upstream can load the rest on demand).
-    fn diff_file_body(&mut self, ui: &mut Ui, file: &FileDiff, width: f32, partial: bool) {
+    /// `source`: a git preview, whose unchanged context expands from the
+    /// full files; until they load, its files end with "More unchanged
+    /// context may be available".
+    fn diff_file_body(
+        &mut self,
+        ui: &mut Ui,
+        file: &FileDiff,
+        width: f32,
+        source: Option<&ContentsSource>,
+    ) {
+        let partial = source.is_some();
+        let expandable =
+            partial && matches!(file.status, FileStatus::Modified | FileStatus::Renamed);
+        // The patch's hash keys the files, like Pierre's `cacheKey`: a
+        // changed file loads again.
+        let patch_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for line in file.hunks.iter().flat_map(|h| h.lines()) {
+                line.text.hash(&mut hasher);
+                line.new.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        let contents_key =
+            source.map(|s| format!("diff-contents:{}\0{}\0{patch_hash:x}", s.key, file.path));
+        let contents: Option<Vec<String>> = contents_key
+            .as_ref()
+            .and_then(|k| self.diff_contents.get(k))
+            .and_then(|r| r.as_ref().ok())
+            .cloned();
+        let mut expand: Option<(usize, bool, bool)> = None;
         if file.binary {
-            separator_row(ui, width, width, "Binary file not shown", false);
+            separator_row(ui, width, width, "Binary file not shown", false, false);
             return;
         }
         let language = file.path.rsplit('.').next().unwrap_or_default().to_owned();
@@ -996,22 +1056,33 @@ impl App {
         let digit = widgets::text_width(ui, "0", egui::FontId::monospace(13.0));
         let shift = (widest.to_string().len() as f32 - 3.0) * digit;
         let mut previous_end: u32 = 1;
-        for hunk in &file.hunks {
+        let mut previous_old_end: u32 = 1;
+        let hunk_count = file.hunks.len();
+        for (index, hunk) in file.hunks.iter().enumerate() {
             let skipped = hunk.new_start.saturating_sub(previous_end);
             if skipped > 0 {
-                separator_row(
+                let offset = i64::from(hunk.old_start) - i64::from(hunk.new_start);
+                self.diff_gap(
                     ui,
-                    width,
-                    content,
-                    &format!(
-                        "{skipped} unmodified line{}",
-                        if skipped == 1 { "" } else { "s" }
-                    ),
-                    self.diff_split,
+                    GapPlace {
+                        key: contents_key.as_deref().filter(|_| expandable),
+                        contents: contents.as_deref(),
+                        index,
+                        first: previous_end,
+                        last: hunk.new_start - 1,
+                        offset,
+                        up: index > 0,
+                        down: true,
+                    },
+                    (&language, width, content, left_width, shift),
+                    &mut expand,
                 );
             }
             if let Some(last) = hunk.lines().filter(|l| l.kind != LineKind::Deletion).last() {
                 previous_end = last.new + 1;
+            }
+            if let Some(last) = hunk.lines().filter(|l| l.kind != LineKind::Addition).last() {
+                previous_old_end = last.old + 1;
             }
             if !self.diff_split {
                 for line in hunk.lines() {
@@ -1067,15 +1138,165 @@ impl App {
                 }
             }
         }
-        // Partial patches can't tell how much unchanged code follows.
-        if partial && matches!(file.status, FileStatus::Modified | FileStatus::Renamed) {
-            separator_row(
+        // Partial patches can't tell how much unchanged code follows until
+        // the full file loads.
+        if expandable {
+            match &contents {
+                None => {
+                    if separator_row(
+                        ui,
+                        width,
+                        content,
+                        "More unchanged context may be available",
+                        self.diff_split,
+                        true,
+                    ) {
+                        expand = Some((hunk_count, true, false));
+                    }
+                }
+                Some(lines) => {
+                    let total = lines.len() as u32;
+                    if total >= previous_end {
+                        self.diff_gap(
+                            ui,
+                            GapPlace {
+                                key: contents_key.as_deref(),
+                                contents: Some(lines),
+                                index: hunk_count,
+                                first: previous_end,
+                                last: total,
+                                offset: i64::from(previous_old_end) - i64::from(previous_end),
+                                up: true,
+                                down: false,
+                            },
+                            (&language, width, content, left_width, shift),
+                            &mut expand,
+                        );
+                    }
+                }
+            }
+        }
+        // `expandHunk`: reveal the next lines, loading the files first.
+        if let (Some((index, up, down)), Some(key), Some(source)) = (expand, contents_key, source) {
+            let region = self.diff_expanded.entry((key.clone(), index)).or_default();
+            if up {
+                region.0 += EXPANSION;
+            }
+            if down {
+                region.1 += EXPANSION;
+            }
+            if !self.diff_contents.contains_key(&key) {
+                let change_type = match file.status {
+                    FileStatus::Renamed if file.hunks.is_empty() => "rename-pure",
+                    FileStatus::Renamed => "rename-changed",
+                    FileStatus::Added => "new",
+                    FileStatus::Deleted => "deleted",
+                    _ => "change",
+                };
+                self.send_request(
+                    key,
+                    "review.getDiffFileContents",
+                    json!({
+                        "cwd": source.cwd,
+                        "sourceKind": source.kind,
+                        "changeType": change_type,
+                        "baseRef": source.base,
+                        "headRef": source.head,
+                        "oldPath": file.old_path.as_deref().unwrap_or(&file.path),
+                        "newPath": file.path,
+                    }),
+                );
+            }
+        }
+    }
+
+    /// One run of unchanged lines between hunks: the revealed lines at both
+    /// ends (`fromStart` after the previous hunk, `fromEnd` before the next)
+    /// and the separator for what stays hidden.
+    fn diff_gap(
+        &mut self,
+        ui: &mut Ui,
+        gap: GapPlace,
+        (language, width, content, left_width, shift): (&str, f32, f32, f32, f32),
+        expand: &mut Option<(usize, bool, bool)>,
+    ) {
+        let size = gap.last + 1 - gap.first;
+        let (from_start, from_end) = match (gap.key, gap.contents) {
+            (Some(key), Some(_)) => self
+                .diff_expanded
+                .get(&(key.to_owned(), gap.index))
+                .copied()
+                .unwrap_or_default(),
+            _ => (0, 0),
+        };
+        let from_start = from_start.min(size);
+        let from_end = from_end.min(size - from_start);
+        let line = |number: u32| -> diff::Line {
+            let text = gap
+                .contents
+                .and_then(|lines| lines.get(number as usize - 1))
+                .cloned()
+                .unwrap_or_default();
+            diff::Line {
+                kind: LineKind::Context,
+                text,
+                old: (i64::from(number) + gap.offset).max(1) as u32,
+                new: number,
+                emphasis: Vec::new(),
+            }
+        };
+        let top: Vec<diff::Line> = (gap.first..gap.first + from_start).map(line).collect();
+        self.context_rows(ui, &top, (language, width, content, left_width, shift));
+        let hidden = size - from_start - from_end;
+        if hidden > 0 {
+            let label = format!(
+                "{hidden} unmodified line{}",
+                if hidden == 1 { "" } else { "s" }
+            );
+            if separator_row(
                 ui,
                 width,
                 content,
-                "More unchanged context may be available",
+                &label,
                 self.diff_split,
+                gap.key.is_some(),
+            ) {
+                *expand = Some((gap.index, gap.up, gap.down));
+            }
+        }
+        let bottom: Vec<diff::Line> = (gap.last + 1 - from_end..=gap.last).map(line).collect();
+        self.context_rows(ui, &bottom, (language, width, content, left_width, shift));
+    }
+
+    /// Revealed unchanged lines, painted like a hunk's context.
+    fn context_rows(
+        &mut self,
+        ui: &mut Ui,
+        lines: &[diff::Line],
+        (language, width, content, left_width, shift): (&str, f32, f32, f32, f32),
+    ) {
+        for line in lines {
+            if !self.diff_split {
+                let galley = self.code_galley(ui, line, language, content, shift);
+                let height = galley.rows.len().max(1) as f32 * LINE;
+                let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+                let column =
+                    Rect::from_min_max(row.min, Pos2::new(row.left() + content, row.bottom()));
+                paint_diff_cell(ui, column, line, line.number(), galley, shift);
+                continue;
+            }
+            let right_width = content - left_width - 2.0;
+            let old = self.code_galley(ui, line, language, left_width, shift);
+            let new = self.code_galley(ui, line, language, right_width, shift);
+            let height = old.rows.len().max(new.rows.len()).max(1) as f32 * LINE;
+            let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+            let left = Rect::from_min_size(row.min, Vec2::new(left_width, height));
+            let right = Rect::from_min_size(
+                Pos2::new(left.right() + 2.0, row.top()),
+                Vec2::new(right_width, height),
             );
+            paint_diff_cell(ui, left, line, line.old, old, shift);
+            paint_diff_cell(ui, right, line, line.new, new, shift);
         }
     }
 
@@ -1142,8 +1363,44 @@ fn centered_note(ui: &Ui, rect: Rect, text: &str) {
 /// "N unmodified lines": centered between rules in the unified view,
 /// left-aligned without rules in the split view.
 /// `content` is the width the rows use (the list minus a scrollbar strip).
-fn separator_row(ui: &mut Ui, width: f32, content: f32, text: &str, split: bool) {
-    let (allocated, _) = ui.allocate_exact_size(Vec2::new(width, SEPARATOR), Sense::hover());
+/// A gap's place in its file for `diff_gap`.
+struct GapPlace<'a> {
+    /// The full files' request key, when this gap can expand.
+    key: Option<&'a str>,
+    contents: Option<&'a [String]>,
+    /// The hunk the gap precedes (the hunk count for the trailing gap).
+    index: usize,
+    /// First and last new-side line numbers of the gap.
+    first: u32,
+    last: u32,
+    /// Old-side minus new-side numbering across the gap.
+    offset: i64,
+    up: bool,
+    down: bool,
+}
+
+/// Returns whether a clickable separator (an expandable gap) was clicked.
+fn separator_row(
+    ui: &mut Ui,
+    width: f32,
+    content: f32,
+    text: &str,
+    split: bool,
+    clickable: bool,
+) -> bool {
+    let sense = if clickable {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (allocated, response) = ui.allocate_exact_size(Vec2::new(width, SEPARATOR), sense);
+    let clicked = response.clicked();
+    let text_color = if clickable && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        theme::foreground()
+    } else {
+        theme::muted_foreground()
+    };
     let label_width = widgets::text_width(ui, text, font(11.0, Weight::Regular));
     if split {
         widgets::text_in(
@@ -1154,9 +1411,9 @@ fn separator_row(ui: &mut Ui, width: f32, content: f32, text: &str, split: bool)
             ),
             text,
             font(11.0, Weight::Regular),
-            theme::muted_foreground(),
+            text_color,
         );
-        return;
+        return clicked;
     }
     let row = Rect::from_min_size(allocated.min, Vec2::new(content - 4.0, SEPARATOR));
     let center = row.center();
@@ -1176,8 +1433,9 @@ fn separator_row(ui: &mut Ui, width: f32, content: f32, text: &str, split: bool)
         Rect::from_min_max(Pos2::new(center.x - label_width / 2.0, row.top()), row.max),
         text,
         font(11.0, Weight::Regular),
-        theme::muted_foreground(),
+        text_color,
     );
+    clicked
 }
 
 /// Rectangles covering the glyphs of `text[start..end]` in `galley`.
