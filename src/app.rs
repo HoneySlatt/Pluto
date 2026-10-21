@@ -49,6 +49,7 @@ pub struct App {
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
+    pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -259,6 +260,7 @@ impl App {
             last_row_click: None,
             confirm: None,
             snooze_dialog: None,
+            prices_dialog: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
@@ -797,6 +799,7 @@ impl eframe::App for App {
                 self.command_palette(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
+                self.prices_dialog(ui, rect);
             }
         }
         // Relative times tick; repaint at least once a minute.

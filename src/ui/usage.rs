@@ -323,7 +323,6 @@ impl App {
         for (text, weight, color) in [
             ("Usage", Weight::Medium, theme::muted_foreground()),
             ("/", Weight::Regular, theme::muted_foreground()),
-            ("All environments", Weight::Medium, theme::foreground()),
         ] {
             let width = widgets::text_width(ui, text, font(14.0, weight));
             widgets::text_in(
@@ -334,6 +333,72 @@ impl App {
                 color,
             );
             x += width + 12.0;
+        }
+        // The environments breadcrumb opens the environment menu and Model prices.
+        let label = "All environments";
+        let label_width = widgets::text_width(ui, label, font(14.0, Weight::Medium));
+        let crumb = Rect::from_min_size(
+            Pos2::new(x, 16.0),
+            Vec2::new(label_width + 2.0 + 14.0, 20.0),
+        );
+        let response = ui.interact(crumb, ui.id().with("usage-environments"), Sense::click());
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(crumb.min, Pos2::new(x + label_width + 1.0, crumb.bottom())),
+            label,
+            font(14.0, Weight::Medium),
+            theme::foreground(),
+        );
+        if response.hovered() {
+            ui.painter().hline(
+                x..=x + label_width,
+                crumb.bottom() - 1.0,
+                Stroke::new(1.0, theme::foreground()),
+            );
+        }
+        theme::paint_icon(
+            ui,
+            "chevron-down",
+            Rect::from_min_size(Pos2::new(x + label_width + 2.0, 19.0), Vec2::splat(14.0)),
+            14.0,
+            theme::alpha(theme::muted_foreground(), 0.6),
+        );
+        if response.clicked() {
+            self.open_menu = (self.open_menu.as_deref() != Some("usage-environments"))
+                .then(|| "usage-environments".to_owned());
+        }
+        let environment = self.state.config["environment"]["label"]
+            .as_str()
+            .unwrap_or("Local")
+            .to_owned();
+        let entries = [
+            widgets::MenuEntry::Item(widgets::MenuItem {
+                checked: Some(true),
+                ..widgets::MenuItem::new("All environments")
+            }),
+            widgets::MenuEntry::Separator,
+            widgets::MenuEntry::Item(widgets::MenuItem {
+                checked: Some(true),
+                ..widgets::MenuItem::new(&environment)
+            }),
+            widgets::MenuEntry::Separator,
+            widgets::MenuEntry::Item(widgets::MenuItem {
+                icon: Some("sliders-horizontal"),
+                icon_size: 16.0,
+                ..widgets::MenuItem::new("Model prices")
+            }),
+        ];
+        if widgets::menu_aligned(
+            ui,
+            &mut self.open_menu,
+            "usage-environments",
+            crumb,
+            false,
+            false,
+            &entries,
+        ) == Some(4)
+        {
+            self.open_price_dialog();
         }
         let refresh = Rect::from_min_size(Pos2::new(rect.right() - 48.0, 12.0), Vec2::splat(28.0));
         if widgets::icon_button(

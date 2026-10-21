@@ -360,6 +360,8 @@ pub struct MenuItem<'a> {
     /// `data-disabled`: dimmed to 64% and inert; `tooltip` says why.
     pub disabled: bool,
     pub tooltip: Option<&'a str>,
+    /// `MenuCheckboxItem`: a check column, ticked when true.
+    pub checked: Option<bool>,
 }
 
 impl<'a> MenuItem<'a> {
@@ -376,6 +378,7 @@ impl<'a> MenuItem<'a> {
             icon_size: 14.0,
             disabled: false,
             tooltip: None,
+            checked: None,
         }
     }
 }
@@ -504,7 +507,8 @@ pub fn menu_aligned(
                     body.clone()
                 };
                 let mut width = text_width(ui, item.label, title)
-                    + if item.icon.is_some() { 20.0 } else { 0.0 };
+                    + if item.icon.is_some() { 20.0 } else { 0.0 }
+                    + if item.checked.is_some() { 24.0 } else { 0.0 };
                 if let Some(badge) = item.badge {
                     width += 6.0 + text_width(ui, badge, badge_font.clone()) + 8.0;
                 }
@@ -610,6 +614,21 @@ pub fn menu_aligned(
                         }
                         let mut x = row.left() + 8.0;
                         let title_top = row.top() + 4.0;
+                        if let Some(checked) = item.checked {
+                            if checked {
+                                theme::paint_icon(
+                                    ui,
+                                    "check",
+                                    Rect::from_min_size(
+                                        Pos2::new(x, title_top + 2.0),
+                                        Vec2::splat(16.0),
+                                    ),
+                                    16.0,
+                                    dim(theme::foreground()),
+                                );
+                            }
+                            x += 24.0;
+                        }
                         if let Some(icon) = item.icon {
                             let size = item.icon_size;
                             theme::paint_icon(

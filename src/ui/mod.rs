@@ -27,6 +27,7 @@ pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod thread_menu;
 pub mod usage;
+pub mod usage_prices;
 pub mod usage_summary;
 pub mod when_builder;
 pub mod widgets;
