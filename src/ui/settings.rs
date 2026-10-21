@@ -237,6 +237,8 @@ pub(crate) enum Control {
         label: String,
         icon: Option<&'static str>,
         traits: Option<String>,
+        /// A trailing switch that shows the picker while on.
+        switch: Option<bool>,
     },
     Button(&'static str),
     /// `Button variant="outline" size="sm"` with a leading icon.
@@ -477,6 +479,7 @@ impl App {
                         label: model,
                         icon: model_icon,
                         traits: self.traits_label(&selection),
+                        switch: None,
                     },
                 },
                 Row {
@@ -859,6 +862,7 @@ impl App {
                     label,
                     icon,
                     traits: self.traits_label(&selection),
+                    switch: None,
                 },
             }]
         };
@@ -1186,11 +1190,22 @@ impl App {
                         "Source control writer model",
                         "Model for source control text and branch or bookmark names. Off uses the environment's text generation model.",
                         false,
-                        Control::Switch(
-                            !self
-                                .server_setting("sourceControlWriterModelSelection")
-                                .is_null(),
-                        ),
+                        {
+                            let writer = self.server_setting("sourceControlWriterModelSelection");
+                            let selection = serde_json::from_value::<crate::model::ModelSelection>(
+                                writer.clone(),
+                            )
+                            .ok()
+                            .filter(|s| !s.model.is_empty())
+                            .unwrap_or_else(|| self.composer_model_selection(true));
+                            let (label, icon) = self.model_label(&selection);
+                            Control::Model {
+                                label,
+                                icon,
+                                traits: None,
+                                switch: Some(!writer.is_null()),
+                            }
+                        },
                     ),
                 ],
             },
@@ -1890,10 +1905,10 @@ impl App {
             self.settings_picker = None;
             return;
         }
-        let key = if row == "text-generation-model" {
-            "textGenerationModelSelection"
-        } else {
-            "defaultModelSelection"
+        let key = match row.as_str() {
+            "text-generation-model" => "textGenerationModelSelection",
+            "source-control-writer-model" => "sourceControlWriterModelSelection",
+            _ => "defaultModelSelection",
         };
         let current =
             serde_json::from_value::<crate::model::ModelSelection>(self.server_setting(key))
@@ -2684,8 +2699,18 @@ impl App {
                 label,
                 icon,
                 traits,
+                switch: trailing,
             } => {
                 let mut x = right;
+                if let Some(on) = *trailing {
+                    if switch(ui, right, center_y, on, &row.id) {
+                        return Some(RowAction::Toggle(!on));
+                    }
+                    if !on {
+                        return None;
+                    }
+                    x = right - 38.0;
+                }
                 let mut clicked = false;
                 let mut buttons: Vec<(String, Option<&'static str>)> = Vec::new();
                 if let Some(traits) = traits {
