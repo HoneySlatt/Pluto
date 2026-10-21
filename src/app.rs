@@ -70,6 +70,8 @@ pub struct App {
     pub(crate) action_editor: Option<crate::ui::action_editor::ActionEditor>,
     /// The last action run per project (`lastInvokedScriptByProjectId`).
     pub(crate) last_script: std::collections::HashMap<String, String>,
+    /// The open "Choose project icon" dialog.
+    pub(crate) icon_picker: Option<crate::ui::icon_picker::IconPicker>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -291,6 +293,7 @@ impl App {
             settings_scope: Default::default(),
             action_editor: None,
             last_script: Default::default(),
+            icon_picker: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
@@ -775,6 +778,7 @@ impl eframe::App for App {
                 self.snooze_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
+                self.icon_picker_dialog(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();

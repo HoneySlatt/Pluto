@@ -2019,6 +2019,7 @@ impl App {
             || self.custom_model_editor.is_some()
             || self.add_instance.is_some()
             || self.action_editor.is_some()
+            || self.icon_picker.is_some()
             || (self.custom_model_input.is_some() && ui.memory(|m| m.focused().is_some()));
         if ui.input(|i| i.key_pressed(Key::Escape)) && !overlay {
             self.settings_page = None;
@@ -2580,7 +2581,19 @@ impl App {
         let control_width = control_width(ui, &row.control);
         let text_width =
             (rect.width() - 2.0 * ROW_PAD_X - 32.0 - control_width).min(DESCRIPTION_MAX);
-        if !row.description.is_empty() {
+        // A lone emoji (the project icon's) is drawn in color.
+        let lone_emoji = crate::ui::emoji::first_emoji(&row.description).as_deref()
+            == Some(row.description.trim());
+        if lone_emoji {
+            crate::ui::emoji::paint_faded(
+                ui,
+                Pos2::new(base_left + 7.0, y + 4.0 + 9.0),
+                12.0,
+                row.description.trim(),
+                0.8,
+            );
+            y += 4.0 + 18.0;
+        } else if !row.description.is_empty() {
             let galley = widgets::galley(
                 ui,
                 &row.description,

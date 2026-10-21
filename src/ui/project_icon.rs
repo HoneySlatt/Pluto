@@ -1,4 +1,5 @@
-//! Project monogram tiles (`ProjectMonogram.tsx`, `projectIdentity.ts`).
+//! Project icons (`ProjectFavicon.tsx`): a chosen Lucide icon or emoji, else
+//! the monogram tile (`ProjectMonogram.tsx`, `projectIdentity.ts`).
 //! Favicon images are not fetched yet; projects fall back to their monogram.
 use eframe::egui::{self, Align, Color32, Pos2, Rect, Ui, text::LayoutJob};
 
@@ -64,6 +65,27 @@ fn color_index(name: &str) -> usize {
     index
 }
 
+/// The Tailwind 400 shade of a project icon color name.
+pub fn color_named(name: &str) -> Option<Color32> {
+    theme::PROJECT_COLOR_NAMES
+        .iter()
+        .position(|n| *n == name)
+        .map(|i| theme::PROJECT_COLORS[i])
+}
+
+/// The color name of a title's derived identity.
+pub fn derived_color_name(title: &str) -> &'static str {
+    theme::PROJECT_COLOR_NAMES[color_index(title)]
+}
+
+/// The derived identity of a title (`deriveProjectIdentity`).
+pub fn derived(title: &str) -> Identity {
+    Identity {
+        monogram: monogram(title),
+        color: theme::PROJECT_COLORS[color_index(title)],
+    }
+}
+
 pub fn identity(project: &Project) -> Identity {
     let icon = project.project_icon.as_ref();
     let color_of = |value: &serde_json::Value| {
@@ -90,18 +112,73 @@ pub fn identity(project: &Project) -> Identity {
     }
 }
 
-/// Paints the 16×16-viewBox monogram tile scaled into `rect`.
+/// Paints the project's icon into `rect`: its Lucide icon (in its color),
+/// its emoji (80% of the height), or the monogram tile.
 pub fn paint(ui: &Ui, rect: Rect, project: &Project) {
-    paint_identity(ui, rect, identity(project));
+    let icon = project.project_icon.as_ref();
+    let monogram = icon.is_some_and(|i| i["kind"] == "monogram" || i["monogramText"].is_string());
+    match icon.and_then(|i| i["kind"].as_str()) {
+        Some("lucide") if !monogram => {
+            let icon = icon.expect("matched");
+            let color = icon["color"]
+                .as_str()
+                .and_then(color_named)
+                .unwrap_or(theme::PROJECT_COLORS[0]);
+            crate::ui::lucide::paint(ui, rect, icon["name"].as_str().unwrap_or_default(), color);
+        }
+        Some("emoji") => {
+            let emoji = icon.and_then(|i| i["emoji"].as_str()).unwrap_or_default();
+            crate::ui::emoji::paint(ui, rect.center(), rect.height() * 0.8, emoji);
+        }
+        _ => paint_identity(ui, rect, identity(project)),
+    }
+}
+
+/// Paints a monogram tile of `text` in `color` (`ProjectMonogram`).
+pub fn paint_monogram(ui: &Ui, rect: Rect, text: &str, color: Color32) {
+    paint_identity(
+        ui,
+        rect,
+        Identity {
+            monogram: text.to_owned(),
+            color,
+        },
+    );
 }
 
 /// `opacity-40 grayscale`: the resting favicon of parked sidebar rows.
 pub fn paint_dimmed(ui: &Ui, rect: Rect, project: &Project) {
-    let mut identity = identity(project);
-    let [r, g, b, _] = identity.color.to_array();
-    let gray = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32).round() as u8;
-    identity.color = theme::alpha(Color32::from_rgb(gray, gray, gray), 0.4);
-    paint_identity(ui, rect, identity);
+    let gray = |color: Color32| {
+        let [r, g, b, _] = color.to_array();
+        let luma = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32).round() as u8;
+        theme::alpha(Color32::from_rgb(luma, luma, luma), 0.4)
+    };
+    let icon = project.project_icon.as_ref();
+    let monogram = icon.is_some_and(|i| i["kind"] == "monogram" || i["monogramText"].is_string());
+    match icon.and_then(|i| i["kind"].as_str()) {
+        Some("lucide") if !monogram => {
+            let icon = icon.expect("matched");
+            let color = icon["color"]
+                .as_str()
+                .and_then(color_named)
+                .unwrap_or(theme::PROJECT_COLORS[0]);
+            crate::ui::lucide::paint(
+                ui,
+                rect,
+                icon["name"].as_str().unwrap_or_default(),
+                gray(color),
+            );
+        }
+        Some("emoji") => {
+            let emoji = icon.and_then(|i| i["emoji"].as_str()).unwrap_or_default();
+            crate::ui::emoji::paint_dimmed(ui, rect.center(), rect.height() * 0.8, emoji);
+        }
+        _ => {
+            let mut identity = identity(project);
+            identity.color = gray(identity.color);
+            paint_identity(ui, rect, identity);
+        }
+    }
 }
 
 fn paint_identity(ui: &Ui, rect: Rect, identity: Identity) {

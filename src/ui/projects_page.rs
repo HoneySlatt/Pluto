@@ -30,6 +30,13 @@ fn icon_description(project: &Project) -> String {
             .unwrap_or_default()
             .to_owned()
     };
+    // The lucide wire shape with `monogramText` decodes to a monogram.
+    let monogram = icon
+        .and_then(|i| i["monogramText"].as_str().or(i["monogram"].as_str()))
+        .map(str::to_owned);
+    if let Some(monogram) = monogram {
+        return format!("{monogram} · {}", text("color"));
+    }
     match icon.and_then(|i| i["kind"].as_str()) {
         Some("lucide") => format!("{} · {}", text("name"), text("color")),
         Some("monogram") => format!("{} · {}", text("text"), text("color")),
@@ -410,8 +417,11 @@ impl App {
                 "faviconPath": null,
                 "projectIcon": null,
             })),
+            ("project-icon", RowAction::Select(button)) if button == "Choose icon" => {
+                self.open_icon_picker(project);
+            }
             ("project-icon", RowAction::Select(_)) => {
-                self.status = Some("Choosing a project icon is not implemented yet".into());
+                self.status = Some("Choosing a project icon file is not implemented yet".into());
             }
             ("project-actions", RowAction::Click) => self.open_action_editor(&project.id, None),
             (id, RowAction::Click) if id.starts_with("project-action:") => {
@@ -481,5 +491,9 @@ mod tests {
         assert_eq!(icon_description(&project), "public/icon.svg");
         project.project_icon = Some(json!({"kind": "monogram", "text": "T3", "color": "indigo"}));
         assert_eq!(icon_description(&project), "T3 · indigo");
+        project.project_icon = Some(
+            json!({"kind": "lucide", "name": "folder-code", "color": "pink", "monogramText": "DX"}),
+        );
+        assert_eq!(icon_description(&project), "DX · pink");
     }
 }
