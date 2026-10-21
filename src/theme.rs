@@ -712,6 +712,11 @@ pub fn install_fonts(ctx: &egui::Context, custom: &CustomFonts) {
 fn install_styles(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::dark());
     ctx.all_styles_mut(|style| {
+        // Raw glyph coverage, without egui's dark-mode weight boost, which
+        // fattens and blurs glyphs next to Chromium's text (measured at 1x
+        // and 1.5x against the reference).
+        style.visuals.text_options.color_transfer_function =
+            egui::epaint::FontColorTransferFunction::Off;
         style
             .text_styles
             .insert(TextStyle::Body, FontId::proportional(14.0));

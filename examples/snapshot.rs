@@ -44,16 +44,28 @@ fn main() {
         .and_then(|s| s.split_once('x'))
         .and_then(|(w, h)| Some(egui::vec2(w.parse().ok()?, h.parse().ok()?)))
         .unwrap_or(egui::vec2(1440.0, 900.0));
+    // `--ppp 1.5` renders at a fractional display scale.
+    let ppp = args
+        .iter()
+        .position(|a| a == "--ppp")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
     let options = Options {
         server: (!offline).then(|| args[1].clone()),
         token: (!offline).then(|| Zeroizing::new(token.trim().to_owned())),
-        client_settings_path: None,
+        // `--settings PATH` loads (and may rewrite) a client settings file.
+        client_settings_path: args
+            .iter()
+            .position(|a| a == "--settings")
+            .and_then(|i| args.get(i + 1))
+            .map(std::path::PathBuf::from),
         // Snapshots never start provider turns.
         block_turn_starts: true,
     };
     let mut harness = Harness::builder()
         .with_size(size)
-        .with_pixels_per_point(1.0)
+        .with_pixels_per_point(ppp)
         .with_step_dt(1.0 / 60.0)
         .build_eframe(|cc| App::new(cc, options));
     // Start past egui's double-click window so scripted clicks count normally.

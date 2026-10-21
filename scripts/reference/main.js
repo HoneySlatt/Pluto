@@ -1,5 +1,7 @@
 // Captures the upstream web client served by a fixture server.
 // usage: electron scripts/reference <url> <out.png> [waitMs] [js] [width] [height]
+// SCALE=1.5 zooms the page by that factor in a window enlarged to match, like a
+// fractional display scale; CLICKS stay in page points.
 // The optional js runs in the page after waitMs (10s limit); its result is
 // printed. CLICKS="x,y;x,y" clicks those viewport points afterwards.
 const { app, BrowserWindow } = require("electron");
@@ -10,16 +12,18 @@ const path = require("path");
 const [url, out, wait = "4000", js = "", w = "1440", h = "900"] = process.argv
   .slice(2)
   .filter((arg) => !arg.startsWith("--"));
+const scale = +(process.env.SCALE || 1);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
 app.setPath("userData", path.join(os.tmpdir(), "t3-egui-reference-profile"));
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
-    width: +w,
-    height: +h,
+    width: Math.round(w * scale),
+    height: Math.round(h * scale),
     show: false,
     webPreferences: { offscreen: true },
   });
+  win.webContents.on("did-finish-load", () => win.webContents.setZoomFactor(scale));
   await win.loadURL(url);
   await sleep(+wait);
   if (js) {
@@ -34,7 +38,7 @@ app.whenReady().then(async () => {
   // points prefixed with "m" only move the pointer there (hover).
   for (const point of (process.env.CLICKS || "").split(";").filter(Boolean)) {
     const button = point.startsWith("r") ? "right" : "left";
-    const [x, y] = point.replace(/^[rm]/, "").split(",").map(Number);
+    const [x, y] = point.replace(/^[rm]/, "").split(",").map((v) => Math.round(v * scale));
     win.webContents.sendInputEvent({ type: "mouseMove", x, y });
     if (point.startsWith("m")) {
       await sleep(800);
