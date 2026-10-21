@@ -1,8 +1,8 @@
 //! Right panel with the diff (`RightPanelTabs.tsx`, `DiffPanel.tsx`), rendered
 //! like `@pierre/diffs` with the app's diff surface colors. Git previews
 //! expand unchanged context on demand (`review.getDiffFileContents`, Pierre's
-//! `expandHunk` with 100-line steps). The branch scope's base-ref picker is
-//! not ported: the base is shown, not chosen.
+//! `expandHunk` with 100-line steps), and the branch scope picks its base
+//! ref (`vcs.listRefs`).
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2, text::LayoutJob};
 use serde_json::{Value, json};
 
@@ -19,6 +19,63 @@ pub struct ContentsSource {
     kind: &'static str,
     base: Option<String>,
     head: Option<String>,
+}
+
+const BASE_REF_MENU: &str = "diff-base-ref";
+
+/// One base-ref row: its label, the ref it picks (`None`: Automatic), the
+/// local/remote pair its switch toggles, and whether it exists remotely only.
+struct BaseRefItem {
+    label: String,
+    value: Option<String>,
+    pair: Option<(String, String)>,
+    remote_only: bool,
+}
+
+/// `buildBaseRefChoices`: local branches paired with their remote (origin
+/// first), then remote-only branches. Returns (label, local, remote) names.
+fn base_ref_choices(
+    local: &[Value],
+    remote: &[Value],
+) -> Vec<(String, Option<String>, Option<String>)> {
+    let remote_branch = |r: &Value| -> String {
+        let name = r["name"].as_str().unwrap_or_default();
+        match r["remoteName"].as_str() {
+            Some(remote) if name.starts_with(&format!("{remote}/")) => {
+                name[remote.len() + 1..].to_owned()
+            }
+            _ => name.to_owned(),
+        }
+    };
+    let mut unused: Vec<bool> = vec![true; remote.len()];
+    let mut choices = Vec::new();
+    for l in local {
+        let name = l["name"].as_str().unwrap_or_default().to_owned();
+        let matches: Vec<usize> = (0..remote.len())
+            .filter(|&i| unused[i] && remote_branch(&remote[i]) == name)
+            .collect();
+        let pick = matches
+            .iter()
+            .copied()
+            .find(|&i| remote[i]["remoteName"] == "origin")
+            .or(matches.first().copied());
+        if let Some(i) = pick {
+            unused[i] = false;
+        }
+        choices.push((
+            name.clone(),
+            Some(name),
+            pick.and_then(|i| remote[i]["name"].as_str().map(str::to_owned)),
+        ));
+    }
+    for (i, r) in remote.iter().enumerate() {
+        if unused[i]
+            && let Some(name) = r["name"].as_str()
+        {
+            choices.push((name.to_owned(), None, Some(name.to_owned())));
+        }
+    }
+    choices
 }
 
 /// Pierre's `expansionLineCount`.
@@ -251,8 +308,12 @@ impl App {
             (DiffScope::Turn(_), Some(turn)) => Some(self.diff_key(&thread.id, turn)),
             (DiffScope::Turn(_), None) => None,
             (DiffScope::WorkingTree | DiffScope::Branch, _) => cwd.as_ref().map(|cwd| {
+                let base = match (scope, self.diff_base_refs.get(&thread.id)) {
+                    (DiffScope::Branch, Some(base)) => base.as_str(),
+                    _ => "",
+                };
                 format!(
-                    "preview:{}:{cwd}:{}",
+                    "preview:{}:{cwd}:{}:{base}",
                     if scope == DiffScope::Branch {
                         "branch-range"
                     } else {
@@ -273,11 +334,14 @@ impl App {
                 }
                 self.send_request(key.clone(), "orchestration.getTurnDiff", payload);
             } else if let Some(cwd) = &cwd {
-                self.send_request(
-                    key.clone(),
-                    "review.getDiffPreview",
-                    json!({"cwd": cwd, "ignoreWhitespace": self.diff_ignore_whitespace}),
-                );
+                let mut payload =
+                    json!({"cwd": cwd, "ignoreWhitespace": self.diff_ignore_whitespace});
+                if scope == DiffScope::Branch
+                    && let Some(base) = self.diff_base_refs.get(&thread.id)
+                {
+                    payload["baseRef"] = json!(base);
+                }
+                self.send_request(key.clone(), "review.getDiffPreview", payload);
             }
         }
         let files: Vec<FileDiff> = match key.as_ref().and_then(|k| self.diffs.get(k)) {
@@ -285,44 +349,6 @@ impl App {
             _ => Vec::new(),
         };
         let has_files = !files.is_empty();
-
-        // Branch scope: "head → base" beside the scope button.
-        if scope == DiffScope::Branch
-            && let Some((head, base)) = key
-                .as_ref()
-                .and_then(|k| self.diff_branch_refs.get(k))
-                .cloned()
-        {
-            let refs_font = font(12.0, Weight::Regular);
-            let mut x = scope_button.right() + 12.0;
-            let head_width = widgets::text_width(ui, &head, refs_font.clone()).min(192.0);
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(
-                    Pos2::new(x, bar.top()),
-                    Pos2::new(x + head_width, bar.bottom()),
-                ),
-                &head,
-                refs_font.clone(),
-                theme::muted_foreground(),
-            );
-            x += head_width + 8.0;
-            theme::paint_icon(
-                ui,
-                "arrow-right",
-                Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(14.0, bar.height())),
-                14.0,
-                theme::alpha(theme::muted_foreground(), 0.7),
-            );
-            x += 22.0;
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(Pos2::new(x, bar.top()), bar.max),
-                &base,
-                refs_font,
-                theme::muted_foreground(),
-            );
-        }
 
         // Right-hand controls, drawn right to left: file tree, whitespace,
         // wrap, layout, collapse-all, refresh, stats.
@@ -482,6 +508,7 @@ impl App {
             );
             let additions_text = format!("+{additions}");
             let add_width = widgets::text_width(ui, &additions_text, mono.clone());
+            x = del_x - 4.0 - add_width;
             widgets::text_in(
                 ui,
                 Rect::from_min_max(
@@ -492,6 +519,87 @@ impl App {
                 mono,
                 STAT_ADDITION,
             );
+        }
+
+        // Branch scope: "head → base", the base a ref picker, shrinking the
+        // head first when the controls leave little room.
+        if scope == DiffScope::Branch
+            && let Some((head, base)) = key
+                .as_ref()
+                .and_then(|k| self.diff_branch_refs.get(k))
+                .cloned()
+        {
+            let refs_font = font(12.0, Weight::Regular);
+            let button_font = font(12.0, Weight::Medium);
+            let start = scope_button.right() + 12.0;
+            let end = x - 5.0;
+            let base_width = widgets::text_width(ui, &base, button_font.clone()).min(192.0 - 30.0);
+            let button_width = (7.0 + base_width + 3.0 + 14.0 + 7.0).ceil();
+            let head_full = widgets::text_width(ui, &head, refs_font.clone()).min(192.0);
+            let head_width =
+                head_full.min((end - start - 8.0 - 14.0 - 8.0 - button_width).max(0.0));
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(start, bar.top()),
+                    Pos2::new(start + head_width, bar.bottom()),
+                ),
+                &head,
+                refs_font,
+                theme::muted_foreground(),
+            );
+            let arrow_x = start + head_width + 8.0;
+            theme::paint_icon(
+                ui,
+                "arrow-right",
+                Rect::from_min_size(Pos2::new(arrow_x, bar.top()), Vec2::new(14.0, bar.height())),
+                14.0,
+                theme::alpha(theme::muted_foreground(), 0.7),
+            );
+            let button = Rect::from_min_size(
+                Pos2::new(arrow_x + 22.0, bar.center().y - 12.0),
+                Vec2::new(button_width, 24.0),
+            );
+            let open = self.open_menu.as_deref() == Some(BASE_REF_MENU);
+            let response = ui.interact(button, ui.id().with("diff-base-ref"), Sense::click());
+            if response.hovered() || open {
+                ui.painter()
+                    .rect_filled(button, CornerRadius::same(8), theme::accent());
+            }
+            let color = if response.hovered() || open {
+                theme::foreground()
+            } else {
+                theme::muted_foreground()
+            };
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(button.left() + 8.0, button.top()),
+                    Pos2::new(button.left() + 8.0 + base_width, button.bottom()),
+                ),
+                &base,
+                button_font,
+                color,
+            );
+            theme::paint_icon(
+                ui,
+                "chevron-down",
+                Rect::from_min_size(
+                    Pos2::new(button.left() + 8.0 + base_width + 3.0, button.top()),
+                    Vec2::new(14.0, 24.0),
+                ),
+                14.0,
+                theme::alpha(color, 0.7),
+            );
+            if response.clicked() {
+                self.open_menu = (!open).then(|| BASE_REF_MENU.to_owned());
+                self.base_ref_query.clear();
+            }
+            if let Some(cwd) = &cwd
+                && self.open_menu.as_deref() == Some(BASE_REF_MENU)
+            {
+                self.base_ref_popup(ui, button, &thread.id, cwd, &head);
+            }
         }
 
         // Body: a message, or the files beside an optional file tree.
@@ -1273,6 +1381,263 @@ impl App {
         self.context_rows(ui, &bottom, (language, width, content, left_width, shift));
     }
 
+    /// The base-ref combobox (`ComboboxPopup w-72`): search, the Branch /
+    /// Remote header, Automatic, then the branches (`vcs.listRefs`).
+    fn base_ref_popup(
+        &mut self,
+        ui: &mut Ui,
+        anchor: Rect,
+        thread_id: &str,
+        cwd: &str,
+        head: &str,
+    ) {
+        let query = self.base_ref_query.trim().to_owned();
+        let mut refs = |kind: &str| -> Vec<Value> {
+            let key = format!("refs:{cwd}\0{kind}\0{query}");
+            if !self.diff_refs.contains_key(&key) {
+                self.diff_refs.insert(key.clone(), Ok(Value::Null));
+                let mut payload = json!({"cwd": cwd, "includeMatchingRemoteRefs": true, "refKind": kind, "limit": 100});
+                if !query.is_empty() {
+                    payload["query"] = json!(query);
+                }
+                self.send_request(key.clone(), "vcs.listRefs", payload);
+            }
+            self.diff_refs
+                .get(&key)
+                .and_then(|r| r.as_ref().ok())
+                .and_then(|v| v["refs"].as_array().cloned())
+                .unwrap_or_default()
+        };
+        let local: Vec<Value> = refs("local")
+            .into_iter()
+            .filter(|r| r["name"].as_str() != Some(head))
+            .collect();
+        let remote = refs("remote");
+        let lowered = query.to_lowercase();
+        let choices: Vec<(String, Option<String>, Option<String>)> =
+            base_ref_choices(&local, &remote)
+                .into_iter()
+                .filter(|(label, l, r)| {
+                    lowered.is_empty()
+                        || label.to_lowercase().contains(&lowered)
+                        || l.as_ref()
+                            .is_some_and(|n| n.to_lowercase().contains(&lowered))
+                        || r.as_ref()
+                            .is_some_and(|n| n.to_lowercase().contains(&lowered))
+                })
+                .collect();
+        let selected = self.diff_base_refs.get(thread_id).cloned();
+        // Items: Automatic (only without a query), then the choices.
+        let mut items: Vec<BaseRefItem> = Vec::new();
+        if query.is_empty() {
+            items.push(BaseRefItem {
+                label: "Automatic".into(),
+                value: None,
+                pair: None,
+                remote_only: false,
+            });
+        }
+        for (label, l, r) in &choices {
+            let value = match (&selected, r) {
+                (Some(selected), Some(remote)) if selected == remote => remote.clone(),
+                _ => l.clone().or_else(|| r.clone()).unwrap_or_default(),
+            };
+            let pair = l.clone().zip(r.clone());
+            items.push(BaseRefItem {
+                label: label.clone(),
+                value: Some(value),
+                pair,
+                remote_only: l.is_none(),
+            });
+        }
+        let rows = items.len().max(1) as f32;
+        let height = 1.0 + 9.0 + 33.0 + 1.0 + 29.0 + 4.0 + (rows * 28.0).min(256.0) + 4.0 + 1.0;
+        let rect = Rect::from_min_size(
+            Pos2::new(anchor.left(), anchor.bottom() + 4.0),
+            Vec2::new(288.0, height),
+        );
+        let mut open = self.open_menu.take();
+        let mut query_text = self.base_ref_query.clone();
+        let mut chosen: Option<Option<String>> = None;
+        widgets::popup(ui, &mut open, BASE_REF_MENU, rect, anchor, |ui, rect| {
+            let inner = rect.shrink(1.0);
+            let search = Rect::from_min_size(
+                Pos2::new(inner.left() + 12.0, inner.top() + 9.0),
+                Vec2::new(inner.width() - 24.0, 33.0),
+            );
+            widgets::combobox_search(ui, search, &mut query_text, "Search refs...");
+            let header = Rect::from_min_max(
+                Pos2::new(inner.left(), search.bottom() + 1.0),
+                Pos2::new(inner.right(), search.bottom() + 30.0),
+            );
+            ui.painter().rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(header.left(), header.bottom() - 1.0),
+                    Vec2::new(header.width(), 1.0),
+                ),
+                0.0,
+                theme::alpha(theme::border(), 0.7),
+            );
+            let caps = |ui: &Ui, x: f32, text: &str| -> f32 {
+                let mut job = egui::text::LayoutJob::default();
+                let mut format =
+                    widgets::format(font(10.0, Weight::Medium), theme::muted_foreground(), 14.0);
+                format.extra_letter_spacing = 0.25;
+                job.append(text, 0.0, format);
+                let galley = ui.fonts_mut(|f| f.layout_job(job));
+                let width = galley.size().x;
+                ui.painter().galley(
+                    Pos2::new(x, header.top() + 8.0),
+                    galley,
+                    theme::muted_foreground(),
+                );
+                width
+            };
+            caps(ui, header.left() + 36.0, "BRANCH");
+            let remote_width = {
+                let mut job = egui::text::LayoutJob::default();
+                let mut format =
+                    widgets::format(font(10.0, Weight::Medium), theme::muted_foreground(), 14.0);
+                format.extra_letter_spacing = 0.25;
+                job.append("REMOTE", 0.0, format);
+                ui.fonts_mut(|f| f.layout_job(job)).size().x
+            };
+            caps(ui, header.right() - 26.0 - remote_width, "REMOTE");
+            let list = Rect::from_min_max(
+                Pos2::new(inner.left(), header.bottom() + 4.0),
+                Pos2::new(inner.right(), inner.bottom() - 4.0),
+            );
+            if items.is_empty() {
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_size(
+                        list.min + Vec2::new(12.0, 0.0),
+                        Vec2::new(list.width(), 28.0),
+                    ),
+                    "No matching refs.",
+                    font(14.0, Weight::Regular),
+                    theme::muted_foreground(),
+                );
+                return;
+            }
+            let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
+            list_ui.set_clip_rect(list);
+            egui::ScrollArea::vertical()
+                .id_salt("diff-base-ref-list")
+                .auto_shrink([false, false])
+                .show(&mut list_ui, |ui| {
+                    let origin = ui.max_rect().min;
+                    for (index, item_data) in items.iter().enumerate() {
+                        let BaseRefItem {
+                            label,
+                            value,
+                            pair,
+                            remote_only,
+                        } = item_data;
+                        let item = Rect::from_min_size(
+                            Pos2::new(origin.x + 4.0, origin.y + index as f32 * 28.0),
+                            Vec2::new(list.width() - 8.0, 28.0),
+                        );
+                        let response =
+                            ui.interact(item, ui.id().with(("base-ref", index)), Sense::click());
+                        let current = value.as_deref().map(str::to_owned) == selected;
+                        if response.hovered() || current {
+                            ui.painter()
+                                .rect_filled(item, CornerRadius::same(6), theme::accent());
+                        }
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(item.left() + 8.0, item.top()),
+                                Pos2::new(item.right() - 40.0, item.bottom()),
+                            ),
+                            label,
+                            font(14.0, Weight::Regular),
+                            theme::foreground(),
+                        );
+                        let mut handled = false;
+                        if let Some((local_name, remote_name)) = pair {
+                            // `Switch`: use the remote version of the branch.
+                            let use_remote = value.as_deref() == Some(remote_name.as_str());
+                            let track = Rect::from_min_size(
+                                Pos2::new(item.right() - 30.0, item.center().y - 7.0),
+                                Vec2::new(24.0, 14.0),
+                            );
+                            let switch = ui.interact(
+                                track,
+                                ui.id().with(("base-ref-remote", index)),
+                                Sense::click(),
+                            );
+                            ui.painter().rect_filled(
+                                track,
+                                CornerRadius::same(7),
+                                if use_remote {
+                                    theme::primary()
+                                } else {
+                                    theme::overlay(0.08)
+                                },
+                            );
+                            let thumb_x = if use_remote {
+                                track.right() - 13.0
+                            } else {
+                                track.left() + 1.0
+                            };
+                            ui.painter().rect_filled(
+                                Rect::from_min_size(
+                                    Pos2::new(thumb_x, track.top() + 1.0),
+                                    Vec2::splat(12.0),
+                                ),
+                                CornerRadius::same(6),
+                                theme::background(),
+                            );
+                            if switch.clicked() {
+                                chosen = Some(Some(if use_remote {
+                                    local_name.clone()
+                                } else {
+                                    remote_name.clone()
+                                }));
+                                handled = true;
+                            }
+                        } else if *remote_only {
+                            theme::paint_icon(
+                                ui,
+                                "check",
+                                Rect::from_min_size(
+                                    Pos2::new(item.right() - 18.0, item.top()),
+                                    Vec2::new(12.0, 28.0),
+                                ),
+                                12.0,
+                                theme::muted_foreground(),
+                            );
+                        }
+                        if response.clicked() && !handled {
+                            chosen = Some(value.clone());
+                        }
+                    }
+                    ui.allocate_rect(
+                        Rect::from_min_size(
+                            origin,
+                            Vec2::new(list.width(), items.len() as f32 * 28.0),
+                        ),
+                        Sense::hover(),
+                    );
+                });
+        });
+        self.base_ref_query = query_text;
+        self.open_menu = open;
+        if let Some(choice) = chosen {
+            match choice {
+                Some(base) => {
+                    self.diff_base_refs.insert(thread_id.to_owned(), base);
+                }
+                None => {
+                    self.diff_base_refs.remove(thread_id);
+                }
+            }
+            self.open_menu = None;
+        }
+    }
+
     /// Revealed unchanged lines, painted like a hunk's context.
     fn context_rows(
         &mut self,
@@ -1728,6 +2093,31 @@ fn tree_rows(files: &[FileDiff], collapsed: &std::collections::BTreeSet<String>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_refs_pair_local_branches_with_origin() {
+        let local = vec![json!({"name": "main"}), json!({"name": "dev"})];
+        let remote = vec![
+            json!({"name": "fork/main", "remoteName": "fork"}),
+            json!({"name": "origin/main", "remoteName": "origin"}),
+            json!({"name": "origin/release", "remoteName": "origin"}),
+        ];
+        let choices = base_ref_choices(&local, &remote);
+        assert_eq!(
+            choices[0],
+            (
+                "main".into(),
+                Some("main".into()),
+                Some("origin/main".into())
+            )
+        );
+        assert_eq!(choices[1], ("dev".into(), Some("dev".into()), None));
+        assert_eq!(choices[2].0, "fork/main");
+        assert_eq!(
+            choices[3],
+            ("origin/release".into(), None, Some("origin/release".into()))
+        );
+    }
 
     fn file(path: &str) -> FileDiff {
         FileDiff {

@@ -66,6 +66,11 @@ pub struct App {
     /// Revealed context per (file key, gap): lines after the previous hunk
     /// and before the next.
     pub(crate) diff_expanded: std::collections::HashMap<(String, usize), (u32, u32)>,
+    /// The branch scope's chosen base ref per thread (absent: Automatic).
+    pub(crate) diff_base_refs: std::collections::HashMap<String, String>,
+    pub(crate) base_ref_query: String,
+    /// `vcs.listRefs` results by `refs:` key.
+    pub(crate) diff_refs: std::collections::HashMap<String, Result<Value, String>>,
     pub(crate) diff_tree_open: bool,
     /// Whether the diff file list overflowed (and showed a scrollbar) last frame.
     pub(crate) diff_list_overflows: bool,
@@ -258,6 +263,9 @@ impl App {
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_expanded: Default::default(),
+            diff_base_refs: Default::default(),
+            base_ref_query: String::new(),
+            diff_refs: Default::default(),
             diff_tree_open: false,
             diff_list_overflows: false,
             diff_tree_selected: None,
@@ -954,6 +962,8 @@ impl App {
             self.terminals.receive(&key, result);
         } else if key.starts_with("files-") {
             self.files.receive(&key, result);
+        } else if key.starts_with("refs:") {
+            self.diff_refs.insert(key, result);
         } else if key.starts_with("diff-contents:") {
             let lines = result.map(|value| {
                 let text = value["newContents"].as_str().unwrap_or_default();
