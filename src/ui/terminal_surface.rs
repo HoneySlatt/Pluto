@@ -11,7 +11,8 @@
 use std::collections::HashMap;
 
 use eframe::egui::{
-    Color32, CornerRadius, Event, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
+    self, Color32, CornerRadius, Event, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
+    Vec2,
 };
 use serde_json::{Value, json};
 
@@ -24,6 +25,8 @@ const FONT_SIZE: f32 = 12.0;
 const CELL_HEIGHT: f32 = 18.0;
 const PADDING: f32 = 4.0;
 const CURSOR: Color32 = Color32::from_rgb(180, 203, 255);
+/// `rgba(180, 203, 255, 0.25)`.
+const SELECTION: Color32 = Color32::from_rgba_unmultiplied_const(180, 203, 255, 64);
 
 /// Ghostty's default palette (Tomorrow Night) for the 16 ANSI colors.
 const PALETTE: [Color32; 16] = [
@@ -75,6 +78,52 @@ pub struct TerminalView {
     error: Option<String>,
     /// Lines scrolled back into the history.
     offset: usize,
+    /// The selection's anchor and head as (buffer line, column), lines
+    /// counted from the oldest scrollback line.
+    selection: Option<((usize, usize), (usize, usize))>,
+}
+
+impl TerminalView {
+    /// The selected text: each line's cells trimmed at the end, joined by
+    /// newlines (`getSelection`).
+    fn selected_text(&self) -> Option<String> {
+        let (a, b) = self.selection?;
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        if start == end {
+            return None;
+        }
+        let screen = &self.terminal.screen;
+        let lines: Vec<&Vec<terminal::Cell>> =
+            screen.scrollback.iter().chain(screen.grid.iter()).collect();
+        let mut out = Vec::new();
+        for (line, cells) in lines
+            .iter()
+            .enumerate()
+            .skip(start.0)
+            .take(end.0 + 1 - start.0)
+        {
+            let from = if line == start.0 { start.1 } else { 0 };
+            let to = if line == end.0 { end.1 } else { cells.len() };
+            let text: String = cells
+                .iter()
+                .skip(from)
+                .take(to.saturating_sub(from))
+                .map(|c| c.c)
+                .collect();
+            out.push(text.trim_end().to_owned());
+        }
+        let text = out.join("\n");
+        (!text.trim().is_empty()).then_some(text)
+    }
+
+    /// Whether the cell at (line, col) lies in the selection.
+    fn selected(&self, line: usize, col: usize) -> bool {
+        let Some((a, b)) = self.selection else {
+            return false;
+        };
+        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        (line, col) >= start && (line, col) < end
+    }
 }
 
 /// Terminal sessions by stream key.
@@ -83,9 +132,57 @@ pub struct Terminals {
     views: HashMap<String, TerminalView>,
     /// The terminal that has keyboard focus.
     focused: Option<String>,
+    /// The open selection or right-click menu: its terminal and state.
+    menu: Option<(String, crate::ui::context_menu::State)>,
 }
 
 impl App {
+    /// `terminalContextMenuItems` / `terminalSelectionMenuItems`: Copy
+    /// (disabled without a selection) and Paste. "Add to chat" is not ported.
+    fn terminal_menu(&mut self, ui: &mut Ui, key: &str, _thread: &str, _id: &str) {
+        let Some((menu_key, state)) = self.terminals.menu.take() else {
+            return;
+        };
+        if menu_key != key {
+            self.terminals.menu = Some((menu_key, state));
+            return;
+        }
+        let selection = self
+            .terminals
+            .views
+            .get(key)
+            .and_then(TerminalView::selected_text);
+        let items = [
+            crate::ui::context_menu::Item {
+                disabled: selection.is_none(),
+                ..crate::ui::context_menu::Item::new("copy", "Copy")
+            },
+            crate::ui::context_menu::Item::new("paste", "Paste"),
+        ];
+        let mut open = Some(state);
+        let clicked = crate::ui::context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.terminals.menu = Some((key.to_owned(), state));
+        }
+        match clicked.as_deref() {
+            Some("copy") => {
+                if let Some(text) = selection {
+                    ui.ctx().copy_text(text);
+                }
+                if let Some(view) = self.terminals.views.get_mut(key) {
+                    view.selection = None;
+                }
+                self.terminals.focused = Some(key.to_owned());
+            }
+            Some("paste") => {
+                self.terminals.focused = Some(key.to_owned());
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            }
+            _ => {}
+        }
+    }
+
     /// Whether a terminal holds the keyboard: the focused one is the open
     /// panel's active surface.
     pub(crate) fn terminal_focused(&self) -> bool {
@@ -229,6 +326,7 @@ impl App {
                     status: "starting".into(),
                     error: None,
                     offset: 0,
+                    selection: None,
                 },
             );
             self.terminals.focused = Some(key.clone());
@@ -256,10 +354,60 @@ impl App {
         }
 
         // Focus, keyboard and paste, wheel scrolling.
-        let response = ui.interact(body, ui.id().with(("terminal", &key)), Sense::click());
+        let response = ui.interact(
+            body,
+            ui.id().with(("terminal", &key)),
+            Sense::click_and_drag(),
+        );
         if response.clicked() {
             self.terminals.focused = Some(key.clone());
         }
+        // Mouse selection on the cell grid; a release opens the selection
+        // actions, a right click the terminal menu (Copy, Paste).
+        let origin = body.min + Vec2::splat(PADDING);
+        let cell_at = |view: &TerminalView, pos: Pos2| -> (usize, usize) {
+            let screen = &view.terminal.screen;
+            let first = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
+            let row = (((pos.y - origin.y) / CELL_HEIGHT).floor().max(0.0) as usize)
+                .min(screen.rows.saturating_sub(1));
+            let col =
+                (((pos.x - origin.x) / cell_width).round().max(0.0) as usize).min(screen.cols);
+            (first + row, col)
+        };
+        if let Some(view) = self.terminals.views.get_mut(&key)
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                let cell = cell_at(view, pos);
+                view.selection = Some((cell, cell));
+                self.terminals.focused = Some(key.clone());
+            } else if response.dragged_by(egui::PointerButton::Primary)
+                && let Some((anchor, _)) = view.selection
+            {
+                view.selection = Some((anchor, cell_at(view, pos)));
+            }
+        }
+        if response.drag_stopped()
+            && self
+                .terminals
+                .views
+                .get(&key)
+                .is_some_and(|v| v.selected_text().is_some())
+            && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        {
+            self.terminals.menu = Some((key.clone(), crate::ui::context_menu::State::new(pos)));
+        }
+        if response.clicked()
+            && let Some(view) = self.terminals.views.get_mut(&key)
+        {
+            view.selection = None;
+        }
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            self.terminals.menu = Some((key.clone(), crate::ui::context_menu::State::new(pos)));
+        }
+        self.terminal_menu(ui, &key, &thread, id);
         let focused =
             self.terminals.focused.as_deref() == Some(key.as_str()) && self.open_menu.is_none();
         if focused {
@@ -274,6 +422,16 @@ impl App {
                     )
                 })
                 .unwrap_or((false, false));
+            // Ctrl+Shift+C copies the selection (`hasSelection` / `getSelection`).
+            if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::C))
+                && let Some(text) = self
+                    .terminals
+                    .views
+                    .get(&key)
+                    .and_then(TerminalView::selected_text)
+            {
+                ui.ctx().copy_text(text);
+            }
             let mut out = String::new();
             ui.input_mut(|input| {
                 input.events.retain(|event| match event {
@@ -327,11 +485,31 @@ impl App {
         let screen = &view.terminal.screen;
         let foreground = theme::foreground();
         let background = theme::background();
-        let origin = body.min + Vec2::splat(PADDING);
         let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
         let lines = screen.view(view.offset);
+        let first_line = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
         for (row, line) in lines.iter().enumerate() {
             let y = origin.y + row as f32 * CELL_HEIGHT;
+            // The selection band under the glyphs (`--terminal-selection-background`).
+            let mut col = 0;
+            while col < line.len() {
+                if !view.selected(first_line + row, col) {
+                    col += 1;
+                    continue;
+                }
+                let start = col;
+                while col < line.len() && view.selected(first_line + row, col) {
+                    col += 1;
+                }
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(origin.x + start as f32 * cell_width, y),
+                        Vec2::new((col - start) as f32 * cell_width, CELL_HEIGHT),
+                    ),
+                    0.0,
+                    SELECTION,
+                );
+            }
             let mut col = 0;
             while col < line.len() {
                 let cell = line[col];
@@ -534,6 +712,23 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selections_read_trimmed_lines() {
+        let mut terminal = Terminal::new(10, 3);
+        terminal.feed("hello\r\nworld");
+        let mut view = TerminalView {
+            terminal,
+            status: "running".into(),
+            error: None,
+            offset: 0,
+            selection: Some(((1, 3), (0, 0))),
+        };
+        assert_eq!(view.selected_text().as_deref(), Some("hello\nwor"));
+        assert!(view.selected(0, 9) && !view.selected(1, 3));
+        view.selection = Some(((0, 2), (0, 2)));
+        assert_eq!(view.selected_text(), None);
+    }
 
     #[test]
     fn keys_follow_xterm() {

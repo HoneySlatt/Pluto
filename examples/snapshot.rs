@@ -57,13 +57,13 @@ fn main() {
         std::thread::sleep(Duration::from_millis(30));
     }
     // `--click x,y` clicks once, then waits for the server to answer.
-    // Interactions, in order: --click/--rclick/--dclick/--move x,y, --scroll dy, --type text, --key Enter|Escape.
+    // Interactions, in order: --click/--rclick/--dclick/--move x,y, --drag x1,y1,x2,y2,
+    // --scroll dy, --type text, --key Enter|Escape.
     let mut ops = args.iter().skip(4).peekable();
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
-            "--click" | "--rclick" | "--dclick" | "--move" | "--scroll" | "--type" | "--key" => {
-                ops.next().cloned().unwrap_or_default()
-            }
+            "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
+            | "--key" => ops.next().cloned().unwrap_or_default(),
             _ => continue,
         };
         let point = || {
@@ -83,6 +83,32 @@ fn main() {
             }
         };
         match op.as_str() {
+            "--drag" => {
+                let n: Vec<f32> = value.split(',').map(|v| v.parse().unwrap()).collect();
+                let (from, to) = (egui::pos2(n[0], n[1]), egui::pos2(n[2], n[3]));
+                harness.event(egui::Event::PointerMoved(from));
+                harness.step();
+                harness.event(egui::Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+                for step in 1..=8 {
+                    harness.event(egui::Event::PointerMoved(
+                        from + (to - from) * (step as f32 / 8.0),
+                    ));
+                    harness.step();
+                }
+                harness.event(egui::Event::PointerButton {
+                    pos: to,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
             "--click" | "--rclick" | "--dclick" => {
                 let pos = point();
                 harness.event(egui::Event::PointerMoved(pos));
