@@ -1,17 +1,12 @@
 //! Project favicons (`ProjectFavicon.tsx`, `createProjectFaviconUrlAtomFamily`
 //! in `client-runtime/src/state/assets.ts`): `assets.createUrl` with a
-//! `project-favicon` resource issues a signed URL, fetched over HTTP on a
-//! background thread; the server's "missing" marker keeps the monogram.
-//!
-//! Only plain-HTTP servers (this computer) are fetched; favicons from an
-//! HTTPS server stay monograms. Raster favicons are downscaled on the CPU and
+//! `project-favicon` resource issues a signed URL, fetched (HTTP or HTTPS,
+//! `crate::http`) on a background thread; the server's "missing" marker
+//! keeps the monogram. Raster favicons are downscaled on the CPU and
 //! fitted into the icon box (`object-contain`); SVGs are rasterized by egui.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use eframe::egui::{self, Rect, Ui};
 use serde_json::{Value, json};
@@ -78,56 +73,6 @@ pub fn paint(ui: &Ui, rect: Rect, project: &Project, tint: egui::Color32) -> boo
     true
 }
 
-/// A plain HTTP/1.1 GET (`Connection: close`); the body on a 200.
-pub(crate) fn http_get(url: &url::Url) -> Option<Vec<u8>> {
-    if url.scheme() != "http" {
-        return None;
-    }
-    let host = url.host_str()?.trim_matches(['[', ']']).to_owned();
-    let port = url.port_or_known_default()?;
-    let address = (host.as_str(), port).to_socket_addrs().ok()?.next()?;
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).ok()?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .ok()?;
-    let path = match url.query() {
-        Some(query) => format!("{}?{query}", url.path()),
-        None => url.path().to_owned(),
-    };
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
-    )
-    .ok()?;
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).ok()?;
-    let split = response.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let head = String::from_utf8_lossy(&response[..split]).to_lowercase();
-    if !head.starts_with("http/1.1 200") && !head.starts_with("http/1.0 200") {
-        return None;
-    }
-    let body = response[split + 4..].to_vec();
-    if head.contains("transfer-encoding: chunked") {
-        return Some(dechunk(&body));
-    }
-    Some(body)
-}
-
-/// Joins a chunked body.
-fn dechunk(mut body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    while let Some(line) = body.windows(2).position(|w| w == b"\r\n") {
-        let size =
-            usize::from_str_radix(String::from_utf8_lossy(&body[..line]).trim(), 16).unwrap_or(0);
-        if size == 0 || body.len() < line + 2 + size {
-            break;
-        }
-        out.extend_from_slice(&body[line + 2..line + 2 + size]);
-        body = &body[(line + 2 + size + 2).min(body.len())..];
-    }
-    out
-}
-
 impl App {
     /// Asks for the favicons of projects without a chosen icon (once per
     /// workspace root and favicon path).
@@ -187,7 +132,7 @@ impl App {
         let id = project_id.to_owned();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let state = match http_get(&url) {
+            let state = match crate::http::get(&url) {
                 Some(bytes) if !bytes.is_empty() => {
                     let name = url
                         .path_segments()
@@ -208,15 +153,5 @@ impl App {
             }
             ctx.request_repaint();
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunked_bodies_join() {
-        assert_eq!(dechunk(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n"), b"abcde");
     }
 }

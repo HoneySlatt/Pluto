@@ -1,12 +1,10 @@
 //! Image attachments of user messages (`UserTimelineRow` in
 //! `chat/MessagesTimeline.tsx`, `selectMessageImageResources` in
 //! `session-logic.ts`): `assets.createUrl` with an `attachment` resource
-//! issues a signed URL, fetched over HTTP on a background thread like the
+//! issues a signed URL, fetched (HTTP or HTTPS) on a background thread like the
 //! project favicons, then decoded and drawn cropped to its cell
 //! (`object-cover`), downscaled on the CPU to the drawn pixel size.
-//!
-//! Only plain-HTTP servers are fetched; an HTTPS server's images keep their
-//! name placeholder. Expanding an image (the lightbox) is not ported.
+//! The preview opens in `lightbox`.
 //!
 //! Also the composer's images (`addComposerAttachments`): pasted from the
 //! clipboard (read with `wl-paste`, or `xclip` on X11, since egui only
@@ -20,8 +18,8 @@ use eframe::egui::{self, CornerRadius, Rect, TextureHandle, Ui, Vec2};
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::http::get as http_get;
 use crate::ui::emoji::premultiply;
-use crate::ui::favicon::http_get;
 
 #[derive(Clone)]
 enum Loaded {

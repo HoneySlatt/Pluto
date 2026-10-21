@@ -1,6 +1,7 @@
 pub mod app;
 pub mod diff;
 pub mod highlight;
+pub mod http;
 pub mod model;
 pub mod protocol;
 pub mod requests;

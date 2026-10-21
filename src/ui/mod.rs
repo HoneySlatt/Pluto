@@ -20,6 +20,7 @@ pub mod keybindings;
 pub mod lightbox;
 pub mod lucide;
 pub mod markdown;
+pub mod md_links;
 pub mod palette;
 pub mod pickers;
 pub mod project_actions;

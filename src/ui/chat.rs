@@ -414,6 +414,27 @@ impl App {
     /// One image cell (`aspect-[4/3] overflow-hidden rounded-lg border
     /// border-border/80 bg-background/70`): the image cropped to fill it, or
     /// its name while it loads.
+    /// `openFileInPanel`: a markdown file reference opens in the right
+    /// panel when it is inside the workspace.
+    fn open_markdown_file(&mut self, path: &str) {
+        let root = self.workspace_cwd().unwrap_or_default();
+        let relative =
+            if let Some(rest) = path.strip_prefix(&format!("{}/", root.trim_end_matches('/'))) {
+                Some(rest.to_owned())
+            } else if path.starts_with('/') || path.starts_with('~') {
+                None
+            } else {
+                Some(path.trim_start_matches("./").to_owned())
+            };
+        match relative {
+            Some(relative) => self.open_file(relative),
+            None => {
+                self.status =
+                    Some("Opening files outside the workspace is not implemented yet".into());
+            }
+        }
+    }
+
     /// Returns whether the loaded image was clicked (`cursor-zoom-in`).
     fn attachment_cell(&mut self, ui: &mut Ui, rect: Rect, image: &serde_json::Value) -> bool {
         let radius = CornerRadius::same(8);
@@ -576,11 +597,15 @@ impl App {
             Vec2::new(width - 8.0, f32::INFINITY),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-            Markdown {
-                highlighter: &mut self.highlighter,
-                id: ui.id().with(("markdown", &message.id)),
+            let mut markdown = Markdown::new(
+                &mut self.highlighter,
+                ui.id().with(("markdown", &message.id)),
+            );
+            markdown.show(ui, text, width - 8.0);
+            // `openFileInPanel`: a file chip opens in the right panel.
+            if let Some(file) = markdown.opened_file.take() {
+                self.open_markdown_file(&file.path);
             }
-            .show(ui, text, width - 8.0);
             if let Some((turn_id, files)) = changes {
                 ui.add_space(16.0);
                 self.changed_files_card(ui, turn_id, files, width - 8.0);

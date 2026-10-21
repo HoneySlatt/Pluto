@@ -1,6 +1,9 @@
 //! Assistant markdown (`ChatMarkdown.tsx` + `.chat-markdown` CSS): block
 //! margins collapse like CSS, inline code gets its padded chip, fenced code
 //! uses the pierre-dark highlighter, tables use the 12px compact layout.
+//! File references become file chips and external links lead with their
+//! site's icon (`md_links`).
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -11,6 +14,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 
 use crate::highlight::Highlighter;
 use crate::theme::{self, Weight, font};
+use crate::ui::md_links::{self, FileRef};
 use crate::ui::widgets;
 
 const BODY: f32 = 14.0;
@@ -30,7 +34,55 @@ struct Style {
 enum Inline {
     Text(String, Style),
     Code(String),
+    /// A file reference, drawn as a chip.
+    File(FileRef),
     Break,
+}
+
+/// Inline code that names a file becomes its chip
+/// (`resolveInlineCodeFileLinkMeta`).
+fn code_inline(code: &str) -> Inline {
+    md_links::inline_code_candidate(code)
+        .and_then(|candidate| md_links::parse_file_link(&candidate))
+        .map_or_else(|| Inline::Code(code.to_owned()), Inline::File)
+}
+
+/// Skips a link's content up to and past its end.
+fn skip_link(events: &[Event], index: &mut usize) {
+    let mut depth = 0;
+    while *index < events.len() {
+        let event = &events[*index];
+        *index += 1;
+        match event {
+            Event::Start(Tag::Link { .. }) => depth += 1,
+            Event::End(TagEnd::Link) if depth == 0 => break,
+            Event::End(TagEnd::Link) => depth -= 1,
+            _ => {}
+        }
+    }
+}
+
+/// Every file reference's path, for the chips' disambiguating suffixes.
+fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
+    let inlines = |inlines: &[Inline], out: &mut Vec<String>| {
+        for inline in inlines {
+            if let Inline::File(file) = inline {
+                out.push(file.path.clone());
+            }
+        }
+    };
+    for block in blocks {
+        match block {
+            Block::Paragraph(i) | Block::Heading(_, i) => inlines(i, out),
+            Block::List { items, .. } => items.iter().for_each(|item| collect_files(item, out)),
+            Block::Quote(blocks) => collect_files(blocks, out),
+            Block::Table { head, rows, .. } => {
+                head.iter().for_each(|cell| inlines(cell, out));
+                rows.iter().flatten().for_each(|cell| inlines(cell, out));
+            }
+            Block::Code { .. } | Block::Rule => {}
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -197,15 +249,33 @@ fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => style.link = Some(dest_url.to_string()),
+            Event::Start(Tag::Link { dest_url, .. }) => match md_links::parse_file_link(dest_url) {
+                Some(file) => {
+                    *index += 1;
+                    skip_link(events, index);
+                    out.push(Inline::File(file));
+                    continue;
+                }
+                None => style.link = Some(dest_url.to_string()),
+            },
             Event::End(TagEnd::Emphasis) => style.italic = false,
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
             Event::End(TagEnd::Link) => style.link = None,
             Event::Text(t) => out.push(Inline::Text(t.to_string(), style.clone())),
-            Event::Code(t) => out.push(Inline::Code(t.to_string())),
+            Event::Code(t) => out.push(code_inline(t)),
             Event::SoftBreak => out.push(Inline::Text(" ".into(), style.clone())),
             Event::HardBreak => out.push(Inline::Break),
+            // A nested list (or any block) ends the item's inline run.
+            Event::Start(
+                Tag::List(_)
+                | Tag::Item
+                | Tag::Paragraph
+                | Tag::CodeBlock(_)
+                | Tag::BlockQuote(_)
+                | Tag::Table(_)
+                | Tag::Heading { .. },
+            ) => break,
             Event::Start(_) => depth += 1,
             Event::End(_) if depth > 0 => depth -= 1,
             _ => break,
@@ -226,13 +296,19 @@ fn parse_inlines(events: &[Event], index: &mut usize, end: TagEnd) -> Vec<Inline
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => style.link = Some(dest_url.to_string()),
+            Event::Start(Tag::Link { dest_url, .. }) => match md_links::parse_file_link(dest_url) {
+                Some(file) => {
+                    skip_link(events, index);
+                    out.push(Inline::File(file));
+                }
+                None => style.link = Some(dest_url.to_string()),
+            },
             Event::End(TagEnd::Emphasis) => style.italic = false,
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
             Event::End(TagEnd::Link) => style.link = None,
             Event::Text(t) => out.push(Inline::Text(t.to_string(), style.clone())),
-            Event::Code(t) => out.push(Inline::Code(t.to_string())),
+            Event::Code(t) => out.push(code_inline(t)),
             Event::SoftBreak => out.push(Inline::Text(" ".into(), style.clone())),
             Event::HardBreak => out.push(Inline::Break),
             Event::Html(t) | Event::InlineHtml(t) => {
@@ -248,23 +324,91 @@ struct Inlines {
     galley: Arc<Galley>,
     /// Section index → inline code chip group.
     chips: Vec<Option<usize>>,
+    /// Section index → file chip group and its file.
+    files: Vec<Option<(usize, FileRef)>>,
+    /// Section index → the icon a link's leading space holds.
+    icons: Vec<Option<md_links::LinkIcon>>,
     links: Vec<Option<String>>,
+    /// The text size (chip metrics are in em).
+    size: f32,
 }
 
-fn layout_inlines(
+/// A file chip's room before its label: the border, the padding, the icon
+/// and the gap.
+fn chip_lead(chip_size: f32) -> f32 {
+    1.0 + (0.5 + 1.17 + 0.33) * chip_size
+}
+
+/// A link icon's room: `ms-[0.25em]`, 14px, `me-[0.2em]`.
+fn link_icon_width(size: f32) -> f32 {
+    0.25 * size + 14.0 + 0.2 * size
+}
+
+/// A transparent non-breaking space `width` wide in `font` (a section's
+/// letter spacing goes before its glyph, so this never opens a paragraph).
+fn spacer(ui: &Ui, font: egui::FontId, width: f32, line_height: f32) -> egui::TextFormat {
+    let nbsp = ui.fonts_mut(|f| f.glyph_width(&font, '\u{a0}'));
+    let mut format = widgets::format(font, Color32::TRANSPARENT, line_height);
+    format.extra_letter_spacing = width - nbsp;
+    format
+}
+
+/// The job and its per-section metadata, with a line break inserted before
+/// the sections (by their index without the inserted breaks) in `breaks`.
+#[allow(clippy::too_many_arguments)]
+fn build_inlines(
     ui: &Ui,
     inlines: &[Inline],
     size: f32,
     line_height: f32,
     base_weight: Weight,
     color: Color32,
-    wrap: f32,
-) -> Inlines {
+    suffixes: &HashMap<String, String>,
+    breaks: &std::collections::HashSet<usize>,
+) -> (LayoutJob, Inlines, Vec<Option<usize>>) {
     let mut job = LayoutJob::default();
     let mut chips = Vec::new();
+    let mut files = Vec::new();
+    let mut icons = Vec::new();
     let mut links = Vec::new();
+    // Where breaks were inserted (job section indices).
+    let mut inserted: Vec<usize> = Vec::new();
+    let newline = widgets::format(font(size, base_weight), Color32::TRANSPARENT, line_height);
+    let break_before = |job: &mut LayoutJob,
+                        chips: &mut Vec<Option<usize>>,
+                        files: &mut Vec<Option<(usize, FileRef)>>,
+                        icons: &mut Vec<Option<md_links::LinkIcon>>,
+                        links: &mut Vec<Option<String>>,
+                        inserted: &mut Vec<usize>| {
+        let original = chips.len() - inserted.len();
+        if breaks.contains(&original) {
+            inserted.push(chips.len());
+            job.append("\n", 0.0, newline.clone());
+            chips.push(None);
+            files.push(None);
+            icons.push(None);
+            links.push(None);
+        }
+    };
     let mut chip = 0;
+    let mut file_chip = 0;
+    let mut previous_link: Option<String> = None;
     for inline in inlines {
+        // A link leads with its site's icon (`ms-[0.25em] me-[0.2em]`
+        // around 14px), kept on the line of its first word.
+        // The room goes before the link's first text (`leading_space`).
+        let link = match inline {
+            Inline::Text(_, style) => style.link.clone(),
+            _ => None,
+        };
+        let mut link_icon = None;
+        if let Some(url) = &link
+            && previous_link.as_ref() != Some(url)
+            && let Some(host) = md_links::external_host(url)
+        {
+            link_icon = Some(md_links::link_icon(&host, ui.ctx()));
+        }
+        previous_link = link;
         match inline {
             Inline::Text(text, style) => {
                 let weight = if style.bold {
@@ -280,9 +424,57 @@ fn layout_inlines(
                 if style.link.is_some() {
                     format.color = INFO_FOREGROUND;
                 }
-                job.append(text, 0.0, format);
+                let leading = if link_icon.is_some() {
+                    break_before(
+                        &mut job,
+                        &mut chips,
+                        &mut files,
+                        &mut icons,
+                        &mut links,
+                        &mut inserted,
+                    );
+                    link_icon_width(size)
+                } else {
+                    0.0
+                };
+                job.append(text, leading, format);
                 chips.push(None);
+                files.push(None);
+                icons.push(link_icon.take());
                 links.push(style.link.clone());
+            }
+            Inline::File(file) => {
+                // `ContextChip`: 0.86em medium text, 1px border, 0.5em
+                // padding, a 1.17em icon and a 0.33em gap; it never wraps.
+                let chip_size = size * 0.86;
+                let chip_font = font(chip_size, Weight::Medium);
+                let label = md_links::chip_label(file, suffixes).replace(' ', "\u{a0}");
+                let [_, _, text] = md_links::mention_colors(theme::border(), theme::foreground());
+                break_before(
+                    &mut job,
+                    &mut chips,
+                    &mut files,
+                    &mut icons,
+                    &mut links,
+                    &mut inserted,
+                );
+                job.append(
+                    &label,
+                    chip_lead(chip_size),
+                    widgets::format(chip_font.clone(), text, line_height),
+                );
+                job.append(
+                    "\u{a0}",
+                    0.0,
+                    spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
+                );
+                for _ in 0..2 {
+                    chips.push(None);
+                    files.push(Some((file_chip, file.clone())));
+                    icons.push(None);
+                    links.push(None);
+                }
+                file_chip += 1;
             }
             Inline::Code(code) => {
                 // CSS: 12px mono, padding .1rem .35rem, 1px border.
@@ -299,6 +491,8 @@ fn layout_inlines(
                 );
                 job.append(" ", 0.0, pad);
                 chips.extend([Some(chip), Some(chip), Some(chip)]);
+                files.extend([None, None, None]);
+                icons.extend([None, None, None]);
                 links.extend([None, None, None]);
                 chip += 1;
             }
@@ -309,16 +503,96 @@ fn layout_inlines(
                     widgets::format(font(size, base_weight), color, line_height),
                 );
                 chips.push(None);
+                files.push(None);
+                icons.push(None);
                 links.push(None);
             }
         }
     }
-    job.wrap.max_width = wrap;
-    let galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
-    Inlines {
-        galley,
-        chips,
-        links,
+    // Each section's index without the inserted breaks.
+    let mut original = 0;
+    let origins: Vec<Option<usize>> = (0..chips.len())
+        .map(|index| {
+            if inserted.contains(&index) {
+                None
+            } else {
+                original += 1;
+                Some(original - 1)
+            }
+        })
+        .collect();
+    let empty = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(LayoutJob::default())));
+    (
+        job,
+        Inlines {
+            galley: empty,
+            chips,
+            files,
+            icons,
+            links,
+            size,
+        },
+        origins,
+    )
+}
+
+/// Lays the inlines out. A section whose room sits before it (a link's icon,
+/// a chip's padding) must not start a wrapped row, where epaint drops that
+/// room: such a section gets a line break of its own, like upstream's
+/// `whitespace-nowrap` keeps the icon with its word.
+#[allow(clippy::too_many_arguments)]
+fn layout_inlines(
+    ui: &Ui,
+    inlines: &[Inline],
+    size: f32,
+    line_height: f32,
+    base_weight: Weight,
+    color: Color32,
+    wrap: f32,
+    suffixes: &HashMap<String, String>,
+) -> Inlines {
+    let mut breaks = std::collections::HashSet::new();
+    loop {
+        let (mut job, mut laid, origins) = build_inlines(
+            ui,
+            inlines,
+            size,
+            line_height,
+            base_weight,
+            color,
+            suffixes,
+            &breaks,
+        );
+        job.wrap.max_width = wrap;
+        laid.galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
+        let sections = char_sections(&laid.galley);
+        let mut added = false;
+        let mut char_index = 0usize;
+        let rows = &laid.galley.rows;
+        for (row_index, placed) in rows.iter().enumerate() {
+            let continues = row_index > 0 && !rows[row_index - 1].ends_with_newline;
+            if continues && !placed.row.glyphs.is_empty() {
+                let section = sections.get(char_index).copied().unwrap_or(0);
+                let starts_section =
+                    char_index == 0 || sections.get(char_index - 1).copied() != Some(section);
+                let leading = laid
+                    .galley
+                    .job
+                    .sections
+                    .get(section)
+                    .map_or(0.0, |s| s.leading_space);
+                if starts_section
+                    && leading > 0.0
+                    && let Some(Some(original)) = origins.get(section)
+                {
+                    added |= breaks.insert(*original);
+                }
+            }
+            char_index += placed.row.glyphs.len() + usize::from(placed.ends_with_newline);
+        }
+        if !added {
+            return laid;
+        }
     }
 }
 
@@ -339,23 +613,30 @@ fn char_sections(galley: &Galley) -> Vec<usize> {
         .collect()
 }
 
-/// Paints inline text, chip backgrounds and handles link clicks.
-fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
+/// Paints inline text, chip backgrounds and icons, and handles link clicks;
+/// returns a file chip that was clicked.
+fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Option<FileRef> {
     let painter = ui.painter().clone();
     let sections = char_sections(&inlines.galley);
+    let chip_size = inlines.size * 0.86;
+    let [chip_border, chip_fill, _] =
+        md_links::mention_colors(theme::border(), theme::foreground());
+    let mut file_rects: Vec<(Rect, FileRef)> = Vec::new();
     // Rows hold one glyph per character; a trailing `\n` is omitted.
     let mut char_index = 0usize;
     for placed in &inlines.galley.rows {
         let mut run: Option<(usize, f32, f32)> = None;
+        let mut file_run: Option<(usize, f32, f32, FileRef)> = None;
         let row_top = pos.y + placed.pos.y;
         let row_height = placed.row.size.y;
+        let row_x = pos.x + placed.pos.x;
         let flush = |run: &mut Option<(usize, f32, f32)>| {
             if let Some((_, left, right)) = run.take() {
                 let height = 21.0f32.min(row_height);
                 let top = row_top + ((row_height - height) / 2.0).round();
                 let rect = Rect::from_min_max(
-                    Pos2::new(pos.x + placed.pos.x + left, top),
-                    Pos2::new(pos.x + placed.pos.x + right, top + height),
+                    Pos2::new(row_x + left, top),
+                    Pos2::new(row_x + right, top + height),
                 );
                 painter.rect(
                     rect,
@@ -364,6 +645,41 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
                     Stroke::new(1.0, theme::border()),
                     StrokeKind::Inside,
                 );
+            }
+        };
+        // A file chip: the fill, the border over it, the file-type icon.
+        let mut flush_file = |file_run: &mut Option<(usize, f32, f32, FileRef)>| {
+            if let Some((_, left, right, file)) = file_run.take() {
+                let height = (1.41 * chip_size).round();
+                let top = row_top + ((row_height - height) / 2.0).round();
+                let rect = Rect::from_min_max(
+                    Pos2::new((row_x + left).round(), top),
+                    Pos2::new((row_x + right).round(), top + height),
+                );
+                let radius = CornerRadius::same((0.5 * chip_size).round() as u8);
+                painter.rect_filled(rect, radius, chip_fill);
+                painter.rect_stroke(
+                    rect,
+                    radius,
+                    Stroke::new(1.0, chip_border),
+                    StrokeKind::Inside,
+                );
+                let icon_size = (1.17 * chip_size).round();
+                let icon = Rect::from_min_size(
+                    Pos2::new(
+                        rect.left() + 1.0 + (0.5 * chip_size).round(),
+                        rect.center().y - icon_size / 2.0,
+                    ),
+                    Vec2::splat(icon_size),
+                );
+                let directory = !md_links::basename(&file.path).contains('.');
+                let (name, tint) = if directory {
+                    ("folder", theme::muted_foreground())
+                } else {
+                    crate::ui::files::file_icon(&file.path)
+                };
+                theme::paint_icon(ui, name, icon, icon_size, tint);
+                file_rects.push((rect, file));
             }
         };
         for glyph in &placed.row.glyphs {
@@ -380,17 +696,71 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
                 }
                 (None, _) => flush(&mut run),
             }
+            let file = inlines.files.get(section).cloned().flatten();
+            match (file, &mut file_run) {
+                (Some((c, _)), Some((current, _, right, _))) if *current == c => {
+                    *right = glyph.pos.x + glyph.advance_width;
+                }
+                (Some((c, file)), _) => {
+                    flush_file(&mut file_run);
+                    // The run opens on the label; its room is to the left.
+                    let left = glyph.pos.x - chip_lead(chip_size);
+                    file_run = Some((c, left, glyph.pos.x + glyph.advance_width, file));
+                }
+                (None, _) => flush_file(&mut file_run),
+            }
+            // A link's icon sits in its first text's leading space.
+            let first_of_section =
+                char_index < 2 || sections.get(char_index - 2).copied() != Some(section);
+            if first_of_section && let Some(Some(icon)) = inlines.icons.get(section) {
+                let rect = Rect::from_min_size(
+                    Pos2::new(
+                        row_x + glyph.pos.x - link_icon_width(inlines.size) + 0.25 * inlines.size,
+                        row_top + (row_height - 14.0) / 2.0 + 0.125 * inlines.size / 2.0,
+                    ),
+                    Vec2::splat(14.0),
+                );
+                match icon {
+                    md_links::LinkIcon::Named(name) => {
+                        theme::paint_icon(ui, name, rect, 14.0, INFO_FOREGROUND);
+                    }
+                    md_links::LinkIcon::Image(image) => {
+                        crate::ui::attachments::paint_contain(
+                            ui,
+                            rect,
+                            &format!("link-favicon:{:p}", Arc::as_ptr(image)),
+                            image,
+                            Color32::WHITE,
+                        );
+                    }
+                }
+            }
         }
         flush(&mut run);
+        flush_file(&mut file_run);
         if placed.ends_with_newline {
             char_index += 1;
         }
     }
     let rect = Rect::from_min_size(pos, inlines.galley.size());
     painter.galley(pos, inlines.galley.clone(), theme::foreground());
-    if inlines.links.iter().any(Option::is_some) {
+    let mut opened = None;
+    if inlines.links.iter().any(Option::is_some) || !file_rects.is_empty() {
         let response = ui.interact(rect, id, Sense::click());
         if let Some(pointer) = response.hover_pos() {
+            if let Some((_, file)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                let path = match file.line {
+                    Some(line) => format!("{}:{line}", file.path),
+                    None => file.path.clone(),
+                };
+                let clicked = response.clicked();
+                response.on_hover_text(path);
+                if clicked {
+                    opened = Some(file.clone());
+                }
+                return opened;
+            }
             let cursor = inlines.galley.cursor_from_pos(pointer - pos);
             let section = sections.get(cursor.index.0).copied();
             if let Some(url) = section.and_then(|s| inlines.links.get(s).cloned().flatten()) {
@@ -401,17 +771,37 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
             }
         }
     }
+    opened
 }
 
 pub struct Markdown<'a> {
     pub highlighter: &'a mut Highlighter,
     pub id: egui::Id,
+    /// A file chip clicked during `show`.
+    pub(crate) opened_file: Option<FileRef>,
+    /// Parent-folder suffixes of file chips sharing a basename.
+    suffixes: HashMap<String, String>,
+    /// Inside a quote, text takes the muted color.
+    quoted: bool,
 }
 
-impl Markdown<'_> {
+impl<'a> Markdown<'a> {
+    pub fn new(highlighter: &'a mut Highlighter, id: egui::Id) -> Self {
+        Self {
+            highlighter,
+            id,
+            opened_file: None,
+            suffixes: HashMap::new(),
+            quoted: false,
+        }
+    }
+
     /// Renders `text` into the column starting at `ui.cursor()`; returns its height.
     pub fn show(&mut self, ui: &mut Ui, text: &str, width: f32) -> f32 {
         let blocks = parse(text);
+        let mut files = Vec::new();
+        collect_files(&blocks, &mut files);
+        self.suffixes = md_links::parent_suffixes(&files);
         let top = ui.cursor().top();
         self.blocks(ui, &blocks, width, 0);
         ui.cursor().top() - top
@@ -431,7 +821,12 @@ impl Markdown<'_> {
     }
 
     fn block(&mut self, ui: &mut Ui, block: &Block, width: f32, depth: usize, id: egui::Id) {
-        let paragraph_color = theme::alpha(theme::foreground(), 0.8);
+        // `.chat-markdown blockquote`: `color: var(--contrast-muted-foreground)`.
+        let paragraph_color = if self.quoted {
+            theme::muted_foreground()
+        } else {
+            theme::alpha(theme::foreground(), 0.8)
+        };
         match block {
             Block::Paragraph(inlines) => {
                 let laid = layout_inlines(
@@ -442,10 +837,13 @@ impl Markdown<'_> {
                     Weight::Regular,
                     paragraph_color,
                     width,
+                    &self.suffixes,
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                paint_inlines(ui, rect.min, &laid, id);
+                if let Some(file) = paint_inlines(ui, rect.min, &laid, id) {
+                    self.opened_file = Some(file);
+                }
             }
             Block::Heading(level, inlines) => {
                 let size = match level {
@@ -467,10 +865,13 @@ impl Markdown<'_> {
                     Weight::SemiBold,
                     color,
                     width,
+                    &self.suffixes,
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                paint_inlines(ui, rect.min, &laid, id);
+                if let Some(file) = paint_inlines(ui, rect.min, &laid, id) {
+                    self.opened_file = Some(file);
+                }
             }
             Block::List { start, items } => {
                 for (number, item) in items.iter().enumerate() {
@@ -539,7 +940,11 @@ impl Markdown<'_> {
                         Pos2::new(left + 14.8, top),
                         Vec2::new(width - 14.8, f32::INFINITY),
                     )),
-                    |ui| self.blocks(ui, blocks, width - 14.8, depth + 1),
+                    |ui| {
+                        let quoted = std::mem::replace(&mut self.quoted, true);
+                        self.blocks(ui, blocks, width - 14.8, depth + 1);
+                        self.quoted = quoted;
+                    },
                 );
                 let bottom = ui.cursor().top();
                 ui.painter().rect_filled(
@@ -626,11 +1031,22 @@ impl Markdown<'_> {
             return;
         }
         let cell_line = 19.5; // 12px × 1.625
+        let suffixes = self.suffixes.clone();
+        let mut opened = None;
         let measure = |ui: &Ui, inlines: &[Inline], weight| {
-            layout_inlines(ui, inlines, 12.0, cell_line, weight, color, f32::INFINITY)
-                .galley
-                .size()
-                .x
+            layout_inlines(
+                ui,
+                inlines,
+                12.0,
+                cell_line,
+                weight,
+                color,
+                f32::INFINITY,
+                &suffixes,
+            )
+            .galley
+            .size()
+            .x
         };
         // Auto table layout: columns share the width by their content width.
         let mut natural = vec![0.0f32; columns];
@@ -652,7 +1068,7 @@ impl Markdown<'_> {
             natural.iter().map(|w| w * width / total).collect()
         };
         let border = theme::overlay(0.036);
-        let paint_row = |ui: &mut Ui, cells: &[Vec<Inline>], header: bool| {
+        let mut paint_row = |ui: &mut Ui, cells: &[Vec<Inline>], header: bool| {
             let pad_y = if header { 8.8 } else { 7.2 };
             let weight = if header {
                 Weight::SemiBold
@@ -662,7 +1078,16 @@ impl Markdown<'_> {
             let laid: Vec<Inlines> = (0..columns)
                 .map(|i| {
                     let cell = cells.get(i).map(Vec::as_slice).unwrap_or(&[]);
-                    layout_inlines(ui, cell, 12.0, cell_line, weight, color, widths[i] - 24.0)
+                    layout_inlines(
+                        ui,
+                        cell,
+                        12.0,
+                        cell_line,
+                        weight,
+                        color,
+                        widths[i] - 24.0,
+                        &suffixes,
+                    )
                 })
                 .collect();
             // CSS line boxes are fractional; epaint rounds each row to whole pixels.
@@ -682,12 +1107,14 @@ impl Markdown<'_> {
                     Some(Alignment::Center) => (widths[i] - cell_width) / 2.0,
                     _ => 12.0,
                 };
-                paint_inlines(
+                if let Some(file) = paint_inlines(
                     ui,
                     Pos2::new(x + offset, rect.top() + pad_y),
                     cell,
                     id.with(("cell", header, i, rect.top() as i32)),
-                );
+                ) {
+                    opened = Some(file);
+                }
                 x += widths[i];
             }
             ui.painter().rect_filled(
@@ -704,6 +1131,9 @@ impl Markdown<'_> {
         }
         for row in rows {
             paint_row(ui, row, false);
+        }
+        if opened.is_some() {
+            self.opened_file = opened;
         }
         // Toolbar: expand toggle (expanded by default) and copy.
         ui.add_space(2.0);
@@ -743,8 +1173,12 @@ fn plain(inlines: &[Inline]) -> String {
     inlines
         .iter()
         .map(|i| match i {
-            Inline::Text(t, _) | Inline::Code(t) => t.as_str(),
-            Inline::Break => " ",
+            Inline::Text(t, _) | Inline::Code(t) => t.clone(),
+            Inline::File(file) => match file.line {
+                Some(line) => format!("{}:{line}", file.path),
+                None => file.path.clone(),
+            },
+            Inline::Break => " ".to_owned(),
         })
         .collect()
 }

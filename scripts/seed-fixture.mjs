@@ -219,6 +219,41 @@ function imageAttachment(threadId, name) {
   return { type: "image", id, name, mimeType: "image/png", sizeBytes: png.length };
 }
 
+// Every markdown construct the assistant uses, for style comparisons. Links
+// stay on github.com (a drawn mark) and reserved hosts (the globe), so the
+// reference never fetches a favicon.
+const styles = thread(web, "Styles markdown", 100);
+const stylesTurn = randomUUID();
+message(styles, "user", "Montre-moi tous les styles.", 100);
+message(styles, "assistant", [
+  "Le défaut vient de `crates/core/src/overview.rs:58` et touche aussi `src/app.rs`. Voir [main.rs](src/main.rs#L10), l'issue [#3973 sur GitHub](https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher/issues/3973) et [la doc locale](http://docs.example.test/cloud-saves). La commande `cargo test` passe.",
+  "",
+  "## Titre de niveau 2",
+  "",
+  "### Titre de niveau 3",
+  "",
+  "- **Gras**, *italique* et ~~barré~~",
+  "- Un élément avec `du code` et un [lien GitHub](https://github.com/t3tools/t3code)",
+  "  - Un sous-élément",
+  "",
+  "1. Premier",
+  "2. Second",
+  "",
+  "> Une citation avec `README.md` dedans.",
+  "",
+  "| Fichier | Lignes |",
+  "| --- | --- |",
+  "| `src/ui/chat.rs` | 120 |",
+  "",
+  "```rust",
+  "fn main() {}",
+  "```",
+  "",
+  "---",
+  "",
+  "Fin.",
+].join("\n"), 99, stylesTurn);
+
 function request(threadId, turnId, kind, summary, payload, minutesAgo) {
   const createdAt = at(minutesAgo);
   emit("thread", threadId, "thread.activity-appended", createdAt, {
