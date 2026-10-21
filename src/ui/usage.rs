@@ -43,6 +43,9 @@ pub struct UsageState {
     /// When limits were last refreshed (`refreshUsageLimits` waits 5 minutes
     /// between automatic refreshes).
     pub limits_refreshed: Option<std::time::Instant>,
+    /// The limit segment whose popover is hovered, and the one pinned open.
+    pub segment_hover: Option<String>,
+    pub segment_pinned: Option<String>,
 }
 
 impl Default for UsageState {
@@ -56,17 +59,40 @@ impl Default for UsageState {
             requested: Default::default(),
             by_time: false,
             limits_refreshed: None,
+            segment_hover: None,
+            segment_pinned: None,
         }
     }
 }
 
 /// One window pooled over a driver's accounts (`LimitPoolWindow`).
+/// One subscription account (`LimitAccount`), as its segment popover names it.
+#[derive(Clone)]
+struct Account {
+    driver: String,
+    display_name: Option<String>,
+    email: Option<String>,
+    plan: Option<String>,
+    /// The environment it is signed in on.
+    signed_in: Option<String>,
+}
+
+/// One account's share of a pooled window.
+struct Column {
+    remaining: i64,
+    /// The countdown plate ("↻ 2h 46m").
+    reset: Option<String>,
+    resets_at: Option<String>,
+    /// Points of the pool its reset restores.
+    restores: i64,
+    account: Account,
+}
+
 struct PoolWindow {
     label: String,
     remaining: i64,
     pace: Option<&'static str>,
-    /// Per account column: remaining share and reset label.
-    columns: Vec<(i64, Option<String>, bool)>,
+    columns: Vec<Column>,
 }
 
 struct Pool {
@@ -135,8 +161,8 @@ fn pace(used: f64, elapsed: f64) -> &'static str {
 
 /// `collectLimitPools` over the providers that report windows: accounts
 /// grouped by driver, windows pooled by kind and id, ordered by kind.
-fn limit_pools(providers: &[Value], now: i64) -> Vec<Pool> {
-    let mut pools: Vec<(String, Vec<&Value>)> = Vec::new();
+fn limit_pools(providers: &[Value], now: i64, environment: Option<&str>) -> Vec<Pool> {
+    let mut pools: Vec<(String, Vec<(&Value, Account)>)> = Vec::new();
     for provider in providers {
         let limits = &provider["usageLimits"];
         let usable = provider["enabled"] != false
@@ -148,16 +174,29 @@ fn limit_pools(providers: &[Value], now: i64) -> Vec<Pool> {
             continue;
         }
         let driver = provider["driver"].as_str().unwrap_or_default().to_owned();
+        let text = |v: &Value| {
+            v.as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+        let account = Account {
+            driver: driver.clone(),
+            display_name: text(&provider["displayName"]),
+            email: text(&provider["auth"]["email"]),
+            plan: text(&provider["auth"]["label"]),
+            signed_in: environment.map(str::to_owned),
+        };
         match pools.iter_mut().find(|(d, _)| *d == driver) {
-            Some((_, accounts)) => accounts.push(limits),
-            None => pools.push((driver, vec![limits])),
+            Some((_, accounts)) => accounts.push((limits, account)),
+            None => pools.push((driver, vec![(limits, account)])),
         }
     }
     pools
         .into_iter()
         .map(|(driver, accounts)| {
             let mut keys: Vec<(String, String, String)> = Vec::new();
-            for account in &accounts {
+            for (account, _) in &accounts {
                 for window in account["windows"].as_array().into_iter().flatten() {
                     let kind = window["kind"].as_str().unwrap_or("other").to_owned();
                     let id = window["id"].as_str().unwrap_or_default().to_owned();
@@ -171,10 +210,10 @@ fn limit_pools(providers: &[Value], now: i64) -> Vec<Pool> {
             let windows = keys
                 .into_iter()
                 .map(|(kind, id, label)| {
-                    let members: Vec<Option<&Value>> = accounts
+                    let members: Vec<Option<(&Value, &Account)>> = accounts
                         .iter()
-                        .map(|account| {
-                            account["windows"]
+                        .map(|(limits, account)| {
+                            limits["windows"]
                                 .as_array()
                                 .into_iter()
                                 .flatten()
@@ -182,9 +221,10 @@ fn limit_pools(providers: &[Value], now: i64) -> Vec<Pool> {
                                     w["kind"].as_str().unwrap_or("other") == kind
                                         && w["id"] == id.as_str()
                                 })
+                                .map(|w| (w, account))
                         })
                         .collect();
-                    let present: Vec<&Value> = members.iter().flatten().copied().collect();
+                    let present: Vec<&Value> = members.iter().flatten().map(|(w, _)| *w).collect();
                     let used = |w: &Value| w["usedPercent"].as_f64().unwrap_or(0.0);
                     let mean_used =
                         present.iter().map(|w| used(w)).sum::<f64>() / present.len() as f64;
@@ -199,12 +239,16 @@ fn limit_pools(providers: &[Value], now: i64) -> Vec<Pool> {
                             timed.iter().map(|t| t.1).sum::<f64>() / n,
                         )
                     });
+                    let count = present.len().max(1) as f64;
                     let columns = members
                         .iter()
                         .flatten()
-                        .map(|w| {
-                            let remaining = (100.0 - used(w).clamp(0.0, 100.0)).round() as i64;
-                            (remaining, reset_label(w, now), !w["resetsAt"].is_null())
+                        .map(|(w, account)| Column {
+                            remaining: (100.0 - used(w).clamp(0.0, 100.0)).round() as i64,
+                            reset: reset_label(w, now),
+                            resets_at: w["resetsAt"].as_str().map(str::to_owned),
+                            restores: (used(w) / count).round() as i64,
+                            account: (*account).clone(),
                         })
                         .collect();
                     PoolWindow {
@@ -346,7 +390,10 @@ impl App {
             return;
         }
         let now = self.usage.now.timestamp_millis();
-        let pools = limit_pools(&self.providers(), now);
+        let environment = self.state.config["environment"]["label"]
+            .as_str()
+            .map(str::to_owned);
+        let pools = limit_pools(&self.providers(), now, environment.as_deref());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("usage-limits")
@@ -393,7 +440,13 @@ impl App {
                     for window in &pool.windows {
                         let card =
                             Rect::from_min_size(Pos2::new(left, y), Vec2::new(COLUMN, CARD_HEIGHT));
-                        self.pool_window_card(ui, card, window, bar_color(&pool.driver));
+                        self.pool_window_card(
+                            ui,
+                            card,
+                            window,
+                            bar_color(&pool.driver),
+                            &pool.driver,
+                        );
                         y += CARD_HEIGHT + 12.0;
                     }
                     y += 32.0 - 12.0;
@@ -406,7 +459,14 @@ impl App {
     }
 
     /// `PoolWindowCard`: label, the pooled share left with its pace, and the bar.
-    fn pool_window_card(&self, ui: &Ui, card: Rect, window: &PoolWindow, color: Color32) {
+    fn pool_window_card(
+        &mut self,
+        ui: &mut Ui,
+        card: Rect,
+        window: &PoolWindow,
+        color: Color32,
+        driver: &str,
+    ) {
         ui.painter().rect(
             card,
             CornerRadius::same(10),
@@ -460,13 +520,240 @@ impl App {
         );
         let count = window.columns.len().max(1) as f32;
         let segment_width = (bar.width() - 4.0 * (count - 1.0)) / count;
-        for (index, (remaining, reset, has_reset)) in window.columns.iter().enumerate() {
+        for (index, column) in window.columns.iter().enumerate() {
             let segment = Rect::from_min_size(
                 Pos2::new(bar.left() + index as f32 * (segment_width + 4.0), bar.top()),
                 Vec2::new(segment_width, bar.height()),
             );
-            paint_segment(ui, segment, *remaining, reset.as_deref(), *has_reset, color);
+            paint_segment(
+                ui,
+                segment,
+                column.remaining,
+                column.reset.as_deref(),
+                column.resets_at.is_some(),
+                color,
+            );
+            let id = format!("{driver}\0{}\0{index}", window.label);
+            self.segment_popover(ui, segment, &id, column);
         }
+    }
+}
+
+impl App {
+    /// `SegmentPopover`: the account behind a segment, its plan and where it
+    /// is signed in, then what is left and when it resets. Opens on hover,
+    /// stays while the pointer is on it, pins on click.
+    fn segment_popover(&mut self, ui: &mut Ui, segment: Rect, id: &str, column: &Column) {
+        let response = ui.interact(segment, ui.id().with(("limit-segment", id)), Sense::click());
+        let pinned = self.usage.segment_pinned.as_deref() == Some(id);
+        if response.clicked() {
+            self.usage.segment_pinned = (!pinned).then(|| id.to_owned());
+        }
+        let rows_bottom = 2
+            + usize::from(column.resets_at.is_some())
+            + usize::from(column.restores > 0 && column.resets_at.is_some());
+        let first_rows = usize::from(column.account.plan.is_some())
+            + usize::from(column.account.signed_in.is_some());
+        let header = 17.0
+            + 20.0
+            + if column.account.email.is_some() {
+                22.0
+            } else {
+                0.0
+            };
+        let mut height = header + 17.0;
+        if first_rows > 0 {
+            height += 10.0 + 1.0 + 10.0 + first_rows as f32 * 20.0 - 4.0;
+        }
+        height += 10.0 + 1.0 + 10.0 + (rows_bottom - 1) as f32 * 20.0 - 4.0;
+        let width = 322.0;
+        let screen = ui.ctx().content_rect();
+        let mut top = segment.top() - 6.0 - height;
+        if top < screen.top() + 4.0 {
+            top = segment.bottom() + 6.0;
+        }
+        let left = (segment.center().x - width / 2.0)
+            .clamp(screen.left() + 4.0, screen.right() - 4.0 - width);
+        let popup = Rect::from_min_size(Pos2::new(left, top), Vec2::new(width, height));
+        let over_popup = ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|pos| popup.contains(pos));
+        let hovering =
+            response.hovered() || (over_popup && self.usage.segment_hover.as_deref() == Some(id));
+        if hovering {
+            self.usage.segment_hover = Some(id.to_owned());
+        } else if self.usage.segment_hover.as_deref() == Some(id) {
+            self.usage.segment_hover = None;
+        }
+        if !(hovering || pinned) {
+            return;
+        }
+        if pinned
+            && !response.clicked()
+            && ui.input(|i| i.pointer.any_pressed())
+            && !over_popup
+            && !response.hovered()
+        {
+            self.usage.segment_pinned = None;
+        }
+        if response.hovered() || pinned {
+            ui.painter().rect_stroke(
+                segment,
+                CornerRadius::same(8),
+                Stroke::new(1.0, theme::border()),
+                StrokeKind::Outside,
+            );
+        }
+        let column_account = column.account.clone();
+        let now = chrono::Utc::now();
+        egui::Area::new(ui.id().with(("limit-popover", id)))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup.min)
+            .show(ui.ctx(), |ui| {
+                widgets::popup_surface(ui, popup);
+                let left = popup.left() + 17.0;
+                let mut y = popup.top() + 17.0;
+                // The account: provider glyph with its initials badge, then the name.
+                let icon = Rect::from_min_size(Pos2::new(left + 2.0, y + 2.0), Vec2::splat(16.0));
+                if let Some((glyph, tint)) =
+                    crate::ui::pickers::provider_icon(&column_account.driver)
+                {
+                    let tint = if column_account.driver == "codex" {
+                        theme::alpha(theme::foreground(), 0.8)
+                    } else {
+                        tint
+                    };
+                    theme::paint_icon(ui, glyph, icon, 16.0, tint);
+                }
+                let name = column_account
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| driver_label(&column_account.driver).to_owned());
+                if column_account.display_name.is_some() {
+                    let initials: String = name
+                        .split_whitespace()
+                        .filter_map(|w| w.chars().next())
+                        .take(2)
+                        .collect::<String>()
+                        .to_uppercase();
+                    let initials = if initials.chars().count() < 2 {
+                        name.chars().take(2).collect::<String>().to_uppercase()
+                    } else {
+                        initials
+                    };
+                    let badge = Rect::from_min_size(
+                        Pos2::new(icon.left(), icon.top() + 4.0),
+                        Vec2::new(18.0, 14.0),
+                    );
+                    ui.painter()
+                        .rect_filled(badge, CornerRadius::same(7), theme::popover());
+                    let width = widgets::text_width(ui, &initials, font(8.0, Weight::SemiBold));
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_max(
+                            Pos2::new(badge.center().x - width / 2.0, badge.top()),
+                            badge.max,
+                        ),
+                        &initials,
+                        font(8.0, Weight::SemiBold),
+                        theme::muted_foreground(),
+                    );
+                }
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_size(Pos2::new(left + 28.0, y), Vec2::new(260.0, 20.0)),
+                    &name,
+                    font(14.0, Weight::Medium),
+                    theme::foreground(),
+                );
+                y += 22.0;
+                if let Some(email) = &column_account.email {
+                    let key = format!("limit-email:{email}");
+                    self.redacted_text(
+                        ui,
+                        Pos2::new(left, y),
+                        email,
+                        &key,
+                        ("Click to reveal email", "Click to hide email"),
+                    );
+                    y += 17.0;
+                }
+                let row = |ui: &Ui, y: f32, label: &str, value: &str| {
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_size(Pos2::new(left, y), Vec2::new(72.0, 16.0)),
+                        label,
+                        font(12.0, Weight::Regular),
+                        theme::muted_foreground(),
+                    );
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_size(Pos2::new(left + 84.0, y), Vec2::new(204.0, 16.0)),
+                        value,
+                        font(12.0, Weight::Regular),
+                        theme::foreground(),
+                    );
+                };
+                let divider = |ui: &Ui, y: f32| {
+                    ui.painter().rect_filled(
+                        Rect::from_min_size(Pos2::new(left, y), Vec2::new(288.0, 1.0)),
+                        0.0,
+                        theme::alpha(theme::border(), 0.6),
+                    );
+                };
+                if column_account.plan.is_some() || column_account.signed_in.is_some() {
+                    y += 10.0;
+                    divider(ui, y);
+                    y += 11.0;
+                    if let Some(plan) = &column_account.plan {
+                        row(ui, y, "Plan", plan);
+                        y += 20.0;
+                    }
+                    if let Some(place) = &column_account.signed_in {
+                        row(ui, y, "Signed in", place);
+                        y += 20.0;
+                    }
+                    y -= 4.0;
+                }
+                y += 10.0;
+                divider(ui, y);
+                y += 11.0;
+                row(ui, y, "Left", &format!("{}%", column.remaining));
+                y += 20.0;
+                if let Some(resets_at) = &column.resets_at {
+                    let when = upcoming_time(resets_at, now);
+                    let resets_in = column
+                        .reset
+                        .as_deref()
+                        .map(|r| r.replace("\u{21bb} ", "in "))
+                        .map(|r| format!(" · {r}"))
+                        .unwrap_or_default();
+                    row(ui, y, "Resets", &format!("{when}{resets_in}"));
+                    y += 20.0;
+                    if column.restores > 0 {
+                        row(ui, y, "Restores", &format!("+{}% of pool", column.restores));
+                    }
+                }
+            });
+    }
+}
+
+/// `formatUpcomingTimestamp`: the local time, "tomorrow at" it, or the
+/// numeric date before it.
+fn upcoming_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(date) = crate::timeline::parse_time(iso) else {
+        return String::new();
+    };
+    let local = date.with_timezone(&chrono::Local);
+    let today = now.with_timezone(&chrono::Local).date_naive();
+    let time = local.format("%-I:%M %p").to_string();
+    match (local.date_naive() - today).num_days() {
+        days if days <= 0 => time,
+        1 => format!("tomorrow at {time}"),
+        _ if chrono::Datelike::year(&local.date_naive()) == chrono::Datelike::year(&today) => {
+            format!("{} {time}", local.format("%-m/%-d"))
+        }
+        _ => format!("{} {time}", local.format("%-m/%-d/%Y")),
     }
 }
 
@@ -632,13 +919,17 @@ mod tests {
                  "resetsAt": iso(now + 3_600_000), "windowDurationMins": 300}
             ]}
         })];
-        let pools = limit_pools(&providers, now);
+        let pools = limit_pools(&providers, now, None);
         let windows = &pools[0].windows;
         assert_eq!(windows[0].label, "Session");
         assert_eq!(windows[0].remaining, 20);
         // 80% spent with 80% of the window gone: on pace.
         assert_eq!(windows[0].pace, Some("gauge"));
-        assert_eq!(windows[0].columns[0].1.as_deref(), Some("\u{21bb} 1h 0m"));
+        assert_eq!(
+            windows[0].columns[0].reset.as_deref(),
+            Some("\u{21bb} 1h 0m")
+        );
+        assert_eq!(windows[0].columns[0].restores, 80);
         assert_eq!(windows[1].pace, Some("trending-down"));
     }
 }
