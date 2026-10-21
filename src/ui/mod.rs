@@ -1,4 +1,5 @@
 pub mod accent_picker;
+pub mod action_editor;
 pub mod agents_panel;
 pub mod bitbucket;
 pub mod changed_files;

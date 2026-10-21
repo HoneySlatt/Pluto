@@ -221,6 +221,9 @@ impl App {
             .map(|(i, row)| {
                 let base = if row.id == "project-actions-empty" {
                     37.0
+                } else if row.id.starts_with("project-action:") {
+                    // `ProjectActionsList` rows: `py-2`.
+                    8.0 + 20.0 + 4.0 + 18.0 + 8.0 + 1.0
                 } else {
                     row_height(ui, row, CARD_WIDTH)
                 };
@@ -259,12 +262,129 @@ impl App {
                     font(14.0, Weight::Regular),
                     theme::muted_foreground(),
                 );
+            } else if row.id.starts_with("project-action:") {
+                if self.action_row(ui, rect, row, index > 0) {
+                    actions.push((row.id.clone(), RowAction::Click));
+                }
             } else if let Some(action) = self.settings_row(ui, rect, row, index > 0) {
                 actions.push((row.id.clone(), action));
             }
             row_top += height;
         }
         card.bottom()
+    }
+
+    /// A `ProjectActionsList` row: icon, name and badges, the command in mono,
+    /// the shortcut, and the edit gear (shown on hover); returns whether the
+    /// gear was clicked.
+    fn action_row(&mut self, ui: &mut Ui, rect: Rect, row: &Row, divided: bool) -> bool {
+        let Some(project) = self.settings_project() else {
+            return false;
+        };
+        let script_id = &row.id["project-action:".len()..];
+        let script = self
+            .project_scripts(&project.id)
+            .into_iter()
+            .find(|s| s["id"] == script_id)
+            .unwrap_or(Value::Null);
+        let top = rect.top() + if divided { 1.0 } else { 0.0 } + 8.0;
+        let left = rect.left() + 16.0;
+        let muted = theme::muted_foreground();
+        theme::paint_icon(
+            ui,
+            crate::ui::action_editor::script_icon(script["icon"].as_str().unwrap_or("play")),
+            Rect::from_min_size(Pos2::new(left, top + 2.0), Vec2::splat(16.0)),
+            16.0,
+            muted,
+        );
+        let mut x = left + 24.0;
+        let name_width = widgets::text_width(ui, &row.title, font(14.0, Weight::Medium));
+        widgets::text(
+            ui,
+            Pos2::new(x, top),
+            &row.title,
+            font(14.0, Weight::Medium),
+            theme::foreground(),
+            20.0,
+        );
+        x += name_width + 8.0;
+        let mut badges = Vec::new();
+        if script["runOnWorktreeCreate"] == true {
+            badges.push("setup");
+        }
+        if script["previewUrl"].is_string() {
+            badges.push("preview · desktop only");
+        }
+        for badge in badges {
+            let width = widgets::text_width(ui, badge, font(11.0, Weight::Regular)) + 12.0;
+            let chip = Rect::from_min_size(Pos2::new(x, top + 1.5), Vec2::new(width, 17.0));
+            ui.painter().rect_stroke(
+                chip,
+                CornerRadius::same(4),
+                Stroke::new(1.0, theme::alpha(theme::border(), 0.6)),
+                StrokeKind::Inside,
+            );
+            widgets::text(
+                ui,
+                Pos2::new(chip.left() + 6.0, chip.top() + 0.5),
+                badge,
+                font(11.0, Weight::Regular),
+                muted,
+                16.0,
+            );
+            x = chip.right() + 8.0;
+        }
+        let right = rect.right() - 16.0;
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(left, top + 24.0),
+                Pos2::new(right - 120.0, top + 42.0),
+            ),
+            &row.description,
+            theme::mono(12.0),
+            theme::alpha(muted, 0.8),
+        );
+        let center = rect.center().y + if divided { 0.5 } else { 0.0 };
+        let gear = Rect::from_min_size(Pos2::new(right - 24.0, center - 12.0), Vec2::splat(24.0));
+        let mut shortcut_right = gear.left() - 8.0;
+        let hovered = ui.rect_contains_pointer(rect);
+        let clicked = if hovered {
+            widgets::icon_button(
+                ui,
+                gear,
+                ("action-edit", script_id),
+                "settings",
+                14.0,
+                muted,
+                "",
+            )
+            .clicked()
+        } else {
+            false
+        };
+        if !hovered {
+            shortcut_right = gear.left() - 8.0;
+        }
+        if let Some(label) =
+            crate::ui::action_editor::script_command(script_id).and_then(|command| {
+                crate::ui::action_editor::shortcut_label_for(
+                    &self.state.config["keybindings"],
+                    &command,
+                )
+            })
+        {
+            let width = widgets::text_width(ui, &label, font(12.0, Weight::Regular));
+            widgets::text(
+                ui,
+                Pos2::new(shortcut_right - width, center - 8.0),
+                &label,
+                font(12.0, Weight::Regular),
+                muted,
+                16.0,
+            );
+        }
+        clicked
     }
 
     fn apply_project(&mut self, project: &Project, id: &str, action: RowAction) {
@@ -293,8 +413,16 @@ impl App {
             ("project-icon", RowAction::Select(_)) => {
                 self.status = Some("Choosing a project icon is not implemented yet".into());
             }
-            ("project-actions", RowAction::Click) => {
-                self.status = Some("Editing project actions is not implemented yet".into());
+            ("project-actions", RowAction::Click) => self.open_action_editor(&project.id, None),
+            (id, RowAction::Click) if id.starts_with("project-action:") => {
+                let script_id = &id["project-action:".len()..];
+                let script = self
+                    .project_scripts(&project.id)
+                    .into_iter()
+                    .find(|s| s["id"] == script_id);
+                if let Some(script) = script {
+                    self.open_action_editor(&project.id, Some(&script));
+                }
             }
             ("remove-project", RowAction::Click) => {
                 // `removeMembers` for the whole (single-member) project.

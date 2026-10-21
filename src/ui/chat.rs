@@ -135,7 +135,14 @@ impl App {
             )
             .clicked()
             {
-                self.status = Some("Project actions are not implemented yet".into());
+                // `ProjectScriptsControl` with no actions: the editor.
+                let target = project
+                    .as_ref()
+                    .map(|p| p.id.clone())
+                    .or_else(|| self.draft_project().map(|p| p.id));
+                if let Some(id) = target {
+                    self.open_action_editor(&id, None);
+                }
             }
             right = rect_button.left();
         }

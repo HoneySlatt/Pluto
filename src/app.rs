@@ -66,6 +66,8 @@ pub struct App {
     pub(crate) bitbucket: crate::ui::bitbucket::BitbucketDraft,
     /// The settings scope ("Applying settings for <project> across …").
     pub(crate) settings_scope: crate::ui::settings_scope::SettingsScope,
+    /// The open Add/Edit Action dialog.
+    pub(crate) action_editor: Option<crate::ui::action_editor::ActionEditor>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -285,6 +287,7 @@ impl App {
             source_control_expanded: Default::default(),
             bitbucket: Default::default(),
             settings_scope: Default::default(),
+            action_editor: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,
@@ -768,6 +771,7 @@ impl eframe::App for App {
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
+                self.action_editor_dialog(ui, rect);
             }
             Screen::Main => {
                 self.sync_vcs_watch();
@@ -825,6 +829,7 @@ impl eframe::App for App {
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
+                self.action_editor_dialog(ui, rect);
             }
         }
         // Relative times tick; repaint at least once a minute.

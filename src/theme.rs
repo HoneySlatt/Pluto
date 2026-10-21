@@ -765,6 +765,9 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-pi",
         "external-link",
         "panels-top-left",
+        "play",
+        "flask-conical",
+        "bug",
     )
 }
 

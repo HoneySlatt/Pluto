@@ -78,6 +78,7 @@ pub(crate) fn row_server_keys(id: &str) -> &'static [&'static str] {
             &["sourceControlWritingStyle"]
         }
         "source-control-writer-model" => &["sourceControlWriterModelSelection"],
+        "project-actions" => &["defaultProjectScripts"],
         "agent-browser-access" => &["enableAgentBrowserAccess"],
         "agent-device-access" => &["enableAgentDeviceAccess"],
         "device-hub" => &["enableDeviceSupport"],
@@ -196,6 +197,43 @@ impl App {
         let Some(project) = self.settings_project() else {
             return;
         };
+        // Resetting the actions drops the shortcuts of actions that go away
+        // (`persist(() => null)`), unless another list still uses them.
+        if keys.contains(&"defaultProjectScripts") {
+            let settings = &self.state.config["settings"];
+            let ids = |list: &Value| -> Vec<String> {
+                list.as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| s["id"].as_str().map(str::to_owned))
+                    .collect()
+            };
+            let current =
+                ids(&settings["projectSettingsOverrides"][&project.id]["defaultProjectScripts"]);
+            let defaults = ids(&settings["defaultProjectScripts"]);
+            let others: Vec<String> = settings["projectSettingsOverrides"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(id, _)| **id != project.id)
+                .flat_map(|(_, entry)| ids(&entry["defaultProjectScripts"]))
+                .collect();
+            let bindings = self.state.config["keybindings"].clone();
+            for id in current
+                .iter()
+                .filter(|id| !defaults.contains(id) && !others.contains(id))
+            {
+                if let Some(command) = crate::ui::action_editor::script_command(id)
+                    && let Some(key) = crate::ui::action_editor::keybinding_for(&bindings, &command)
+                {
+                    self.send_request(
+                        "keybinding-remove".into(),
+                        "server.removeKeybinding",
+                        json!({"key": key, "command": command}),
+                    );
+                }
+            }
+        }
         let mut entry = self.state.config["settings"]["projectSettingsOverrides"][&project.id]
             .as_object()
             .cloned()
@@ -208,7 +246,7 @@ impl App {
 
     /// Replaces the project's entry (the server replaces entries rather than
     /// merging them); an empty entry is dropped.
-    fn save_project_overrides(&mut self, project_id: &str, entry: Map<String, Value>) {
+    pub(crate) fn save_project_overrides(&mut self, project_id: &str, entry: Map<String, Value>) {
         let value = if entry.is_empty() {
             Value::Null
         } else {
