@@ -241,10 +241,13 @@ message(question, "user", "Configure le compositeur Wayland.", 20);
 request(question, questionTurn, "user-input.requested", "User input requested", {
   requestId: randomUUID(),
   questions: [
-    { id: "compositor", header: "Compositeur", question: "Quel compositeur veux-tu utiliser ?",
+    // Long descriptions wrap, and the options overflow the banner's scroll area.
+    { id: "compositor", header: "Compositeur", question: "Quel compositeur veux-tu utiliser pour la session Wayland, sachant que la configuration actuelle doit rester compatible avec les deux machines ?",
       options: [
-        { label: "Niri", description: "Tiling à défilement" },
-        { label: "Hyprland", description: "Tiling dynamique" },
+        { label: "Niri (Recommandé)", description: "Tiling à défilement : les fenêtres s'ouvrent dans une bande horizontale infinie que l'on fait défiler, sans jamais redimensionner celles qui sont déjà ouvertes. La configuration existante s'y prête déjà en grande partie." },
+        { label: "Hyprland", description: "Tiling dynamique avec animations et effets ; la configuration est plus longue à maintenir, mais les plugins couvrent presque tous les besoins et la communauté est très active." },
+        { label: "Sway", description: "Compatible i3, stable et sobre, mais sans animations ni coins arrondis : un retour en arrière visuel par rapport à la configuration actuelle." },
+        { label: "Garder l'actuel", description: "Ne rien changer pour l'instant." },
       ], multiSelect: false },
     { id: "bar", header: "Barre", question: "Quelle barre d'état ?",
       options: [{ label: "Waybar" }, { label: "Aucune" }], multiSelect: false },

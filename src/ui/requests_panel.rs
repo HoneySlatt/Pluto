@@ -32,8 +32,89 @@ fn neutral_surface() -> Color32 {
 fn neutral_outline() -> Color32 {
     theme::shade(28)
 }
-const OPTION_HEIGHT: f32 = 54.0;
-const OPTION_HEIGHT_PLAIN: f32 = 36.0;
+/// The question body's scroll limit (`ComposerBanner.Scroll`:
+/// `max-h-[min(24rem,40dvh)]`).
+fn max_body_height(ui: &Ui) -> f32 {
+    (ui.ctx().content_rect().height() * 0.4).min(384.0)
+}
+
+/// One option's wrapped label and description (`px-2.5 py-2`, the text
+/// column beside the 20px shortcut slot) and its row height.
+struct OptionLayout {
+    label: std::sync::Arc<egui::Galley>,
+    description: Option<std::sync::Arc<egui::Galley>>,
+    height: f32,
+}
+
+fn option_layouts(ui: &Ui, question: &Question, width: f32) -> Vec<OptionLayout> {
+    let text_width = width - 10.0 - 8.0 - 20.0 - 10.0;
+    question
+        .options
+        .iter()
+        .map(|option| {
+            let label = widgets::galley(
+                ui,
+                &option.label,
+                font(14.0, Weight::Medium),
+                theme::foreground(),
+                20.0,
+                text_width,
+            );
+            let description = option
+                .description
+                .as_ref()
+                .filter(|d| **d != option.label)
+                .map(|d| {
+                    widgets::galley(
+                        ui,
+                        d,
+                        font(11.0, Weight::Regular),
+                        theme::secondary_label(),
+                        16.0,
+                        text_width,
+                    )
+                });
+            let height =
+                8.0 + label.size().y + description.as_ref().map_or(0.0, |d| 2.0 + d.size().y) + 8.0;
+            OptionLayout {
+                label,
+                description,
+                height,
+            }
+        })
+        .collect()
+}
+
+/// The question body's full height at `width`: the question, the
+/// multi-select hint, the options (`mt-2 space-y-0.5`) and `pb-1`.
+fn body_height(ui: &Ui, question: &Question, width: f32) -> f32 {
+    let text = widgets::galley(
+        ui,
+        &question.question,
+        font(14.0, Weight::Regular),
+        theme::foreground(),
+        20.0,
+        width,
+    );
+    let options: f32 = option_layouts(ui, question, width)
+        .iter()
+        .map(|o| o.height)
+        .sum::<f32>()
+        + 2.0 * question.options.len().saturating_sub(1) as f32;
+    text.size().y + if question.multi_select { 20.0 } else { 0.0 } + 8.0 + options + 4.0
+}
+
+/// The body's visible height and text width: past the scroll limit the
+/// content clears the scrollbar (`pe-2`).
+fn body_metrics(ui: &Ui, question: &Question, width: f32) -> (f32, f32, f32) {
+    let max = max_body_height(ui);
+    let full = body_height(ui, question, width);
+    if full <= max {
+        return (full, full, width);
+    }
+    let narrow = width - 8.0;
+    (max, body_height(ui, question, narrow), narrow)
+}
 
 fn banner_surface(ui: &Ui, rect: Rect, fill: Color32, outline: Color32) {
     let corners = CornerRadius {
@@ -58,19 +139,6 @@ fn detail_lines(approval: &PendingApproval) -> usize {
         .map_or(1, |d| d.lines().count().clamp(1, 5))
 }
 
-fn option_height(question: &Question, index: usize) -> f32 {
-    let option = &question.options[index];
-    if option
-        .description
-        .as_ref()
-        .is_some_and(|d| *d != option.label)
-    {
-        OPTION_HEIGHT
-    } else {
-        OPTION_HEIGHT_PLAIN
-    }
-}
-
 impl App {
     pub(crate) fn approval_banner_height(&self, approval: &PendingApproval) -> f32 {
         12.0 + 16.0 + 4.0 + 16.0 * detail_lines(approval) as f32 + 12.0 + OVERLAP
@@ -87,23 +155,7 @@ impl App {
         };
         let mut height = 4.0 + 24.0;
         if self.question_collapsed.as_deref() != Some(question.id.as_str()) {
-            let text = widgets::galley(
-                ui,
-                &question.question,
-                font(14.0, Weight::Regular),
-                theme::foreground(),
-                20.0,
-                width - 2.0 * INSET - 40.0,
-            );
-            height += text.size().y;
-            if question.multi_select {
-                height += 4.0 + 16.0;
-            }
-            height += 8.0;
-            for index in 0..question.options.len() {
-                height += option_height(question, index) + if index > 0 { 2.0 } else { 0.0 };
-            }
-            height += 4.0;
+            height += body_metrics(ui, question, width - 2.0 * INSET - 40.0).0;
         }
         height + 4.0 + OVERLAP
     }
@@ -397,113 +449,129 @@ impl App {
 
         let mut selected_value = None;
         if !collapsed {
-            let body_width = rect.right() - 8.0 - content_left;
-            let mut y = header.bottom();
-            let text = widgets::galley(
-                ui,
-                &question.question,
-                font(14.0, Weight::Regular),
-                theme::alpha(theme::foreground(), 0.85),
-                20.0,
-                body_width,
+            let (visible, content_height, body_width) =
+                body_metrics(ui, &question, rect.right() - 8.0 - content_left);
+            let body = Rect::from_min_size(
+                Pos2::new(content_left, header.bottom()),
+                Vec2::new(rect.right() - 4.0 - content_left, visible),
             );
-            let text_height = text.size().y;
-            ui.painter()
-                .galley(Pos2::new(content_left, y), text, theme::foreground());
-            y += text_height;
-            if question.multi_select {
-                widgets::text(
-                    ui,
-                    Pos2::new(content_left, y + 4.0),
-                    "Select one or more options.",
-                    font(12.0, Weight::Regular),
-                    theme::secondary_label(),
-                    16.0,
-                );
-                y += 20.0;
-            }
-            y += 8.0;
             let draft = self
                 .question_drafts
                 .get(&question.id)
                 .cloned()
                 .unwrap_or_default();
             let custom_active = !draft.custom.trim().is_empty() || !self.composer.trim().is_empty();
-            for (index, option) in question.options.iter().enumerate() {
-                if index > 0 {
-                    y += 2.0;
-                }
-                let row = Rect::from_min_size(
-                    Pos2::new(content_left, y),
-                    Vec2::new(body_width, option_height(&question, index)),
-                );
-                let response = ui.interact(
-                    row,
-                    ui.id().with(("question-option", &question.id, index)),
-                    if responding {
-                        Sense::hover()
-                    } else {
-                        Sense::click()
-                    },
-                );
-                let selected = !custom_active && draft.selected.contains(&option.value);
-                if selected {
-                    ui.painter()
-                        .rect_filled(row, CornerRadius::same(6), theme::overlay(0.0165));
-                } else if response.hovered() {
-                    ui.painter()
-                        .rect_filled(row, CornerRadius::same(6), theme::overlay(0.009));
-                }
-                let color = if selected {
-                    theme::foreground()
-                } else {
-                    theme::alpha(theme::foreground(), 0.85)
-                };
-                widgets::text(
-                    ui,
-                    Pos2::new(row.left() + 10.0, row.top() + 8.0),
-                    &option.label,
-                    font(14.0, Weight::Medium),
-                    color,
-                    20.0,
-                );
-                if let Some(description) =
-                    option.description.as_ref().filter(|d| **d != option.label)
-                {
-                    widgets::text(
+            let layouts = option_layouts(ui, &question, body_width);
+            let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(body));
+            egui::ScrollArea::vertical()
+                .id_salt(("question-body", &question.id))
+                .max_height(visible)
+                .auto_shrink([false, true])
+                .show(&mut body_ui, |ui| {
+                    let (content, _) = ui
+                        .allocate_exact_size(Vec2::new(body_width, content_height), Sense::hover());
+                    let mut y = content.top();
+                    let text = widgets::galley(
                         ui,
-                        Pos2::new(row.left() + 10.0, row.top() + 30.0),
-                        description,
-                        font(11.0, Weight::Regular),
-                        theme::secondary_label(),
-                        16.0,
+                        &question.question,
+                        font(14.0, Weight::Regular),
+                        theme::alpha(theme::foreground(), 0.85),
+                        20.0,
+                        body_width,
                     );
-                }
-                let slot = Rect::from_min_size(
-                    Pos2::new(row.right() - 10.0 - 20.0, row.center().y - 10.0),
-                    Vec2::splat(20.0),
-                );
-                if selected {
-                    theme::paint_icon(ui, "check", slot, 14.0, theme::primary());
-                } else if index < 9 {
-                    let digit = (index + 1).to_string();
-                    let digit_width = widgets::text_width(ui, &digit, theme::mono(10.0));
-                    widgets::text_in(
-                        ui,
-                        Rect::from_min_max(
-                            Pos2::new(slot.center().x - digit_width / 2.0, slot.top()),
-                            slot.max,
-                        ),
-                        &digit,
-                        theme::mono(10.0),
-                        theme::muted_foreground(),
-                    );
-                }
-                if response.clicked() {
-                    selected_value = Some(option.value.clone());
-                }
-                y = row.bottom();
-            }
+                    let text_height = text.size().y;
+                    ui.painter()
+                        .galley(Pos2::new(content_left, y), text, theme::foreground());
+                    y += text_height;
+                    if question.multi_select {
+                        widgets::text(
+                            ui,
+                            Pos2::new(content_left, y + 4.0),
+                            "Select one or more options.",
+                            font(12.0, Weight::Regular),
+                            theme::secondary_label(),
+                            16.0,
+                        );
+                        y += 20.0;
+                    }
+                    y += 8.0;
+                    for (index, (option, layout)) in
+                        question.options.iter().zip(layouts).enumerate()
+                    {
+                        if index > 0 {
+                            y += 2.0;
+                        }
+                        let row = Rect::from_min_size(
+                            Pos2::new(content_left, y),
+                            Vec2::new(body_width, layout.height),
+                        );
+                        let response = ui.interact(
+                            row,
+                            ui.id().with(("question-option", &question.id, index)),
+                            if responding {
+                                Sense::hover()
+                            } else {
+                                Sense::click()
+                            },
+                        );
+                        let selected = !custom_active && draft.selected.contains(&option.value);
+                        if selected {
+                            ui.painter().rect_filled(
+                                row,
+                                CornerRadius::same(6),
+                                theme::overlay(0.0165),
+                            );
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(
+                                row,
+                                CornerRadius::same(6),
+                                theme::overlay(0.009),
+                            );
+                        }
+                        let color = if selected {
+                            theme::foreground()
+                        } else {
+                            theme::alpha(theme::foreground(), 0.85)
+                        };
+                        let label_height = layout.label.size().y;
+                        ui.painter().galley(
+                            Pos2::new(row.left() + 10.0, row.top() + 8.0),
+                            layout.label,
+                            color,
+                        );
+                        if let Some(description) = layout.description {
+                            ui.painter().galley(
+                                Pos2::new(row.left() + 10.0, row.top() + 8.0 + label_height + 2.0),
+                                description,
+                                theme::secondary_label(),
+                            );
+                        }
+                        let slot = Rect::from_min_size(
+                            Pos2::new(row.right() - 10.0 - 20.0, row.center().y - 10.0),
+                            Vec2::splat(20.0),
+                        );
+                        if selected {
+                            theme::paint_icon(ui, "check", slot, 14.0, theme::primary());
+                        } else if index < 9 {
+                            let digit = (index + 1).to_string();
+                            let digit_width = widgets::text_width(ui, &digit, theme::mono(10.0));
+                            widgets::text_in(
+                                ui,
+                                Rect::from_min_max(
+                                    Pos2::new(slot.center().x - digit_width / 2.0, slot.top()),
+                                    slot.max,
+                                ),
+                                &digit,
+                                theme::mono(10.0),
+                                theme::muted_foreground(),
+                            );
+                        }
+                        if response.clicked() {
+                            selected_value = Some(option.value.clone());
+                        }
+                        y = row.bottom();
+                    }
+                });
             // Number keys pick options while the prompt editor is not focused.
             let editor_focused = ui.memory(|m| m.focused().is_some());
             if !responding && !editor_focused {

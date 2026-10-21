@@ -36,13 +36,21 @@ fn main() {
     // Values that follow flags are not titles.
     let title = title.filter(|t| !t.starts_with("--"));
     let expand = args.iter().any(|a| a == "--expand");
+    // `--size WxH` changes the 1440x900 window.
+    let size = args
+        .iter()
+        .position(|a| a == "--size")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.split_once('x'))
+        .and_then(|(w, h)| Some(egui::vec2(w.parse().ok()?, h.parse().ok()?)))
+        .unwrap_or(egui::vec2(1440.0, 900.0));
     let options = Options {
         server: (!offline).then(|| args[1].clone()),
         token: (!offline).then(|| Zeroizing::new(token.trim().to_owned())),
         client_settings_path: None,
     };
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(1440.0, 900.0))
+        .with_size(size)
         .with_pixels_per_point(1.0)
         .with_step_dt(1.0 / 60.0)
         .build_eframe(|cc| App::new(cc, options));
@@ -79,6 +87,10 @@ fn main() {
         let value = match op.as_str() {
             "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
             | "--key" | "--drop" => ops.next().cloned().unwrap_or_default(),
+            "--size" => {
+                ops.next();
+                continue;
+            }
             _ => continue,
         };
         let point = || {

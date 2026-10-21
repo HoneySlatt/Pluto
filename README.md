@@ -85,7 +85,7 @@ text is rasterized by epaint, not the browser, so a few text-sized boxes land
 `tabular-nums` is emulated with fixed digit cells, so Geist's tabular "1"
 sits about 2px right, and "↻" (missing from Geist) comes from egui's fallback
 font, smaller than the browser's. Scrollbars stay visible at rest; upstream
-fades them in on hover or scroll. The usage chart readout has no backdrop blur.
+fades them in on hover or scroll, and fades the overflowing edge of the question card's options. The usage chart readout has no backdrop blur.
 
 ## Development
 
