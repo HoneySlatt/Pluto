@@ -1,3 +1,4 @@
+pub mod agents_panel;
 pub mod changed_files;
 pub mod chat;
 pub mod composer;

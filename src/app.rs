@@ -49,6 +49,7 @@ pub struct App {
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
+    pub(crate) agents: crate::ui::agents_panel::AgentsState,
     pub(crate) keybinding_edit: Option<crate::ui::keybindings::KeybindingEdit>,
     pub(crate) new_keybinding: Option<crate::ui::keybindings::KeybindingEdit>,
     /// The open keybinding search and whether it still needs focus.
@@ -146,6 +147,8 @@ pub(crate) enum PanelTab {
     Files {
         file: Option<String>,
     },
+    /// The thread's subagents.
+    Agents,
     /// A terminal session (`terminalId`), shown as "Terminal N".
     Terminal {
         id: String,
@@ -244,6 +247,7 @@ impl App {
             last_row_click: None,
             confirm: None,
             snooze_dialog: None,
+            agents: Default::default(),
             keybinding_edit: None,
             new_keybinding: None,
             keybinding_search: None,

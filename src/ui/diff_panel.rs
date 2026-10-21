@@ -150,6 +150,11 @@ impl App {
             self.terminal_surface(ui, body, id);
             return;
         }
+        if active == crate::app::PanelTab::Agents {
+            let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
+            self.agents_panel(ui, body);
+            return;
+        }
         if let crate::app::PanelTab::Files { file } = active {
             let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
             self.files_surface(ui, body, file);

@@ -5,6 +5,7 @@ pub mod model;
 pub mod protocol;
 pub mod requests;
 pub mod snooze;
+pub mod subagents;
 pub mod terminal;
 pub mod theme;
 pub mod timeline;

@@ -100,6 +100,12 @@ impl App {
             }
         } else if label == "Terminal" {
             self.open_terminal_tab();
+        } else if label == "Agents" {
+            if let Some(panel) = self.panel_mut() {
+                panel.show(crate::app::PanelTab::Agents, |t| {
+                    *t == crate::app::PanelTab::Agents
+                });
+            }
         } else if label == "Files" {
             if let Some(panel) = self.panel_mut() {
                 panel.show(crate::app::PanelTab::Files { file: None }, |t| {
@@ -267,6 +273,7 @@ impl App {
         for (index, tab) in panel.tabs.iter().enumerate() {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
+                crate::app::PanelTab::Agents => ("Agents".to_owned(), "bot", theme::foreground()),
                 crate::app::PanelTab::Files { file: None } => {
                     ("Files".to_owned(), "files", theme::foreground())
                 }
