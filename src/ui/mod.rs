@@ -17,6 +17,7 @@ pub mod pull_requests;
 pub mod requests_panel;
 pub mod settings;
 pub mod settings_search;
+pub mod shortcuts;
 pub mod sidebar;
 pub mod snooze_dialog;
 pub mod source_control;

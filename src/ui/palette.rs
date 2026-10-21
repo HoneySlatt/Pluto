@@ -623,22 +623,7 @@ impl App {
 
     /// Global shortcuts that open the palette or start threads.
     pub(crate) fn palette_shortcuts(&mut self, ui: &Ui) {
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K)) {
-            self.toggle_palette(View::Root);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::O)) {
-            self.start_draft(None);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::F)) {
-            self.toggle_palette(View::Content);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::P)) {
-            self.toggle_palette(View::Files);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::U)) {
-            self.palette = PaletteState::default();
-            self.open_usage();
-        }
+        self.run_shortcuts(ui);
     }
 
     pub(crate) fn command_palette(&mut self, ui: &mut Ui, screen: Rect) {

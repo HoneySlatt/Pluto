@@ -85,6 +85,17 @@ pub struct Terminals {
     focused: Option<String>,
 }
 
+impl App {
+    /// Whether a terminal holds the keyboard: the focused one is the open
+    /// panel's active surface.
+    pub(crate) fn terminal_focused(&self) -> bool {
+        let panel = self.panel();
+        self.terminals.focused.is_some()
+            && panel.open
+            && matches!(panel.active_tab(), Some(PanelTab::Terminal { .. }))
+    }
+}
+
 impl Terminals {
     /// Applies a stream event (`TerminalAttachStreamEvent`); returns whether
     /// the key was a terminal stream.

@@ -254,7 +254,7 @@ impl App {
 
     /// `refreshLimits`: asks the server to re-read provider status and quotas;
     /// automatic refreshes skip a check made in the last five minutes.
-    fn refresh_limits(&mut self, automatic: bool) {
+    pub(crate) fn refresh_limits(&mut self, automatic: bool) {
         if automatic
             && self
                 .usage

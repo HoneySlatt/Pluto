@@ -114,7 +114,7 @@ fn main() {
                 let (mods, name) = value.rsplit_once('+').unwrap_or(("", value.as_str()));
                 let mut modifiers = egui::Modifiers::NONE;
                 if mods.contains("Ctrl") {
-                    modifiers |= egui::Modifiers::COMMAND;
+                    modifiers |= egui::Modifiers::COMMAND | egui::Modifiers::CTRL;
                 }
                 if mods.contains("Shift") {
                     modifiers |= egui::Modifiers::SHIFT;
