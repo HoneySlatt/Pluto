@@ -50,6 +50,8 @@ pub struct App {
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
+    /// The custom model being added: instance, typed slug and its error.
+    pub(crate) custom_model_input: Option<(String, String, Option<String>)>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
     pub(crate) agents: crate::ui::agents_panel::AgentsState,
@@ -261,6 +263,7 @@ impl App {
             confirm: None,
             snooze_dialog: None,
             prices_dialog: None,
+            custom_model_input: None,
             drawers: Default::default(),
             agents: Default::default(),
             keybinding_edit: None,

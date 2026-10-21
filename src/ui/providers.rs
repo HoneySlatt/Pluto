@@ -393,6 +393,62 @@ fn paint_card(ui: &Ui, rect: Rect) {
 
 /// A `ghost-muted` `xs` button with an optional leading icon; returns
 /// whether it was clicked.
+/// `readCustomModelEntries`: slugs (strings or `{slug, name}`), first
+/// occurrence wins; returns (slug, name).
+fn custom_model_entries(value: &Value) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for raw in value.as_array().into_iter().flatten() {
+        let slug = raw
+            .as_str()
+            .or(raw["slug"].as_str())
+            .map(str::trim)
+            .unwrap_or_default();
+        if slug.is_empty() || out.iter().any(|(s, _)| s == slug) {
+            continue;
+        }
+        let name = raw["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(slug);
+        out.push((slug.to_owned(), name.to_owned()));
+    }
+    out
+}
+
+/// `Button size="sm"`: outline (Add) or ghost (Cancel); returns whether clicked.
+fn ghost_outline_button(ui: &Ui, rect: Rect, id: &str, label: &str, outline: bool) -> bool {
+    let response = ui.interact(rect, ui.id().with(("small-button", id)), Sense::click());
+    if outline {
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(8),
+            if response.hovered() {
+                theme::overlay(0.06)
+            } else {
+                theme::control_surface()
+            },
+            Stroke::new(1.0, theme::input()),
+            StrokeKind::Inside,
+        );
+    } else if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(8), theme::accent());
+    }
+    let width = widgets::text_width(ui, label, font(14.0, Weight::Medium));
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(
+            Pos2::new(rect.center().x - width / 2.0, rect.top()),
+            rect.max,
+        ),
+        label,
+        font(14.0, Weight::Medium),
+        theme::foreground(),
+    );
+    response.clicked()
+}
+
 fn ghost_button(ui: &Ui, rect: Rect, id: &str, icon: Option<&str>, label: &str) -> bool {
     let response = ui.interact(rect, ui.id().with(("ghost", id)), Sense::click());
     let color = if response.hovered() {
@@ -480,6 +536,17 @@ impl App {
     /// Saves one instance (`buildProviderInstanceUpdatePatch`).
     fn save_instance(&mut self, row: &InstanceRow, instance: Value) {
         self.patch_server_settings(json!({"providerInstances": {row.id.clone(): instance}}));
+    }
+
+    /// `updateCustomModels`: the instance config's `customModels`, kept
+    /// explicit even when empty.
+    fn save_custom_models(&mut self, row: &InstanceRow, models: Vec<Value>) {
+        let mut instance = row.instance.clone();
+        if !instance["config"].is_object() {
+            instance["config"] = json!({});
+        }
+        instance["config"]["customModels"] = Value::Array(models);
+        self.save_instance(row, instance);
     }
 
     /// The Providers page from `top` (the scope sentence's top); returns the
@@ -1298,10 +1365,33 @@ impl App {
         top: f32,
         width: f32,
     ) -> f32 {
-        let models: Vec<Value> = live
+        // `deriveProviderModelsForDisplay`: built-ins from the probe, custom
+        // rows from the instance config so edits show at once.
+        let live_models: Vec<Value> = live
             .and_then(|p| p["models"].as_array())
             .cloned()
             .unwrap_or_default();
+        let custom_models = custom_model_entries(&row.instance["config"]["customModels"]);
+        let mut models: Vec<Value> = live_models
+            .iter()
+            .filter(|m| m["isCustom"] != true)
+            .cloned()
+            .collect();
+        if row.driver != "antigravity" {
+            for (slug, name) in &custom_models {
+                let capabilities = live_models
+                    .iter()
+                    .find(|m| m["isCustom"] == true && m["slug"] == slug.as_str())
+                    .map(|m| m["capabilities"].clone())
+                    .unwrap_or(Value::Null);
+                models.push(json!({"slug": slug, "name": name, "isCustom": true, "capabilities": capabilities}));
+            }
+        }
+        let adding = self
+            .custom_model_input
+            .as_ref()
+            .filter(|(id, _, _)| *id == row.id)
+            .map(|(_, text, error)| (text.clone(), error.clone()));
         let prefs = self.client_settings["providerModelPreferences"][&row.id].clone();
         let hidden = strings(&prefs["hiddenModels"]);
         let order = strings(&prefs["modelOrder"]);
@@ -1343,7 +1433,17 @@ impl App {
             Pos2::new(left, top),
             Vec2::new(
                 width,
-                1.0 + 12.0 + 16.0 + 12.0 + 24.0 + 8.0 + list_height + 12.0 + 1.0,
+                1.0 + 12.0
+                    + 16.0
+                    + 12.0
+                    + 24.0
+                    + 8.0
+                    + list_height
+                    + 12.0
+                    + 1.0
+                    + adding.as_ref().map_or(0.0, |(_, error)| {
+                        12.0 + 28.0 + if error.is_some() { 24.0 } else { 0.0 }
+                    }),
             ),
         );
         paint_card(ui, card);
@@ -1423,7 +1523,7 @@ impl App {
             theme::muted_foreground(),
             16.0,
         );
-        if row.driver != "antigravity" {
+        if row.driver != "antigravity" && adding.is_none() {
             let label = "Add custom model";
             let w = (widgets::text_width(ui, label, font(12.0, Weight::Medium)) + 34.0).round();
             if ghost_button(
@@ -1433,9 +1533,10 @@ impl App {
                 Some("plus"),
                 label,
             ) {
-                self.status = Some("Custom models are not implemented yet".into());
+                self.custom_model_input = Some((row.id.clone(), String::new(), None));
             }
         }
+        let mut remove_custom: Option<String> = None;
 
         let mut y = toolbar + 32.0;
         if display.is_empty() {
@@ -1615,6 +1716,27 @@ impl App {
                 new_hidden = Some(next);
             }
             let mut actions_right = switch_rect.left() - 8.0;
+            if custom {
+                // Remove (`XIcon`); editing the name and options is not ported.
+                let button = Rect::from_min_size(
+                    Pos2::new(actions_right - 20.0, center - 10.0),
+                    Vec2::splat(20.0),
+                );
+                actions_right -= 22.0;
+                if widgets::icon_button(
+                    ui,
+                    button,
+                    ("model-remove", &row.id, slug),
+                    "x",
+                    12.0,
+                    theme::muted_foreground(),
+                    "Remove custom model",
+                )
+                .clicked()
+                {
+                    remove_custom = Some(slug.clone());
+                }
+            }
             if !is_hidden {
                 let same_group = |other: usize| display.get(other).is_some_and(|(_, g)| g == group);
                 for (direction, icon) in [(1i32, "arrow-down"), (-1, "arrow-up")] {
@@ -1667,6 +1789,148 @@ impl App {
                 );
             }
             y += 28.0;
+        }
+
+        // The add row: slug input, Add and Cancel, and the error below.
+        let mut add_custom: Option<String> = None;
+        if let Some((mut text, error)) = adding {
+            let top = y + 12.0;
+            let add_label = "Add";
+            let cancel_label = "Cancel";
+            let add_w =
+                (widgets::text_width(ui, add_label, font(14.0, Weight::Medium)) + 20.0).round();
+            let cancel_w =
+                (widgets::text_width(ui, cancel_label, font(14.0, Weight::Medium)) + 20.0).round();
+            let cancel = Rect::from_min_size(
+                Pos2::new(inner_right - cancel_w, top),
+                Vec2::new(cancel_w, 28.0),
+            );
+            let add = Rect::from_min_size(
+                Pos2::new(cancel.left() - 8.0 - add_w, top),
+                Vec2::new(add_w, 28.0),
+            );
+            let input = Rect::from_min_max(
+                Pos2::new(inner_left, top),
+                Pos2::new(add.left() - 8.0, top + 28.0),
+            );
+            ui.painter().rect(
+                input,
+                CornerRadius::same(8),
+                theme::control_surface(),
+                Stroke::new(1.0, theme::input()),
+                StrokeKind::Inside,
+            );
+            let field = Rect::from_min_max(
+                input.min + Vec2::new(10.0, 5.0),
+                input.max - Vec2::new(10.0, 5.0),
+            );
+            let placeholder = match row.driver.as_str() {
+                "codex" => "gpt-6.7-codex-ultra-preview",
+                "claudeAgent" => "claude-sonnet-5",
+                "cursor" => "claude-sonnet-4-6",
+                "opencode" => "openai/gpt-5",
+                _ => "model-slug",
+            };
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field));
+            let response = child.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(egui::Id::new(("custom-model-input", &row.id)))
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO)
+                    .font(font(14.0, Weight::Regular))
+                    .text_color(theme::foreground())
+                    .vertical_align(egui::Align::Center)
+                    .hint_text(
+                        egui::RichText::new(placeholder)
+                            .font(font(14.0, Weight::Regular))
+                            .color(theme::muted_foreground()),
+                    )
+                    .desired_width(field.width()),
+            );
+            if !response.has_focus() && !response.lost_focus() && text.is_empty() && error.is_none()
+            {
+                response.request_focus();
+            }
+            let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let escape = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let add_clicked = ghost_outline_button(ui, add, "custom-model-add", add_label, true);
+            let cancel_clicked =
+                ghost_outline_button(ui, cancel, "custom-model-cancel", cancel_label, false);
+            if let Some(error) = &error {
+                widgets::text(
+                    ui,
+                    Pos2::new(inner_left, top + 28.0 + 8.0),
+                    error,
+                    font(12.0, Weight::Regular),
+                    Color32::from_rgb(251, 65, 74), // --destructive
+                    16.0,
+                );
+            }
+            let edited = text
+                != self
+                    .custom_model_input
+                    .as_ref()
+                    .map(|(_, t, _)| t.clone())
+                    .unwrap_or_default();
+            if escape || cancel_clicked {
+                self.custom_model_input = None;
+            } else if enter || add_clicked {
+                add_custom = Some(text);
+            } else if let Some((_, current, current_error)) = &mut self.custom_model_input {
+                if edited {
+                    *current_error = None;
+                }
+                *current = text;
+            }
+        }
+        if let Some(text) = add_custom {
+            // `handleAdd`.
+            let slug = text.trim().to_owned();
+            let error = if slug.is_empty() {
+                Some("Enter a model slug.".to_owned())
+            } else if models
+                .iter()
+                .any(|m| m["isCustom"] != true && m["slug"] == slug.as_str())
+            {
+                Some("That model is already built in.".to_owned())
+            } else if slug.chars().count() > 256 {
+                Some("Model slugs must be 256 characters or less.".to_owned())
+            } else if custom_models.iter().any(|(s, _)| *s == slug) {
+                Some("That custom model is already saved.".to_owned())
+            } else {
+                None
+            };
+            match error {
+                Some(error) => {
+                    self.custom_model_input = Some((row.id.clone(), text, Some(error)));
+                }
+                None => {
+                    let mut next: Vec<Value> = row.instance["config"]["customModels"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    next.push(json!(slug));
+                    self.save_custom_models(row, next);
+                    self.custom_model_input = None;
+                }
+            }
+        }
+        if let Some(slug) = remove_custom {
+            // `handleRemove`: also drop it from the order and favorites.
+            let next: Vec<Value> = row.instance["config"]["customModels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|entry| entry.as_str().or(entry["slug"].as_str()) != Some(slug.as_str()))
+                .cloned()
+                .collect();
+            self.save_custom_models(row, next);
+            if order.contains(&slug) {
+                new_order = Some(order.iter().filter(|s| **s != slug).cloned().collect());
+            }
+            if self.favorite_models.remove(&format!("{}/{slug}", row.id)) {
+                self.save_favorites();
+            }
         }
 
         // Model preferences are client settings (`providerModelPreferences`, `favorites`).
@@ -1787,6 +2051,20 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_model_entries_dedupe_and_name() {
+        let config =
+            json!(["a", {"slug": " b ", "name": "Bee"}, "a", "", {"slug": "c", "name": " "}]);
+        assert_eq!(
+            custom_model_entries(&config),
+            vec![
+                ("a".to_owned(), "a".to_owned()),
+                ("b".to_owned(), "Bee".to_owned()),
+                ("c".to_owned(), "c".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn versions_and_summaries_follow_upstream() {
