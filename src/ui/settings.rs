@@ -3473,7 +3473,7 @@ impl App {
         );
         let mut top = card.top() + 1.0;
         for (index, kb) in rows.iter().enumerate() {
-            let (command, when) = (&kb.command, &kb.when);
+            let command = &kb.command;
             let height = if index == 0 { 71.0 } else { 72.0 };
             let row = Rect::from_min_size(
                 Pos2::new(card.left() + 1.0, top),
@@ -3528,46 +3528,7 @@ impl App {
                 );
             }
             // "When" line (h-6): label, then the clause button.
-            let when_top = inner_top + 24.0;
-            widgets::text_in(
-                ui,
-                Rect::from_min_size(Pos2::new(text_left, when_top), Vec2::new(40.0, 24.0)),
-                "When",
-                font(12.0, Weight::Regular),
-                theme::alpha(theme::muted_foreground(), 0.7),
-            );
-            let label = if when.is_empty() {
-                "Always"
-            } else {
-                when.as_str()
-            };
-            let mono = egui::FontId::monospace(11.0);
-            let label_width = widgets::text_width(ui, label, mono.clone());
-            let clause = Rect::from_min_size(
-                Pos2::new(text_left + 38.0, when_top + 2.0),
-                Vec2::new(label_width + 6.0 + 4.0 + 14.0 + 6.0, 20.0),
-            );
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(Pos2::new(clause.left() + 6.0, clause.top()), clause.max),
-                label,
-                mono,
-                if when.is_empty() {
-                    theme::muted_foreground()
-                } else {
-                    theme::foreground()
-                },
-            );
-            theme::paint_icon(
-                ui,
-                "chevron-down",
-                Rect::from_min_size(
-                    Pos2::new(clause.left() + 6.0 + label_width + 2.0, clause.top()),
-                    Vec2::new(14.0, 20.0),
-                ),
-                14.0,
-                theme::muted_foreground(),
-            );
+            self.keybinding_when(ui, kb, text_left, inner_top + 24.0);
             // Keys: `KbdGroup` chips inside a 28px ghost button.
             let right = row.right() - ROW_PAD_X;
             let center_y = row.top() + (if index == 0 { 0.0 } else { 1.0 }) + 36.0
