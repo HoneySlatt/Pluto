@@ -341,6 +341,8 @@ impl App {
                     for row in &rows {
                         self.row(ui, row, column);
                     }
+                    // Queued follow-ups close the timeline.
+                    self.queued_rows(ui, &thread, column);
                 });
                 ui.add_space(bottom_padding);
             });

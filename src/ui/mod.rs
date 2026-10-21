@@ -28,6 +28,7 @@ pub mod project_scope;
 pub mod projects_page;
 pub mod providers;
 pub mod pull_requests;
+pub mod queue;
 pub mod requests_panel;
 pub mod script_import;
 pub mod setting_inheritance;

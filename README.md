@@ -29,7 +29,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Header | Breadcrumb, Add action, Open, git quick action from live VCS status, Initialize Git, panel toggles |
 | Timeline | User bubbles with their image attachments (signed asset URLs fetched from plain-HTTP servers, cropped to their cells), assistant markdown, settled-turn folds ("Worked for…"), tool rows and group summaries, changed-files card, working indicator, hover meta (time, copy) |
 | Markdown | Paragraphs, headings, lists, inline code chips, links, quotes, tables, fenced code with the pierre-dark theme |
-| Composer | Prompt editor, image attachments (pasted with Ctrl+V, read with `wl-paste` or `xclip` since egui only pastes text, or dropped on the composer; GIF, JPEG, PNG or WebP up to 10 MiB, shown as removable thumbnails and sent as data URLs), model picker, traits and runtime menus, send (`thread.turn.start`), stop, new-thread drafts (`bootstrap.createThread`), checkout strip (static: drafts always start on the current checkout, without the workspace and branch pickers) |
+| Composer | Prompt editor, image attachments (pasted with Ctrl+V, read with `wl-paste` or `xclip` since egui only pastes text, or dropped on the composer; GIF, JPEG, PNG or WebP up to 10 MiB, shown as removable thumbnails and sent as data URLs), model picker, traits and runtime menus, send (`thread.turn.start`), stop, follow-ups during a turn (Stop beside Send; with the "Queue" behavior the message waits in memory as a dashed timeline row with Send now and Cancel, and goes out after the next tool call or when the turn ends, held by approvals and questions; "Steer" sends at once; Stop returns the queue to the composer; off-screen threads send when their turn ends; ported from source, not compared with the reference, which cannot run a turn on the fixture), new-thread drafts (`bootstrap.createThread`), checkout strip (static: drafts always start on the current checkout, without the workspace and branch pickers) |
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), surface tabs and the "+" surface menu; the Files surface (project tree from `projects.listEntries`, search, read-only highlighted file view with line numbers, wrapping and the tree toggle); the Terminal surface (`terminal.attach` stream into a VT screen with scrollback, alternate screen and 16/256/truecolor SGR, Ghostty's default palette, keyboard and paste through `terminal.write`, resizing, new and close, split groups (side by side or stacked, up to four, the active one bordered), the bottom drawer (Ctrl+J, resizable, its groups sidebar with Single, Side by side and Stacked groups), mouse selection with Copy and Paste (Ctrl+Shift+C, the selection and right-click menus); a locally installed Symbols Nerd Font is used for prompt glyphs); the Agents surface (subagents folded from the thread's `task.*` activities: workflows with their phase rail and phases, direct spawns, the totals footer, or "No agents yet") |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unchanged context expanding from the full files on git previews (`review.getDiffFileContents`), the branch scope's base-ref picker (`vcs.listRefs`, local branches paired with their remote), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
@@ -60,7 +60,7 @@ Not ported yet (buttons for these show a "not implemented" notice):
 - the surfaces other than Diff, Files, Terminal and Agents (browser, pull requests,
   device), the Agents workflow script viewer (populated Agents rows are ported from source but not compared with the reference: the fixture has no subagents), file editing, previews and "Open in editor", and terminal
   persisting the bottom drawer's groups, the terminal's "Add to chat" and file-path links (URLs open in the browser rather than a preview), and font settings;
-- the attach button's file picker, non-image files, downscaling images over 10 MiB, inline image chips in the prompt, attachments in answers to agent questions (a paste with both text and an image keeps the text, where upstream keeps the image), expanding an attached image, file attachments and context chips in user messages, queued messages, palette
+- the attach button's file picker, non-image files, downscaling images over 10 MiB, inline image chips in the prompt, attachments in answers to agent questions (a paste with both text and an image keeps the text, where upstream keeps the image), expanding an attached image, file attachments and context chips in user messages, palette
   sub-actions (themes, git clone; "Go to file" and content search from a
   draft without a thread), and "New thread on <branch>"
   branch carry-over (it opens a draft in the thread's project on its current
@@ -93,7 +93,8 @@ fades them in on hover or scroll, and fades the overflowing edge of the question
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-Visual parity is checked on identical synthetic data:
+Visual parity is checked on identical synthetic data (the snapshot example
+drops every `thread.turn.start`, so it never starts a provider turn):
 
 ```sh
 scripts/fixture-server.sh                      # disposable server on :3999

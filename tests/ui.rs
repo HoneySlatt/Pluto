@@ -37,6 +37,7 @@ fn harness_with(projects: Value, threads: Value) -> Harness<'static, App> {
                     server: None,
                     token: None,
                     client_settings_path: None,
+                    block_turn_starts: true,
                 },
             )
         });

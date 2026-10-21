@@ -48,6 +48,8 @@ fn main() {
         server: (!offline).then(|| args[1].clone()),
         token: (!offline).then(|| Zeroizing::new(token.trim().to_owned())),
         client_settings_path: None,
+        // Snapshots never start provider turns.
+        block_turn_starts: true,
     };
     let mut harness = Harness::builder()
         .with_size(size)
@@ -69,6 +71,9 @@ fn main() {
         if opened && app.is_loaded() {
             if expand {
                 app.expand_turns();
+            }
+            if args.iter().any(|a| a == "--running") {
+                app.simulate_running_turn();
             }
             break;
         }

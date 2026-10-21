@@ -338,7 +338,7 @@ impl App {
         self.open_menu = None;
     }
 
-    fn client_setting(&self, key: &str) -> Value {
+    pub(crate) fn client_setting(&self, key: &str) -> Value {
         self.client_settings
             .get(key)
             .cloned()

@@ -21,6 +21,9 @@ pub struct App {
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
     /// Clipboard and dropped images read off the UI thread.
     pub(crate) incoming_images: crate::ui::attachments::Incoming,
+    /// Messages queued while a turn runs.
+    pub(crate) queues: crate::ui::queue::Queues,
+    block_turn_starts: bool,
     pub(crate) status: Option<String>,
     pub(crate) expansion: Expansion,
     pub(crate) settled_expanded: bool,
@@ -242,6 +245,9 @@ pub struct Options {
     pub token: Option<Zeroizing<String>>,
     /// Where client settings persist; `None` keeps them in memory (tests).
     pub client_settings_path: Option<std::path::PathBuf>,
+    /// Drops every `thread.turn.start`, so automated runs never start a
+    /// provider turn.
+    pub block_turn_starts: bool,
 }
 
 impl App {
@@ -263,6 +269,8 @@ impl App {
             composer: String::new(),
             composer_images: Vec::new(),
             incoming_images: Default::default(),
+            queues: Default::default(),
+            block_turn_starts: options.block_turn_starts,
             status: None,
             expansion: Expansion::default(),
             settled_expanded: false,
@@ -571,6 +579,10 @@ impl App {
     }
 
     pub(crate) fn dispatch(&mut self, command: Value) {
+        if self.block_turn_starts && command["type"] == "thread.turn.start" {
+            self.status = Some("Turn starts are blocked in this run".into());
+            return;
+        }
         self.send(Action::Dispatch(command));
     }
 
@@ -779,6 +791,7 @@ impl eframe::App for App {
         self.egui_ctx = Some(ui.ctx().clone());
         if self.connected() {
             self.request_favicons();
+            self.send_due_queued();
         }
         self.sync_theme(ui.ctx());
         let rect = ui.max_rect();
@@ -914,6 +927,25 @@ impl App {
                     self.expansion.turns.insert(turn.clone());
                 }
             }
+        }
+    }
+
+    /// Shows the open thread as running a turn, locally only (dev snapshots:
+    /// the fixture cannot run one without a provider).
+    pub fn simulate_running_turn(&mut self) {
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        let running = |thread: &mut crate::model::Thread| {
+            let session = thread.session.get_or_insert_with(Default::default);
+            session.status = "running".into();
+            session.active_turn_id = Some("snapshot-turn".into());
+        };
+        if let Some(detail) = self.state.detail.as_mut().filter(|t| t.id == id) {
+            running(detail);
+        }
+        if let Some(thread) = self.state.threads.iter_mut().find(|t| t.id == id) {
+            running(thread);
         }
     }
 }

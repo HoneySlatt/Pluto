@@ -14,6 +14,7 @@ fn main() -> eframe::Result<()> {
         token: None,
         client_settings_path: config_home
             .map(|d| d.join("t3-code-rust").join("client-settings.json")),
+        block_turn_starts: false,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {

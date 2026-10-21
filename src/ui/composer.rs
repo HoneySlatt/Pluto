@@ -45,6 +45,49 @@ pub(crate) enum Mode {
     Question(PendingUserInput),
 }
 
+/// The title of a message's thread: its text, or its first image's name
+/// (`truncate(titleSeed)`, 50 characters).
+fn title_seed(text: &str, images: &[crate::ui::attachments::ComposerImage]) -> String {
+    let seed = match images.first() {
+        Some(image) if text.is_empty() => format!("Image: {}", image.name),
+        _ => text.to_owned(),
+    };
+    let chars: Vec<char> = seed.chars().collect();
+    if chars.len() <= 50 {
+        seed
+    } else {
+        format!("{}...", chars[..50].iter().collect::<String>())
+    }
+}
+
+/// A `thread.turn.start` for an existing thread (the caller adds a
+/// bootstrap for a draft).
+pub(crate) fn turn_start_command(
+    thread_id: &str,
+    text: &str,
+    images: &[crate::ui::attachments::ComposerImage],
+    model: &serde_json::Value,
+    runtime: &str,
+    interaction: &str,
+) -> serde_json::Value {
+    json!({
+        "type": "thread.turn.start",
+        "commandId": uuid::Uuid::new_v4().to_string(),
+        "threadId": thread_id,
+        "message": {
+            "messageId": uuid::Uuid::new_v4().to_string(),
+            "role": "user",
+            "text": text,
+            "attachments": crate::ui::attachments::upload_payload(images),
+        },
+        "modelSelection": model,
+        "titleSeed": title_seed(text, images),
+        "runtimeMode": runtime,
+        "interactionMode": if interaction.is_empty() { "default" } else { interaction },
+        "createdAt": now_iso(),
+    })
+}
+
 impl App {
     pub(crate) fn composer_mode(&mut self, draft: bool) -> Mode {
         if draft {
@@ -443,22 +486,34 @@ impl App {
         submit: bool,
     ) -> f32 {
         let send = Rect::from_min_size(Pos2::new(right - 32.0, bar_top - 2.0), Vec2::splat(32.0));
-        if !draft && self.running() {
-            let response = ui.interact(send, ui.id().with("stop"), Sense::click());
+        let has_content = !self.composer.trim().is_empty() || !self.composer_images.is_empty();
+        let running = !draft && self.running();
+        if running {
+            // Stop, then Send while there is something to queue (`gap-2`).
+            let stop = if has_content {
+                send.translate(Vec2::new(-32.0 - 8.0, 0.0))
+            } else {
+                send
+            };
+            let response = ui.interact(stop, ui.id().with("stop"), Sense::click());
             let fill = if response.hovered() {
                 DESTRUCTIVE
             } else {
                 theme::alpha(DESTRUCTIVE, 0.9)
             };
-            ui.painter().circle_filled(send.center(), 16.0, fill);
-            theme::paint_icon(ui, "stop-square", send, 12.0, Color32::WHITE);
+            ui.painter().circle_filled(stop.center(), 16.0, fill);
+            theme::paint_icon(ui, "stop-square", stop, 12.0, Color32::WHITE);
             if response.on_hover_text("Stop generation").clicked() {
+                if let Some(thread) = self.selected.clone() {
+                    self.drain_queue(&thread);
+                }
                 self.interrupt();
             }
-            return send.left();
+            if !has_content {
+                return stop.left();
+            }
         }
-        let can_send = (!self.composer.trim().is_empty() || !self.composer_images.is_empty())
-            && self.connected();
+        let can_send = has_content && self.connected();
         let response = ui.interact(
             send,
             ui.id().with("send"),
@@ -483,10 +538,19 @@ impl App {
             14.0,
             theme::alpha(Color32::WHITE, opacity),
         );
+        let response = if running {
+            response.on_hover_text("Queue message")
+        } else {
+            response
+        };
         if (response.clicked() || submit) && can_send {
-            self.send_message(draft);
+            self.submit_message(draft);
         }
-        send.left()
+        if running {
+            send.left() - 8.0 - 32.0
+        } else {
+            send.left()
+        }
     }
 
     /// Previous / Next / Submit for a pending question. Returns the left edge.
@@ -847,31 +911,41 @@ impl App {
             .to_owned()
     }
 
+    /// The composer's model selection as sent on the wire.
+    fn composer_model_json(&self, draft: bool) -> serde_json::Value {
+        let selection = self.composer_model_selection(draft);
+        let mut model = json!({"instanceId": selection.instance_id, "model": selection.model});
+        if let Some(options) = &selection.options {
+            model["options"] = options.clone();
+        }
+        model
+    }
+
+    /// Sends the composer's message; during a turn of an existing thread the
+    /// "Queue" follow-up behavior queues it instead (`followUpBehavior`).
+    fn submit_message(&mut self, draft: bool) {
+        if !draft
+            && self.running()
+            && self.client_setting("followUpBehavior") != "steer"
+            && let Some(thread) = self.current_thread()
+        {
+            let model = self.composer_model_json(false);
+            let runtime = self.composer_runtime_mode(false);
+            self.enqueue_composer(&thread, model, runtime);
+            return;
+        }
+        self.send_message(draft);
+    }
+
     fn send_message(&mut self, draft: bool) {
         let text = self.composer.trim().to_owned();
         if text.is_empty() && self.composer_images.is_empty() {
             return;
         }
-        let selection = self.composer_model_selection(draft);
         let runtime = self.composer_runtime_mode(draft);
         let now = now_iso();
-        // An image-only message is titled after its first image.
-        let seed = match self.composer_images.first() {
-            Some(image) if text.is_empty() => format!("Image: {}", image.name),
-            _ => text.clone(),
-        };
-        let title = {
-            let chars: Vec<char> = seed.chars().collect();
-            if chars.len() <= 50 {
-                seed.clone()
-            } else {
-                format!("{}...", chars[..50].iter().collect::<String>())
-            }
-        };
-        let mut model = json!({"instanceId": selection.instance_id, "model": selection.model});
-        if let Some(options) = &selection.options {
-            model["options"] = options.clone();
-        }
+        let title = title_seed(&text, &self.composer_images);
+        let model = self.composer_model_json(draft);
         let (thread_id, interaction, bootstrap) = if draft {
             let Some(project) = self.draft_project() else {
                 return;
@@ -894,22 +968,14 @@ impl App {
             };
             (thread.id, thread.interaction_mode, None)
         };
-        let mut command = json!({
-            "type": "thread.turn.start",
-            "commandId": uuid::Uuid::new_v4().to_string(),
-            "threadId": thread_id,
-            "message": {
-                "messageId": uuid::Uuid::new_v4().to_string(),
-                "role": "user",
-                "text": text,
-                "attachments": crate::ui::attachments::upload_payload(&self.composer_images),
-            },
-            "modelSelection": model,
-            "titleSeed": title,
-            "runtimeMode": runtime,
-            "interactionMode": if interaction.is_empty() { "default".to_owned() } else { interaction },
-            "createdAt": now,
-        });
+        let mut command = turn_start_command(
+            &thread_id,
+            &text,
+            &self.composer_images,
+            &model,
+            &runtime,
+            &interaction,
+        );
         if let Some(bootstrap) = bootstrap {
             command["bootstrap"] = bootstrap;
         }
