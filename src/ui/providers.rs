@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::accent_picker::{self, AccentPicker, PickerEvent};
+use crate::ui::custom_model_editor::{CustomModelEditor, EditorEvent};
 use crate::ui::instance_badge;
 use crate::ui::settings::{
     Control, Row, RowAction, Store, card_border, card_fill, number_or_text_field, row_divider,
@@ -1485,10 +1486,30 @@ impl App {
             }
             previous = Some(*group);
         }
+        // The custom model editor opens under its row (`editingSlug`).
+        let mut editor = self.custom_model_editor.take().filter(|e| {
+            e.row == row.id
+                && display
+                    .iter()
+                    .any(|(m, _)| m["isCustom"] == true && m["slug"] == e.slug.as_str())
+        });
+        let candidates: Vec<Value> = models
+            .iter()
+            .filter(|m| m["isCustom"] != true)
+            .filter(|m| {
+                m["capabilities"]["optionDescriptors"]
+                    .as_array()
+                    .is_some_and(|d| !d.is_empty())
+            })
+            .cloned()
+            .collect();
+        let editor_height = editor
+            .as_ref()
+            .map_or(0.0, |e| e.height(!candidates.is_empty()));
         let list_height = if display.is_empty() {
             32.0
         } else {
-            display.len() as f32 * 28.0 + labels
+            display.len() as f32 * 28.0 + labels + editor_height
         };
         let card = Rect::from_min_size(
             Pos2::new(left, top),
@@ -1598,6 +1619,7 @@ impl App {
             }
         }
         let mut remove_custom: Option<String> = None;
+        let mut save_custom: Option<Value> = None;
 
         let mut y = toolbar + 32.0;
         if display.is_empty() {
@@ -1778,7 +1800,7 @@ impl App {
             }
             let mut actions_right = switch_rect.left() - 8.0;
             if custom {
-                // Remove (`XIcon`); editing the name and options is not ported.
+                // Remove (`XIcon`), then edit (`PencilIcon`) to its left.
                 let button = Rect::from_min_size(
                     Pos2::new(actions_right - 20.0, center - 10.0),
                     Vec2::splat(20.0),
@@ -1796,6 +1818,38 @@ impl App {
                 .clicked()
                 {
                     remove_custom = Some(slug.clone());
+                }
+                let button = Rect::from_min_size(
+                    Pos2::new(actions_right - 20.0, center - 10.0),
+                    Vec2::splat(20.0),
+                );
+                actions_right -= 22.0;
+                if widgets::icon_button(
+                    ui,
+                    button,
+                    ("model-edit", &row.id, slug),
+                    "pencil",
+                    12.0,
+                    theme::muted_foreground(),
+                    "Edit name and options",
+                )
+                .clicked()
+                {
+                    editor = if editor.as_ref().is_some_and(|e| e.slug == *slug) {
+                        None
+                    } else {
+                        let entry = row.instance["config"]["customModels"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .find(|e| {
+                                e.as_str().or(e["slug"].as_str()).map(str::trim)
+                                    == Some(slug.as_str())
+                            })
+                            .cloned()
+                            .unwrap_or_else(|| json!(slug));
+                        Some(CustomModelEditor::new(&row.id, &row.driver, &entry))
+                    };
                 }
             }
             if !is_hidden {
@@ -1850,6 +1904,22 @@ impl App {
                 );
             }
             y += 28.0;
+            if let Some(open) = editor.as_mut().filter(|e| e.slug == *slug) {
+                let height = open.height(!candidates.is_empty());
+                let rect = Rect::from_min_max(
+                    Pos2::new(card.left() + 17.0, y + 4.0),
+                    Pos2::new(card.right() - 17.0, y + height - 8.0),
+                );
+                match open.show(ui, rect, &candidates) {
+                    EditorEvent::None => {}
+                    EditorEvent::Cancel => editor = None,
+                    EditorEvent::Save(setting) => {
+                        save_custom = Some(setting);
+                        editor = None;
+                    }
+                }
+                y += height;
+            }
         }
 
         // The add row: slug input, Add and Cancel, and the error below.
@@ -1975,6 +2045,39 @@ impl App {
                     self.custom_model_input = None;
                 }
             }
+        }
+        if let Some(setting) = save_custom {
+            // `handleSaveEdit`: the edited entry replaces its slug's.
+            let slug = setting
+                .as_str()
+                .or(setting["slug"].as_str())
+                .unwrap_or_default()
+                .to_owned();
+            let next: Vec<Value> = row.instance["config"]["customModels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|entry| {
+                    if entry.as_str().or(entry["slug"].as_str()).map(str::trim)
+                        == Some(slug.as_str())
+                    {
+                        setting.clone()
+                    } else {
+                        entry.clone()
+                    }
+                })
+                .collect();
+            self.save_custom_models(row, next);
+        }
+        if remove_custom.is_some()
+            && editor
+                .as_ref()
+                .is_some_and(|e| Some(&e.slug) == remove_custom.as_ref())
+        {
+            editor = None;
+        }
+        if editor.is_some() {
+            self.custom_model_editor = editor;
         }
         if let Some(slug) = remove_custom {
             // `handleRemove`: also drop it from the order and favorites.

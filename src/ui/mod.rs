@@ -6,6 +6,7 @@ pub mod composer;
 pub mod connect;
 pub mod content_search;
 pub mod context_menu;
+pub mod custom_model_editor;
 pub mod diff_panel;
 pub mod files;
 pub mod instance_badge;
