@@ -759,6 +759,10 @@ fn install_styles(ctx: &egui::Context) {
 }
 
 pub fn icon(name: &str) -> egui::ImageSource<'static> {
+    if name == "provider-antigravity" {
+        // A raster mark (upstream embeds the same PNG in its SVG).
+        return egui::include_image!("../assets/icons/provider-antigravity.png");
+    }
     macro_rules! icons {
         ($($name:literal),* $(,)?) => {
             match name {
@@ -975,7 +979,9 @@ pub fn tinted_icon(name: &str, size: f32, tint: Color32) -> egui::Image<'static>
 
 /// Paints an icon centered in `rect`.
 pub fn paint_icon(ui: &egui::Ui, name: &str, rect: egui::Rect, size: f32, tint: Color32) {
-    let rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
+    // OpenCode's 32x40 mark keeps its aspect inside the square slot.
+    let width = if name == "opencode" { size * 0.8 } else { size };
+    let rect = egui::Rect::from_center_size(rect.center(), egui::vec2(width, size));
     tinted_icon(name, size, tint).paint_at(ui, rect);
 }
 

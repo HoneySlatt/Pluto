@@ -65,6 +65,38 @@ fn resolve(
     })
 }
 
+/// `shortcutLabelForCommand` (`findEffectiveShortcutForCommand`): the label of
+/// the last binding of `command` whose condition holds, unless a later binding
+/// claims the same keys.
+pub(crate) fn effective_shortcut_label(
+    bindings: &Value,
+    command: &str,
+    context: &[(&str, bool)],
+) -> Option<String> {
+    let mut claimed = std::collections::HashSet::new();
+    for binding in bindings.as_array()?.iter().rev() {
+        if !when_matches(&binding["whenAst"], context) {
+            continue;
+        }
+        let shortcut = &binding["shortcut"];
+        let flag = |name: &str| shortcut[name] == true;
+        let conflict = (
+            shortcut["key"].as_str().unwrap_or_default().to_owned(),
+            flag("metaKey"),
+            flag("ctrlKey") || flag("modKey"),
+            flag("shiftKey"),
+            flag("altKey"),
+        );
+        if !claimed.insert(conflict) {
+            continue;
+        }
+        if binding["command"] == command {
+            return Some(crate::ui::action_editor::format_shortcut(shortcut));
+        }
+    }
+    None
+}
+
 impl App {
     /// Runs the command bound to a key pressed this frame, consuming it.
     pub(crate) fn run_shortcuts(&mut self, ui: &Ui) {
@@ -194,6 +226,10 @@ impl App {
                     return false;
                 };
                 self.select_thread(Some(target));
+            }
+            jump if jump.starts_with("modelPicker.jump.") => {
+                let index: usize = jump["modelPicker.jump.".len()..].parse().unwrap_or(0);
+                self.picker_jump = Some(index);
             }
             jump if jump.starts_with("thread.jump.") => {
                 let index: usize = jump["thread.jump.".len()..].parse().unwrap_or(0);

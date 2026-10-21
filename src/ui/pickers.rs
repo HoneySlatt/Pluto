@@ -36,11 +36,16 @@ pub const RUNTIME_MODES: [(&str, &str, &str, &str); 4] = [
     ),
 ];
 
-/// Provider glyph for a driver, with its brand tint.
+/// Provider glyph for a driver, with its dark-theme brand tint
+/// (`PROVIDER_ICON_BY_PROVIDER` in `providerIconUtils.ts`).
 pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
     match driver {
         "codex" => Some(("openai", theme::foreground())),
         "claudeAgent" => Some(("claude", Color32::from_rgb(0xd9, 0x77, 0x57))),
+        "cursor" => Some(("provider-cursor", Color32::from_rgb(0xed, 0xec, 0xec))),
+        "grok" => Some(("provider-grok", Color32::from_rgb(0xf5, 0xf5, 0xf5))),
+        "opencode" => Some(("opencode", Color32::WHITE)),
+        "antigravity" => Some(("provider-antigravity", Color32::WHITE)),
         _ => None,
     }
 }
@@ -263,11 +268,17 @@ impl App {
         if self.open_menu.as_deref() != Some(menu) {
             return None;
         }
-        let providers: Vec<Value> = self
-            .providers()
-            .into_iter()
-            .filter(|p| p["status"] == "ready" && p["enabled"] != false)
-            .collect();
+        // The rail shows every enabled instance; those not ready are dimmed
+        // and list no models (`isProviderInstancePickerReady`).
+        let providers = sort_instances(
+            self.providers()
+                .into_iter()
+                .filter(|p| p["enabled"] != false)
+                .collect(),
+        );
+        let ready = |p: &Value| p["status"] == "ready" && p["availability"] != "unavailable";
+        let bindings = self.state.config["keybindings"].clone();
+        let jump = self.picker_jump.take();
         if self.picker_provider.is_none() {
             self.picker_provider = Some(selection.instance_id.clone());
         }
@@ -309,9 +320,9 @@ impl App {
                 ui,
                 star,
                 "rail-favorites",
-                "star-filled",
-                theme::foreground(),
+                ("star-filled", theme::foreground()),
                 active == FAVORITES,
+                true,
                 rail.right(),
             )
             .clicked()
@@ -335,14 +346,22 @@ impl App {
                 let driver = provider["driver"].as_str().unwrap_or_default();
                 let (icon, tint) =
                     provider_icon(driver).unwrap_or(("circle-alert", theme::muted_foreground()));
+                let enabled = ready(provider);
                 let slot = Rect::from_min_size(Pos2::new(rail.left() + 12.0, y), Vec2::splat(20.0));
                 let response = rail_button(
                     ui,
                     slot,
                     &format!("rail-{id}"),
-                    icon,
-                    tint,
+                    (
+                        icon,
+                        if enabled {
+                            tint
+                        } else {
+                            theme::alpha(tint, 0.5)
+                        },
+                    ),
                     active == id,
+                    enabled,
                     rail.right(),
                 );
                 if let Some(badge) = self.instance_badge(&id) {
@@ -356,7 +375,7 @@ impl App {
                     };
                     crate::ui::instance_badge::paint(ui, slot, 2.0, &badge, ring, 1.0);
                 }
-                if response.clicked() {
+                if enabled && response.clicked() {
                     switch_provider = Some(id);
                 }
                 y += 40.0;
@@ -389,7 +408,7 @@ impl App {
             let needle = new_query.trim().to_lowercase();
             let mut current: Vec<(String, String, Value)> = Vec::new();
             let mut legacy: Vec<(String, String, Value)> = Vec::new();
-            for provider in &providers {
+            for provider in providers.iter().filter(|p| ready(p)) {
                 let id = provider["instanceId"]
                     .as_str()
                     .unwrap_or_default()
@@ -438,6 +457,16 @@ impl App {
                             [].iter()
                         })
                         .collect();
+                    // The first nine rows answer `modelPicker.jump.N`.
+                    if let Some((provider_id, _, model)) =
+                        jump.and_then(|n| rows.get(n.wrapping_sub(1)))
+                    {
+                        chosen = Some(ModelSelection {
+                            instance_id: provider_id.clone(),
+                            model: model["slug"].as_str().unwrap_or_default().to_owned(),
+                            options: None,
+                        });
+                    }
                     if rows.is_empty() && legacy.is_empty() {
                         widgets::text(
                             ui,
@@ -448,7 +477,8 @@ impl App {
                             16.0,
                         );
                     }
-                    for (provider_id, provider_name, model) in rows {
+                    for (index, (provider_id, provider_name, model)) in rows.into_iter().enumerate()
+                    {
                         let slug = model["slug"].as_str().unwrap_or_default();
                         let label = model["displayName"]
                             .as_str()
@@ -473,7 +503,7 @@ impl App {
                             ui.painter()
                                 .rect_filled(row, CornerRadius::same(6), theme::accent());
                         }
-                        widgets::text(
+                        let label_width = widgets::text(
                             ui,
                             row.min + Vec2::new(8.0, 4.0),
                             label,
@@ -481,12 +511,15 @@ impl App {
                             theme::foreground(),
                             16.5,
                         );
+                        if model["badge"] == "new" {
+                            paint_new_badge(ui, row.min + Vec2::new(16.0 + label_width.x, 6.5));
+                        }
                         let driver = providers
                             .iter()
                             .find(|p| p["instanceId"] == provider_id.as_str())
                             .and_then(|p| p["driver"].as_str())
                             .unwrap_or_default();
-                        if let Some((icon, _)) = provider_icon(driver) {
+                        if let Some((icon, tint)) = provider_icon(driver) {
                             theme::paint_icon(
                                 ui,
                                 icon,
@@ -495,7 +528,11 @@ impl App {
                                     Vec2::new(12.0, 16.5),
                                 ),
                                 12.0,
-                                theme::muted_foreground(),
+                                if driver == "codex" {
+                                    theme::muted_foreground()
+                                } else {
+                                    tint
+                                },
                             );
                         }
                         widgets::text(
@@ -512,13 +549,29 @@ impl App {
                             Vec2::splat(24.0),
                         );
                         let favorite = favorites.contains(&key);
+                        let shortcut = (index < 9)
+                            .then(|| {
+                                crate::ui::shortcuts::effective_shortcut_label(
+                                    &bindings,
+                                    &format!("modelPicker.jump.{}", index + 1),
+                                    &[("isDesktop", true), ("modelPickerOpen", true)],
+                                )
+                            })
+                            .flatten();
+                        if let Some(shortcut) = shortcut {
+                            paint_kbd(ui, &shortcut, star_rect.left() + 2.0, row.center().y);
+                        }
                         if widgets::icon_button(
                             ui,
                             star_rect,
                             ("favorite", &key),
                             if favorite { "star-filled" } else { "star" },
                             12.0,
-                            theme::muted_foreground(),
+                            if favorite {
+                                theme::warning()
+                            } else {
+                                theme::muted_foreground()
+                            },
                             if favorite {
                                 "Remove from favorites"
                             } else {
@@ -613,14 +666,14 @@ fn rail_button(
     ui: &mut Ui,
     slot: Rect,
     id: &str,
-    icon: &str,
-    tint: Color32,
+    (icon, tint): (&str, Color32),
     active: bool,
+    enabled: bool,
     rail_right: f32,
 ) -> eframe::egui::Response {
     let hit = slot.expand(8.0);
     let response = ui.interact(hit, ui.id().with(id), Sense::click());
-    if response.hovered() && !active {
+    if response.hovered() && !active && enabled {
         ui.painter()
             .rect_filled(hit, CornerRadius::same(8), theme::accent());
     }
@@ -643,4 +696,64 @@ fn rail_button(
         );
     }
     response
+}
+
+/// `sortProviderInstanceEntries`: the server's order grouped by driver kind
+/// (first appearance), each kind's default instance before its custom ones.
+fn sort_instances(providers: Vec<Value>) -> Vec<Value> {
+    let mut kinds: Vec<String> = Vec::new();
+    for provider in &providers {
+        let driver = provider["driver"].as_str().unwrap_or_default().to_owned();
+        if !kinds.contains(&driver) {
+            kinds.push(driver);
+        }
+    }
+    let mut sorted = Vec::with_capacity(providers.len());
+    for kind in &kinds {
+        let bucket = providers.iter().filter(|p| p["driver"] == kind.as_str());
+        let (defaults, customs): (Vec<&Value>, Vec<&Value>) =
+            bucket.partition(|p| p["instanceId"] == kind.as_str());
+        sorted.extend(defaults.into_iter().chain(customs).cloned());
+    }
+    sorted
+}
+
+/// The row's "New" tag (`ModelListRow`): 10px bold caps in `update-foreground`
+/// on a 15% `update` fill with a 35% border.
+fn paint_new_badge(ui: &Ui, min: Pos2) {
+    let label_font = font(10.0, Weight::Bold);
+    let width = widgets::text_width(ui, "NEW", label_font.clone());
+    let rect = Rect::from_min_size(min, Vec2::new(width + 4.0, 12.0));
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(4),
+        theme::alpha(theme::primary(), 0.15),
+        Stroke::new(1.0, theme::alpha(theme::primary(), 0.35)),
+        StrokeKind::Inside,
+    );
+    widgets::text_in(
+        ui,
+        rect.shrink2(Vec2::new(2.0, 0.0)),
+        "NEW",
+        label_font,
+        theme::BLUE_400,
+    );
+}
+
+/// A `Kbd` chip (h-5, min-w-5, px-1, `bg-muted`, 12px medium) ending at `right`.
+fn paint_kbd(ui: &Ui, label: &str, right: f32, center_y: f32) {
+    let label_font = font(12.0, Weight::Medium);
+    let text_width = widgets::text_width(ui, label, label_font.clone());
+    let width = (text_width + 8.0).max(20.0);
+    let rect = Rect::from_min_size(
+        Pos2::new(right - 6.0 - width, center_y - 10.0),
+        Vec2::new(width, 20.0),
+    );
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(4), theme::muted());
+    let text = Rect::from_min_max(
+        Pos2::new(rect.center().x - text_width / 2.0, rect.top()),
+        rect.max,
+    );
+    widgets::text_in(ui, text, label, label_font, theme::muted_foreground());
 }

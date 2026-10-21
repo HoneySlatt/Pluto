@@ -106,7 +106,11 @@ pub(crate) fn shortcut_label_for(bindings: &Value, command: &str) -> Option<Stri
         .iter()
         .rev()
         .find(|binding| binding["command"] == command)?;
-    let shortcut = &binding["shortcut"];
+    Some(format_shortcut(&binding["shortcut"]))
+}
+
+/// `formatShortcutLabel` off macOS.
+pub(crate) fn format_shortcut(shortcut: &Value) -> String {
     let key = shortcut["key"].as_str().unwrap_or_default();
     let key_label = match key {
         " " => "Space".to_owned(),
@@ -138,7 +142,7 @@ pub(crate) fn shortcut_label_for(bindings: &Value, command: &str) -> Option<Stri
         parts.push("Meta".to_owned());
     }
     parts.push(key_label);
-    Some(parts.join("+"))
+    parts.join("+")
 }
 
 pub(crate) struct ActionEditor {

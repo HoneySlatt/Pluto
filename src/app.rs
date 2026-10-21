@@ -39,6 +39,8 @@ pub struct App {
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
     pub(crate) picker_legacy_open: bool,
+    /// A `modelPicker.jump.N` press (1-based) for the open model picker.
+    pub(crate) picker_jump: Option<usize>,
     pub(crate) favorite_models: std::collections::BTreeSet<String>,
     /// Right panel per thread (`rightPanelStore.ts`, in memory).
     pub(crate) panels: std::collections::HashMap<String, Panel>,
@@ -288,6 +290,7 @@ impl App {
             picker_provider: None,
             picker_query: String::new(),
             picker_legacy_open: false,
+            picker_jump: None,
             favorite_models: Default::default(),
             panels: Default::default(),
             launcher_highlight: None,

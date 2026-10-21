@@ -1074,32 +1074,16 @@ impl App {
     }
 
     fn paint_provider_mark(&self, ui: &Ui, driver: &str, min: Pos2, fade: f32) {
-        let Some((_, _, icon, _)) = driver_meta(driver) else {
+        let Some((icon, tint)) = crate::ui::pickers::provider_icon(driver) else {
             return;
         };
         let rect = Rect::from_min_size(min + Vec2::splat(2.0), Vec2::splat(16.0));
-        let tint = match driver {
-            "claudeAgent" => Color32::from_rgb(0xd9, 0x77, 0x57),
-            "cursor" => Color32::from_rgb(0xed, 0xec, 0xec),
-            "grok" => Color32::from_rgb(0xf5, 0xf5, 0xf5),
-            "opencode" | "antigravity" => Color32::WHITE,
-            _ => theme::alpha(theme::foreground(), 0.8),
-        };
-        if driver == "antigravity" {
-            // A raster mark (upstream embeds the same PNG in its SVG).
-            egui::Image::new(egui::include_image!(
-                "../../assets/icons/provider-antigravity.png"
-            ))
-            .tint(theme::alpha(tint, fade))
-            .paint_at(ui, rect);
-        } else if driver == "opencode" {
-            theme::tinted_icon(icon, 16.0, theme::alpha(tint, fade)).paint_at(
-                ui,
-                Rect::from_center_size(rect.center(), Vec2::new(12.8, 16.0)),
-            );
+        let tint = if driver == "codex" {
+            theme::alpha(theme::foreground(), 0.8)
         } else {
-            theme::paint_icon(ui, icon, rect, 16.0, theme::alpha(tint, fade));
-        }
+            tint
+        };
+        theme::paint_icon(ui, icon, rect, 16.0, theme::alpha(tint, fade));
     }
 
     /// The selected instance's editor (`mode === "editor"`); returns the
