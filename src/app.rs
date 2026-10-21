@@ -21,6 +21,8 @@ pub struct App {
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
     /// Clipboard and dropped images read off the UI thread.
     pub(crate) incoming_images: crate::ui::attachments::Incoming,
+    /// Settings → Appearance typography.
+    pub(crate) typography: crate::ui::typography::Typography,
     /// The expanded image preview.
     pub(crate) lightbox: Option<crate::ui::lightbox::Lightbox>,
     /// Messages queued while a turn runs.
@@ -273,6 +275,7 @@ impl App {
             incoming_images: Default::default(),
             queues: Default::default(),
             lightbox: None,
+            typography: Default::default(),
             block_turn_starts: options.block_turn_starts,
             status: None,
             expansion: Expansion::default(),
@@ -292,7 +295,7 @@ impl App {
             palette: Default::default(),
             browse: Default::default(),
             thread_menu: None,
-            last_visited: Default::default(),
+            last_visited: load_visits(options.client_settings_path.as_deref()),
             visited_turn: None,
             project_scope: None,
             scope_menu: Default::default(),
@@ -380,6 +383,8 @@ impl App {
         // The diff panel starts from the saved client defaults.
         app.diff_split = app.client_settings["diffLayout"] == "split";
         app.diff_ignore_whitespace = app.client_settings["diffIgnoreWhitespace"] != false;
+        app.diff_wrap = app.client_settings["wordWrap"] != false;
+        app.files.wrap = app.diff_wrap;
         app.load_favorites();
         if let (Some(_), Some(token)) = (options.server, options.token) {
             app.connect.token = token;
@@ -516,6 +521,22 @@ impl App {
         if newer {
             self.last_visited
                 .insert(thread_id.to_owned(), at.to_owned());
+            self.save_visits();
+        }
+    }
+
+    /// Visits persist beside the client settings (upstream keeps them in
+    /// its UI state store), so a reply that lands while the app is closed
+    /// still reads as Done.
+    fn save_visits(&self) {
+        let Some(path) = visits_path(self.client_settings_path.as_deref()) else {
+            return;
+        };
+        if let Ok(text) = serde_json::to_string(&self.last_visited) {
+            let temp = path.with_extension("json.tmp");
+            if std::fs::write(&temp, text).is_ok() {
+                let _ = std::fs::rename(&temp, &path);
+            }
         }
     }
 
@@ -544,6 +565,7 @@ impl App {
         let visited = (completed - chrono::Duration::milliseconds(1))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         self.last_visited.insert(thread.id.clone(), visited);
+        self.save_visits();
     }
 
     /// `hasUnseenCompletion`: never-visited threads count as read.
@@ -792,6 +814,7 @@ impl eframe::App for App {
         self.now = chrono::Utc::now();
         self.poll_events();
         self.egui_ctx = Some(ui.ctx().clone());
+        self.apply_typography(ui.ctx());
         if self.connected() {
             self.request_favicons();
             self.send_due_queued();
@@ -1156,4 +1179,17 @@ impl App {
     pub fn renaming_thread(&self) -> Option<&str> {
         self.renaming.as_ref().map(|(id, _)| id.as_str())
     }
+}
+
+/// `visited.json` beside the client settings file.
+fn visits_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    Some(settings?.with_file_name("visited.json"))
+}
+
+/// The persisted thread visits (empty without a settings path).
+fn load_visits(settings: Option<&std::path::Path>) -> std::collections::HashMap<String, String> {
+    visits_path(settings)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }

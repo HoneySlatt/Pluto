@@ -21,8 +21,6 @@ use crate::terminal::{self, Color, Terminal};
 use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
 
-const FONT_SIZE: f32 = 12.0;
-const CELL_HEIGHT: f32 = 18.0;
 const PADDING: f32 = 4.0;
 const CURSOR: Color32 = Color32::from_rgb(180, 203, 255);
 /// `rgba(180, 203, 255, 0.25)`.
@@ -527,10 +525,12 @@ impl App {
             return;
         };
         let key = format!("term:{thread}\0{id}");
-        let mono = theme::mono(FONT_SIZE);
+        let mono = theme::terminal_font(false);
         let cell_width = widgets::text_width(ui, "M", mono.clone()).max(1.0);
         let cols = (((body.width() - PADDING * 2.0) / cell_width).floor() as usize).max(1);
-        let rows = (((body.height() - PADDING * 2.0) / CELL_HEIGHT).floor() as usize).max(1);
+        let rows = (((body.height() - PADDING * 2.0) / theme::terminal_cell_height()).floor()
+            as usize)
+            .max(1);
         if !self.terminals.views.contains_key(&key) {
             self.terminals.views.insert(
                 key.clone(),
@@ -590,7 +590,9 @@ impl App {
         let cell_at = |view: &TerminalView, pos: Pos2| -> (usize, usize) {
             let screen = &view.terminal.screen;
             let first = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
-            let row = (((pos.y - origin.y) / CELL_HEIGHT).floor().max(0.0) as usize)
+            let row = (((pos.y - origin.y) / theme::terminal_cell_height())
+                .floor()
+                .max(0.0) as usize)
                 .min(screen.rows.saturating_sub(1));
             let col =
                 (((pos.x - origin.x) / cell_width).round().max(0.0) as usize).min(screen.cols);
@@ -717,7 +719,7 @@ impl App {
                 && let Some(view) = self.terminals.views.get_mut(&key)
                 && !view.terminal.screen.alternate()
             {
-                let lines = (scroll / CELL_HEIGHT).round() as i64;
+                let lines = (scroll / theme::terminal_cell_height()).round() as i64;
                 let max = view.terminal.screen.scrollback.len() as i64;
                 view.offset = (view.offset as i64 + lines).clamp(0, max) as usize;
             }
@@ -733,95 +735,17 @@ impl App {
         let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
         let lines = screen.view(view.offset);
         let first_line = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
-        for (row, line) in lines.iter().enumerate() {
-            let y = origin.y + row as f32 * CELL_HEIGHT;
-            // The selection band under the glyphs (`--terminal-selection-background`).
-            let mut col = 0;
-            while col < line.len() {
-                if !view.selected(first_line + row, col) {
-                    col += 1;
-                    continue;
-                }
-                let start = col;
-                while col < line.len() && view.selected(first_line + row, col) {
-                    col += 1;
-                }
-                painter.rect_filled(
-                    Rect::from_min_size(
-                        Pos2::new(origin.x + start as f32 * cell_width, y),
-                        Vec2::new((col - start) as f32 * cell_width, CELL_HEIGHT),
-                    ),
-                    0.0,
-                    SELECTION,
-                );
-            }
-            let mut col = 0;
-            while col < line.len() {
-                let cell = line[col];
-                let mut end = col + 1;
-                while end < line.len()
-                    && line[end].fg == cell.fg
-                    && line[end].bg == cell.bg
-                    && line[end].flags == cell.flags
-                {
-                    end += 1;
-                }
-                let (mut fg, mut bg) = (resolve(cell.fg, foreground), resolve(cell.bg, background));
-                if cell.flags & terminal::INVERSE != 0 {
-                    std::mem::swap(&mut fg, &mut bg);
-                }
-                if cell.flags & terminal::DIM != 0 {
-                    fg = theme::alpha(fg, 0.6);
-                }
-                let x = origin.x + col as f32 * cell_width;
-                if bg != background {
-                    painter.rect_filled(
-                        Rect::from_min_size(
-                            Pos2::new(x, y),
-                            Vec2::new((end - col) as f32 * cell_width, CELL_HEIGHT),
-                        ),
-                        0.0,
-                        bg,
-                    );
-                }
-                let text: String = line[col..end].iter().map(|c| c.c).collect();
-                if !text.trim().is_empty() {
-                    let run_font = if cell.flags & terminal::BOLD != 0 {
-                        theme::mono_bold(FONT_SIZE)
-                    } else {
-                        mono.clone()
-                    };
-                    // Glyphs are placed on the cell grid one by one, so a
-                    // fallback glyph cannot push the rest of the row.
-                    for (i, c) in text.chars().enumerate() {
-                        if c != ' ' {
-                            let galley = widgets::galley(
-                                ui,
-                                &c.to_string(),
-                                run_font.clone(),
-                                fg,
-                                CELL_HEIGHT,
-                                f32::INFINITY,
-                            );
-                            painter.galley(Pos2::new(x + i as f32 * cell_width, y), galley, fg);
-                        }
-                    }
-                    if cell.flags & terminal::UNDERLINE != 0 {
-                        painter.hline(
-                            x..=x + (end - col) as f32 * cell_width,
-                            y + CELL_HEIGHT - 3.0,
-                            Stroke::new(1.0, fg),
-                        );
-                    }
-                }
-                col = end;
-            }
-        }
+        paint_terminal_lines(ui, &painter, origin, &lines, cell_width, |row, col| {
+            view.selected(first_line + row, col)
+        });
         if let Some((line, start, end, _)) = &hovered_link
             && *line >= first_line
             && *line < first_line + screen.rows
         {
-            let y = origin.y + (line - first_line) as f32 * CELL_HEIGHT + CELL_HEIGHT - 3.0;
+            let y = origin.y
+                + (line - first_line) as f32 * theme::terminal_cell_height()
+                + theme::terminal_cell_height()
+                - 3.0;
             painter.hline(
                 origin.x + *start as f32 * cell_width..=origin.x + *end as f32 * cell_width,
                 y,
@@ -833,9 +757,9 @@ impl App {
             let cursor = Rect::from_min_size(
                 Pos2::new(
                     origin.x + screen.col as f32 * cell_width,
-                    origin.y + screen.row as f32 * CELL_HEIGHT,
+                    origin.y + screen.row as f32 * theme::terminal_cell_height(),
                 ),
-                Vec2::new(cell_width, CELL_HEIGHT),
+                Vec2::new(cell_width, theme::terminal_cell_height()),
             );
             if focused {
                 painter.rect_filled(cursor, 0.0, CURSOR);
@@ -846,7 +770,7 @@ impl App {
                         &c.to_string(),
                         mono.clone(),
                         background,
-                        CELL_HEIGHT,
+                        theme::terminal_cell_height(),
                         f32::INFINITY,
                     );
                     painter.galley(cursor.min, galley, background);
@@ -886,6 +810,111 @@ impl App {
 
 /// The floating toolbar (split right, split down, new terminal, close);
 /// returns the clicked action's index. Splits stop at four sessions.
+/// Paints terminal lines on the cell grid from `origin`: the selection band,
+/// cell backgrounds, then each glyph with its colors and attributes.
+pub(crate) fn paint_terminal_lines(
+    ui: &Ui,
+    painter: &egui::Painter,
+    origin: Pos2,
+    lines: &[&Vec<terminal::Cell>],
+    cell_width: f32,
+    selected: impl Fn(usize, usize) -> bool,
+) {
+    let foreground = theme::foreground();
+    let background = theme::background();
+    let mono = theme::terminal_font(false);
+    for (row, line) in lines.iter().enumerate() {
+        let y = origin.y + row as f32 * theme::terminal_cell_height();
+        // The selection band under the glyphs (`--terminal-selection-background`).
+        let mut col = 0;
+        while col < line.len() {
+            if !selected(row, col) {
+                col += 1;
+                continue;
+            }
+            let start = col;
+            while col < line.len() && selected(row, col) {
+                col += 1;
+            }
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(origin.x + start as f32 * cell_width, y),
+                    Vec2::new(
+                        (col - start) as f32 * cell_width,
+                        theme::terminal_cell_height(),
+                    ),
+                ),
+                0.0,
+                SELECTION,
+            );
+        }
+        let mut col = 0;
+        while col < line.len() {
+            let cell = line[col];
+            let mut end = col + 1;
+            while end < line.len()
+                && line[end].fg == cell.fg
+                && line[end].bg == cell.bg
+                && line[end].flags == cell.flags
+            {
+                end += 1;
+            }
+            let (mut fg, mut bg) = (resolve(cell.fg, foreground), resolve(cell.bg, background));
+            if cell.flags & terminal::INVERSE != 0 {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+            if cell.flags & terminal::DIM != 0 {
+                fg = theme::alpha(fg, 0.6);
+            }
+            let x = origin.x + col as f32 * cell_width;
+            if bg != background {
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(x, y),
+                        Vec2::new(
+                            (end - col) as f32 * cell_width,
+                            theme::terminal_cell_height(),
+                        ),
+                    ),
+                    0.0,
+                    bg,
+                );
+            }
+            let text: String = line[col..end].iter().map(|c| c.c).collect();
+            if !text.trim().is_empty() {
+                let run_font = if cell.flags & terminal::BOLD != 0 {
+                    theme::terminal_font(true)
+                } else {
+                    mono.clone()
+                };
+                // Glyphs are placed on the cell grid one by one, so a
+                // fallback glyph cannot push the rest of the row.
+                for (i, c) in text.chars().enumerate() {
+                    if c != ' ' {
+                        let galley = widgets::galley(
+                            ui,
+                            &c.to_string(),
+                            run_font.clone(),
+                            fg,
+                            theme::terminal_cell_height(),
+                            f32::INFINITY,
+                        );
+                        painter.galley(Pos2::new(x + i as f32 * cell_width, y), galley, fg);
+                    }
+                }
+                if cell.flags & terminal::UNDERLINE != 0 {
+                    painter.hline(
+                        x..=x + (end - col) as f32 * cell_width,
+                        y + theme::terminal_cell_height() - 3.0,
+                        Stroke::new(1.0, fg),
+                    );
+                }
+            }
+            col = end;
+        }
+    }
+}
+
 pub(crate) fn terminal_toolbar(ui: &mut Ui, body: Rect, sessions: usize) -> Option<usize> {
     {
         let background = theme::background();

@@ -591,7 +591,18 @@ fn mix_oklab(a: Color32, b: Color32, t: f32) -> Color32 {
 /// border color, the fill the accent at 11%, the text 22% toward it). Fill
 /// and border may be translucent: paint the fill, then the border over it.
 pub(crate) fn mention_colors(border: Color32, foreground: Color32) -> [Color32; 3] {
-    let accent = oklch(0.62, 0.11, 215.0);
+    chip_colors(0.11, 215.0, border, foreground)
+}
+
+/// A context chip's (border, fill, text) for its kind's accent
+/// `oklch(0.62 chroma hue)` (`contextChipVariants`).
+pub(crate) fn chip_colors(
+    chroma: f32,
+    hue: f32,
+    border: Color32,
+    foreground: Color32,
+) -> [Color32; 3] {
+    let accent = oklch(0.62, chroma, hue);
     [
         mix_oklab(accent, border, 0.34),
         accent.gamma_multiply(0.11),

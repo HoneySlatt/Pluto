@@ -13,7 +13,6 @@ use crate::theme::{self, Weight, font};
 use crate::ui::requests_panel::OVERLAP;
 use crate::ui::widgets;
 
-const LINE: f32 = 22.75;
 const MIN_TEXT_HEIGHT: f32 = 70.0;
 const MAX_TEXT_HEIGHT: f32 = 200.0;
 /// The composer card (gray 16 on the stock palette).
@@ -133,9 +132,9 @@ impl App {
         let galley = widgets::galley(
             ui,
             &self.composer,
-            font(14.0, Weight::Regular),
+            theme::composer_font(),
             theme::foreground(),
-            LINE,
+            theme::composer_line(),
             width - 34.0,
         );
         galley.size().y.clamp(MIN_TEXT_HEIGHT, MAX_TEXT_HEIGHT)
@@ -271,9 +270,9 @@ impl App {
                 ui,
                 text_rect.min,
                 placeholder,
-                font(14.0, Weight::Regular),
+                theme::composer_font(),
                 theme::alpha(theme::muted_foreground(), 0.75),
-                LINE,
+                theme::composer_line(),
             );
         }
         if matches!(mode, Mode::Approval(..)) {
@@ -295,7 +294,7 @@ impl App {
                         .id(editor_id)
                         .frame(egui::Frame::NONE)
                         .margin(egui::Margin::ZERO)
-                        .font(font(14.0, Weight::Regular))
+                        .font(theme::composer_font())
                         .text_color(theme::foreground())
                         .desired_width(text_rect.width())
                         .layouter(&mut |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
@@ -304,9 +303,9 @@ impl App {
                                 text.as_str(),
                                 0.0,
                                 widgets::format(
-                                    font(14.0, Weight::Regular),
+                                    theme::composer_font(),
                                     theme::foreground(),
-                                    LINE,
+                                    theme::composer_line(),
                                 ),
                             );
                             job.wrap.max_width = wrap;

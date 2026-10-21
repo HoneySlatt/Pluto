@@ -59,6 +59,16 @@ pub fn default_client_settings() -> Value {
         "legacySidebarEnabled": false,
         "favorites": [],
         "providerModelPreferences": {},
+        // Typography (Settings → Appearance).
+        "fontFamilySans": "",
+        "fontSizeInterface": 16,
+        "fontFamilyComposer": "",
+        "fontSizePrompt": 14,
+        "fontFamilyCode": "",
+        "fontSizeCode": 13,
+        "fontFamilyTerminal": "",
+        "fontSizeTerminal": 12,
+        "wordWrap": true,
     })
 }
 
@@ -182,8 +192,9 @@ pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
 /// Pages with a native port; the others show a notice.
-const PORTED_PAGES: [usize; 9] = [
+const PORTED_PAGES: [usize; 10] = [
     0,
+    1,
     KEYBINDINGS_PAGE,
     SNAP_SHOT_PAGE,
     STORAGE_PAGE,
@@ -367,6 +378,12 @@ impl App {
                         self.diff_ignore_whitespace = value.as_bool().unwrap_or(true)
                     }
                     "diffLayout" => self.diff_split = value == "split",
+                    // `wordWrap`: the diff and file views start wrapped or not.
+                    "wordWrap" => {
+                        let wrap = value != false;
+                        self.diff_wrap = wrap;
+                        self.files.wrap = wrap;
+                    }
                     _ => {}
                 }
             }
@@ -2208,6 +2225,8 @@ impl App {
                 self.save_client_settings();
                 self.diff_ignore_whitespace = true;
                 self.diff_split = false;
+                self.diff_wrap = true;
+                self.files.wrap = true;
             }
         }
 
@@ -2272,6 +2291,17 @@ impl App {
                 if page == PROJECT_PAGE {
                     // `SettingsPageContainer className="gap-6"`.
                     y = self.projects_page(ui, left, y - 8.0);
+                    ui.allocate_rect(
+                        Rect::from_min_max(
+                            Pos2::new(left, top),
+                            Pos2::new(left + card_width, y + 48.0),
+                        ),
+                        Sense::hover(),
+                    );
+                    return;
+                }
+                if page == crate::ui::typography::APPEARANCE_PAGE {
+                    y = self.appearance_page(ui, left, y);
                     ui.allocate_rect(
                         Rect::from_min_max(
                             Pos2::new(left, top),

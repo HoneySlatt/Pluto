@@ -961,14 +961,14 @@ impl<'a> Markdown<'a> {
     }
 
     fn code_block(&mut self, ui: &mut Ui, language: &str, code: &str, width: f32, id: egui::Id) {
-        let line_height = 17.875; // 13px × leading-snug
+        let line_height = theme::code_line(17.875); // 13px × leading-snug
         let inner_width = width - 2.0 - 28.8;
         let mut job = LayoutJob::default();
         for (text, color) in self.highlighter.spans(code, language) {
             job.append(
                 text,
                 0.0,
-                widgets::format(theme::mono(13.0), *color, line_height),
+                widgets::format(theme::code_font(), *color, line_height),
             );
         }
         job.wrap.max_width = inner_width; // wrapping is on by default upstream

@@ -125,7 +125,10 @@ pub enum DiffScope {
 const HEADER: f32 = 52.0;
 const TOOLBAR: f32 = 28.0;
 const FILE_HEADER: f32 = 32.0;
-const LINE: f32 = 20.0;
+/// The code line (20px at the default code size).
+fn code_line_height() -> f32 {
+    theme::code_line(20.0)
+}
 const SEPARATOR: f32 = 24.0;
 const MODIFIED: Color32 = Color32::from_rgb(0, 159, 255); // --diffs-modified-base
 const ADDED: Color32 = Color32::from_rgb(7, 196, 128);
@@ -1017,7 +1020,13 @@ impl App {
     }
 
     /// File row; returns true when clicked (toggle).
-    fn diff_file_header(&mut self, ui: &mut Ui, file: &FileDiff, open: bool, width: f32) -> bool {
+    pub(crate) fn diff_file_header(
+        &mut self,
+        ui: &mut Ui,
+        file: &FileDiff,
+        open: bool,
+        width: f32,
+    ) -> bool {
         let (row, _) = ui.allocate_exact_size(Vec2::new(width, FILE_HEADER), Sense::hover());
         let response = ui.interact(row, ui.id().with(("diff-file", &file.path)), Sense::click());
         if open {
@@ -1119,7 +1128,7 @@ impl App {
     /// `source`: a git preview, whose unchanged context expands from the
     /// full files; until they load, its files end with "More unchanged
     /// context may be available".
-    fn diff_file_body(
+    pub(crate) fn diff_file_body(
         &mut self,
         ui: &mut Ui,
         file: &FileDiff,
@@ -1166,7 +1175,7 @@ impl App {
             .map(|l| l.old.max(l.new))
             .max()
             .unwrap_or(1);
-        let digit = widgets::text_width(ui, "0", egui::FontId::monospace(13.0));
+        let digit = widgets::text_width(ui, "0", theme::code_font());
         let shift = (widest.to_string().len() as f32 - 3.0) * digit;
         let mut previous_end: u32 = 1;
         let mut previous_old_end: u32 = 1;
@@ -1200,7 +1209,7 @@ impl App {
             if !self.diff_split {
                 for line in hunk.lines() {
                     let galley = self.code_galley(ui, line, &language, content, shift);
-                    let height = galley.rows.len().max(1) as f32 * LINE;
+                    let height = galley.rows.len().max(1) as f32 * code_line_height();
                     let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
                     let column =
                         Rect::from_min_max(row.min, Pos2::new(row.left() + content, row.bottom()));
@@ -1230,7 +1239,7 @@ impl App {
                 let lines = |g: &Option<std::sync::Arc<egui::Galley>>| {
                     g.as_ref().map_or(1, |g| g.rows.len().max(1))
                 };
-                let height = lines(&old_galley).max(lines(&new_galley)) as f32 * LINE;
+                let height = lines(&old_galley).max(lines(&new_galley)) as f32 * code_line_height();
                 let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
                 let left = Rect::from_min_size(row.min, Vec2::new(left_width, height));
                 let right = Rect::from_min_size(
@@ -1648,7 +1657,7 @@ impl App {
         for line in lines {
             if !self.diff_split {
                 let galley = self.code_galley(ui, line, language, content, shift);
-                let height = galley.rows.len().max(1) as f32 * LINE;
+                let height = galley.rows.len().max(1) as f32 * code_line_height();
                 let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
                 let column =
                     Rect::from_min_max(row.min, Pos2::new(row.left() + content, row.bottom()));
@@ -1658,7 +1667,7 @@ impl App {
             let right_width = content - left_width - 2.0;
             let old = self.code_galley(ui, line, language, left_width, shift);
             let new = self.code_galley(ui, line, language, right_width, shift);
-            let height = old.rows.len().max(new.rows.len()).max(1) as f32 * LINE;
+            let height = old.rows.len().max(new.rows.len()).max(1) as f32 * code_line_height();
             let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
             let left = Rect::from_min_size(row.min, Vec2::new(left_width, height));
             let right = Rect::from_min_size(
@@ -1699,14 +1708,14 @@ impl App {
             job.append(
                 &text,
                 0.0,
-                widgets::format(egui::FontId::monospace(13.0), color, LINE),
+                widgets::format(theme::code_font(), color, code_line_height()),
             );
         }
         if job.text.is_empty() {
             job.append(
                 " ",
                 0.0,
-                widgets::format(egui::FontId::monospace(13.0), theme::foreground(), LINE),
+                widgets::format(theme::code_font(), theme::foreground(), code_line_height()),
             );
         }
         job.wrap.max_width = wrap;
@@ -1827,7 +1836,7 @@ fn glyph_spans(galley: &egui::Galley, text: &str, start: usize, end: usize) -> V
             let top = placed.pos.y + 1.0;
             out.push(Rect::from_min_max(
                 Pos2::new(placed.pos.x + l, top),
-                Pos2::new(placed.pos.x + r, top + LINE - 2.0),
+                Pos2::new(placed.pos.x + r, top + code_line_height() - 2.0),
             ));
         }
         if placed.ends_with_newline {
@@ -1917,7 +1926,7 @@ fn paint_diff_cell(
     // Text sits 1px above egui's centered line box.
     let top = column.top() - 1.0;
     let number = number.to_string();
-    let number_font = egui::FontId::monospace(13.0);
+    let number_font = theme::code_font();
     let number_width = widgets::text_width(ui, &number, number_font.clone());
     widgets::text(
         ui,
@@ -1925,7 +1934,7 @@ fn paint_diff_cell(
         &number,
         number_font,
         number_color,
-        LINE,
+        code_line_height(),
     );
     let origin = Pos2::new(column.left() + code_text, top);
     for (start, end) in &line.emphasis {

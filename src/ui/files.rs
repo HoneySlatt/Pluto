@@ -26,7 +26,10 @@ const INDENT: f32 = 19.0;
 const TREE_WIDTH: f32 = 256.0;
 const CHEVRON: Color32 = Color32::from_rgb(0x84, 0x84, 0x8a);
 const CODE_BACKGROUND: Color32 = Color32::from_rgb(17, 17, 17);
-const LINE: f32 = 20.0;
+/// The code line (20px at the default code size).
+fn code_line_height() -> f32 {
+    theme::code_line(20.0)
+}
 
 /// One entry of a listing: its workspace-relative path and whether it is a
 /// directory or ignored.
@@ -500,7 +503,7 @@ impl App {
             }
         }
         let digits = lines.len().to_string().len().max(1) as f32;
-        let digit = widgets::text_width(ui, "0", theme::mono(13.0));
+        let digit = widgets::text_width(ui, "0", theme::code_font());
         let number_right = 25.0 + (digits - 1.0) * digit;
         let code_left = number_right + 17.0;
         let wrap_width = if self.files.wrap {
@@ -532,20 +535,32 @@ impl App {
                     .map(|line| {
                         let mut job = egui::text::LayoutJob::default();
                         for (text, color) in line {
-                            job.append(text, 0.0, widgets::format(theme::mono(13.0), *color, LINE));
+                            job.append(
+                                text,
+                                0.0,
+                                widgets::format(theme::code_font(), *color, code_line_height()),
+                            );
                         }
                         if line.is_empty() {
                             job.append(
                                 " ",
                                 0.0,
-                                widgets::format(theme::mono(13.0), theme::code_foreground(), LINE),
+                                widgets::format(
+                                    theme::code_font(),
+                                    theme::code_foreground(),
+                                    code_line_height(),
+                                ),
                             );
                         }
                         job.wrap.max_width = wrap_width;
                         ui.fonts_mut(|f| f.layout_job(job))
                     })
                     .collect();
-                let height: f32 = galleys.iter().map(|g| g.size().y.max(LINE)).sum::<f32>() + 16.0;
+                let height: f32 = galleys
+                    .iter()
+                    .map(|g| g.size().y.max(code_line_height()))
+                    .sum::<f32>()
+                    + 16.0;
                 let width =
                     galleys.iter().map(|g| g.size().x).fold(0.0, f32::max) + code_left + 12.0;
                 let area = Rect::from_min_size(origin, Vec2::new(width.max(rect.width()), height));
@@ -559,8 +574,8 @@ impl App {
                 let mut y = origin.y + 8.0;
                 for (index, galley) in galleys.into_iter().enumerate() {
                     let number = (index + 1).to_string();
-                    let number_width = widgets::text_width(ui, &number, theme::mono(13.0));
-                    let row_height = galley.size().y.max(LINE);
+                    let number_width = widgets::text_width(ui, &number, theme::code_font());
+                    let row_height = galley.size().y.max(code_line_height());
                     let mut number_color = theme::muted_foreground();
                     if let Some((line, scrolled)) = reveal
                         && line == index + 1
@@ -599,9 +614,9 @@ impl App {
                         ui,
                         Pos2::new(origin.x + number_right - number_width, y),
                         &number,
-                        theme::mono(13.0),
+                        theme::code_font(),
                         number_color,
-                        LINE,
+                        code_line_height(),
                     );
                     ui.painter().galley(
                         Pos2::new(origin.x + code_left, y),

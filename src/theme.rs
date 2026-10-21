@@ -370,6 +370,85 @@ pub fn font(size: f32, weight: Weight) -> FontId {
     FontId::new(size, family)
 }
 
+/// Sizes from Settings → Appearance: code, prompt and terminal text stay
+/// absolute pixels while the interface size zooms everything else
+/// (`applyAppearanceFontVariables`).
+#[derive(Clone, Copy, PartialEq)]
+pub struct TypeSizes {
+    pub code: f32,
+    pub prompt: f32,
+    pub terminal: f32,
+    /// The interface zoom (interface size / 16).
+    pub zoom: f32,
+}
+
+impl Default for TypeSizes {
+    fn default() -> Self {
+        Self {
+            code: 13.0,
+            prompt: 14.0,
+            terminal: 12.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+fn type_sizes_cell() -> &'static std::sync::RwLock<TypeSizes> {
+    static SIZES: std::sync::OnceLock<std::sync::RwLock<TypeSizes>> = std::sync::OnceLock::new();
+    SIZES.get_or_init(Default::default)
+}
+
+pub fn set_type_sizes(sizes: TypeSizes) {
+    if let Ok(mut cell) = type_sizes_cell().write() {
+        *cell = sizes;
+    }
+}
+
+pub fn type_sizes() -> TypeSizes {
+    type_sizes_cell().read().map(|s| *s).unwrap_or_default()
+}
+
+/// The code font (`--font-size-code`) for code blocks, diffs and files.
+pub fn code_font() -> FontId {
+    let sizes = type_sizes();
+    FontId::monospace(sizes.code / sizes.zoom)
+}
+
+/// The prompt editor's font (`--font-composer`, `--font-size-prompt`).
+pub fn composer_font() -> FontId {
+    let sizes = type_sizes();
+    FontId::new(
+        sizes.prompt / sizes.zoom,
+        FontFamily::Name("composer".into()),
+    )
+}
+
+/// The terminal's font, regular or bold.
+pub fn terminal_font(bold: bool) -> FontId {
+    let sizes = type_sizes();
+    let family = if bold { "terminal-bold" } else { "terminal" };
+    FontId::new(sizes.terminal / sizes.zoom, FontFamily::Name(family.into()))
+}
+
+/// A code line height given at the default 13px code size, scaled with it.
+pub fn code_line(default: f32) -> f32 {
+    let sizes = type_sizes();
+    default * sizes.code / 13.0 / sizes.zoom
+}
+
+/// The prompt's line height (`leading-relaxed`).
+pub fn composer_line() -> f32 {
+    let sizes = type_sizes();
+    sizes.prompt * 1.625 / sizes.zoom
+}
+
+/// The terminal's cell height: Ghostty's measured 18px at 12 and 13px
+/// (the font's line height, about 1.385em), never under 18px.
+pub fn terminal_cell_height() -> f32 {
+    let sizes = type_sizes();
+    (sizes.terminal * 18.0 / 13.0).round().max(18.0) / sizes.zoom
+}
+
 pub fn mono(size: f32) -> FontId {
     FontId::monospace(size)
 }
@@ -419,6 +498,33 @@ pub fn apply_palette(ctx: &egui::Context) {
 
 /// The bytes of `SymbolsNerdFontMono-Regular.ttf` from the usual font
 /// directories, if installed.
+/// System fonts covering common symbols terminals and tools print (check
+/// marks, crosses, triangles, arrows), found once through fontconfig.
+fn symbol_fonts() -> &'static [std::sync::Arc<Vec<u8>>] {
+    static FONTS: std::sync::OnceLock<Vec<std::sync::Arc<Vec<u8>>>> = std::sync::OnceLock::new();
+    FONTS.get_or_init(|| {
+        let mut files: Vec<String> = Vec::new();
+        for code in ["2713", "2717", "25b3", "2192", "2014"] {
+            let file = std::process::Command::new("fc-match")
+                .args(["-f", "%{file}", &format!(":charset={code}")])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .filter(|f| !f.is_empty());
+            if let Some(file) = file
+                && !files.contains(&file)
+            {
+                files.push(file);
+            }
+        }
+        files
+            .iter()
+            .filter_map(|f| std::fs::read(f).ok())
+            .map(std::sync::Arc::new)
+            .collect()
+    })
+}
+
 fn installed_symbols_font() -> Option<Vec<u8>> {
     const NAME: &str = "SymbolsNerdFontMono-Regular.ttf";
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
@@ -454,8 +560,26 @@ fn installed_symbols_font() -> Option<Vec<u8>> {
         .and_then(|path| std::fs::read(path).ok())
 }
 
+/// Fonts chosen in Settings → Appearance (`appearanceFonts.ts`), each
+/// prepended to its default family so Geist and the fallbacks keep covering
+/// missing glyphs: the interface by weight (regular, medium, semibold, bold),
+/// the prompt, code (regular, bold) and the terminal (regular, bold).
+#[derive(Clone, Default, PartialEq)]
+pub struct CustomFonts {
+    pub sans: [Option<std::sync::Arc<Vec<u8>>>; 4],
+    pub composer: Option<std::sync::Arc<Vec<u8>>>,
+    pub code: [Option<std::sync::Arc<Vec<u8>>>; 2],
+    pub terminal: [Option<std::sync::Arc<Vec<u8>>>; 2],
+}
+
 pub fn install(ctx: &egui::Context) {
     egui_extras::install_image_loaders(ctx);
+    install_fonts(ctx, &CustomFonts::default());
+    install_styles(ctx);
+}
+
+/// Installs Geist and the fallbacks, with the custom fonts in front.
+pub fn install_fonts(ctx: &egui::Context, custom: &CustomFonts) {
     let mut fonts = FontDefinitions::empty();
     let faces: [(&str, &'static [u8]); 6] = [
         ("Geist", include_bytes!("../assets/fonts/Geist-Regular.otf")),
@@ -497,36 +621,95 @@ pub fn install(ctx: &egui::Context) {
         );
         fallback.push("Symbols Nerd Font Mono".into());
     }
+    // Symbols Geist lacks (✓ △ ✗ …), from the system fonts that cover them.
+    for (index, bytes) in symbol_fonts().iter().enumerate() {
+        let name = format!("System Symbols {index}");
+        fonts.font_data.insert(
+            name.clone(),
+            FontData::from_owned(bytes.as_ref().clone()).into(),
+        );
+        fallback.push(name);
+    }
     for (name, data) in defaults.font_data {
         fallback.push(name.clone());
         fonts.font_data.insert(name, data);
     }
-    let family = |primary: &str| {
-        let mut list = vec![primary.to_owned()];
+    let mut custom_names: Vec<(String, std::sync::Arc<Vec<u8>>)> = Vec::new();
+    let mut custom_name = |slot: &Option<std::sync::Arc<Vec<u8>>>, name: &str| {
+        slot.as_ref().map(|bytes| {
+            custom_names.push((name.to_owned(), bytes.clone()));
+            name.to_owned()
+        })
+    };
+    let sans: Vec<Option<String>> = custom
+        .sans
+        .iter()
+        .enumerate()
+        .map(|(i, slot)| custom_name(slot, &format!("custom-sans-{i}")))
+        .collect();
+    let composer = custom_name(&custom.composer, "custom-composer");
+    let code: Vec<Option<String>> = custom
+        .code
+        .iter()
+        .enumerate()
+        .map(|(i, slot)| custom_name(slot, &format!("custom-code-{i}")))
+        .collect();
+    let terminal: Vec<Option<String>> = custom
+        .terminal
+        .iter()
+        .enumerate()
+        .map(|(i, slot)| custom_name(slot, &format!("custom-terminal-{i}")))
+        .collect();
+    for (name, bytes) in custom_names {
+        fonts
+            .font_data
+            .insert(name, FontData::from_owned(bytes.as_ref().clone()).into());
+    }
+    let chain = |front: &[&Option<String>], primary: &str| {
+        let mut list: Vec<String> = front.iter().filter_map(|f| (*f).clone()).collect();
+        list.push(primary.to_owned());
         list.extend(fallback.iter().cloned());
         list
     };
     fonts
         .families
-        .insert(FontFamily::Proportional, family("Geist"));
+        .insert(FontFamily::Proportional, chain(&[&sans[0]], "Geist"));
     fonts
         .families
-        .insert(FontFamily::Monospace, family("Geist Mono"));
-    fonts
-        .families
-        .insert(FontFamily::Name("medium".into()), family("Geist Medium"));
+        .insert(FontFamily::Monospace, chain(&[&code[0]], "Geist Mono"));
+    fonts.families.insert(
+        FontFamily::Name("medium".into()),
+        chain(&[&sans[1], &sans[0]], "Geist Medium"),
+    );
     fonts.families.insert(
         FontFamily::Name("semibold".into()),
-        family("Geist SemiBold"),
+        chain(&[&sans[2], &sans[0]], "Geist SemiBold"),
     );
-    fonts
-        .families
-        .insert(FontFamily::Name("bold".into()), family("Geist Bold"));
+    fonts.families.insert(
+        FontFamily::Name("bold".into()),
+        chain(&[&sans[3], &sans[0]], "Geist Bold"),
+    );
     fonts.families.insert(
         FontFamily::Name("mono-bold".into()),
-        family("Geist Mono Bold"),
+        chain(&[&code[1], &code[0]], "Geist Mono Bold"),
+    );
+    // The prompt follows the interface font unless it has its own.
+    fonts.families.insert(
+        FontFamily::Name("composer".into()),
+        chain(&[&composer, &sans[0]], "Geist"),
+    );
+    fonts.families.insert(
+        FontFamily::Name("terminal".into()),
+        chain(&[&terminal[0]], "Geist Mono"),
+    );
+    fonts.families.insert(
+        FontFamily::Name("terminal-bold".into()),
+        chain(&[&terminal[1], &terminal[0]], "Geist Mono Bold"),
     );
     ctx.set_fonts(fonts);
+}
+
+fn install_styles(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::dark());
     ctx.all_styles_mut(|style| {
         style
@@ -725,6 +908,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "link",
         "github",
         "github-mark",
+        "box",
         "arrow-down",
         "opencode",
         "minus",
