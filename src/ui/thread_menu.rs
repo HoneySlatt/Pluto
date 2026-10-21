@@ -232,7 +232,8 @@ impl App {
                 .copy_text(thread.branch.clone().unwrap_or_default()),
             "copy-thread-id" => ui.ctx().copy_text(thread.id.clone()),
             "project-settings" => {
-                self.status = Some("Project settings are not implemented yet".into())
+                let project = thread.project_id.clone();
+                self.open_project_settings(&project);
             }
             "archive" => self.dispatch(command("thread.archive", id)),
             // `confirmThreadDelete` asks first unless it was turned off.

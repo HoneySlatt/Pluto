@@ -764,6 +764,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-acp",
         "provider-pi",
         "external-link",
+        "panels-top-left",
     )
 }
 

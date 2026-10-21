@@ -20,6 +20,7 @@ pub struct Project {
     pub title: String,
     pub workspace_root: String,
     pub project_icon: Option<Value>,
+    pub favicon_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

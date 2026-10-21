@@ -305,7 +305,7 @@ impl App {
         for candidate in &projects {
             items.push(MenuRow::Item {
                 label: candidate.title.clone(),
-                icon: Icon::Project(candidate.clone()),
+                icon: Icon::Project(Box::new(candidate.clone())),
                 checked: project.as_ref().is_some_and(|p| p.id == candidate.id),
             });
         }
@@ -432,7 +432,7 @@ impl App {
 enum Icon {
     None,
     Named(&'static str),
-    Project(Project),
+    Project(Box<Project>),
 }
 
 enum MenuRow {

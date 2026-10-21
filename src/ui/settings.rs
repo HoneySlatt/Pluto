@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::context_menu;
+use crate::ui::projects_page::PROJECT_PAGE;
 use crate::ui::widgets::{self, MenuEntry, MenuItem};
 
 /// `SETTINGS_SECTION_LABELS` with their icons (`SETTINGS_SECTION_ICONS`).
@@ -261,6 +262,13 @@ pub(crate) enum Control {
         label: &'static str,
         icon: &'static str,
     },
+    /// The project icon row: the icon, "Choose icon" and "Choose file".
+    ProjectIcon(crate::model::Project),
+    /// `Button variant="destructive-outline" size="sm"` with a leading icon.
+    Destructive {
+        label: &'static str,
+        icon: &'static str,
+    },
     None,
 }
 
@@ -435,6 +443,14 @@ impl App {
         if let Err(error) = write() {
             eprintln!("could not save client settings: {error}");
         }
+    }
+
+    /// Every General row, for pages that reuse some (the Project page).
+    pub(crate) fn general_rows(&self) -> Vec<Row> {
+        self.general_sections()
+            .into_iter()
+            .flat_map(|section| section.rows)
+            .collect()
     }
 
     fn general_sections(&self) -> Vec<Section> {
@@ -1020,7 +1036,7 @@ impl App {
         ]
     }
 
-    fn apply_general(&mut self, id: &str, action: RowAction) {
+    pub(crate) fn apply_general(&mut self, id: &str, action: RowAction) {
         use RowAction::*;
         let client =
             |app: &mut App, key: &str, value: Value| app.update_setting(Store::Client, key, value);
@@ -2023,9 +2039,18 @@ impl App {
         self.settings_search_field(ui, left);
         let searching = self.settings_search_results(ui, left);
 
-        for (index, (label, icon)) in PAGES.iter().enumerate().filter(|_| !searching) {
+        // A project scope adds the Project page first (`isSettingsOverviewVisible`).
+        let project_entry = self
+            .is_project_scope()
+            .then_some((PROJECT_PAGE, ("Project", "panels-top-left")));
+        let entries: Vec<(usize, (&str, &str))> = project_entry
+            .into_iter()
+            .chain(PAGES.iter().copied().enumerate())
+            .collect();
+        for (slot, (index, (label, icon))) in entries.into_iter().enumerate().filter(|_| !searching)
+        {
             let item = Rect::from_min_size(
-                Pos2::new(left + 8.0, 100.0 + index as f32 * 36.0),
+                Pos2::new(left + 8.0, 100.0 + slot as f32 * 36.0),
                 Vec2::new(239.0, 32.0),
             );
             let response = ui.interact(item, ui.id().with(("settings-nav", index)), Sense::click());
@@ -2090,7 +2115,11 @@ impl App {
     }
 
     fn settings_page_view(&mut self, ui: &mut Ui, main: Rect, page: usize) {
-        let (label, _) = PAGES[page];
+        let label = if page == PROJECT_PAGE {
+            "Project"
+        } else {
+            PAGES[page].0
+        };
         // Header: "Settings / Page", and Restore device defaults on General.
         let mut x = main.left() + 20.0;
         for (text, weight, color) in [
@@ -2153,7 +2182,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if !PORTED_PAGES.contains(&page) {
+        if !PORTED_PAGES.contains(&page) && page != PROJECT_PAGE {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -2205,6 +2234,18 @@ impl App {
                         Rect::from_min_max(
                             Pos2::new(left, top),
                             Pos2::new(left + card_width, bottom + 48.0),
+                        ),
+                        Sense::hover(),
+                    );
+                    return;
+                }
+                if page == PROJECT_PAGE {
+                    // `SettingsPageContainer className="gap-6"`.
+                    y = self.projects_page(ui, left, y - 8.0);
+                    ui.allocate_rect(
+                        Rect::from_min_max(
+                            Pos2::new(left, top),
+                            Pos2::new(left + card_width, y + 48.0),
                         ),
                         Sense::hover(),
                     );
@@ -2981,6 +3022,95 @@ impl App {
                     .inner;
                 (clicked && *enabled).then_some(RowAction::Toggle(!on))
             }
+            Control::ProjectIcon(project) => {
+                let mut x = right;
+                let mut chosen = None;
+                for label in ["Choose file", "Choose icon"] {
+                    let width = widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 20.0;
+                    let button = Rect::from_min_size(
+                        Pos2::new(x - width, center_y - 14.0),
+                        Vec2::new(width, 28.0),
+                    );
+                    x = button.left() - 8.0;
+                    let response = ui.interact(
+                        button,
+                        ui.id().with(("project-icon-button", label)),
+                        Sense::click(),
+                    );
+                    ui.painter().rect(
+                        button,
+                        CornerRadius::same(10),
+                        if response.hovered() {
+                            theme::overlay(0.05)
+                        } else {
+                            theme::control_surface()
+                        },
+                        Stroke::new(1.0, theme::input()),
+                        StrokeKind::Inside,
+                    );
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_max(
+                            Pos2::new(button.left() + 10.0, button.top()),
+                            button.max,
+                        ),
+                        label,
+                        font(14.0, Weight::Medium),
+                        theme::foreground(),
+                    );
+                    if response.clicked() {
+                        chosen = Some(RowAction::Select(label.to_owned()));
+                    }
+                }
+                crate::ui::project_icon::paint(
+                    ui,
+                    Rect::from_min_size(Pos2::new(x - 24.0, center_y - 12.0), Vec2::splat(24.0)),
+                    project,
+                );
+                chosen
+            }
+            Control::Destructive { label, icon } => {
+                let destructive = theme::error_foreground();
+                let width = widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 38.0;
+                let button = Rect::from_min_size(
+                    Pos2::new(right - width, center_y - 14.0),
+                    Vec2::new(width, 28.0),
+                );
+                let response = ui.interact(
+                    button,
+                    ui.id().with(("settings-destructive", &row.id)),
+                    Sense::click(),
+                );
+                ui.painter().rect(
+                    button,
+                    CornerRadius::same(10),
+                    if response.hovered() {
+                        theme::alpha(destructive, 0.08)
+                    } else {
+                        theme::control_surface()
+                    },
+                    Stroke::new(1.0, theme::alpha(destructive, 0.32)),
+                    StrokeKind::Inside,
+                );
+                theme::paint_icon(
+                    ui,
+                    icon,
+                    Rect::from_min_size(
+                        Pos2::new(button.left() + 10.0, center_y - 8.0),
+                        Vec2::splat(16.0),
+                    ),
+                    16.0,
+                    destructive,
+                );
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(Pos2::new(button.left() + 30.0, button.top()), button.max),
+                    label,
+                    font(14.0, Weight::Medium),
+                    destructive,
+                );
+                response.clicked().then_some(RowAction::Click)
+            }
             Control::OutlineXs { label, icon } => {
                 // A bare label (no `ml-0.5`) starts 2px closer to the icon.
                 let width = widgets::outline_button_width(ui, true, label) - 2.0;
@@ -3136,6 +3266,14 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         } => outline_icon_width(ui, label, *icon_size),
         Control::Tool { label, .. } => {
             38.0 + widgets::text_width(ui, label, font(16.0, Weight::Medium))
+        }
+        Control::ProjectIcon(_) => {
+            let button =
+                |label: &str| widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 20.0;
+            24.0 + 8.0 + button("Choose icon") + 8.0 + button("Choose file")
+        }
+        Control::Destructive { label, .. } => {
+            widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 38.0
         }
         Control::None => 0.0,
     }

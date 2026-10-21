@@ -140,6 +140,7 @@ impl App {
             });
         }
         let mut chosen: Option<Option<String>> = None;
+        // The project whose settings gear was clicked (id).
         let mut settings: Option<String> = None;
         if !rows.is_empty() && ui.input(|i| i.key_pressed(Key::Enter)) {
             chosen = Some(rows[self.scope_menu.highlight].map(|p| p.id.clone()));
@@ -246,7 +247,7 @@ impl App {
                                     project.title
                                 ));
                                 if gear_response.clicked() {
-                                    settings = Some(project.title.clone());
+                                    settings = Some(project.id.clone());
                                     continue;
                                 }
                             }
@@ -285,11 +286,9 @@ impl App {
         self.scope_menu.query = query;
         self.scope_menu.highlight = highlight;
         self.open_menu = open;
-        if let Some(title) = settings {
+        if let Some(id) = settings {
             self.open_menu = None;
-            self.status = Some(format!(
-                "Project settings for {title} are not implemented yet"
-            ));
+            self.open_project_settings(&id);
         } else if let Some(scope) = chosen {
             self.open_menu = None;
             self.project_scope = scope;
