@@ -3327,6 +3327,15 @@ const USAGE_COMMANDS: [&str; 7] = [
 ];
 
 /// `commandLabel`: "chat.newLocal" reads "Chat: New Local".
+/// `compareCommands` keyed by label: Usage commands sort as one block in
+/// page order where the first of them would.
+pub(crate) fn command_order(command: &str, label: &str) -> (String, usize) {
+    match USAGE_COMMANDS.iter().position(|c| *c == command) {
+        Some(rank) => (command_label(USAGE_COMMANDS[0]).to_lowercase(), rank),
+        None => (label.to_lowercase(), 0),
+    }
+}
+
 pub(crate) fn command_label(command: &str) -> String {
     if command == "thread.copyReference" {
         return "Pull Request: Copy Link or Thread ID".into();
@@ -3398,7 +3407,7 @@ fn when_expression(node: &Value) -> String {
 impl App {
     /// `KeybindingsSettings`: the bindings, sorted by command, with their
     /// when clause and keys; shortcuts edit in place (see `keybindings`).
-    /// Adding, search and the JSON file action are not ported.
+    /// The JSON file action is not ported.
     fn keybindings_list(&mut self, ui: &mut Ui, left: f32, mut y: f32) -> f32 {
         let mut rows =
             crate::ui::keybindings::build_rows(&self.state.config["keybindings"], when_expression);
@@ -3408,6 +3417,8 @@ impl App {
                 None => (command.to_owned(), 0),
             }
         };
+        let all_rows =
+            crate::ui::keybindings::build_rows(&self.state.config["keybindings"], when_expression);
         let pill = |key: &str| {
             crate::ui::keybindings::pill_parts(key)
                 .join("+")
@@ -3419,7 +3430,23 @@ impl App {
                 .then_with(|| pill(&a.key).cmp(&pill(&b.key)))
         });
 
-        // Header: title, binding count and the (unported) actions.
+        // `buildKeybindingRows`' query filter.
+        if let Some(query) = &self.keybinding_search {
+            let query = query.trim().to_lowercase();
+            if !query.is_empty() {
+                rows.retain(|row| {
+                    let source = if row.custom { "custom" } else { "default" };
+                    row.command.to_lowercase().contains(&query)
+                        || command_label(&row.command).to_lowercase().contains(&query)
+                        || row.key.to_lowercase().contains(&query)
+                        || row.when.to_lowercase().contains(&query)
+                        || source.contains(&query)
+                });
+            }
+        }
+        let adding = self.new_keybinding.is_some();
+
+        // Header: title, binding count, search, add and the (unported) file action.
         widgets::text_in(
             ui,
             Rect::from_min_size(Pos2::new(left + 16.0, y), Vec2::new(200.0, 28.0)),
@@ -3428,11 +3455,20 @@ impl App {
             theme::alpha(theme::foreground(), 0.7),
         );
         let mut x = left + CARD_WIDTH - 16.0;
-        for (icon, tip) in [
-            ("file-braces", "Open keybindings.json"),
-            ("plus", "Add keybinding"),
-            ("search", "Search keybindings"),
-        ] {
+        let searching = self.keybinding_search.is_some();
+        let actions: &[(&str, &str)] = if searching {
+            &[
+                ("file-braces", "Open keybindings.json"),
+                ("plus", "Add keybinding"),
+            ]
+        } else {
+            &[
+                ("file-braces", "Open keybindings.json"),
+                ("plus", "Add keybinding"),
+                ("search", "Search keybindings"),
+            ]
+        };
+        for (icon, tip) in actions {
             let button = Rect::from_min_size(Pos2::new(x - 24.0, y + 2.0), Vec2::splat(24.0));
             x = button.left() - 6.0;
             if widgets::icon_button(
@@ -3446,24 +3482,96 @@ impl App {
             )
             .clicked()
             {
-                self.status = Some(format!("{tip} is not implemented yet"));
+                match *icon {
+                    "plus" => {
+                        self.new_keybinding =
+                            Some(crate::ui::keybindings::KeybindingEdit::new_binding())
+                    }
+                    "search" => {
+                        self.keybinding_search = Some(String::new());
+                        self.keybinding_search_focus = true;
+                    }
+                    _ => self.status = Some(format!("{tip} is not implemented yet")),
+                }
             }
         }
-        let count = format!("{} bindings", rows.len());
-        let count_width = widgets::text_width(ui, &count, font(11.0, Weight::Regular));
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(x - count_width, y), Pos2::new(x, y + 28.0)),
-            &count,
-            font(11.0, Weight::Regular),
-            theme::muted_foreground(),
-        );
-        y += 28.0 + 10.0;
+        if searching {
+            // `ExpandableHeaderSearch` open: an input group, w-44.
+            let group = Rect::from_min_size(Pos2::new(x - 176.0, y), Vec2::new(176.0, 28.0));
+            ui.painter().rect(
+                group,
+                CornerRadius::same(8),
+                theme::control_surface(),
+                Stroke::new(1.0, theme::input()),
+                StrokeKind::Inside,
+            );
+            theme::paint_icon(
+                ui,
+                "search",
+                Rect::from_min_size(
+                    Pos2::new(group.left() + 10.0, group.center().y - 6.0),
+                    Vec2::splat(12.0),
+                ),
+                12.0,
+                theme::foreground(),
+            );
+            let field = Rect::from_min_max(
+                Pos2::new(group.left() + 28.0, group.top() + 4.0),
+                Pos2::new(group.right() - 8.0, group.bottom() - 4.0),
+            );
+            let mut query = self.keybinding_search.take().unwrap_or_default();
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field));
+            let response = child.add(
+                egui::TextEdit::singleline(&mut query)
+                    .id(egui::Id::new("keybinding-search"))
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO)
+                    .font(font(14.0, Weight::Regular))
+                    .text_color(theme::foreground())
+                    .vertical_align(egui::Align::Center)
+                    .hint_text(
+                        egui::RichText::new("Search keybindings")
+                            .font(font(14.0, Weight::Regular))
+                            .color(theme::muted_foreground()),
+                    )
+                    .desired_width(field.width()),
+            );
+            if !response.has_focus()
+                && !response.lost_focus()
+                && query.is_empty()
+                && self.keybinding_search_focus
+            {
+                response.request_focus();
+            }
+            self.keybinding_search_focus = false;
+            let escape = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+            // Blurring an empty search, or Escape, closes it.
+            self.keybinding_search = if escape || (response.lost_focus() && query.is_empty()) {
+                None
+            } else {
+                Some(query)
+            };
+            y += 28.0 + 10.0;
+        } else {
+            let count = format!("{} bindings", rows.len() + usize::from(adding));
+            let count_width = widgets::text_width(ui, &count, font(11.0, Weight::Regular));
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(x - count_width, y), Pos2::new(x, y + 28.0)),
+                &count,
+                font(11.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+            y += 28.0 + 10.0;
+        }
 
-        let card = Rect::from_min_size(
-            Pos2::new(left, y),
-            Vec2::new(CARD_WIDTH, rows.len() as f32 * 72.0 + 2.0 - 1.0),
-        );
+        let offset = usize::from(adding);
+        let body = if rows.is_empty() && !adding {
+            116.0
+        } else {
+            (rows.len() + offset) as f32 * 72.0 - 1.0
+        };
+        let card = Rect::from_min_size(Pos2::new(left, y), Vec2::new(CARD_WIDTH, body + 2.0));
         ui.painter().rect(
             card,
             CornerRadius::same(14),
@@ -3472,7 +3580,55 @@ impl App {
             StrokeKind::Inside,
         );
         let mut top = card.top() + 1.0;
+        if rows.is_empty() && !adding {
+            let message = "No keybindings match your search.";
+            let width = widgets::text_width(ui, message, font(14.0, Weight::Regular));
+            widgets::text_in(
+                ui,
+                Rect::from_center_size(card.center(), Vec2::new(width + 1.0, 20.0)),
+                message,
+                font(14.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+        }
+        if adding {
+            // `NewKeybindingSettingsRow`: `bg-muted/15`, shaped like the rows.
+            let row = Rect::from_min_size(
+                Pos2::new(card.left() + 1.0, top),
+                Vec2::new(CARD_WIDTH - 2.0, 71.0),
+            );
+            top += 71.0;
+            ui.painter().rect(
+                row,
+                CornerRadius {
+                    nw: 13,
+                    ne: 13,
+                    sw: 0,
+                    se: 0,
+                },
+                theme::alpha(theme::muted(), 0.15),
+                Stroke::NONE,
+                StrokeKind::Inside,
+            );
+            let inner_top = row.top() + ROW_PAD_Y;
+            let text_left = row.left() + ROW_PAD_X;
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(300.0, 20.0)),
+                "New keybinding",
+                font(14.0, Weight::Medium),
+                theme::foreground(),
+            );
+            if let Some(edit) = &self.new_keybinding {
+                let placeholder = edit.new_row();
+                self.keybinding_when(ui, &placeholder, text_left, inner_top + 24.0);
+            }
+            let center_y = row.top() + 36.0 - 0.5;
+            self.new_keybinding_control(ui, &all_rows, row.right() - ROW_PAD_X, center_y);
+        }
+        let mut anchored = std::collections::HashSet::new();
         for (index, kb) in rows.iter().enumerate() {
+            let index = index + offset;
             let command = &kb.command;
             let height = if index == 0 { 71.0 } else { 72.0 };
             let row = Rect::from_min_size(
@@ -3490,6 +3646,10 @@ impl App {
                     0.0,
                     row_divider(),
                 );
+            }
+            // Settings search lands on the first row of a command.
+            if anchored.insert(command.clone()) {
+                self.settings_target_row(ui, &format!("keybinding-{command}"), row);
             }
             let text_left = row.left() + ROW_PAD_X;
             let title_width = widgets::text_in(

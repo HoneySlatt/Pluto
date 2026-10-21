@@ -50,6 +50,10 @@ pub struct App {
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) keybinding_edit: Option<crate::ui::keybindings::KeybindingEdit>,
+    pub(crate) new_keybinding: Option<crate::ui::keybindings::KeybindingEdit>,
+    /// The open keybinding search and whether it still needs focus.
+    pub(crate) keybinding_search: Option<String>,
+    pub(crate) keybinding_search_focus: bool,
     pub(crate) panel_width: f32,
     /// Diff scope per thread (`diffPanelStore.ts`), Working tree by default.
     pub(crate) diff_scopes: std::collections::HashMap<String, crate::ui::diff_panel::DiffScope>,
@@ -236,6 +240,9 @@ impl App {
             confirm: None,
             snooze_dialog: None,
             keybinding_edit: None,
+            new_keybinding: None,
+            keybinding_search: None,
+            keybinding_search_focus: false,
             panel_width: 540.0,
             diff_scopes: Default::default(),
             diff_scope_menu: None,

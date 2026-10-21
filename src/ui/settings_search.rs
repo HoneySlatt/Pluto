@@ -35,6 +35,11 @@ pub(crate) struct Target {
     pub pulse_from: Option<f64>,
 }
 
+/// `STATIC_KEYBINDING_COMMANDS`.
+pub(crate) fn keybinding_commands() -> Vec<&'static str> {
+    KEYBINDINGS.iter().map(|(command, _)| *command).collect()
+}
+
 /// `normalizeSearchText`, without the diacritic folding (the catalog is ASCII).
 fn normalize(text: &str) -> String {
     text.to_lowercase()
