@@ -5,10 +5,12 @@
 //! (`projectIconOptions.ts`).
 //!
 //! Only the sequence's base glyph is looked up: ZWJ sequences and skin tones
-//! show their first emoji.
+//! show their first emoji. The 128px bitmap is downscaled on the CPU to the
+//! drawn pixel size (area filtering, like the browser's), since sampling it
+//! straight down to icon sizes aliases.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use eframe::egui::{self, Color32, Pos2, Rect, TextureHandle, Ui, Vec2};
 use skrifa::bitmap::{BitmapData, BitmapStrikes};
@@ -33,9 +35,9 @@ fn font_bytes() -> Option<&'static [u8]> {
     .as_deref()
 }
 
-/// The emoji's bitmap as RGBA, from its first glyph the font maps, and its
-/// height in ems (Noto's 128px rows at 109 ppem).
-fn decode(emoji: &str) -> Option<(egui::ColorImage, f32)> {
+/// The emoji's bitmap as premultiplied RGBA, from its first glyph the font
+/// maps, and its height in ems (Noto's 128px rows at 109 ppem).
+fn decode(emoji: &str) -> Option<(image::RgbaImage, f32)> {
     let font = FontRef::new(font_bytes()?).ok()?;
     let charmap = font.charmap();
     let glyph = emoji
@@ -46,44 +48,71 @@ fn decode(emoji: &str) -> Option<(egui::ColorImage, f32)> {
     let BitmapData::Png(png) = bitmap.data else {
         return None;
     };
-    let image = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+    let mut image = image::load_from_memory_with_format(png, image::ImageFormat::Png)
         .ok()?
         .to_rgba8();
-    let size = [image.width() as usize, image.height() as usize];
+    // Premultiplied, so filtering does not bleed the transparent black in.
+    for pixel in image.pixels_mut() {
+        let [r, g, b, a] = pixel.0;
+        let scale = |c: u8| ((c as u16 * a as u16 + 127) / 255) as u8;
+        pixel.0 = [scale(r), scale(g), scale(b), a];
+    }
     let ems = bitmap.height as f32 / bitmap.ppem_y.max(1.0);
-    Some((
-        egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw()),
-        ems,
-    ))
+    Some((image, ems))
 }
 
-type Texture = Option<(TextureHandle, f32)>;
+/// The decoded bitmap and em height, once per emoji.
+fn decoded(emoji: &str) -> Option<(Arc<image::RgbaImage>, f32)> {
+    type Decoded = Option<(Arc<image::RgbaImage>, f32)>;
+    static DECODED: OnceLock<Mutex<HashMap<String, Decoded>>> = OnceLock::new();
+    let mut decoded = DECODED.get_or_init(Default::default).lock().ok()?;
+    decoded
+        .entry(emoji.to_owned())
+        .or_insert_with(|| decode(emoji).map(|(image, ems)| (Arc::new(image), ems)))
+        .clone()
+}
 
-/// The emoji's texture and em height, decoded once per emoji (None without
-/// a color font).
-fn texture(ui: &Ui, emoji: &str, grayscale: bool) -> Texture {
-    static TEXTURES: OnceLock<Mutex<HashMap<(String, bool), Texture>>> = OnceLock::new();
+/// The emoji's texture at `height` physical pixels (None without a color
+/// font), resized once per size.
+fn texture(ui: &Ui, emoji: &str, grayscale: bool, height: u32) -> Option<TextureHandle> {
+    type Textures = HashMap<(String, bool, u32), Option<TextureHandle>>;
+    static TEXTURES: OnceLock<Mutex<Textures>> = OnceLock::new();
+    let (source, _) = decoded(emoji)?;
     let mut textures = TEXTURES.get_or_init(Default::default).lock().ok()?;
     textures
-        .entry((emoji.to_owned(), grayscale))
+        .entry((emoji.to_owned(), grayscale, height))
         .or_insert_with(|| {
-            decode(emoji).map(|(mut image, ems)| {
-                if grayscale {
-                    // CSS `grayscale`: Rec. 709 luma.
-                    for pixel in &mut image.pixels {
-                        let [r, g, b, a] = pixel.to_array();
-                        let luma = (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32)
-                            .round() as u8;
-                        *pixel = Color32::from_rgba_premultiplied(luma, luma, luma, a);
-                    }
+            let width = (source.width() as f32 * height as f32 / source.height().max(1) as f32)
+                .round()
+                .max(1.0) as u32;
+            let resized = if height < source.height() {
+                image::imageops::resize(
+                    source.as_ref(),
+                    width,
+                    height,
+                    image::imageops::FilterType::Triangle,
+                )
+            } else {
+                source.as_ref().clone()
+            };
+            let mut image = egui::ColorImage::from_rgba_premultiplied(
+                [resized.width() as usize, resized.height() as usize],
+                resized.as_raw(),
+            );
+            if grayscale {
+                // CSS `grayscale`: Rec. 709 luma.
+                for pixel in &mut image.pixels {
+                    let [r, g, b, a] = pixel.to_array();
+                    let luma =
+                        (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32).round() as u8;
+                    *pixel = Color32::from_rgba_premultiplied(luma, luma, luma, a);
                 }
-                let texture = ui.ctx().load_texture(
-                    format!("emoji:{emoji}:{grayscale}"),
-                    image,
-                    egui::TextureOptions::LINEAR,
-                );
-                (texture, ems)
-            })
+            }
+            Some(ui.ctx().load_texture(
+                format!("emoji:{emoji}:{grayscale}:{height}"),
+                image,
+                egui::TextureOptions::LINEAR,
+            ))
         })
         .clone()
 }
@@ -105,11 +134,19 @@ pub fn paint_dimmed(ui: &Ui, center: Pos2, size: f32, emoji: &str) {
 
 fn paint_with(ui: &Ui, center: Pos2, size: f32, emoji: &str, alpha: f32, grayscale: bool) {
     let tint = crate::theme::alpha(Color32::WHITE, alpha);
-    if let Some((texture, ems)) = texture(ui, emoji, grayscale) {
+    let ppp = ui.ctx().pixels_per_point();
+    let texture = decoded(emoji).and_then(|(_, ems)| {
+        let pixels = (size * ems * ppp).round().max(1.0) as u32;
+        texture(ui, emoji, grayscale, pixels)
+    });
+    if let Some(texture) = texture {
         let [w, h] = texture.size();
-        let height = size * ems;
-        let width = height * w as f32 / h.max(1) as f32;
-        let rect = Rect::from_center_size(center, Vec2::new(width, height));
+        // One texel per physical pixel, on the pixel grid.
+        let size = Vec2::new(w as f32, h as f32);
+        let origin = center.to_vec2() * ppp - size / 2.0;
+        // A half-pixel offset rounds up, like the browser places the glyph.
+        let min = Pos2::new(origin.x.round(), origin.y.floor()) / ppp;
+        let rect = Rect::from_min_size(min, size / ppp);
         ui.painter().image(
             texture.id(),
             rect,
