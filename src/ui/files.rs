@@ -51,6 +51,8 @@ pub struct FilesState {
     pub query: String,
     pub wrap: bool,
     pub tree: bool,
+    /// The revealed line (path, line) and whether it was scrolled to.
+    reveal: Option<(String, usize, bool)>,
 }
 
 impl Default for FilesState {
@@ -64,6 +66,7 @@ impl Default for FilesState {
             query: String::new(),
             wrap: true,
             tree: true,
+            reveal: None,
         }
     }
 }
@@ -205,6 +208,31 @@ impl App {
                 }
             },
         );
+        // The tree reveals the file: its folders open.
+        if let Some(cwd) = self.workspace_cwd() {
+            let mut folder = String::new();
+            for part in path
+                .split('/')
+                .rev()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+            {
+                if !folder.is_empty() {
+                    folder.push('/');
+                }
+                folder.push_str(part);
+                self.files.expanded.insert(format!("{cwd}\0{folder}"));
+                self.files_list(&cwd, &folder);
+            }
+        }
+    }
+
+    /// `openFile` with a line: the file view centers and selects it.
+    pub(crate) fn open_file_at(&mut self, path: String, line: usize) {
+        self.open_file(path.clone());
+        self.files.reveal = Some((path, line, false));
     }
 
     fn files_list(&mut self, cwd: &str, directory: &str) {
@@ -473,6 +501,13 @@ impl App {
         } else {
             f32::INFINITY
         };
+        let reveal = self
+            .files
+            .reveal
+            .as_ref()
+            .filter(|(revealed, _, _)| revealed == path)
+            .map(|&(_, line, scrolled)| (line, scrolled));
+        let mut revealed = false;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         let scroll = if self.files.wrap {
@@ -518,15 +553,49 @@ impl App {
                 for (index, galley) in galleys.into_iter().enumerate() {
                     let number = (index + 1).to_string();
                     let number_width = widgets::text_width(ui, &number, theme::mono(13.0));
+                    let row_height = galley.size().y.max(LINE);
+                    let mut number_color = theme::muted_foreground();
+                    if let Some((line, scrolled)) = reveal
+                        && line == index + 1
+                    {
+                        // Pierre's selected line, as rendered on the stock theme.
+                        let row = Rect::from_min_size(
+                            Pos2::new(origin.x, y),
+                            Vec2::new(area.width(), row_height),
+                        );
+                        let gutter = Rect::from_min_max(
+                            row.min,
+                            Pos2::new(origin.x + number_right + 7.0, row.bottom()),
+                        );
+                        ui.painter().rect_filled(
+                            gutter,
+                            0.0,
+                            theme::stock_or(Color32::from_rgb(37, 69, 102), |p| {
+                                theme::mix(p.background, p.primary, 0.35)
+                            }),
+                        );
+                        ui.painter().rect_filled(
+                            Rect::from_min_max(Pos2::new(gutter.right() + 1.0, row.top()), row.max),
+                            0.0,
+                            theme::stock_or(Color32::from_rgb(32, 48, 68), |p| {
+                                theme::mix(p.background, p.primary, 0.2)
+                            }),
+                        );
+                        number_color =
+                            theme::stock_or(Color32::from_rgb(114, 182, 255), |p| p.primary);
+                        if !scrolled {
+                            ui.scroll_to_rect(row, Some(egui::Align::Center));
+                            revealed = true;
+                        }
+                    }
                     widgets::text(
                         ui,
                         Pos2::new(origin.x + number_right - number_width, y),
                         &number,
                         theme::mono(13.0),
-                        theme::muted_foreground(),
+                        number_color,
                         LINE,
                     );
-                    let row_height = galley.size().y.max(LINE);
                     ui.painter().galley(
                         Pos2::new(origin.x + code_left, y),
                         galley,
@@ -536,6 +605,9 @@ impl App {
                 }
                 ui.allocate_rect(area, Sense::hover());
             });
+        if revealed && let Some(reveal) = &mut self.files.reveal {
+            reveal.2 = true;
+        }
     }
 
     /// The project tree in `rect`: the search header and the rows.

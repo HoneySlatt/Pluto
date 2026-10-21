@@ -112,11 +112,16 @@ fn main() {
             "--type" => harness.event(egui::Event::Text(value.clone())),
             "--key" => {
                 let (mods, name) = value.rsplit_once('+').unwrap_or(("", value.as_str()));
-                let modifiers = if mods.contains("Ctrl") {
-                    egui::Modifiers::COMMAND
-                } else {
-                    egui::Modifiers::NONE
-                };
+                let mut modifiers = egui::Modifiers::NONE;
+                if mods.contains("Ctrl") {
+                    modifiers |= egui::Modifiers::COMMAND;
+                }
+                if mods.contains("Shift") {
+                    modifiers |= egui::Modifiers::SHIFT;
+                }
+                if mods.contains("Alt") {
+                    modifiers |= egui::Modifiers::ALT;
+                }
                 let key = egui::Key::from_name(name).expect("key name");
                 for pressed in [true, false] {
                     harness.event(egui::Event::Key {

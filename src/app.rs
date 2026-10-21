@@ -95,6 +95,7 @@ pub struct App {
     pub(crate) prs: crate::ui::pull_requests::PullRequestsState,
     /// The Files surface's reads and view state.
     pub(crate) files: crate::ui::files::FilesState,
+    pub(crate) content_search: crate::ui::content_search::ContentSearch,
     /// Terminal sessions of the Terminal surface.
     pub(crate) terminals: crate::ui::terminal_surface::Terminals,
     /// Client settings (`ClientSettings`), in memory.
@@ -260,6 +261,7 @@ impl App {
             pull_requests_open: false,
             prs: Default::default(),
             files: Default::default(),
+            content_search: Default::default(),
             terminals: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
@@ -924,6 +926,8 @@ impl App {
             self.terminals.receive(&key, result);
         } else if key.starts_with("files-") {
             self.files.receive(&key, result);
+        } else if key.starts_with("content-search:") {
+            self.content_search.receive(&key, result);
         } else if key.starts_with("prs:") {
             self.prs.refreshing = false;
             self.prs.results.insert(key, result);

@@ -2,6 +2,7 @@ pub mod changed_files;
 pub mod chat;
 pub mod composer;
 pub mod connect;
+pub mod content_search;
 pub mod context_menu;
 pub mod diff_panel;
 pub mod files;

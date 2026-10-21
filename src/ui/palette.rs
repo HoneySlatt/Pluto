@@ -1,7 +1,8 @@
 //! Command palette (`CommandPalette.tsx`, `CommandPalette.logic.ts`): root
 //! actions and recent threads, "New thread in…", "Add project" with local
 //! folder browsing (`filesystem.browse`), and the "Go to file" mode
-//! (`files/ProjectFilePicker.tsx`). Actions whose screens are not ported yet
+//! (`files/ProjectFilePicker.tsx`), and project content search (see
+//! `content_search`). Actions whose screens are not ported yet
 //! say so when run.
 use eframe::egui::{
     self, Color32, CornerRadius, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
@@ -34,6 +35,8 @@ pub enum View {
     Browse,
     /// The file picker, a mode of its own: Esc closes it.
     Files,
+    /// Project content search, also a mode of its own.
+    Content,
 }
 
 #[derive(Default)]
@@ -50,6 +53,11 @@ pub struct PaletteState {
 impl PaletteState {
     fn view(&self) -> View {
         self.stack.last().cloned().unwrap_or(View::Root)
+    }
+
+    /// Modes replace the palette rather than nest in it: no back button.
+    fn in_mode(&self) -> bool {
+        matches!(self.view(), View::Files | View::Content)
     }
 }
 
@@ -177,6 +185,7 @@ impl App {
             self.palette = PaletteState::default();
             return;
         }
+        self.content_search.reset();
         self.palette = PaletteState {
             open: true,
             query: if view == View::Browse {
@@ -299,7 +308,7 @@ impl App {
                 let mut search = Item::new(
                     "text-search",
                     "Search project contents",
-                    Action::Missing("Project search"),
+                    Action::Push(View::Content),
                 );
                 search.shortcut = Some("Ctrl+Shift+F");
                 actions.push(search);
@@ -498,6 +507,7 @@ impl App {
                     items,
                 }]
             }
+            View::Content => Vec::new(),
             View::Files => {
                 // `useActiveProjectTarget`; drafts have no right panel here yet.
                 let target = self.current_thread().and_then(|thread| {
@@ -589,6 +599,9 @@ impl App {
         if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::O)) {
             self.start_draft(None);
         }
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::F)) {
+            self.toggle_palette(View::Content);
+        }
         if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::P)) {
             self.toggle_palette(View::Files);
         }
@@ -634,7 +647,7 @@ impl App {
                 run = Some(item.action.clone());
             }
         }
-        let in_submenu = !self.palette.stack.is_empty() && self.palette.view() != View::Files;
+        let in_submenu = !self.palette.stack.is_empty() && !self.palette.in_mode();
         if escape {
             self.palette = PaletteState::default();
             return;
@@ -662,7 +675,11 @@ impl App {
         } else {
             4.0
         };
-        let height = SEARCH + 4.0 + list_height + bottom_pad + FOOTER;
+        let height = if self.palette.view() == View::Content {
+            420.0 // `h-105`
+        } else {
+            SEARCH + 4.0 + list_height + bottom_pad + FOOTER
+        };
         let rect = Rect::from_min_size(
             Pos2::new(screen.center().x - WIDTH / 2.0, TOP),
             Vec2::new(WIDTH, height),
@@ -676,6 +693,8 @@ impl App {
         let mut clicked_row = None;
         let mut back = false;
         let mut close = false;
+        let content_target = self.content_search_target();
+        let mut opened = false;
         egui::Area::new(ui.id().with("palette"))
             .order(egui::Order::Foreground)
             .fixed_pos(screen.min)
@@ -720,6 +739,10 @@ impl App {
                     theme::paint_icon(ui, "search", icon_rect, 16.0, theme::muted_foreground());
                 }
                 let mut input_right = search.right() - 8.0;
+                if view == View::Content {
+                    self.content_search_options(ui, search);
+                    input_right = search.right() - 120.0; // `pe-30`
+                }
                 if view == View::Browse {
                     let add = Rect::from_min_size(
                         Pos2::new(search.right() - 2.0 - 79.0, search.top() + 6.0),
@@ -757,10 +780,14 @@ impl App {
                     Pos2::new(input_right, search.bottom() - 8.0),
                 );
                 let placeholder = match view {
-                    View::Root => "Search commands, projects, and threads...",
-                    View::Browse => "Enter project path (e.g. ~/projects/my-app)",
-                    View::Files => "Search files…",
-                    _ => "Search...",
+                    View::Root => "Search commands, projects, and threads...".to_owned(),
+                    View::Browse => "Enter project path (e.g. ~/projects/my-app)".to_owned(),
+                    View::Files => "Search files…".to_owned(),
+                    View::Content => match &content_target {
+                        Some((_, project)) => format!("Search in {project}"),
+                        None => "Search project contents…".to_owned(),
+                    },
+                    _ => "Search...".to_owned(),
                 };
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(input));
                 let response = child.add(
@@ -788,6 +815,14 @@ impl App {
                         .cursor
                         .set_char_range(Some(egui::text::CCursorRange::one(end)));
                     state.store(ui.ctx(), response.id);
+                }
+
+                if view == View::Content {
+                    let body = Rect::from_min_max(
+                        Pos2::new(rect.left() + 1.0, search.bottom() + 6.0),
+                        Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER),
+                    );
+                    opened = self.content_search_body(ui, body, &query, (up, down, enter));
                 }
 
                 // List.
@@ -916,7 +951,7 @@ impl App {
                 x = key_chip(ui, x, "arrow-up", true) + 4.0;
                 x = key_chip(ui, x, "arrow-down", true) + 6.0;
                 x = label(ui, x, "Navigate") + 12.0;
-                if view == View::Files {
+                if matches!(view, View::Files | View::Content) {
                     x = key_chip(ui, x, "Enter", false) + 6.0;
                     x = label(ui, x, "Open file") + 12.0;
                 } else if view != View::Browse {
@@ -928,7 +963,12 @@ impl App {
                     x = label(ui, x, "Back") + 12.0;
                 }
                 x = key_chip(ui, x, "Esc", false) + 6.0;
-                label(ui, x, if view == View::Files { "Back" } else { "Close" });
+                let escape = if matches!(view, View::Files | View::Content) {
+                    "Back"
+                } else {
+                    "Close"
+                };
+                label(ui, x, escape);
             });
         self.palette.query = query;
         if let Some(index) = hovered_row {
@@ -939,7 +979,7 @@ impl App {
         {
             run = Some(item.action.clone());
         }
-        if close {
+        if close || opened {
             self.palette = PaletteState::default();
             return;
         }
@@ -966,6 +1006,9 @@ impl App {
                 } else {
                     String::new()
                 };
+                if view == View::Content {
+                    self.content_search.reset();
+                }
                 self.palette.stack.push(view);
                 self.palette.highlight = 0;
                 self.palette.focus = true;
