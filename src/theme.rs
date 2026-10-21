@@ -721,6 +721,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "server",
         "cloud",
         "laptop",
+        "download",
         "link",
         "github",
         "arrow-down",

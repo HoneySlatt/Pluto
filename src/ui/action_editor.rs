@@ -836,6 +836,35 @@ impl App {
         Ok(())
     }
 
+    /// `importFileScript`: adds a t3.json script as an action without a
+    /// shortcut; a failure reopens it in the Add Action dialog with the error.
+    pub(crate) fn import_file_script(&mut self, project_id: &str, script: &Value) {
+        let text = |key: &str| script[key].as_str().unwrap_or_default().trim().to_owned();
+        let run = script["runOnWorktreeCreate"] == true;
+        let preview_url = text("previewUrl");
+        let mut editor = ActionEditor {
+            project_id: project_id.to_owned(),
+            script_id: None,
+            name: text("name"),
+            command: text("command"),
+            icon: script["icon"].as_str().unwrap_or("play").to_owned(),
+            run_on_worktree_create: run,
+            wait_for_setup: run && script["async"] == false,
+            keybinding: String::new(),
+            auto_open_preview: !preview_url.is_empty() && script["autoOpenPreview"] == true,
+            preview_url,
+            error: None,
+            icon_picker: false,
+            recording: false,
+            delete_confirm: false,
+            focused: false,
+        };
+        if let Err(error) = self.submit_action(&editor) {
+            editor.error = Some(error);
+            self.action_editor = Some(editor);
+        }
+    }
+
     /// `Delete action "<name>"?`; returns the choice once made.
     fn delete_action_confirm(&mut self, ui: &mut Ui, screen: Rect, name: &str) -> Option<bool> {
         // `AlertDialogPopup`: the header, then the footer band.

@@ -152,6 +152,18 @@ impl App {
     }
 }
 
+impl App {
+    /// `T3ProjectFileState`'s "invalid": the file was read but fails to
+    /// decode.
+    pub(crate) fn project_file_invalid(&self, cwd: &str) -> bool {
+        matches!(
+            self.files.reads.get(&format!("{cwd}\0{FILE_NAME}")),
+            Some(Ok(data)) if data["truncated"] != true
+                && data["contents"].as_str().is_some_and(|c| parse(c).is_none())
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

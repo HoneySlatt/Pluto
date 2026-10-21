@@ -5,19 +5,22 @@
 //! With actions, the header shows the preferred one (the last run, else the
 //! first that is not a setup action) and a menu of all of them; running opens
 //! the bottom terminal drawer and types the command into its active terminal
-//! (queued until that terminal has attached). Not ported: opening a second
+//! (queued until that terminal has attached). The repository's t3.json
+//! scripts are offered for import (`script_import`): under "From t3.json"
+//! in the menu, or, without actions, in an "Add action" menu. Not ported: opening a second
 //! terminal when the active one is busy, and the script environment
 //! variables (`projectScriptRuntimeEnv`).
 
-use eframe::egui::{CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::Value;
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::action_editor::{script_command, script_icon, shortcut_label_for};
-use crate::ui::widgets;
+use crate::ui::{script_import, widgets};
 
 const MENU_ID: &str = "project-actions-menu";
+const IMPORT_MENU_ID: &str = "project-actions-import-menu";
 
 /// `primaryProjectScript` with the preferred (last run) action first.
 fn primary_script<'a>(scripts: &'a [Value], preferred: Option<&str>) -> Option<&'a Value> {
@@ -25,6 +28,33 @@ fn primary_script<'a>(scripts: &'a [Value], preferred: Option<&str>) -> Option<&
         .and_then(|id| scripts.iter().find(|s| s["id"] == id))
         .or_else(|| scripts.iter().find(|s| s["runOnWorktreeCreate"] != true))
         .or(scripts.first())
+}
+
+/// The menus' "Add action" item; returns whether it was clicked.
+fn add_action_item(ui: &mut Ui, item: Rect, label_font: &egui::FontId) -> bool {
+    let response = ui.interact(item, ui.id().with("action-item-add"), Sense::click());
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(item, CornerRadius::same(6), theme::accent());
+    }
+    theme::paint_icon(
+        ui,
+        "plus",
+        Rect::from_min_size(
+            Pos2::new(item.left() + 6.0, item.center().y - 8.0),
+            Vec2::splat(16.0),
+        ),
+        16.0,
+        theme::alpha(theme::foreground(), 0.8),
+    );
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(Pos2::new(item.left() + 28.0, item.top()), item.max),
+        "Add action",
+        label_font.clone(),
+        theme::foreground(),
+    );
+    response.clicked()
 }
 
 impl App {
@@ -38,8 +68,12 @@ impl App {
         compact: bool,
     ) -> f32 {
         let scripts = self.project_scripts(project_id);
+        let importable = self.importable_scripts(project_id);
         let preferred = self.last_script.get(project_id).cloned();
         let Some(primary) = primary_script(&scripts, preferred.as_deref()).cloned() else {
+            if !importable.is_empty() {
+                return self.import_actions_menu(ui, right, project_id, compact, &importable);
+            }
             let label = if compact { "" } else { "Add action" };
             let width = if compact {
                 24.0
@@ -122,8 +156,105 @@ impl App {
                 Some(MENU_ID.to_owned())
             };
         }
-        self.project_actions_menu(ui, chevron, project_id, &scripts);
+        self.project_actions_menu(ui, chevron, project_id, &scripts, &importable);
         main.left()
+    }
+
+    /// Without actions but with importable t3.json scripts: the "Add
+    /// action" menu button and its menu ("From t3.json", then Add action).
+    fn import_actions_menu(
+        &mut self,
+        ui: &mut Ui,
+        right: f32,
+        project_id: &str,
+        compact: bool,
+        importable: &[Value],
+    ) -> f32 {
+        let label = if compact { "" } else { "Add action" };
+        let width = if compact {
+            24.0 + 14.0
+        } else {
+            widgets::outline_button_width(ui, true, label) + 14.0
+        };
+        let button = Rect::from_min_size(Pos2::new(right - width, 14.0), Vec2::new(width, 24.0));
+        let response = widgets::outline_button(
+            ui,
+            button,
+            "add-action-menu",
+            Some(("plus", theme::muted_foreground())),
+            label,
+            CornerRadius::same(8),
+        );
+        theme::paint_icon(
+            ui,
+            "chevron-down",
+            Rect::from_min_size(
+                Pos2::new(button.right() - 6.0 - 14.0, button.top() + 5.0),
+                Vec2::splat(14.0),
+            ),
+            14.0,
+            theme::muted_foreground(),
+        );
+        if response.clicked() {
+            self.open_menu = if self.open_menu.as_deref() == Some(IMPORT_MENU_ID) {
+                None
+            } else {
+                Some(IMPORT_MENU_ID.to_owned())
+            };
+        }
+        if self.open_menu.as_deref() != Some(IMPORT_MENU_ID) {
+            return button.left();
+        }
+        let label_font = font(14.0, Weight::Regular);
+        let content = importable
+            .iter()
+            .map(|s| script_import::import_item_width(ui, s))
+            .fold(
+                28.0 + widgets::text_width(ui, "Add action", label_font.clone()) + 8.0,
+                f32::max,
+            );
+        let width = (content + 10.0).max(160.0).ceil();
+        let height = 2.0 + 8.0 + 28.0 + importable.len() as f32 * 28.0 + 28.0;
+        let rect = Rect::from_min_size(
+            Pos2::new(button.right() - width, button.bottom() + 4.0),
+            Vec2::new(width, height),
+        );
+        let mut picked: Option<usize> = None;
+        let mut add = false;
+        let mut open = self.open_menu.clone();
+        widgets::popup(ui, &mut open, IMPORT_MENU_ID, rect, button, |ui, inner| {
+            let left = inner.left() + 5.0;
+            let right = inner.right() - 5.0;
+            let mut y = inner.top() + 5.0;
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(left + 8.0, y), Pos2::new(right, y + 28.0)),
+                "From t3.json",
+                font(12.0, Weight::Medium),
+                theme::muted_foreground(),
+            );
+            y += 28.0;
+            for (index, script) in importable.iter().enumerate() {
+                let item = Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + 28.0));
+                if script_import::import_item(ui, item, index, script) {
+                    picked = Some(index);
+                }
+                y += 28.0;
+            }
+            let item = Rect::from_min_max(Pos2::new(left, y), Pos2::new(right, y + 28.0));
+            add = add_action_item(ui, item, &label_font);
+        });
+        self.open_menu = open;
+        if picked.is_some() || add {
+            self.open_menu = None;
+        }
+        if let Some(index) = picked {
+            self.import_file_script(project_id, &importable[index]);
+        }
+        if add {
+            self.open_action_editor(project_id, None);
+        }
+        button.left()
     }
 
     /// The actions menu: each action (its shortcut, or the edit gear while
@@ -134,6 +265,7 @@ impl App {
         anchor: Rect,
         project_id: &str,
         scripts: &[Value],
+        importable: &[Value],
     ) {
         if self.open_menu.as_deref() != Some(MENU_ID) {
             return;
@@ -174,8 +306,20 @@ impl App {
                 label_font.clone(),
             )))
             .fold(0.0, f32::max);
-        let width = (6.0 + 16.0 + 6.0 + content + 8.0 + 10.0).max(160.0).ceil();
-        let height = 2.0 + 8.0 + scripts.len() as f32 * 32.0 + 28.0;
+        let width = importable
+            .iter()
+            .map(|s| script_import::import_item_width(ui, s) + 10.0)
+            .fold(6.0 + 16.0 + 6.0 + content + 8.0 + 10.0, f32::max)
+            .max(160.0)
+            .ceil();
+        // "From t3.json": a separator, its label and the importable scripts.
+        let imports = if importable.is_empty() {
+            0.0
+        } else {
+            9.0 + 28.0 + importable.len() as f32 * 28.0
+        };
+        let height = 2.0 + 8.0 + scripts.len() as f32 * 32.0 + imports + 28.0;
+        let mut picked: Option<usize> = None;
         let rect = Rect::from_min_size(
             Pos2::new(anchor.right() - width, anchor.bottom() + 4.0),
             Vec2::new(width, height),
@@ -253,37 +397,50 @@ impl App {
                 }
                 y += 32.0;
             }
+            if !importable.is_empty() {
+                ui.painter().rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(inner.left() + 12.0, y + 4.0),
+                        Vec2::new(inner.width() - 24.0, 1.0),
+                    ),
+                    0.0,
+                    theme::border(),
+                );
+                y += 9.0;
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(
+                        Pos2::new(inner.left() + 12.0, y),
+                        Pos2::new(inner.right() - 4.0, y + 28.0),
+                    ),
+                    "From t3.json",
+                    font(12.0, Weight::Medium),
+                    theme::muted_foreground(),
+                );
+                y += 28.0;
+                for (index, script) in importable.iter().enumerate() {
+                    let item = Rect::from_min_size(
+                        Pos2::new(inner.left() + 4.0, y),
+                        Vec2::new(inner.width() - 8.0, 28.0),
+                    );
+                    if script_import::import_item(ui, item, index, script) {
+                        picked = Some(index);
+                    }
+                    y += 28.0;
+                }
+            }
             let item = Rect::from_min_size(
                 Pos2::new(inner.left() + 4.0, y),
                 Vec2::new(inner.width() - 8.0, 28.0),
             );
-            let response = ui.interact(item, ui.id().with("action-item-add"), Sense::click());
-            if response.hovered() {
-                ui.painter()
-                    .rect_filled(item, CornerRadius::same(6), theme::accent());
-            }
-            theme::paint_icon(
-                ui,
-                "plus",
-                Rect::from_min_size(
-                    Pos2::new(item.left() + 6.0, item.center().y - 8.0),
-                    Vec2::splat(16.0),
-                ),
-                16.0,
-                theme::alpha(theme::foreground(), 0.8),
-            );
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(Pos2::new(item.left() + 28.0, item.top()), item.max),
-                "Add action",
-                label_font.clone(),
-                theme::foreground(),
-            );
-            add = response.clicked();
+            add = add_action_item(ui, item, &label_font);
         });
         self.open_menu = open;
-        if run.is_some() || edit.is_some() || add {
+        if run.is_some() || edit.is_some() || add || picked.is_some() {
             self.open_menu = None;
+        }
+        if let Some(index) = picked {
+            self.import_file_script(project_id, &importable[index]);
         }
         if let Some(index) = run {
             self.run_project_script(project_id, &scripts[index]);
