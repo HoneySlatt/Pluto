@@ -56,6 +56,8 @@ pub fn default_client_settings() -> Value {
         "planModeEnabled": false,
         "contextWindowMeterEnabled": false,
         "legacySidebarEnabled": false,
+        "favorites": [],
+        "providerModelPreferences": {},
     })
 }
 
@@ -156,7 +158,7 @@ pub const KEYBINDINGS_PAGE: usize = 2;
 /// Index of the Storage page in `PAGES`.
 pub const STORAGE_PAGE: usize = 7;
 /// Pages with a native port; the others show a notice.
-const PORTED_PAGES: [usize; 8] = [
+const PORTED_PAGES: [usize; 9] = [
     0,
     KEYBINDINGS_PAGE,
     SNAP_SHOT_PAGE,
@@ -165,9 +167,12 @@ const PORTED_PAGES: [usize; 8] = [
     ARCHIVE_PAGE,
     SOURCE_CONTROL_PAGE,
     INTEGRATIONS_PAGE,
+    PROVIDERS_PAGE,
 ];
 /// Index of the Source Control page in `PAGES`.
 pub const SOURCE_CONTROL_PAGE: usize = 6;
+/// Index of the Providers page in `PAGES`.
+pub const PROVIDERS_PAGE: usize = 4;
 /// Index of the Integrations page in `PAGES`.
 pub const INTEGRATIONS_PAGE: usize = 5;
 /// Index of the Connections page in `PAGES`.
@@ -183,19 +188,19 @@ const ROW_PAD_X: f32 = 16.0;
 const ROW_PAD_Y: f32 = 12.0;
 const DESCRIPTION_MAX: f32 = 576.0; // max-w-xl
 /// `bg-card/40` over the page.
-fn card_fill() -> Color32 {
+pub(crate) fn card_fill() -> Color32 {
     theme::stock_or(Color32::from_rgb(13, 13, 13), |p| {
         theme::mix(p.background, p.card, 0.4)
     })
 }
 /// `border-border/60`.
-fn card_border() -> Color32 {
+pub(crate) fn card_border() -> Color32 {
     theme::stock_or(Color32::from_rgb(22, 22, 22), |p| {
         theme::mix(p.background, p.border, 0.6)
     })
 }
 /// `border-border/50` between rows.
-fn row_divider() -> Color32 {
+pub(crate) fn row_divider() -> Color32 {
     theme::stock_or(Color32::from_rgb(21, 21, 21), |p| {
         theme::mix(p.background, p.border, 0.5)
     })
@@ -208,7 +213,7 @@ pub(crate) enum Store {
     Server,
 }
 
-enum Control {
+pub(crate) enum Control {
     Switch(bool),
     /// Options as (value, label); `width` is the trigger width.
     Select {
@@ -218,6 +223,12 @@ enum Control {
         icon: Option<&'static str>,
     },
     Number(i64),
+    /// A text input (`Input size="sm"`) committing on blur.
+    Field {
+        value: String,
+        placeholder: String,
+        width: f32,
+    },
     /// `RetentionControl`: a day count with its switch, or "Off".
     Retention(Option<i64>),
     Text(String),
@@ -249,15 +260,15 @@ enum Control {
     None,
 }
 
-struct Row {
-    id: String,
-    title: String,
-    description: String,
-    status: Option<String>,
+pub(crate) struct Row {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) status: Option<String>,
     /// Server rows show the inheritance indicator beside the title.
-    layers: bool,
-    reset: bool,
-    control: Control,
+    pub(crate) layers: bool,
+    pub(crate) reset: bool,
+    pub(crate) control: Control,
 }
 
 struct Section {
@@ -269,7 +280,7 @@ struct Section {
     rows: Vec<Row>,
 }
 
-enum RowAction {
+pub(crate) enum RowAction {
     Toggle(bool),
     Select(String),
     Number(i64),
@@ -336,6 +347,64 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Sends a `server.updateSettings` patch and applies it locally the way
+    /// the server does (`deepMerge`: nested objects merge, other values
+    /// replace), so sibling entries such as other provider instances stay.
+    pub(crate) fn patch_server_settings(&mut self, patch: Value) {
+        fn merge(current: &mut Value, patch: &Value) {
+            match (current.as_object_mut(), patch.as_object()) {
+                (Some(current), Some(patch)) => {
+                    for (key, value) in patch {
+                        merge(current.entry(key.clone()).or_insert(Value::Null), value);
+                    }
+                }
+                _ => *current = patch.clone(),
+            }
+        }
+        if !self.state.config["settings"].is_object() {
+            self.state.config["settings"] = json!({});
+        }
+        merge(&mut self.state.config["settings"], &patch);
+        let key = patch
+            .as_object()
+            .and_then(|o| o.keys().next())
+            .cloned()
+            .unwrap_or_default();
+        self.send_request(
+            format!("settings:{key}"),
+            "server.updateSettings",
+            json!({ "patch": patch }),
+        );
+    }
+
+    /// The picker's favorites from the client `favorites` setting
+    /// (`{provider, model}` entries, keyed `provider/model` here).
+    pub(crate) fn load_favorites(&mut self) {
+        self.favorite_models = self.client_settings["favorites"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| {
+                Some(format!(
+                    "{}/{}",
+                    f["provider"].as_str()?,
+                    f["model"].as_str()?
+                ))
+            })
+            .collect();
+    }
+
+    /// Saves the picker's favorites to the client `favorites` setting.
+    pub(crate) fn save_favorites(&mut self) {
+        let entries: Vec<Value> = self
+            .favorite_models
+            .iter()
+            .filter_map(|key| key.split_once('/'))
+            .map(|(provider, model)| json!({"provider": provider, "model": model}))
+            .collect();
+        self.update_setting(Store::Client, "favorites", Value::Array(entries));
     }
 
     /// Writes the client settings next to the other app config (atomic rename).
@@ -2023,7 +2092,7 @@ impl App {
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
                 // `SettingsPageContainer width="wide"` on Connections.
-                let card_width = if page == CONNECTIONS_PAGE {
+                let card_width = if page == CONNECTIONS_PAGE || page == PROVIDERS_PAGE {
                     976.0
                 } else {
                     CARD_WIDTH
@@ -2031,13 +2100,26 @@ impl App {
                 let left = body.center().x - card_width / 2.0;
                 let top = ui.max_rect().top();
                 // `SETTINGS_DEVICE_ONLY_PATHS` (Appearance, SnapShots, Connections) skip the scope.
-                let mut y = if [1, SNAP_SHOT_PAGE, CONNECTIONS_PAGE].contains(&page) {
+                let mut y = if [1, SNAP_SHOT_PAGE, CONNECTIONS_PAGE, PROVIDERS_PAGE].contains(&page)
+                {
                     top + 24.0
                 } else {
                     scope_sentence(ui, left, top)
                 };
                 // The last card (or header) ends the content; `pb-12` follows.
                 let mut bottom = y;
+                if page == PROVIDERS_PAGE {
+                    // The page draws its own scope sentence ("on <machine>").
+                    let bottom = self.providers_page(ui, left, top);
+                    ui.allocate_rect(
+                        Rect::from_min_max(
+                            Pos2::new(left, top),
+                            Pos2::new(left + card_width, bottom + 48.0),
+                        ),
+                        Sense::hover(),
+                    );
+                    return;
+                }
                 if page == KEYBINDINGS_PAGE {
                     y = self.keybindings_list(ui, left, y);
                     ui.allocate_rect(
@@ -2128,7 +2210,7 @@ impl App {
                         .map(|(i, row)| {
                             // Rows inside an unavailable group carry no divider.
                             let undivided = i == 0 || section.unavailable.is_some();
-                            row_height(ui, row) - if undivided { 1.0 } else { 0.0 }
+                            row_height(ui, row, card_width) - if undivided { 1.0 } else { 0.0 }
                         })
                         .collect();
                     // The unavailable group pads by 6 and leads with its notice.
@@ -2234,7 +2316,7 @@ impl App {
 
     /// One `SettingsRow`: title (with the inheritance and reset slots),
     /// description and status on the left, the control on the right.
-    fn settings_row(
+    pub(crate) fn settings_row(
         &mut self,
         ui: &mut Ui,
         rect: Rect,
@@ -2529,6 +2611,31 @@ impl App {
                 let _ = changed;
                 None
             }
+            Control::Field {
+                value,
+                placeholder,
+                width,
+            } => {
+                let field = Rect::from_min_size(
+                    Pos2::new(right - width, center_y - 14.0),
+                    Vec2::new(*width, 28.0),
+                );
+                let text = self
+                    .settings_edits
+                    .entry(row.id.to_owned())
+                    .or_insert_with(|| value.clone());
+                let (_, done, buffer) = number_or_text_field(ui, field, &row.id, text, placeholder);
+                *self
+                    .settings_edits
+                    .get_mut(&row.id)
+                    .expect("inserted above") = buffer.clone();
+                if done {
+                    self.settings_edits.remove(&row.id);
+                    return (buffer.trim() != value)
+                        .then(|| RowAction::Text(buffer.trim().to_owned()));
+                }
+                None
+            }
             Control::Text(value) => {
                 let field = Rect::from_min_size(
                     Pos2::new(right - 288.0, center_y - 14.0),
@@ -2778,7 +2885,7 @@ fn select_width(ui: &Ui, control: &Control) -> Option<f32> {
 
 /// A bordered single-line field; returns (changed, committed, text). Enter
 /// or losing focus commits.
-fn number_or_text_field(
+pub(crate) fn number_or_text_field(
     ui: &mut Ui,
     rect: Rect,
     id: &str,
@@ -2804,14 +2911,21 @@ fn number_or_text_field(
             .margin(egui::Margin::ZERO)
             .font(font(14.0, Weight::Regular))
             .text_color(theme::foreground())
-            .hint_text(
-                egui::RichText::new(placeholder)
-                    .font(font(14.0, Weight::Regular))
-                    .color(theme::muted_foreground()),
-            )
             .desired_width(rect.width() - 20.0)
             .vertical_align(egui::Align::Center),
     );
+    // The placeholder goes through the shared text path: egui's hint text
+    // renders lighter than the same muted color elsewhere.
+    if text.is_empty() {
+        widgets::text(
+            ui,
+            Pos2::new(inner.left(), rect.top() + 4.0),
+            placeholder,
+            font(14.0, Weight::Regular),
+            theme::muted_foreground(),
+            20.0,
+        );
+    }
     let committed = response.lost_focus();
     (response.changed(), committed, text.clone())
 }
@@ -2826,6 +2940,7 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         }
         Control::Retention(Some(days)) => 42.0 + retention_width(ui, &days.to_string()),
         Control::Text(_) => 288.0,
+        Control::Field { width, .. } => *width,
         Control::Model { label, traits, .. } => {
             let w = |t: &str| widgets::text_width(ui, t, font(14.0, Weight::Medium)) + 60.0;
             w(label) + traits.as_deref().map_or(0.0, |t| w(t) + 8.0)
@@ -2844,8 +2959,8 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
 
 /// Row height: padding, the 20px title line, the wrapped description and the
 /// optional status, plus the divider above every row but the first.
-fn row_height(ui: &Ui, row: &Row) -> f32 {
-    let text_width = (CARD_WIDTH - 2.0 - 2.0 * ROW_PAD_X - 32.0 - control_width(ui, &row.control))
+pub(crate) fn row_height(ui: &Ui, row: &Row, card_width: f32) -> f32 {
+    let text_width = (card_width - 2.0 - 2.0 * ROW_PAD_X - 32.0 - control_width(ui, &row.control))
         .min(DESCRIPTION_MAX);
     let title = if row.id == "archive-empty" {
         22.0
@@ -3430,7 +3545,7 @@ impl App {
 }
 
 /// A settings `Switch` ending at `right`; returns whether it was clicked.
-fn switch(ui: &Ui, right: f32, center_y: f32, on: bool, id: &str) -> bool {
+pub(crate) fn switch(ui: &Ui, right: f32, center_y: f32, on: bool, id: &str) -> bool {
     let track = Rect::from_min_size(
         Pos2::new(right - 30.0, center_y - 9.0),
         Vec2::new(30.0, 18.0),

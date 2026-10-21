@@ -476,33 +476,45 @@ impl App {
         let Some(account) = some(&item["auth"]["account"]) else {
             return;
         };
-        let revealed = self.discovery.revealed.contains(kind);
+        self.redacted_text(
+            ui,
+            Pos2::new(x, pos.y + 1.0),
+            account,
+            kind,
+            ("Click to reveal account", "Click to hide account"),
+        );
+    }
+
+    /// `RedactedSensitiveText`: a stable placeholder of `value`'s shape,
+    /// blurred, until clicked; returns its width. `key` names the reveal
+    /// state, `tips` the (reveal, hide) tooltips.
+    pub(crate) fn redacted_text(
+        &mut self,
+        ui: &mut Ui,
+        pos: Pos2,
+        value: &str,
+        key: &str,
+        tips: (&str, &str),
+    ) -> f32 {
+        let revealed = self.discovery.revealed.contains(key);
         let shown = if revealed {
-            account.to_owned()
+            value.to_owned()
         } else {
-            redacted_placeholder(account)
+            redacted_placeholder(value)
         };
         let mono = theme::mono(11.0);
         let width = widgets::text_width(ui, &shown, mono.clone());
-        let button = Rect::from_min_size(Pos2::new(x, pos.y + 1.0), Vec2::new(width, 17.0));
+        let button = Rect::from_min_size(pos, Vec2::new(width, 17.0));
         let response = ui
-            .interact(
-                button,
-                ui.id().with(("reveal-account", kind)),
-                Sense::click(),
-            )
-            .on_hover_text(if revealed {
-                "Click to hide account"
-            } else {
-                "Click to reveal account"
-            });
+            .interact(button, ui.id().with(("reveal", key)), Sense::click())
+            .on_hover_text(if revealed { tips.1 } else { tips.0 });
         let color = if response.hovered() {
             theme::foreground()
         } else {
             theme::muted_foreground()
         };
         if revealed {
-            widgets::text(ui, Pos2::new(x, pos.y + 1.0), &shown, mono, color, 16.5);
+            widgets::text(ui, pos, &shown, mono, color, 16.5);
         } else {
             // `blur-xs` (4px): the text smeared over two rings of offsets.
             let mut offsets = vec![(0.0f32, 0.0f32)];
@@ -516,7 +528,7 @@ impl App {
             for (dx, dy) in offsets {
                 widgets::text(
                     ui,
-                    Pos2::new(x + dx, pos.y + 1.0 + dy),
+                    Pos2::new(pos.x + dx, pos.y + dy),
                     &shown,
                     mono.clone(),
                     theme::alpha(color, alpha),
@@ -526,11 +538,12 @@ impl App {
         }
         if response.clicked() {
             if revealed {
-                self.discovery.revealed.remove(kind);
+                self.discovery.revealed.remove(key);
             } else {
-                self.discovery.revealed.insert(kind.to_owned());
+                self.discovery.revealed.insert(key.to_owned());
             }
         }
+        width
     }
 }
 

@@ -83,6 +83,10 @@ pub struct App {
     pub(crate) discovery: crate::ui::source_control::Discovery,
     /// The latest `subscribeDeviceState` value (Integrations settings).
     pub(crate) device_state: Option<Value>,
+    /// The instance open in the Providers settings editor.
+    pub(crate) providers_selected: Option<String>,
+    /// A `server.refreshProviders` from the Providers page is in flight.
+    pub(crate) providers_refreshing: bool,
     pub(crate) usage: crate::ui::usage::UsageState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
@@ -198,6 +202,8 @@ impl App {
             usage_open: false,
             discovery: Default::default(),
             device_state: None,
+            providers_selected: None,
+            providers_refreshing: false,
             usage: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
@@ -219,6 +225,7 @@ impl App {
         // The diff panel starts from the saved client defaults.
         app.diff_split = app.client_settings["diffLayout"] == "split";
         app.diff_ignore_whitespace = app.client_settings["diffIgnoreWhitespace"] != false;
+        app.load_favorites();
         if let (Some(_), Some(token)) = (options.server, options.token) {
             app.connect.token = token;
             app.connect_now(&cc.egui_ctx);
@@ -852,6 +859,8 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key == "providers-refresh" {
+            self.providers_refreshing = false;
         } else if key == "device-state" {
             // A stream: keep the last good state if it later fails or expires.
             if let Ok(state) = result {

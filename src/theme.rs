@@ -684,6 +684,10 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "sc-bitbucket",
         "sc-forgejo",
         "ellipsis-vertical",
+        "provider-cursor",
+        "provider-grok",
+        "circle-arrow-up",
+        "pipette",
     )
 }
 

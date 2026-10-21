@@ -33,14 +33,16 @@ reads it from a file at startup instead; it is kept in memory only.
 | Requests | Approval banner (approve/decline) and user-input questions (options, multi-step answers) |
 | Right panel | Per-thread panel with the "Open a surface" launcher (letter shortcuts), the Diff tab and the "+" surface menu |
 | Diff panel | Working tree, branch and per-turn scopes (`review.getDiffPreview`, `orchestration.getTurnDiff`), unified or split view, change blocks realigned by similarity and word-alt emphasis like @pierre/diffs, the file tree, collapse, wrap and whitespace toggles, resizable panel |
-| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Source Control page (repository defaults, `server.discoverSourceControl` version control and hosting integrations with redacted accounts, text generation style); the Integrations page (agent browser access, the desktop-only browser defaults, device hub and hosts from `subscribeDeviceState`, read-only); the Storage page (worktree cleanup and retention rules); the SnapShots page (unavailable outside the desktop app, like the web client); the Connections page as a session without `access:write` sees it (administrative access notice, empty remote environments); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
+| Settings | Settings sidebar and header; the General page (new-thread defaults, organization, behavior, projects & threads, confirmations, text generation, about, diagnostics, legacy features) saving server settings with `server.updateSettings`; the Source Control page (repository defaults, `server.discoverSourceControl` version control and hosting integrations with redacted accounts, text generation style); the Providers page (instance list with status, version and enable switch; the editor's display name with the redacted account, runtime fields, models with favorites, visibility and order; the health check interval); the Integrations page (agent browser access, the desktop-only browser defaults, device hub and hosts from `subscribeDeviceState`, read-only); the Storage page (worktree cleanup and retention rules); the SnapShots page (unavailable outside the desktop app, like the web client); the Connections page as a session without `access:write` sees it (administrative access notice, empty remote environments); the Archive page (unarchive, delete); the Keybindings page (read-only list) |
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`) |
 | State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts` |
 
 Not ported yet (buttons for these show a "not implemented" notice):
 
 - settings: the Appearance page (built-in themes, contrast and the other
-  appearance controls) and the Providers page, settings search and scope
+  appearance controls), adding or deleting provider instances, the provider
+  accent color picker, provider environment variables and custom models,
+  usage limit hubs, provider update installs and setup flows, settings search and scope
   pickers, the default and source control writer model pickers, keybinding
   editing, project settings, device setup (enabling the hub or agent access,
   adding hosts), the Git fetch interval and Bitbucket credentials panels, and

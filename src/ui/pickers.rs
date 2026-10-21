@@ -532,10 +532,11 @@ impl App {
         if let Some(provider) = switch_provider {
             self.picker_provider = Some(provider);
         }
-        if let Some(key) = toggle_favorite
-            && !self.favorite_models.remove(&key)
-        {
-            self.favorite_models.insert(key);
+        if let Some(key) = toggle_favorite {
+            if !self.favorite_models.remove(&key) {
+                self.favorite_models.insert(key);
+            }
+            self.save_favorites();
         }
         if let Some(selection) = chosen {
             self.set_selection(draft, selection);

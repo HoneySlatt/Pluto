@@ -9,6 +9,7 @@ pub mod palette;
 pub mod pickers;
 pub mod project_icon;
 pub mod project_scope;
+pub mod providers;
 pub mod requests_panel;
 pub mod settings;
 pub mod sidebar;
