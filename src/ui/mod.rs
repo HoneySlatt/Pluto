@@ -4,6 +4,7 @@ pub mod composer;
 pub mod connect;
 pub mod context_menu;
 pub mod diff_panel;
+pub mod files;
 pub mod markdown;
 pub mod palette;
 pub mod pickers;

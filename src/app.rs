@@ -91,6 +91,8 @@ pub struct App {
     /// The Pull requests page replaces the workspace (`/pull-requests`).
     pub(crate) pull_requests_open: bool,
     pub(crate) prs: crate::ui::pull_requests::PullRequestsState,
+    /// The Files surface's reads and view state.
+    pub(crate) files: crate::ui::files::FilesState,
     /// Client settings (`ClientSettings`), in memory.
     pub(crate) client_settings: Value,
     pub(crate) client_settings_path: Option<std::path::PathBuf>,
@@ -109,12 +111,49 @@ pub struct App {
     pub(crate) vcs_init: Option<String>,
 }
 
-/// `ThreadRightPanelState`, reduced to the one surface this client renders.
-#[derive(Clone, Copy, Default)]
+/// `ThreadRightPanelState`, reduced to the surfaces this client renders.
+#[derive(Clone, Default)]
 pub(crate) struct Panel {
     pub open: bool,
-    /// The Diff surface is open (as a tab).
-    pub diff: bool,
+    /// Open surfaces, as tabs, and the active one.
+    pub tabs: Vec<PanelTab>,
+    pub active: usize,
+}
+
+/// One right-panel surface tab.
+#[derive(Clone, PartialEq)]
+pub(crate) enum PanelTab {
+    Diff,
+    /// The file browser, with the file it previews.
+    Files {
+        file: Option<String>,
+    },
+}
+
+impl Panel {
+    pub(crate) fn active_tab(&self) -> Option<&PanelTab> {
+        self.tabs.get(self.active).or(self.tabs.last())
+    }
+
+    /// Activates the first tab matching `matches`, or opens `tab`.
+    pub(crate) fn show(&mut self, tab: PanelTab, matches: impl Fn(&PanelTab) -> bool) {
+        match self.tabs.iter().position(matches) {
+            Some(index) => self.active = index,
+            None => {
+                self.tabs.push(tab);
+                self.active = self.tabs.len() - 1;
+            }
+        }
+    }
+
+    pub(crate) fn close(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.tabs.remove(index);
+        }
+        if self.active >= index && self.active > 0 {
+            self.active -= 1;
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -210,6 +249,7 @@ impl App {
             usage: Default::default(),
             pull_requests_open: false,
             prs: Default::default(),
+            files: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
                 options.client_settings_path.as_deref(),
             ),
@@ -801,7 +841,7 @@ impl App {
         }
         if let Some(panel) = self.panel_mut() {
             panel.open = true;
-            panel.diff = true;
+            panel.show(PanelTab::Diff, |t| *t == PanelTab::Diff);
         }
         if let Some(file) = file {
             self.diff_tree_selected = Some(file.clone());
@@ -814,7 +854,7 @@ impl App {
         self.selected
             .as_ref()
             .and_then(|id| self.panels.get(id))
-            .copied()
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -869,6 +909,8 @@ impl App {
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
+        } else if key.starts_with("files-") {
+            self.files.receive(&key, result);
         } else if key.starts_with("prs:") {
             self.prs.refreshing = false;
             self.prs.results.insert(key, result);

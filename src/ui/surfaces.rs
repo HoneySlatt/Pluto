@@ -94,7 +94,15 @@ impl App {
     fn open_surface(&mut self, label: &str) {
         if label == "Diff" {
             if let Some(panel) = self.panel_mut() {
-                panel.diff = true;
+                panel.show(crate::app::PanelTab::Diff, |t| {
+                    *t == crate::app::PanelTab::Diff
+                });
+            }
+        } else if label == "Files" {
+            if let Some(panel) = self.panel_mut() {
+                panel.show(crate::app::PanelTab::Files { file: None }, |t| {
+                    matches!(t, crate::app::PanelTab::Files { .. })
+                });
             }
         } else {
             self.status = Some(format!("The {label} surface is not implemented yet"));
@@ -246,6 +254,91 @@ impl App {
     }
 
     /// The tab bar's "+" button and its surface menu.
+    /// The panel's tab bar (`RightPanelTabs`): one tab per open surface
+    /// (`pl-1.5 pr-2`, a 12px glyph that turns into a close button while the
+    /// tab is hovered) and the "+" surface menu.
+    pub(crate) fn panel_tab_bar(&mut self, ui: &mut Ui, inner: Rect) {
+        let panel = self.panel();
+        let mut x = inner.left() + 8.0;
+        let mut select = None;
+        let mut close = None;
+        for (index, tab) in panel.tabs.iter().enumerate() {
+            let (label, icon, tint) = match tab {
+                crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
+                crate::app::PanelTab::Files { file: None } => {
+                    ("Files".to_owned(), "files", theme::foreground())
+                }
+                crate::app::PanelTab::Files { file: Some(path) } => {
+                    let name = path.rsplit('/').next().unwrap_or(path).to_owned();
+                    let extension = name.rsplit('.').next().unwrap_or_default().to_owned();
+                    let (icon, tint) = crate::ui::markdown::language_icon(&extension)
+                        .unwrap_or(("file-text", theme::foreground()));
+                    (name, icon, tint)
+                }
+            };
+            let text_width = widgets::text_width(ui, &label, font(12.0, Weight::Regular));
+            let rect = Rect::from_min_size(
+                Pos2::new(x, 14.0),
+                Vec2::new((6.0 + 12.0 + 6.0 + text_width + 8.0).round(), 24.0),
+            );
+            x = rect.right() + 4.0;
+            let active = index == panel.active.min(panel.tabs.len() - 1);
+            let response = ui.interact(rect, ui.id().with(("panel-tab", index)), Sense::click());
+            if active || response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::same(8), theme::accent());
+            }
+            let glyph = Rect::from_min_size(
+                Pos2::new(rect.left() + 4.0, rect.center().y - 8.0),
+                Vec2::splat(16.0),
+            );
+            let close_response = ui
+                .interact(
+                    glyph,
+                    ui.id().with(("close-panel-tab", index)),
+                    Sense::click(),
+                )
+                .on_hover_text(format!("Close {label}"));
+            if close_response.hovered() {
+                ui.painter()
+                    .rect_filled(glyph, CornerRadius::same(6), theme::muted());
+            }
+            let hovered = ui.rect_contains_pointer(rect);
+            theme::paint_icon(
+                ui,
+                if hovered { "x" } else { icon },
+                glyph,
+                12.0,
+                if hovered { theme::foreground() } else { tint },
+            );
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(rect.min + Vec2::new(24.0, 0.0), rect.max),
+                &label,
+                font(12.0, Weight::Regular),
+                if active {
+                    theme::foreground()
+                } else {
+                    theme::muted_foreground()
+                },
+            );
+            if close_response.clicked() {
+                close = Some(index);
+            } else if response.clicked() {
+                select = Some(index);
+            }
+        }
+        if let Some(panel) = self.panel_mut() {
+            if let Some(index) = close {
+                panel.close(index);
+            } else if let Some(index) = select {
+                panel.active = index;
+            }
+        }
+        let add = Rect::from_min_size(Pos2::new(x, 14.0), Vec2::splat(24.0));
+        self.add_surface_button(ui, add);
+    }
+
     pub(crate) fn add_surface_button(&mut self, ui: &mut Ui, button: Rect) {
         let open = self.open_menu.as_deref() == Some(ADD_MENU);
         if open {

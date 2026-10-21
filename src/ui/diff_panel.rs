@@ -121,53 +121,21 @@ impl App {
         let inner = Rect::from_min_max(Pos2::new(rect.left() + 1.0, rect.top()), rect.max);
 
         // No surface open: the launcher fills the panel.
-        if !self.panel().diff {
+        let panel = self.panel();
+        let Some(active) = panel.active_tab().cloned() else {
             self.panel_controls(ui, rect.right());
             let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
             self.surface_launcher(ui, body, HEADER);
             return;
-        }
+        };
         self.launcher_focused = false;
-
-        // Tab bar: the Diff tab (its icon turns into a close button while the
-        // tab is hovered) and the "+" surface menu.
-        let tab = Rect::from_min_size(Pos2::new(inner.left() + 8.0, 14.0), Vec2::new(51.0, 24.0));
-        ui.painter()
-            .rect_filled(tab, CornerRadius::same(8), theme::accent());
-        let tab_hovered = ui.rect_contains_pointer(tab);
-        let close = Rect::from_min_size(
-            Pos2::new(tab.left() + 6.0, tab.center().y - 8.0),
-            Vec2::splat(16.0),
-        );
-        let close_response = ui
-            .interact(close, ui.id().with("close-diff-tab"), Sense::click())
-            .on_hover_text("Close Diff");
-        if close_response.hovered() {
-            ui.painter()
-                .rect_filled(close, CornerRadius::same(6), theme::muted());
-        }
-        theme::paint_icon(
-            ui,
-            if tab_hovered { "x" } else { "file-diff" },
-            close,
-            12.0,
-            theme::foreground(),
-        );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(tab.min + Vec2::new(24.0, 0.0), tab.max),
-            "Diff",
-            font(12.0, Weight::Regular),
-            theme::foreground(),
-        );
-        if close_response.clicked()
-            && let Some(panel) = self.panel_mut()
-        {
-            panel.diff = false;
-        }
-        let add = Rect::from_min_size(Pos2::new(tab.right() + 4.0, 14.0), Vec2::splat(24.0));
-        self.add_surface_button(ui, add);
+        self.panel_tab_bar(ui, inner);
         self.panel_controls(ui, rect.right());
+        if let crate::app::PanelTab::Files { file } = active {
+            let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
+            self.files_surface(ui, body, file);
+            return;
+        }
 
         let Some(thread) = self.current_thread() else {
             return;
