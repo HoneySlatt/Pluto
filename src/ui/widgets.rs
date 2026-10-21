@@ -159,10 +159,10 @@ pub fn icon_button(
     let response = ui.interact(rect, ui.id().with(id), Sense::click());
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, radius(theme::CONTROL_RADIUS as f32), theme::ACCENT);
+            .rect_filled(rect, radius(theme::CONTROL_RADIUS as f32), theme::accent());
     }
     let tint = if response.hovered() {
-        theme::FOREGROUND
+        theme::foreground()
     } else {
         tint
     };
@@ -185,15 +185,15 @@ pub fn outline_button(
 ) -> Response {
     let response = ui.interact(rect, ui.id().with(id), Sense::click());
     let fill = if response.hovered() {
-        theme::white(0.06)
+        theme::overlay(0.06)
     } else {
-        theme::CONTROL_SURFACE
+        theme::control_surface()
     };
     ui.painter().rect(
         rect,
         corners,
         fill,
-        Stroke::new(1.0, theme::INPUT),
+        Stroke::new(1.0, theme::input()),
         StrokeKind::Inside,
     );
     let mut x = rect.left() + 7.0;
@@ -214,7 +214,7 @@ pub fn outline_button(
             ),
             label,
             theme::font(12.0, theme::Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
     }
     response
@@ -380,9 +380,17 @@ impl<'a> MenuItem<'a> {
     }
 }
 
-const MENU_SURFACE: Color32 = Color32::from_rgb(16, 16, 16); // dropdown glass over the app
-const MENU_OUTLINE: Color32 = Color32::from_rgba_premultiplied(25, 25, 25, 26); // white 10%
-const MENU_SELECTED: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 20); // foreground 8%
+fn menu_surface() -> Color32 {
+    theme::popover()
+}
+fn menu_outline() -> Color32 {
+    theme::stock_or(Color32::from_rgba_premultiplied(25, 25, 25, 26), |_| {
+        theme::overlay(0.1)
+    })
+}
+fn menu_selected() -> Color32 {
+    theme::overlay(0.078)
+}
 
 fn menu_entry_height(entry: &MenuEntry) -> f32 {
     match entry {
@@ -401,8 +409,8 @@ pub fn popup_surface(ui: &Ui, rect: Rect) {
     ui.painter().rect(
         rect,
         CornerRadius::same(10),
-        MENU_SURFACE,
-        Stroke::new(1.0, MENU_OUTLINE),
+        menu_surface(),
+        Stroke::new(1.0, menu_outline()),
         StrokeKind::Inside,
     );
 }
@@ -443,7 +451,7 @@ fn shortcut_galley(ui: &Ui, text: &str) -> Arc<Galley> {
             extra_letter_spacing: 1.2,
             ..format(
                 theme::font(12.0, theme::Weight::Medium),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             )
         },
@@ -558,7 +566,7 @@ pub fn menu_aligned(
                             Pos2::new(row.left() + 8.0, row.top() + 6.0),
                             label,
                             theme::font(12.0, theme::Weight::Medium),
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                             16.0,
                         );
                     }
@@ -569,7 +577,7 @@ pub fn menu_aligned(
                                 Vec2::new(row.width() - 16.0, 1.0),
                             ),
                             0.0,
-                            theme::BORDER,
+                            theme::border(),
                         );
                     }
                     MenuEntry::Item(item) => {
@@ -595,10 +603,10 @@ pub fn menu_aligned(
                         };
                         if item.selected {
                             ui.painter()
-                                .rect_filled(row, CornerRadius::same(6), MENU_SELECTED);
+                                .rect_filled(row, CornerRadius::same(6), menu_selected());
                         } else if response.hovered() && !item.disabled {
                             ui.painter()
-                                .rect_filled(row, CornerRadius::same(6), theme::ACCENT);
+                                .rect_filled(row, CornerRadius::same(6), theme::accent());
                         }
                         let mut x = row.left() + 8.0;
                         let title_top = row.top() + 4.0;
@@ -613,9 +621,9 @@ pub fn menu_aligned(
                                 ),
                                 size,
                                 dim(if item.destructive {
-                                    theme::ERROR_FOREGROUND
+                                    theme::error_foreground()
                                 } else {
-                                    theme::MUTED_FOREGROUND
+                                    theme::muted_foreground()
                                 }),
                             );
                             x += 20.0;
@@ -631,9 +639,9 @@ pub fn menu_aligned(
                             item.label,
                             title,
                             dim(if item.destructive {
-                                theme::ERROR_FOREGROUND
+                                theme::error_foreground()
                             } else {
-                                theme::FOREGROUND
+                                theme::foreground()
                             }),
                             20.0,
                         );
@@ -646,8 +654,8 @@ pub fn menu_aligned(
                             ui.painter().rect(
                                 chip,
                                 CornerRadius::same(4),
-                                theme::CONTROL_SURFACE,
-                                Stroke::new(1.0, theme::INPUT),
+                                theme::control_surface(),
+                                Stroke::new(1.0, theme::input()),
                                 StrokeKind::Inside,
                             );
                             text_in(
@@ -655,7 +663,7 @@ pub fn menu_aligned(
                                 Rect::from_min_max(chip.min + Vec2::new(4.0, 0.0), chip.max),
                                 badge,
                                 badge_font.clone(),
-                                theme::FOREGROUND,
+                                theme::foreground(),
                             );
                         }
                         if let Some(shortcut) = item.shortcut {
@@ -665,15 +673,15 @@ pub fn menu_aligned(
                             ui.painter().galley_with_override_text_color(
                                 pos,
                                 galley,
-                                dim(theme::MUTED_FOREGROUND),
+                                dim(theme::muted_foreground()),
                             );
                         }
                         if let Some(detail) = item.detail {
                             let gap = if item.icon.is_some() { 2.0 } else { 0.0 };
                             let color = if item.icon.is_some() {
-                                theme::MUTED_FOREGROUND
+                                theme::muted_foreground()
                             } else {
-                                theme::alpha(theme::MUTED_FOREGROUND, 0.8)
+                                theme::alpha(theme::muted_foreground(), 0.8)
                             };
                             text(
                                 ui,
@@ -716,9 +724,9 @@ pub fn primary_button(
         },
     );
     let fill = if response.hovered() && enabled {
-        Color32::from_rgb(48, 97, 218)
+        theme::primary_hover()
     } else {
-        theme::PRIMARY
+        theme::primary()
     };
     let fill = if enabled {
         fill
@@ -750,14 +758,14 @@ pub fn combobox_search(ui: &mut Ui, rect: Rect, query: &mut String, hint: &str) 
             Vec2::new(rect.width(), 1.0),
         ),
         0.0,
-        theme::PRIMARY,
+        theme::primary(),
     );
     theme::paint_icon(
         ui,
         "search",
         Rect::from_min_size(rect.min, Vec2::new(16.0, rect.height())),
         16.0,
-        theme::alpha(theme::MUTED_FOREGROUND, 0.55),
+        theme::alpha(theme::muted_foreground(), 0.55),
     );
     let mut edit_ui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_max(
         Pos2::new(rect.left() + 20.0, rect.top() + 4.0),
@@ -768,11 +776,11 @@ pub fn combobox_search(ui: &mut Ui, rect: Rect, query: &mut String, hint: &str) 
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO)
             .font(theme::font(14.0, theme::Weight::Regular))
-            .text_color(theme::FOREGROUND)
+            .text_color(theme::foreground())
             .hint_text(
                 egui::RichText::new(hint)
                     .font(theme::font(14.0, theme::Weight::Regular))
-                    .color(theme::MUTED_FOREGROUND),
+                    .color(theme::muted_foreground()),
             )
             .desired_width(rect.width() - 20.0),
     );

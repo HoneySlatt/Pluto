@@ -39,7 +39,7 @@ pub const RUNTIME_MODES: [(&str, &str, &str, &str); 4] = [
 /// Provider glyph for a driver, with its brand tint.
 pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
     match driver {
-        "codex" => Some(("openai", theme::FOREGROUND)),
+        "codex" => Some(("openai", theme::foreground())),
         "claudeAgent" => Some(("claude", Color32::from_rgb(0xd9, 0x77, 0x57))),
         _ => None,
     }
@@ -256,7 +256,7 @@ impl App {
                     ne: 0,
                     se: 0,
                 },
-                theme::white(0.009),
+                theme::overlay(0.009),
             );
             let mut y = rail.top() + 12.0;
             let star = Rect::from_min_size(Pos2::new(rail.left() + 12.0, y), Vec2::splat(20.0));
@@ -265,7 +265,7 @@ impl App {
                 star,
                 "rail-favorites",
                 "star-filled",
-                theme::FOREGROUND,
+                theme::foreground(),
                 active == FAVORITES,
                 rail.right(),
             ) {
@@ -277,7 +277,7 @@ impl App {
                     Vec2::new(36.0, 1.0),
                 ),
                 0.0,
-                theme::white(0.042),
+                theme::overlay(0.042),
             );
             y = rail.top() + 57.0;
             for provider in &providers {
@@ -287,7 +287,7 @@ impl App {
                     .to_owned();
                 let driver = provider["driver"].as_str().unwrap_or_default();
                 let (icon, tint) =
-                    provider_icon(driver).unwrap_or(("circle-alert", theme::MUTED_FOREGROUND));
+                    provider_icon(driver).unwrap_or(("circle-alert", theme::muted_foreground()));
                 let slot = Rect::from_min_size(Pos2::new(rail.left() + 12.0, y), Vec2::splat(20.0));
                 if rail_button(
                     ui,
@@ -313,12 +313,12 @@ impl App {
                     ne: 9,
                     se: 9,
                 },
-                theme::white(0.012),
+                theme::overlay(0.012),
             );
             ui.painter().rect_filled(
                 Rect::from_min_size(content.min, Vec2::new(1.0, content.height())),
                 0.0,
-                theme::white(0.042),
+                theme::overlay(0.042),
             );
             let search = Rect::from_min_size(
                 Pos2::new(content.left() + 13.0, content.top() + 9.0),
@@ -385,7 +385,7 @@ impl App {
                             ui.cursor().min + Vec2::new(8.0, 8.0),
                             "No models",
                             font(12.0, Weight::Regular),
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                             16.0,
                         );
                     }
@@ -408,18 +408,18 @@ impl App {
                             ui.painter().rect_filled(
                                 row,
                                 CornerRadius::same(6),
-                                Color32::from_rgba_premultiplied(20, 20, 20, 20),
+                                theme::overlay(0.078),
                             );
                         } else if response.hovered() {
                             ui.painter()
-                                .rect_filled(row, CornerRadius::same(6), theme::ACCENT);
+                                .rect_filled(row, CornerRadius::same(6), theme::accent());
                         }
                         widgets::text(
                             ui,
                             row.min + Vec2::new(8.0, 4.0),
                             label,
                             font(12.0, Weight::Medium),
-                            theme::FOREGROUND,
+                            theme::foreground(),
                             16.5,
                         );
                         let driver = providers
@@ -436,7 +436,7 @@ impl App {
                                     Vec2::new(12.0, 16.5),
                                 ),
                                 12.0,
-                                theme::MUTED_FOREGROUND,
+                                theme::muted_foreground(),
                             );
                         }
                         widgets::text(
@@ -444,7 +444,7 @@ impl App {
                             row.min + Vec2::new(26.0, 25.0),
                             provider_name,
                             font(12.0, Weight::Regular),
-                            theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                            theme::alpha(theme::muted_foreground(), 0.7),
                             16.5,
                         );
                         let key = format!("{provider_id}/{slug}");
@@ -459,7 +459,7 @@ impl App {
                             ("favorite", &key),
                             if favorite { "star-filled" } else { "star" },
                             12.0,
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                             if favorite {
                                 "Remove from favorites"
                             } else {
@@ -485,14 +485,14 @@ impl App {
                             ui.interact(row, ui.id().with("legacy-models"), Sense::click());
                         if response.hovered() {
                             ui.painter()
-                                .rect_filled(row, CornerRadius::same(6), theme::ACCENT);
+                                .rect_filled(row, CornerRadius::same(6), theme::accent());
                         }
                         widgets::text(
                             ui,
                             row.min + Vec2::new(8.0, 4.0),
                             "Legacy models",
                             font(12.0, Weight::Medium),
-                            theme::FOREGROUND,
+                            theme::foreground(),
                             16.5,
                         );
                         let count = format!("{} models", legacy.len());
@@ -501,7 +501,7 @@ impl App {
                             row.min + Vec2::new(8.0, 25.0),
                             &count,
                             font(12.0, Weight::Regular),
-                            theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                            theme::alpha(theme::muted_foreground(), 0.7),
                             16.5,
                         );
                         theme::paint_icon(
@@ -516,7 +516,7 @@ impl App {
                                 Vec2::new(16.0, row.height()),
                             ),
                             16.0,
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                         );
                         if response.clicked() {
                             toggle_legacy = true;
@@ -562,7 +562,7 @@ fn rail_button(
     let response = ui.interact(hit, ui.id().with(id), Sense::click());
     if response.hovered() && !active {
         ui.painter()
-            .rect_filled(hit, CornerRadius::same(8), theme::ACCENT);
+            .rect_filled(hit, CornerRadius::same(8), theme::accent());
     }
     theme::paint_icon(ui, icon, slot, 20.0, tint);
     if active {
@@ -577,7 +577,7 @@ fn rail_button(
                 ne: 0,
                 se: 0,
             },
-            theme::PRIMARY,
+            theme::primary(),
             Stroke::NONE,
             StrokeKind::Inside,
         );

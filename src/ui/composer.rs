@@ -16,10 +16,17 @@ use crate::ui::widgets;
 const LINE: f32 = 22.75;
 const MIN_TEXT_HEIGHT: f32 = 70.0;
 const MAX_TEXT_HEIGHT: f32 = 200.0;
-const SURFACE: Color32 = Color32::from_rgb(16, 16, 16);
-const OUTLINE: Color32 = Color32::from_rgb(28, 28, 28);
+/// The composer card (gray 16 on the stock palette).
+fn card_surface() -> Color32 {
+    theme::shade(16)
+}
+fn outline() -> Color32 {
+    theme::shade(28)
+}
 const DESTRUCTIVE: Color32 = Color32::from_rgb(251, 65, 74); // --destructive
-const MESSAGE_ACTION_HOVER: Color32 = Color32::from_rgb(48, 97, 218);
+fn message_action_hover() -> Color32 {
+    theme::primary_hover()
+}
 
 pub fn runtime_label(mode: &str) -> (&'static str, &'static str) {
     match mode {
@@ -84,7 +91,7 @@ impl App {
             ui,
             &self.composer,
             font(14.0, Weight::Regular),
-            theme::FOREGROUND,
+            theme::foreground(),
             LINE,
             width - 34.0,
         );
@@ -158,8 +165,8 @@ impl App {
         ui.painter().rect(
             strip,
             strip_corners,
-            Color32::from_rgb(19, 19, 19),
-            Stroke::new(1.0, theme::white(0.07)),
+            theme::shade(19),
+            Stroke::new(1.0, theme::overlay(0.07)),
             StrokeKind::Inside,
         );
         self.checkout_strip(
@@ -171,8 +178,8 @@ impl App {
         ui.painter().rect(
             surface,
             CornerRadius::same(22),
-            SURFACE,
-            Stroke::new(1.0, OUTLINE),
+            card_surface(),
+            Stroke::new(1.0, outline()),
             StrokeKind::Inside,
         );
 
@@ -194,7 +201,7 @@ impl App {
                 text_rect.min,
                 placeholder,
                 font(14.0, Weight::Regular),
-                theme::alpha(theme::MUTED_FOREGROUND, 0.75),
+                theme::alpha(theme::muted_foreground(), 0.75),
                 LINE,
             );
         }
@@ -218,7 +225,7 @@ impl App {
                         .frame(egui::Frame::NONE)
                         .margin(egui::Margin::ZERO)
                         .font(font(14.0, Weight::Regular))
-                        .text_color(theme::FOREGROUND)
+                        .text_color(theme::foreground())
                         .desired_width(text_rect.width())
                         .layouter(&mut |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
                             let mut job = egui::text::LayoutJob::default();
@@ -227,7 +234,7 @@ impl App {
                                 0.0,
                                 widgets::format(
                                     font(14.0, Weight::Regular),
-                                    theme::FOREGROUND,
+                                    theme::foreground(),
                                     LINE,
                                 ),
                             );
@@ -292,7 +299,7 @@ impl App {
             "attach",
             "paperclip",
             16.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Attach files",
         )
         .clicked()
@@ -340,9 +347,9 @@ impl App {
             },
         );
         let fill = if response.hovered() && can_send {
-            MESSAGE_ACTION_HOVER
+            message_action_hover()
         } else {
-            theme::PRIMARY
+            theme::primary()
         };
         let opacity = if can_send { 1.0 } else { 0.64 };
         ui.painter()
@@ -393,9 +400,9 @@ impl App {
             },
         );
         let fill = if response.hovered() && enabled {
-            MESSAGE_ACTION_HOVER
+            message_action_hover()
         } else {
-            theme::PRIMARY
+            theme::primary()
         };
         let opacity = if enabled { 1.0 } else { 0.64 };
         ui.painter()
@@ -422,7 +429,7 @@ impl App {
                 "",
                 CornerRadius::same(8),
             );
-            theme::paint_icon(ui, "chevron-left", previous, 14.0, theme::FOREGROUND);
+            theme::paint_icon(ui, "chevron-left", previous, 14.0, theme::foreground());
             if response.on_hover_text("Previous question").clicked() && !responding {
                 self.previous_question(input);
             }
@@ -450,7 +457,7 @@ impl App {
         ui.painter().rect_filled(
             Rect::from_min_size(Pos2::new(x, bar_top + 6.0), Vec2::new(1.0, 16.0)),
             0.0,
-            theme::BORDER,
+            theme::border(),
         );
     }
 
@@ -472,12 +479,12 @@ impl App {
         let open = self.open_menu.as_deref() == Some(id);
         if response.hovered() || open {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(8), theme::ACCENT);
+                .rect_filled(rect, CornerRadius::same(8), theme::accent());
         }
         let color = if response.hovered() {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         let mut cx = x + 11.0;
         if let Some(icon) = icon {
@@ -524,9 +531,9 @@ impl App {
 
     fn checkout_strip(&mut self, ui: &mut Ui, rect: Rect, draft: bool) {
         let muted = if draft {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         } else {
-            theme::alpha(theme::MUTED_FOREGROUND, 0.7)
+            theme::alpha(theme::muted_foreground(), 0.7)
         };
         let label = if draft {
             "Current checkout"
@@ -568,7 +575,7 @@ impl App {
             .current_thread()
             .and_then(|t| t.branch)
             .unwrap_or_else(|| "main".into());
-        let branch_color = theme::alpha(theme::MUTED_FOREGROUND, 0.7);
+        let branch_color = theme::alpha(theme::muted_foreground(), 0.7);
         let branch_width = widgets::text_width(ui, &branch, label_font.clone());
         let right = rect.right() - 8.0;
         let start = right - 7.0 - 12.0 - 2.0 - branch_width - 2.0 - 12.0 - 7.0;

@@ -128,7 +128,7 @@ impl App {
     /// shared by the app and settings sidebars.
     pub(crate) fn sidebar_chrome(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, 0.0, theme::SIDEBAR);
+        painter.rect_filled(rect, 0.0, theme::sidebar());
         // Right border: 1px of white 7.8% over the app background.
         painter.rect_filled(
             Rect::from_min_size(
@@ -136,7 +136,7 @@ impl App {
                 Vec2::new(1.0, rect.height()),
             ),
             0.0,
-            Color32::from_rgb(29, 29, 29),
+            theme::sidebar_border(),
         );
         let left = rect.left();
 
@@ -147,19 +147,19 @@ impl App {
             "toggle-sidebar",
             "panel-left-close",
             16.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Toggle Sidebar",
         );
         let mark = Rect::from_min_size(Pos2::new(left + 52.0, 21.0), Vec2::new(16.5, 9.9));
         egui::Image::new(theme::icon("t3-wordmark"))
-            .tint(theme::SIDEBAR_FOREGROUND)
+            .tint(theme::sidebar_foreground())
             .paint_at(ui, mark);
         // "Code" is cap-trimmed: its baseline sits on the wordmark's bottom edge.
         let code = widgets::galley(
             ui,
             "Code",
             font(14.0, Weight::Medium),
-            theme::SIDEBAR_MUTED,
+            theme::sidebar_muted(),
             20.0,
             f32::INFINITY,
         );
@@ -169,7 +169,7 @@ impl App {
         painter.galley(
             Pos2::new(left + 72.5, mark.bottom() - baseline),
             code,
-            theme::SIDEBAR_MUTED,
+            theme::sidebar_muted(),
         );
     }
 
@@ -186,14 +186,17 @@ impl App {
             ui.painter().rect_filled(
                 back,
                 CornerRadius::same(8),
-                theme::alpha(theme::SIDEBAR_FOREGROUND, 0.08),
+                theme::alpha(theme::sidebar_foreground(), 0.08),
             );
         }
         // Back rests like an inactive item and lights up on hover.
         let (back_icon, back_text) = if response.hovered() {
-            (theme::SIDEBAR_FOREGROUND, theme::SIDEBAR_FOREGROUND)
+            (theme::sidebar_foreground(), theme::sidebar_foreground())
         } else {
-            (theme::SIDEBAR_ICON, theme::alpha(theme::SIDEBAR_MUTED, 0.8))
+            (
+                theme::sidebar_icon(),
+                theme::alpha(theme::sidebar_muted(), 0.8),
+            )
         };
         theme::paint_icon(
             ui,
@@ -227,7 +230,7 @@ impl App {
             "search",
             Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
             16.0,
-            theme::SIDEBAR_ICON,
+            theme::sidebar_icon(),
         );
         let input_rect = Rect::from_min_size(Pos2::new(left + 40.0, 65.5), Vec2::new(111.0, 21.0));
         let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
@@ -236,11 +239,11 @@ impl App {
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
                 .font(font(14.0, Weight::Medium))
-                .text_color(theme::SIDEBAR_FOREGROUND)
+                .text_color(theme::sidebar_foreground())
                 .hint_text(
                     egui::RichText::new("Search")
                         .font(font(14.0, Weight::Medium))
-                        .color(theme::SIDEBAR_MUTED),
+                        .color(theme::sidebar_muted()),
                 )
                 .desired_width(111.0),
         );
@@ -251,7 +254,7 @@ impl App {
             painter.rect_filled(
                 scope_button,
                 widgets::radius(theme::CONTROL_RADIUS as f32),
-                theme::ACCENT,
+                theme::accent(),
             );
         }
         let scoped = self.scoped_project().cloned();
@@ -268,7 +271,7 @@ impl App {
                     painter.rect_filled(
                         scope_button,
                         widgets::radius(theme::CONTROL_RADIUS as f32),
-                        theme::ACCENT,
+                        theme::accent(),
                     );
                 }
                 project_icon::paint(
@@ -285,9 +288,9 @@ impl App {
                 "folder",
                 16.0,
                 if scope_open {
-                    theme::FOREGROUND
+                    theme::foreground()
                 } else {
-                    theme::SIDEBAR_ICON
+                    theme::sidebar_icon()
                 },
                 &tooltip,
             ),
@@ -307,7 +310,7 @@ impl App {
                 ("sidebar-action", i),
                 icon,
                 16.0,
-                theme::SIDEBAR_ICON,
+                theme::sidebar_icon(),
                 label,
             )
             .clicked()
@@ -354,7 +357,7 @@ impl App {
                 ("sidebar-footer", i),
                 icon,
                 16.0,
-                theme::SIDEBAR_ICON,
+                theme::sidebar_icon(),
                 label,
             )
             .clicked()
@@ -491,7 +494,7 @@ impl App {
     }
 
     fn empty_list(&mut self, ui: &mut Ui, area: Rect) {
-        let muted = theme::alpha(theme::MUTED_FOREGROUND, 0.6);
+        let muted = theme::alpha(theme::muted_foreground(), 0.6);
         let center = area.center().x;
         let small = font(12.0, Weight::Regular);
         if self.state.projects.is_empty() {
@@ -515,11 +518,11 @@ impl App {
                 button,
                 widgets::radius(6.0),
                 if response.hovered() {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
                     Color32::TRANSPARENT
                 },
-                Stroke::new(1.0, theme::BORDER),
+                Stroke::new(1.0, theme::border()),
                 egui::StrokeKind::Inside,
             );
             theme::paint_icon(
@@ -527,14 +530,14 @@ impl App {
                 "plus",
                 Rect::from_min_size(button.min + Vec2::new(8.0, 6.0), Vec2::splat(12.0)),
                 12.0,
-                theme::SIDEBAR_MUTED,
+                theme::sidebar_muted(),
             );
             widgets::text_in(
                 ui,
                 Rect::from_min_max(button.min + Vec2::new(24.0, 0.0), button.max),
                 "Add project",
                 label_font,
-                theme::SIDEBAR_MUTED,
+                theme::sidebar_muted(),
             );
             if response.clicked() {
                 self.toggle_palette(crate::ui::palette::View::AddProject);
@@ -574,7 +577,10 @@ impl App {
         let (color, line) = if snoozed {
             (theme::BLUE_400, theme::alpha(theme::BLUE_500, 0.2))
         } else {
-            (theme::alpha(theme::SIDEBAR_MUTED, 0.6), theme::white(0.047))
+            (
+                theme::alpha(theme::sidebar_muted(), 0.6),
+                theme::overlay(0.047),
+            )
         };
         let x = rect.left() + 8.0;
         let width = widgets::text_in(
@@ -627,9 +633,9 @@ impl App {
         let hovered = response.contains_pointer();
         let painter = ui.painter().clone();
         if active {
-            painter.rect_filled(rect, widgets::radius(8.0), theme::ROW_ACTIVE);
+            painter.rect_filled(rect, widgets::radius(8.0), theme::row_active());
         } else if hovered {
-            painter.rect_filled(rect, widgets::radius(8.0), theme::ACCENT);
+            painter.rect_filled(rect, widgets::radius(8.0), theme::accent());
         }
         let x = rect.left() + 10.0;
         let right = rect.right() - 10.0;
@@ -648,13 +654,13 @@ impl App {
             Status::Approval => Some((
                 "Approval",
                 "shield-question-mark",
-                theme::WARNING_FOREGROUND,
+                theme::warning_foreground(),
             )),
             Status::Input => Some(("Input", "message-circle-question-mark", theme::INDIGO_300)),
             Status::Working => Some(("Working", "circle-dashed", theme::SKY_400)),
             Status::Failed => Some(("Failed", "circle-alert", theme::RED_300)),
             Status::Ready if woke.is_some() => {
-                Some(("Woke", "alarm-clock", theme::WARNING_FOREGROUND))
+                Some(("Woke", "alarm-clock", theme::warning_foreground()))
             }
             Status::Ready if unread => Some(("Done", "circle-check", theme::EMERALD_300)),
             Status::Ready => None,
@@ -674,9 +680,9 @@ impl App {
             let settle_response =
                 ui.interact(settle, ui.id().with(("settle", &thread.id)), Sense::click());
             let color = if settle_response.hovered() {
-                theme::FOREGROUND
+                theme::foreground()
             } else {
-                theme::SIDEBAR_MUTED
+                theme::sidebar_muted()
             };
             theme::paint_icon(
                 ui,
@@ -710,9 +716,9 @@ impl App {
                     clock,
                     12.0,
                     if clock_response.hovered() || snooze_open {
-                        theme::FOREGROUND
+                        theme::foreground()
                     } else {
-                        theme::SIDEBAR_MUTED
+                        theme::sidebar_muted()
                     },
                 );
                 if clock_response.clicked() {
@@ -776,7 +782,7 @@ impl App {
                 Rect::from_min_max(Pos2::new(right - width, top), row1.max),
                 &time,
                 font(12.0, Weight::Regular),
-                theme::SECONDARY_LABEL,
+                theme::secondary_label(),
             );
             status_width = width;
         }
@@ -797,19 +803,19 @@ impl App {
                         Weight::Medium
                     },
                 ),
-                theme::SECONDARY_LABEL,
+                theme::secondary_label(),
             );
         }
 
         // Row 2: title.
         let title_color = if recede {
-            theme::SECONDARY_LABEL
+            theme::secondary_label()
         } else if unread || woke.is_some() || status == Status::Input {
-            theme::SIDEBAR_FOREGROUND
+            theme::sidebar_foreground()
         } else if status == Status::Failed {
-            theme::alpha(theme::SIDEBAR_FOREGROUND, 0.95)
+            theme::alpha(theme::sidebar_foreground(), 0.95)
         } else {
-            theme::alpha(theme::SIDEBAR_FOREGROUND, 0.9)
+            theme::alpha(theme::sidebar_foreground(), 0.9)
         };
         let title_rect = Rect::from_min_max(Pos2::new(x, top + 24.0), Pos2::new(right, top + 44.0));
         if !self.rename_editor(ui, &thread.id, title_rect) {
@@ -839,7 +845,7 @@ impl App {
                 Rect::from_min_max(row3.min, Pos2::new(branch_right, row3.bottom())),
                 branch,
                 font(12.0, Weight::Regular),
-                theme::alpha(theme::SIDEBAR_MUTED, 0.4),
+                theme::alpha(theme::sidebar_muted(), 0.4),
             );
         }
         if self
@@ -852,7 +858,7 @@ impl App {
                 "openai",
                 Rect::from_min_size(Pos2::new(right - 14.0, row3.top() + 1.0), Vec2::splat(14.0)),
                 14.0,
-                theme::alpha(theme::SECONDARY_LABEL, 0.6),
+                theme::alpha(theme::secondary_label(), 0.6),
             );
         }
 
@@ -923,10 +929,10 @@ impl App {
         let hovered = response.contains_pointer();
         if active {
             ui.painter()
-                .rect_filled(rect, widgets::radius(8.0), theme::ROW_ACTIVE);
+                .rect_filled(rect, widgets::radius(8.0), theme::row_active());
         } else if hovered {
             ui.painter()
-                .rect_filled(rect, widgets::radius(8.0), theme::ACCENT);
+                .rect_filled(rect, widgets::radius(8.0), theme::accent());
         }
         let x = rect.left() + 10.0;
         if let Some(project) = self.state.project(&thread.project_id).cloned() {
@@ -954,13 +960,13 @@ impl App {
                 (
                     "Woke".to_owned(),
                     font(12.0, Weight::Medium),
-                    theme::WARNING_FOREGROUND,
+                    theme::warning_foreground(),
                 )
             } else {
                 (
                     widgets::relative_time(settled_timestamp(thread).unwrap_or_default(), self.now),
                     small.clone(),
-                    theme::alpha(theme::SECONDARY_LABEL, 0.7),
+                    theme::alpha(theme::secondary_label(), 0.7),
                 )
             };
         let woke_badge = woke.is_some() && !snoozed;
@@ -979,11 +985,11 @@ impl App {
         // input and unread emphasis.
         let emphasized = snoozed && !recede && (woke.is_some() || status(thread) == Status::Input);
         let title_color = if hovered || active || emphasized {
-            theme::FOREGROUND
+            theme::foreground()
         } else if snoozed && !recede && self.is_unread(thread) {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         } else {
-            theme::alpha(theme::SECONDARY_LABEL, 0.7)
+            theme::alpha(theme::secondary_label(), 0.7)
         };
         widgets::text_in(
             ui,
@@ -1058,9 +1064,9 @@ impl App {
                 button.translate(Vec2::new(0.0, -0.5)),
                 size,
                 if button_response.hovered() {
-                    theme::FOREGROUND
+                    theme::foreground()
                 } else {
-                    theme::MUTED_FOREGROUND
+                    theme::muted_foreground()
                 },
             );
             if button_response.clicked() {

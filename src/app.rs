@@ -586,8 +586,8 @@ impl App {
         ui.painter().rect(
             toast,
             egui::CornerRadius::same(10),
-            theme::CARD,
-            egui::Stroke::new(1.0, theme::BORDER),
+            theme::card(),
+            egui::Stroke::new(1.0, theme::border()),
             egui::StrokeKind::Inside,
         );
         crate::ui::widgets::text_in(
@@ -598,7 +598,7 @@ impl App {
             ),
             &message,
             font,
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         let close = Rect::from_min_size(
             Pos2::new(toast.right() - 30.0, toast.top() + 8.0),
@@ -610,7 +610,7 @@ impl App {
             "toast-close",
             "x",
             14.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Dismiss",
         )
         .clicked()
@@ -624,6 +624,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.now = chrono::Utc::now();
         self.poll_events();
+        self.sync_theme(ui.ctx());
         let rect = ui.max_rect();
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
@@ -678,6 +679,26 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Follows the environment's theme (`useDefaultThemeAdoption`): the
+    /// published theme named by the `defaultTheme` server setting replaces
+    /// the stock dark palette; built-in theme ids, which this client does not
+    /// render, keep the stock palette.
+    fn sync_theme(&self, ctx: &egui::Context) {
+        let id = self.state.config["settings"]["defaultTheme"]
+            .as_str()
+            .unwrap_or_default();
+        let palette = (!id.is_empty())
+            .then(|| self.state.config["environmentThemes"].as_array())
+            .flatten()
+            .and_then(|themes| themes.iter().find(|t| t["id"] == id))
+            .and_then(crate::theme::Palette::from_theme)
+            .unwrap_or(crate::theme::DARK);
+        if crate::theme::set_palette(palette) {
+            crate::theme::apply_palette(ctx);
+            ctx.request_repaint();
+        }
+    }
+
     /// Opens the first thread whose title starts with `prefix` (dev snapshots).
     pub fn open_thread_titled(&mut self, prefix: &str) -> bool {
         let id = self

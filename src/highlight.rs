@@ -1,6 +1,7 @@
-//! Code highlighting with the upstream `pierre-dark` Shiki theme, applied to
-//! syntect's TextMate-derived grammars. Token boundaries can differ slightly
-//! from Shiki's grammars.
+//! Code highlighting with the upstream `pierre-dark` and `pierre-light`
+//! Shiki themes (light under a light environment theme), applied to syntect's
+//! TextMate-derived grammars. Token boundaries can differ slightly from
+//! Shiki's grammars.
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -13,8 +14,10 @@ use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 
 pub struct Highlighter {
     syntaxes: SyntaxSet,
-    theme: Theme,
-    cache: HashMap<(String, String), Vec<(String, Color32)>>,
+    dark: Theme,
+    light: Theme,
+    /// Spans by (light theme, language, code).
+    cache: HashMap<(bool, String, String), Vec<(String, Color32)>>,
 }
 
 fn color(hex: &str) -> Option<Color> {
@@ -28,9 +31,9 @@ fn color(hex: &str) -> Option<Color> {
     })
 }
 
-fn pierre_dark() -> Theme {
-    let json: serde_json::Value =
-        serde_json::from_str(include_str!("../assets/pierre-dark.json")).expect("theme json");
+/// A pierre theme reduced to its foreground and token colors.
+fn pierre(source: &str) -> Theme {
+    let json: serde_json::Value = serde_json::from_str(source).expect("theme json");
     let mut scopes = Vec::new();
     for token in json["tokenColors"].as_array().into_iter().flatten() {
         let selectors = match &token["scope"] {
@@ -66,7 +69,7 @@ fn pierre_dark() -> Theme {
         });
     }
     Theme {
-        name: Some("pierre-dark".into()),
+        name: json["name"].as_str().map(str::to_owned),
         author: None,
         settings: ThemeSettings {
             foreground: json["foreground"].as_str().and_then(color),
@@ -80,7 +83,8 @@ impl Default for Highlighter {
     fn default() -> Self {
         Self {
             syntaxes: SyntaxSet::load_defaults_newlines(),
-            theme: pierre_dark(),
+            dark: pierre(include_str!("../assets/pierre-dark.json")),
+            light: pierre(include_str!("../assets/pierre-light.json")),
             cache: HashMap::new(),
         }
     }
@@ -89,16 +93,22 @@ impl Default for Highlighter {
 impl Highlighter {
     /// Colored spans for `code`; plain foreground when the language is unknown.
     pub fn spans(&mut self, code: &str, language: &str) -> &[(String, Color32)] {
-        let key = (language.to_owned(), code.to_owned());
+        let light = !crate::theme::palette().dark;
+        let key = (light, language.to_owned(), code.to_owned());
         if !self.cache.contains_key(&key) {
-            let spans = self.compute(code, language);
+            let spans = self.compute(code, language, light);
             self.cache.insert(key.clone(), spans);
         }
         &self.cache[&key]
     }
 
-    fn compute(&self, code: &str, language: &str) -> Vec<(String, Color32)> {
-        let foreground = Color32::from_rgb(250, 250, 250);
+    fn compute(&self, code: &str, language: &str, light: bool) -> Vec<(String, Color32)> {
+        let (theme, scheme) = if light {
+            (&self.light, &LIGHT)
+        } else {
+            (&self.dark, &DARK)
+        };
+        let foreground = scheme.foreground;
         let syntax = self.syntaxes.find_syntax_by_token(language).or_else(|| {
             let alias = match language {
                 "ts" | "tsx" | "typescript" => "js",
@@ -111,7 +121,7 @@ impl Highlighter {
         let Some(syntax) = syntax else {
             return vec![(code.to_owned(), foreground)];
         };
-        let highlighter = SyntectHighlighter::new(&self.theme);
+        let highlighter = SyntectHighlighter::new(theme);
         let mut parse = ParseState::new(syntax);
         let mut state = HighlightState::new(&highlighter, ScopeStack::new());
         let mut spans: Vec<(String, Color32)> = Vec::new();
@@ -131,22 +141,47 @@ impl Highlighter {
         }
         let rust = language == "rust" || language == "rs";
         let spans = if rust {
-            refine_rust_keywords(spans)
+            refine_rust_keywords(spans, scheme)
         } else {
             spans
         };
-        refine_identifiers(spans, rust)
+        refine_identifiers(spans, rust, scheme)
     }
 }
 
-const NAMESPACE: Color32 = Color32::from_rgb(0xff, 0xab, 0x16); // entity.name.namespace
-const TYPE: Color32 = Color32::from_rgb(0xd5, 0x68, 0xea); // entity.name.type
-const VARIABLE: Color32 = Color32::from_rgb(0xff, 0xa3, 0x59); // variable
-const FUNCTION: Color32 = Color32::from_rgb(0x9d, 0x6a, 0xfb); // entity.name.function
+/// The theme colors the refinements below read and write.
+struct Scheme {
+    foreground: Color32,
+    namespace: Color32,  // entity.name.namespace
+    type_: Color32,      // entity.name.type, storage.type
+    variable: Color32,   // variable
+    function: Color32,   // entity.name.function
+    keyword: Color32,    // keyword, storage
+    operator: Color32,   // keyword.operator, punctuation
+    assignment: Color32, // keyword.operator.assignment
+}
 
-const KEYWORD: Color32 = Color32::from_rgb(0xff, 0x67, 0x8d); // keyword, storage
-const OPERATOR: Color32 = Color32::from_rgb(0x63, 0x63, 0x63); // keyword.operator, punctuation
-const ASSIGNMENT: Color32 = Color32::from_rgb(0x08, 0xc0, 0xef); // keyword.operator.assignment
+const DARK: Scheme = Scheme {
+    foreground: Color32::from_rgb(0xfa, 0xfa, 0xfa),
+    namespace: Color32::from_rgb(0xff, 0xab, 0x16),
+    type_: Color32::from_rgb(0xd5, 0x68, 0xea),
+    variable: Color32::from_rgb(0xff, 0xa3, 0x59),
+    function: Color32::from_rgb(0x9d, 0x6a, 0xfb),
+    keyword: Color32::from_rgb(0xff, 0x67, 0x8d),
+    operator: Color32::from_rgb(0x63, 0x63, 0x63),
+    assignment: Color32::from_rgb(0x08, 0xc0, 0xef),
+};
+
+const LIGHT: Scheme = Scheme {
+    foreground: Color32::from_rgb(0x0a, 0x0a, 0x0a),
+    namespace: Color32::from_rgb(0xd5, 0x90, 0x1c),
+    type_: Color32::from_rgb(0xa6, 0x31, 0xbe),
+    variable: Color32::from_rgb(0xd4, 0x76, 0x28),
+    function: Color32::from_rgb(0x69, 0x3a, 0xcf),
+    keyword: Color32::from_rgb(0xd3, 0x2a, 0x61),
+    operator: Color32::from_rgb(0x63, 0x63, 0x63),
+    assignment: Color32::from_rgb(0x08, 0xc0, 0xef),
+};
 
 /// Rust words Shiki scopes `storage.type` (the theme's later, purple rule)
 /// or `entity.name.type.numeric`, where syntect's grammar says keyword.
@@ -165,7 +200,7 @@ const RUST_OPERATORS: [&str; 21] = [
 
 /// Brings syntect's Rust scopes closer to Shiki's: the words above turn
 /// purple and plain operators cyan.
-fn refine_rust_keywords(spans: Vec<(String, Color32)>) -> Vec<(String, Color32)> {
+fn refine_rust_keywords(spans: Vec<(String, Color32)>, scheme: &Scheme) -> Vec<(String, Color32)> {
     let mut out: Vec<(String, Color32)> = Vec::new();
     let mut push = |text: &str, color: Color32| match out.last_mut() {
         Some((last, last_color)) if *last_color == color => last.push_str(text),
@@ -173,7 +208,7 @@ fn refine_rust_keywords(spans: Vec<(String, Color32)>) -> Vec<(String, Color32)>
     };
     let operator = |c: char| "=!<>+-*/%^&|".contains(c);
     for (text, color) in &spans {
-        if *color != KEYWORD && *color != OPERATOR {
+        if *color != scheme.keyword && *color != scheme.operator {
             push(text, *color);
             continue;
         }
@@ -188,10 +223,10 @@ fn refine_rust_keywords(spans: Vec<(String, Color32)>) -> Vec<(String, Color32)>
                 first.len_utf8()
             };
             let token = &rest[..end];
-            let refined = if *color == KEYWORD && RUST_TYPE_WORDS.contains(&token) {
-                TYPE
-            } else if *color == OPERATOR && RUST_OPERATORS.contains(&token) {
-                ASSIGNMENT
+            let refined = if *color == scheme.keyword && RUST_TYPE_WORDS.contains(&token) {
+                scheme.type_
+            } else if *color == scheme.operator && RUST_OPERATORS.contains(&token) {
+                scheme.assignment
             } else {
                 *color
             };
@@ -206,8 +241,12 @@ fn refine_rust_keywords(spans: Vec<(String, Color32)>) -> Vec<(String, Color32)>
 /// unscoped. Colors identifiers the way those grammars do: `x::` as a
 /// namespace (Rust), `Capitalized` as a type, `call(` as a function, and
 /// anything else as a variable.
-fn refine_identifiers(spans: Vec<(String, Color32)>, rust: bool) -> Vec<(String, Color32)> {
-    let foreground = Color32::from_rgb(250, 250, 250);
+fn refine_identifiers(
+    spans: Vec<(String, Color32)>,
+    rust: bool,
+    scheme: &Scheme,
+) -> Vec<(String, Color32)> {
+    let foreground = scheme.foreground;
     let full: String = spans.iter().map(|(t, _)| t.as_str()).collect();
     let mut out: Vec<(String, Color32)> = Vec::new();
     let mut push = |text: &str, color: Color32| match out.last_mut() {
@@ -216,7 +255,7 @@ fn refine_identifiers(spans: Vec<(String, Color32)>, rust: bool) -> Vec<(String,
     };
     let mut offset = 0;
     for (text, color) in &spans {
-        let refinable = *color == foreground || (rust && *color == TYPE);
+        let refinable = *color == foreground || (rust && *color == scheme.type_);
         if !refinable {
             push(text, *color);
             offset += text.len();
@@ -242,13 +281,13 @@ fn refine_identifiers(spans: Vec<(String, Color32)>, rust: bool) -> Vec<(String,
             let word = &rest[..end];
             let after = full[offset + local + end..].trim_start_matches([' ', '\t']);
             let refined = if rust && after.starts_with("::") {
-                NAMESPACE
-            } else if *color == TYPE || word.starts_with(|c: char| c.is_uppercase()) {
-                TYPE
+                scheme.namespace
+            } else if *color == scheme.type_ || word.starts_with(|c: char| c.is_uppercase()) {
+                scheme.type_
             } else if after.starts_with('(') || (rust && after.starts_with('!')) {
-                FUNCTION
+                scheme.function
             } else {
-                VARIABLE
+                scheme.variable
             };
             push(word, refined);
             rest = &rest[end..];
@@ -270,9 +309,9 @@ mod tests {
             .spans("eframe::run(options, Box::new(App))", "rust")
             .to_vec();
         let color = |word: &str| spans.iter().find(|(t, _)| t == word).map(|(_, c)| *c);
-        assert_eq!(color("eframe"), Some(NAMESPACE));
-        assert_eq!(color("Box"), Some(NAMESPACE));
-        assert_eq!(color("options"), Some(VARIABLE));
+        assert_eq!(color("eframe"), Some(DARK.namespace));
+        assert_eq!(color("Box"), Some(DARK.namespace));
+        assert_eq!(color("options"), Some(DARK.variable));
     }
 
     #[test]
@@ -287,11 +326,11 @@ mod tests {
                 .find(|(t, _)| t.trim() == word)
                 .map(|(_, c)| *c)
         };
-        assert_eq!(color("fn"), Some(KEYWORD));
-        assert_eq!(color("let"), Some(TYPE));
-        assert_eq!(color("u8"), Some(TYPE));
-        assert_eq!(color("="), Some(ASSIGNMENT));
-        assert_eq!(color("+"), Some(ASSIGNMENT));
-        assert_eq!(color(";"), Some(OPERATOR));
+        assert_eq!(color("fn"), Some(DARK.keyword));
+        assert_eq!(color("let"), Some(DARK.type_));
+        assert_eq!(color("u8"), Some(DARK.type_));
+        assert_eq!(color("="), Some(DARK.assignment));
+        assert_eq!(color("+"), Some(DARK.assignment));
+        assert_eq!(color(";"), Some(DARK.operator));
     }
 }

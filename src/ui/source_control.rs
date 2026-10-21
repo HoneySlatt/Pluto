@@ -16,9 +16,24 @@ use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
 
 const CARD_WIDTH: f32 = 848.0;
-const CARD_FILL: Color32 = Color32::from_rgb(13, 13, 13);
-const CARD_BORDER: Color32 = Color32::from_rgb(22, 22, 22);
-const ROW_DIVIDER: Color32 = Color32::from_rgb(21, 21, 21);
+/// `bg-card/40` over the page.
+fn card_fill() -> Color32 {
+    theme::stock_or(Color32::from_rgb(13, 13, 13), |p| {
+        theme::mix(p.background, p.card, 0.4)
+    })
+}
+/// `border-border/60`.
+fn card_border() -> Color32 {
+    theme::stock_or(Color32::from_rgb(22, 22, 22), |p| {
+        theme::mix(p.background, p.border, 0.6)
+    })
+}
+/// `border-border/50` between rows.
+fn row_divider() -> Color32 {
+    theme::stock_or(Color32::from_rgb(21, 21, 21), |p| {
+        theme::mix(p.background, p.border, 0.5)
+    })
+}
 const SUCCESS: Color32 = Color32::from_rgb(0, 188, 125); // --success
 /// The summary column: the row minus padding, the switch and its gap.
 const SUMMARY_WIDTH: f32 = CARD_WIDTH - 2.0 - 32.0 - 30.0 - 12.0;
@@ -64,11 +79,11 @@ fn icon_name(item: &Value) -> Option<&'static str> {
 /// `itemStatusDot`.
 fn status_dot(item: &Value) -> Color32 {
     if not_ready(item) {
-        theme::alpha(theme::MUTED_FOREGROUND, 0.35)
+        theme::alpha(theme::muted_foreground(), 0.35)
     } else if item["status"] != "available"
         || (is_provider(item) && item["auth"]["status"] != "authenticated")
     {
-        theme::WARNING
+        theme::warning()
     } else {
         SUCCESS
     }
@@ -130,7 +145,7 @@ fn summary_font() -> eframe::egui::FontId {
 }
 
 fn summary_color() -> Color32 {
-    theme::alpha(theme::MUTED_FOREGROUND, 0.8)
+    theme::alpha(theme::muted_foreground(), 0.8)
 }
 
 /// Rows with a details panel show a chevron before the switch.
@@ -146,14 +161,14 @@ fn warning_badge(ui: &Ui, pos: Pos2, text: &str, fade: f32) -> f32 {
     ui.painter().rect_filled(
         rect,
         CornerRadius::same(4),
-        theme::alpha(theme::WARNING, 0.16 * fade),
+        theme::alpha(theme::warning(), 0.16 * fade),
     );
     widgets::text(
         ui,
         Pos2::new(rect.left() + 4.0, rect.top() + 3.0),
         text,
         badge_font,
-        theme::alpha(theme::WARNING_FOREGROUND, fade),
+        theme::alpha(theme::warning_foreground(), fade),
         10.0,
     );
     width
@@ -198,7 +213,7 @@ impl App {
                 Pos2::new(card.left() + 16.0, card.top() + 24.0),
                 &text,
                 font(14.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 20.0,
             );
             return card.bottom() + 32.0;
@@ -236,7 +251,7 @@ impl App {
             Rect::from_min_size(Pos2::new(left + 16.0, top), Vec2::new(CARD_WIDTH, 28.0)),
             title,
             font(14.0, Weight::Regular),
-            theme::alpha(theme::FOREGROUND, 0.7),
+            theme::alpha(theme::foreground(), 0.7),
         );
         if scan {
             let button = Rect::from_min_size(
@@ -249,7 +264,7 @@ impl App {
                 "rescan-source-control",
                 "refresh-cw",
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "Rescan Git and hosting integrations",
             )
             .clicked()
@@ -304,14 +319,14 @@ impl App {
                 sw: if index + 1 == count { 13 } else { 0 },
                 se: if index + 1 == count { 13 } else { 0 },
             };
-            painter.rect_filled(rect, radius, theme::alpha(theme::MUTED, 0.2));
+            painter.rect_filled(rect, radius, theme::alpha(theme::muted(), 0.2));
         }
         let mut top = rect.top();
         if index > 0 {
             painter.rect_filled(
                 Rect::from_min_size(rect.min, Vec2::new(rect.width(), 1.0)),
                 0.0,
-                ROW_DIVIDER,
+                row_divider(),
             );
             top += 1.0;
         }
@@ -321,7 +336,7 @@ impl App {
         let line = top + 12.0;
         if let Some(icon) = icon_name(item) {
             let tint = if kind == "github" {
-                theme::alpha(theme::FOREGROUND, 0.8 * fade)
+                theme::alpha(theme::foreground(), 0.8 * fade)
             } else {
                 theme::alpha(Color32::WHITE, fade)
             };
@@ -335,7 +350,7 @@ impl App {
         }
         // Status dot with a 2px background ring, at the mark's top-left.
         let dot = Pos2::new(left + 2.0, line + 2.0);
-        painter.circle_filled(dot, 6.0, theme::alpha(theme::BACKGROUND, fade));
+        painter.circle_filled(dot, 6.0, theme::alpha(theme::background(), fade));
         painter.circle_filled(dot, 4.0, theme::alpha(status_dot(item), fade));
         let label = item["label"].as_str().unwrap_or_default();
         let label_font = font(14.0, Weight::Medium);
@@ -344,7 +359,7 @@ impl App {
             Pos2::new(left + 28.0, line),
             label,
             label_font.clone(),
-            theme::alpha(theme::FOREGROUND, fade),
+            theme::alpha(theme::foreground(), fade),
             20.0,
         );
         let mut x = left + 28.0 + widgets::text_width(ui, label, label_font) + 8.0;
@@ -354,7 +369,7 @@ impl App {
                 Pos2::new(x, line + 2.0),
                 version,
                 theme::mono(12.0),
-                theme::alpha(theme::MUTED_FOREGROUND, fade),
+                theme::alpha(theme::muted_foreground(), fade),
                 16.0,
             );
             x += widgets::text_width(ui, version, theme::mono(12.0)) + 8.0;
@@ -397,7 +412,7 @@ impl App {
                 ("source-control-details", &kind),
                 "chevron-down",
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "",
             )
             .clicked()
@@ -418,9 +433,9 @@ impl App {
             );
             // Disabled: 64%.
             let track_color = if enabled {
-                theme::PRIMARY
+                theme::primary()
             } else {
-                theme::white(0.08)
+                theme::overlay(0.08)
             };
             painter.rect_filled(
                 track,
@@ -435,7 +450,7 @@ impl App {
             painter.rect_filled(
                 Rect::from_min_size(Pos2::new(thumb_x, track.top() + 2.0), Vec2::splat(14.0)),
                 CornerRadius::same(7),
-                theme::BACKGROUND,
+                theme::background(),
             );
         }
     }
@@ -482,9 +497,9 @@ impl App {
                 "Click to reveal account"
             });
         let color = if response.hovered() {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         if revealed {
             widgets::text(ui, Pos2::new(x, pos.y + 1.0), &shown, mono, color, 16.5);
@@ -523,8 +538,8 @@ fn paint_card(ui: &Ui, card: Rect) {
     ui.painter().rect(
         card,
         CornerRadius::same(14),
-        CARD_FILL,
-        Stroke::new(1.0, CARD_BORDER),
+        card_fill(),
+        Stroke::new(1.0, card_border()),
         StrokeKind::Inside,
     );
 }

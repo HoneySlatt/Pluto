@@ -182,9 +182,24 @@ const AUTO_WIDTH: f32 = 0.0;
 const ROW_PAD_X: f32 = 16.0;
 const ROW_PAD_Y: f32 = 12.0;
 const DESCRIPTION_MAX: f32 = 576.0; // max-w-xl
-const CARD_FILL: Color32 = Color32::from_rgb(13, 13, 13);
-const CARD_BORDER: Color32 = Color32::from_rgb(22, 22, 22);
-const ROW_DIVIDER: Color32 = Color32::from_rgb(21, 21, 21);
+/// `bg-card/40` over the page.
+fn card_fill() -> Color32 {
+    theme::stock_or(Color32::from_rgb(13, 13, 13), |p| {
+        theme::mix(p.background, p.card, 0.4)
+    })
+}
+/// `border-border/60`.
+fn card_border() -> Color32 {
+    theme::stock_or(Color32::from_rgb(22, 22, 22), |p| {
+        theme::mix(p.background, p.border, 0.6)
+    })
+}
+/// `border-border/50` between rows.
+fn row_divider() -> Color32 {
+    theme::stock_or(Color32::from_rgb(21, 21, 21), |p| {
+        theme::mix(p.background, p.border, 0.5)
+    })
+}
 
 /// Where a setting lives.
 #[derive(Clone, Copy, PartialEq)]
@@ -1182,7 +1197,7 @@ impl App {
                     list,
                     CornerRadius::same(10),
                     Color32::TRANSPARENT,
-                    Stroke::new(1.0, theme::white(0.036)),
+                    Stroke::new(1.0, theme::overlay(0.036)),
                     StrokeKind::Inside,
                 );
                 let name_font = font(14.0, Weight::Regular);
@@ -1198,7 +1213,7 @@ impl App {
                     Pos2::new(list.left() + 13.0, list.top() + 11.0),
                     "Default",
                     name_font.clone(),
-                    fade(theme::FOREGROUND),
+                    fade(theme::foreground()),
                     20.0,
                 );
                 let badge_x =
@@ -1212,7 +1227,7 @@ impl App {
                     ),
                 );
                 ui.painter()
-                    .rect_filled(badge, CornerRadius::same(6), fade(theme::PRIMARY));
+                    .rect_filled(badge, CornerRadius::same(6), fade(theme::primary()));
                 widgets::text_in(
                     ui,
                     Rect::from_min_max(Pos2::new(badge.left() + 4.0, badge.top()), badge.max),
@@ -1228,7 +1243,7 @@ impl App {
                         Vec2::splat(24.0),
                     ),
                     14.0,
-                    fade(theme::MUTED_FOREGROUND),
+                    fade(theme::muted_foreground()),
                 );
             }
             "device-hosts" => {
@@ -1237,7 +1252,7 @@ impl App {
                     Pos2::new(left, top + 12.0 - 12.0 + 8.0),
                     "No device hosts.",
                     font(14.0, Weight::Regular),
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                     20.0,
                 );
             }
@@ -1452,7 +1467,7 @@ impl App {
             Rect::from_min_size(Pos2::new(left + 16.0, top), Vec2::new(width, 28.0)),
             "Environments",
             font(14.0, Weight::Regular),
-            theme::alpha(theme::FOREGROUND, 0.7),
+            theme::alpha(theme::foreground(), 0.7),
         );
         // Ghost muted `xs` button with a plus.
         let label_font = font(12.0, Weight::Medium);
@@ -1465,10 +1480,10 @@ impl App {
         let response = ui.interact(button, ui.id().with("add-environment"), Sense::click());
         let color = if response.hovered() {
             ui.painter()
-                .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
-            theme::FOREGROUND
+                .rect_filled(button, CornerRadius::same(8), theme::accent());
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         theme::paint_icon(
             ui,
@@ -1495,8 +1510,8 @@ impl App {
         ui.painter().rect(
             card,
             CornerRadius::same(14),
-            CARD_FILL,
-            Stroke::new(1.0, CARD_BORDER),
+            card_fill(),
+            Stroke::new(1.0, card_border()),
             StrokeKind::Inside,
         );
         // `EmptyMedia variant="icon"`: two tilted tiles behind the icon tile.
@@ -1525,15 +1540,15 @@ impl App {
                 .collect();
             ui.painter().add(egui::Shape::convex_polygon(
                 points,
-                theme::CARD,
-                Stroke::new(1.0, theme::BORDER),
+                theme::card(),
+                Stroke::new(1.0, theme::border()),
             ));
         }
         ui.painter().rect(
             media,
             CornerRadius::same(8),
-            theme::CARD,
-            Stroke::new(1.0, theme::BORDER),
+            theme::card(),
+            Stroke::new(1.0, theme::border()),
             StrokeKind::Inside,
         );
         theme::paint_icon(
@@ -1541,21 +1556,21 @@ impl App {
             "chevrons-left-right-ellipsis",
             media,
             18.0,
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         for (text, size, weight, color, y) in [
             (
                 "No saved remote environments",
                 20.0,
                 Weight::SemiBold,
-                theme::FOREGROUND,
+                theme::foreground(),
                 133.0,
             ),
             (
                 "Click \u{201c}Add environment\u{201d} to pair another environment.",
                 14.0,
                 Weight::Regular,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 165.0,
             ),
         ] {
@@ -1708,8 +1723,8 @@ impl App {
         ui.painter().rect(
             group,
             CornerRadius::same(10),
-            theme::CONTROL_SURFACE,
-            Stroke::new(1.0, theme::INPUT),
+            theme::control_surface(),
+            Stroke::new(1.0, theme::input()),
             StrokeKind::Inside,
         );
         let mut action = None;
@@ -1743,9 +1758,9 @@ impl App {
                         se: 9,
                     }
                 };
-                ui.painter().rect_filled(button, radius, theme::ACCENT);
+                ui.painter().rect_filled(button, radius, theme::accent());
             }
-            theme::paint_icon(ui, icon, button, 16.0, theme::FOREGROUND);
+            theme::paint_icon(ui, icon, button, 16.0, theme::foreground());
             if response.clicked() {
                 let next = if index == 0 { days - 1 } else { days + 1 };
                 self.settings_edits.remove(&row.id);
@@ -1766,7 +1781,7 @@ impl App {
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
                 .font(digits_font)
-                .text_color(theme::FOREGROUND)
+                .text_color(theme::foreground())
                 .horizontal_align(egui::Align::Center)
                 .desired_width(digits.width() + 4.0),
         );
@@ -1787,7 +1802,7 @@ impl App {
             Pos2::new(digits.right() + 9.0, center_y - 8.0),
             "days",
             font(12.0, Weight::Regular),
-            theme::FOREGROUND,
+            theme::foreground(),
             16.0,
         );
         action
@@ -1807,7 +1822,7 @@ impl App {
         let sidebar =
             Rect::from_min_size(screen.min, Vec2::new(theme::SIDEBAR_WIDTH, screen.height()));
         let main = Rect::from_min_max(Pos2::new(sidebar.right(), screen.top()), screen.max);
-        ui.painter().rect_filled(main, 0.0, theme::BACKGROUND);
+        ui.painter().rect_filled(main, 0.0, theme::background());
         self.settings_page_view(ui, main, page);
         self.settings_sidebar(ui, sidebar, page);
         self.archive_context_menu(ui);
@@ -1822,7 +1837,7 @@ impl App {
             "search",
             Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
             16.0,
-            theme::alpha(theme::SIDEBAR_MUTED, 0.8),
+            theme::alpha(theme::sidebar_muted(), 0.8),
         );
         let input_rect = Rect::from_min_size(Pos2::new(left + 40.0, 66.5), Vec2::new(170.0, 21.0));
         let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
@@ -1831,17 +1846,17 @@ impl App {
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
                 .font(font(14.0, Weight::Medium))
-                .text_color(theme::SIDEBAR_FOREGROUND)
+                .text_color(theme::sidebar_foreground())
                 .hint_text(
                     egui::RichText::new("Search")
                         .font(font(14.0, Weight::Medium))
-                        .color(theme::SIDEBAR_MUTED),
+                        .color(theme::sidebar_muted()),
                 )
                 .desired_width(170.0),
         );
         let kbd = Rect::from_min_size(Pos2::new(left + 219.0, 66.0), Vec2::splat(20.0));
         ui.painter()
-            .rect_filled(kbd, CornerRadius::same(4), theme::BACKGROUND);
+            .rect_filled(kbd, CornerRadius::same(4), theme::background());
         let key_width = widgets::text_width(ui, "/", font(12.0, Weight::Medium));
         widgets::text_in(
             ui,
@@ -1851,7 +1866,7 @@ impl App {
             ),
             "/",
             font(12.0, Weight::Medium),
-            theme::SIDEBAR_MUTED,
+            theme::sidebar_muted(),
         );
 
         for (index, (label, icon)) in PAGES.iter().enumerate() {
@@ -1865,16 +1880,19 @@ impl App {
                 ui.painter().rect_filled(
                     item,
                     CornerRadius::same(8),
-                    theme::alpha(theme::SIDEBAR_FOREGROUND, 0.07),
+                    theme::alpha(theme::sidebar_foreground(), 0.07),
                 );
             } else if response.hovered() {
                 ui.painter()
-                    .rect_filled(item, CornerRadius::same(8), theme::ACCENT);
+                    .rect_filled(item, CornerRadius::same(8), theme::accent());
             }
             let (icon_color, text_color) = if active || response.hovered() {
-                (theme::SIDEBAR_FOREGROUND, theme::SIDEBAR_FOREGROUND)
+                (theme::sidebar_foreground(), theme::sidebar_foreground())
             } else {
-                (theme::SIDEBAR_ICON, theme::alpha(theme::SIDEBAR_MUTED, 0.8))
+                (
+                    theme::sidebar_icon(),
+                    theme::alpha(theme::sidebar_muted(), 0.8),
+                )
             };
             theme::paint_icon(
                 ui,
@@ -1917,9 +1935,9 @@ impl App {
         // Header: "Settings / Page", and Restore device defaults on General.
         let mut x = main.left() + 20.0;
         for (text, weight, color) in [
-            ("Settings", Weight::Medium, theme::MUTED_FOREGROUND),
-            ("/", Weight::Regular, theme::MUTED_FOREGROUND),
-            (label, Weight::Medium, theme::FOREGROUND),
+            ("Settings", Weight::Medium, theme::muted_foreground()),
+            ("/", Weight::Regular, theme::muted_foreground()),
+            (label, Weight::Medium, theme::foreground()),
         ] {
             let width = widgets::text_width(ui, text, font(14.0, weight));
             widgets::text_in(
@@ -1947,7 +1965,7 @@ impl App {
             let response = ui.interact(button, ui.id().with("restore-defaults"), Sense::click());
             if response.hovered() && changed {
                 ui.painter()
-                    .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
+                    .rect_filled(button, CornerRadius::same(8), theme::accent());
             }
             let alpha = if changed { 1.0 } else { 0.64 };
             theme::paint_icon(
@@ -1958,14 +1976,14 @@ impl App {
                     Vec2::new(14.0, 24.0),
                 ),
                 14.0,
-                theme::alpha(theme::MUTED_FOREGROUND, alpha),
+                theme::alpha(theme::muted_foreground(), alpha),
             );
             widgets::text_in(
                 ui,
                 Rect::from_min_max(Pos2::new(button.left() + 22.0, button.top()), button.max),
                 "Restore device defaults",
                 font(12.0, Weight::Medium),
-                theme::alpha(theme::FOREGROUND, alpha),
+                theme::alpha(theme::foreground(), alpha),
             );
             if response.clicked() && changed {
                 self.client_settings = default_client_settings();
@@ -1984,7 +2002,7 @@ impl App {
                 Pos2::new(body.center().x - width / 2.0, body.top() + 40.0),
                 note,
                 font(14.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 20.0,
             );
             return;
@@ -2043,9 +2061,9 @@ impl App {
                         let response =
                             ui.interact(header, ui.id().with("settings-legacy"), Sense::click());
                         let color = if response.hovered() {
-                            theme::FOREGROUND
+                            theme::foreground()
                         } else {
-                            theme::alpha(theme::FOREGROUND, 0.7)
+                            theme::alpha(theme::foreground(), 0.7)
                         };
                         let width = widgets::text_in(
                             ui,
@@ -2066,7 +2084,7 @@ impl App {
                                 Vec2::new(16.0, 32.0),
                             ),
                             16.0,
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                         );
                         if response.clicked() {
                             self.settings_legacy_open = !self.settings_legacy_open;
@@ -2098,7 +2116,7 @@ impl App {
                             ),
                             &section.title,
                             font(14.0, Weight::Regular),
-                            theme::alpha(theme::FOREGROUND, 0.7),
+                            theme::alpha(theme::foreground(), 0.7),
                         );
                         y += 28.0 + 10.0;
                     }
@@ -2131,8 +2149,8 @@ impl App {
                     ui.painter().rect(
                         card,
                         CornerRadius::same(14),
-                        CARD_FILL,
-                        Stroke::new(1.0, CARD_BORDER),
+                        card_fill(),
+                        Stroke::new(1.0, card_border()),
                         StrokeKind::Inside,
                     );
                     if let Some(message) = section.unavailable {
@@ -2140,7 +2158,7 @@ impl App {
                         ui.painter().rect_filled(
                             group,
                             CornerRadius::same(13),
-                            theme::alpha(theme::MUTED, 0.2),
+                            theme::alpha(theme::muted(), 0.2),
                         );
                         theme::paint_icon(
                             ui,
@@ -2150,14 +2168,14 @@ impl App {
                                 Vec2::splat(14.0),
                             ),
                             14.0,
-                            theme::WARNING,
+                            theme::warning(),
                         );
                         widgets::text(
                             ui,
                             Pos2::new(group.left() + 38.0, group.top() + 14.0),
                             message,
                             font(12.0, Weight::Regular),
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                             19.5,
                         );
                     }
@@ -2172,7 +2190,7 @@ impl App {
                             ui.painter().rect_filled(
                                 Rect::from_min_size(rect.min, Vec2::new(rect.width(), 1.0)),
                                 0.0,
-                                ROW_DIVIDER,
+                                row_divider(),
                             );
                         }
                         let action = ui
@@ -2245,7 +2263,7 @@ impl App {
                 "archive",
                 Rect::from_min_size(Pos2::new(left, inner_top), Vec2::new(14.0, 20.0)),
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             left += 22.0;
         }
@@ -2258,7 +2276,7 @@ impl App {
             ),
             &row.title,
             font(14.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         let mut action = None;
         let mut slot_x = left + title_width + 6.0;
@@ -2272,7 +2290,7 @@ impl App {
                 ),
                 env!("CARGO_PKG_VERSION"),
                 egui::FontId::monospace(10.0),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
         // Background activity explains its shared policy in an info tooltip.
@@ -2284,14 +2302,14 @@ impl App {
                 ("settings-info", &row.id),
                 "info",
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "This shared policy gates background work such as Git refreshes and provider health checks.",
             );
             slot_x += 26.0;
         }
         if row.layers {
             let slot = Rect::from_min_size(Pos2::new(slot_x, inner_top), Vec2::splat(20.0));
-            theme::paint_icon(ui, "layers", slot, 12.0, theme::MUTED_FOREGROUND);
+            theme::paint_icon(ui, "layers", slot, 12.0, theme::muted_foreground());
             slot_x += 26.0;
         }
         if row.reset {
@@ -2302,7 +2320,7 @@ impl App {
                 ("settings-reset", &row.id),
                 "undo-2",
                 12.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "Reset to default",
             )
             .clicked()
@@ -2325,7 +2343,7 @@ impl App {
                 ui,
                 &row.description,
                 font(12.0, Weight::Regular),
-                theme::alpha(theme::MUTED_FOREGROUND, 0.8),
+                theme::alpha(theme::muted_foreground(), 0.8),
                 18.0,
                 text_width,
             );
@@ -2333,7 +2351,7 @@ impl App {
             ui.painter().galley(
                 Pos2::new(base_left, y + 4.0),
                 galley,
-                theme::alpha(theme::MUTED_FOREGROUND, 0.8),
+                theme::alpha(theme::muted_foreground(), 0.8),
             );
             y += 4.0 + height;
         }
@@ -2343,7 +2361,7 @@ impl App {
                 Pos2::new(base_left, y + 6.0),
                 status,
                 font(12.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
         }
@@ -2384,7 +2402,7 @@ impl App {
                         Pos2::new(control_right - width, center_y - 8.0),
                         "Off",
                         small,
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                         16.0,
                     );
                     return None;
@@ -2413,11 +2431,11 @@ impl App {
                     trigger,
                     CornerRadius::same(10),
                     if response.hovered() || open {
-                        theme::white(0.05)
+                        theme::overlay(0.05)
                     } else {
-                        theme::CONTROL_SURFACE
+                        theme::control_surface()
                     },
-                    Stroke::new(1.0, theme::INPUT),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
                 let mut text_left = trigger.left() + 10.0;
@@ -2430,7 +2448,7 @@ impl App {
                             Vec2::new(14.0, 28.0),
                         ),
                         14.0,
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                     text_left += 20.0;
                 }
@@ -2442,7 +2460,7 @@ impl App {
                     ui,
                     label,
                     font(14.0, Weight::Regular),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                     20.0,
                     // The value slot stops `gap-1.5` before the chevron.
                     trigger.right() - 24.0 - text_left,
@@ -2450,7 +2468,7 @@ impl App {
                 ui.painter().galley(
                     Pos2::new(text_left, trigger.center().y - 10.0),
                     galley,
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
                 theme::paint_icon(
                     ui,
@@ -2460,7 +2478,7 @@ impl App {
                         Vec2::new(12.0, 28.0),
                     ),
                     12.0,
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                 );
                 if response.clicked() {
                     self.open_menu = if open { None } else { Some(menu_id.clone()) };
@@ -2565,7 +2583,7 @@ impl App {
                     );
                     if response.hovered() {
                         ui.painter()
-                            .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
+                            .rect_filled(button, CornerRadius::same(8), theme::accent());
                     }
                     let mut tx = button.left() + 10.0;
                     if let Some(icon) = icon {
@@ -2577,7 +2595,7 @@ impl App {
                                 Vec2::new(16.0, 28.0),
                             ),
                             16.0,
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                         );
                         tx += 23.0;
                     }
@@ -2586,7 +2604,7 @@ impl App {
                         Rect::from_min_max(Pos2::new(tx, button.top()), button.max),
                         text,
                         font(14.0, Weight::Medium),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                     theme::paint_icon(
                         ui,
@@ -2596,7 +2614,7 @@ impl App {
                             Vec2::new(14.0, 28.0),
                         ),
                         14.0,
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                     clicked |= response.clicked();
                 }
@@ -2622,11 +2640,11 @@ impl App {
                     button,
                     CornerRadius::same(10),
                     if response.hovered() {
-                        theme::white(0.05)
+                        theme::overlay(0.05)
                     } else {
-                        theme::CONTROL_SURFACE
+                        theme::control_surface()
                     },
-                    Stroke::new(1.0, theme::INPUT),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
                 theme::paint_icon(
@@ -2637,7 +2655,7 @@ impl App {
                         Vec2::splat(*icon_size),
                     ),
                     *icon_size,
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                 );
                 widgets::text_in(
                     ui,
@@ -2647,7 +2665,7 @@ impl App {
                     ),
                     label,
                     font(14.0, Weight::Medium),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
                 response.clicked().then_some(RowAction::Click)
             }
@@ -2659,7 +2677,7 @@ impl App {
                     Pos2::new(right - 38.0 - width, center_y - 12.0),
                     label,
                     label_font,
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                     24.0,
                 );
                 let clicked = ui
@@ -2684,7 +2702,7 @@ impl App {
                     ui,
                     button,
                     ("settings-outline", &row.id),
-                    Some((icon, theme::MUTED_FOREGROUND)),
+                    Some((icon, theme::muted_foreground())),
                     "",
                     CornerRadius::same(8),
                 );
@@ -2693,7 +2711,7 @@ impl App {
                     Rect::from_min_max(Pos2::new(button.left() + 22.0, button.top()), button.max),
                     label,
                     font(12.0, Weight::Medium),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
                 response.clicked().then_some(RowAction::Click)
             }
@@ -2712,11 +2730,11 @@ impl App {
                     button,
                     CornerRadius::same(10),
                     if response.hovered() {
-                        theme::white(0.05)
+                        theme::overlay(0.05)
                     } else {
-                        theme::CONTROL_SURFACE
+                        theme::control_surface()
                     },
-                    Stroke::new(1.0, theme::INPUT),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
                 let text_width = widgets::text_width(ui, label, font(14.0, Weight::Medium));
@@ -2728,7 +2746,7 @@ impl App {
                     ),
                     label,
                     font(14.0, Weight::Medium),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
                 response.clicked().then_some(RowAction::Click)
             }
@@ -2770,8 +2788,8 @@ fn number_or_text_field(
     ui.painter().rect(
         rect,
         CornerRadius::same(10),
-        theme::CONTROL_SURFACE,
-        Stroke::new(1.0, theme::INPUT),
+        theme::control_surface(),
+        Stroke::new(1.0, theme::input()),
         StrokeKind::Inside,
     );
     let inner = Rect::from_min_max(
@@ -2785,11 +2803,11 @@ fn number_or_text_field(
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO)
             .font(font(14.0, Weight::Regular))
-            .text_color(theme::FOREGROUND)
+            .text_color(theme::foreground())
             .hint_text(
                 egui::RichText::new(placeholder)
                     .font(font(14.0, Weight::Regular))
-                    .color(theme::MUTED_FOREGROUND),
+                    .color(theme::muted_foreground()),
             )
             .desired_width(rect.width() - 20.0)
             .vertical_align(egui::Align::Center),
@@ -2840,7 +2858,7 @@ fn row_height(ui: &Ui, row: &Row) -> f32 {
             ui,
             &row.description,
             font(12.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             18.0,
             text_width,
         );
@@ -3082,12 +3100,17 @@ fn scope_sentence(ui: &Ui, left: f32, top: f32) -> f32 {
         (
             "Applying settings for",
             Weight::Regular,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             false,
         ),
-        ("All projects", Weight::Medium, theme::FOREGROUND, true),
-        ("across", Weight::Regular, theme::MUTED_FOREGROUND, false),
-        ("All environments", Weight::Medium, theme::FOREGROUND, true),
+        ("All projects", Weight::Medium, theme::foreground(), true),
+        ("across", Weight::Regular, theme::muted_foreground(), false),
+        (
+            "All environments",
+            Weight::Medium,
+            theme::foreground(),
+            true,
+        ),
     ] {
         let width = widgets::text_width(ui, text, font(16.0, weight));
         widgets::text(ui, Pos2::new(x, y), text, font(16.0, weight), color, 24.0);
@@ -3098,7 +3121,7 @@ fn scope_sentence(ui: &Ui, left: f32, top: f32) -> f32 {
                 "chevron-down",
                 Rect::from_min_size(Pos2::new(x + 6.0, y + 5.0), Vec2::splat(14.0)),
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             x += 26.0;
         } else {
@@ -3251,7 +3274,7 @@ impl App {
             Rect::from_min_size(Pos2::new(left + 16.0, y), Vec2::new(200.0, 28.0)),
             "Keybindings",
             font(14.0, Weight::Regular),
-            theme::alpha(theme::FOREGROUND, 0.7),
+            theme::alpha(theme::foreground(), 0.7),
         );
         let mut x = left + CARD_WIDTH - 16.0;
         for (icon, tip) in [
@@ -3267,7 +3290,7 @@ impl App {
                 ("keybindings-action", icon),
                 icon,
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 tip,
             )
             .clicked()
@@ -3282,7 +3305,7 @@ impl App {
             Rect::from_min_max(Pos2::new(x - count_width, y), Pos2::new(x, y + 28.0)),
             &count,
             font(11.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         y += 28.0 + 10.0;
 
@@ -3293,8 +3316,8 @@ impl App {
         ui.painter().rect(
             card,
             CornerRadius::same(14),
-            CARD_FILL,
-            Stroke::new(1.0, CARD_BORDER),
+            card_fill(),
+            Stroke::new(1.0, card_border()),
             StrokeKind::Inside,
         );
         let mut top = card.top() + 1.0;
@@ -3313,7 +3336,7 @@ impl App {
                 ui.painter().rect_filled(
                     Rect::from_min_size(row.min, Vec2::new(row.width(), 1.0)),
                     0.0,
-                    ROW_DIVIDER,
+                    row_divider(),
                 );
             }
             let text_left = row.left() + ROW_PAD_X;
@@ -3322,7 +3345,7 @@ impl App {
                 Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(600.0, 20.0)),
                 &command_label(command),
                 font(14.0, Weight::Medium),
-                theme::FOREGROUND,
+                theme::foreground(),
             );
             // "When" line (h-6): label, then the clause button.
             let when_top = inner_top + 24.0;
@@ -3331,7 +3354,7 @@ impl App {
                 Rect::from_min_size(Pos2::new(text_left, when_top), Vec2::new(40.0, 24.0)),
                 "When",
                 font(12.0, Weight::Regular),
-                theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                theme::alpha(theme::muted_foreground(), 0.7),
             );
             let label = if when.is_empty() {
                 "Always"
@@ -3350,9 +3373,9 @@ impl App {
                 label,
                 mono,
                 if when.is_empty() {
-                    theme::MUTED_FOREGROUND
+                    theme::muted_foreground()
                 } else {
-                    theme::FOREGROUND
+                    theme::foreground()
                 },
             );
             theme::paint_icon(
@@ -3363,7 +3386,7 @@ impl App {
                     Vec2::new(14.0, 20.0),
                 ),
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             // Keys: `KbdGroup` chips inside a 28px ghost button.
             let chip_font = font(12.0, Weight::Medium);
@@ -3387,7 +3410,7 @@ impl App {
                     Vec2::new(*width, 20.0),
                 );
                 ui.painter()
-                    .rect_filled(chip, CornerRadius::same(4), theme::white(0.03));
+                    .rect_filled(chip, CornerRadius::same(4), theme::overlay(0.03));
                 let text_width = widgets::text_width(ui, key, chip_font.clone());
                 widgets::text_in(
                     ui,
@@ -3397,7 +3420,7 @@ impl App {
                     ),
                     key,
                     chip_font.clone(),
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                 );
                 chip_x += width + 4.0;
             }
@@ -3417,9 +3440,9 @@ fn switch(ui: &Ui, right: f32, center_y: f32, on: bool, id: &str) -> bool {
         track,
         CornerRadius::same(9),
         if on {
-            theme::PRIMARY
+            theme::primary()
         } else {
-            theme::white(0.08)
+            theme::overlay(0.08)
         },
     );
     let thumb_x = if on {
@@ -3430,7 +3453,7 @@ fn switch(ui: &Ui, right: f32, center_y: f32, on: bool, id: &str) -> bool {
     ui.painter().rect_filled(
         Rect::from_min_size(Pos2::new(thumb_x, track.top() + 2.0), Vec2::splat(14.0)),
         CornerRadius::same(7),
-        theme::BACKGROUND,
+        theme::background(),
     );
     response.clicked()
 }

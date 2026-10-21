@@ -20,7 +20,9 @@ const GROUP: f32 = 28.0;
 const ROW: f32 = 32.0;
 const ROW_TALL: f32 = 50.0;
 const LIST_MAX: f32 = 322.0;
-const SURFACE: Color32 = Color32::from_rgb(12, 12, 12);
+fn surface() -> Color32 {
+    theme::shade(12)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum View {
@@ -182,7 +184,7 @@ impl App {
 
     fn status_badge(thread: &Thread) -> Option<(&'static str, Color32)> {
         if thread.has_pending_approvals {
-            Some(("Pending Approval", theme::WARNING_FOREGROUND))
+            Some(("Pending Approval", theme::warning_foreground()))
         } else if thread.has_pending_user_input {
             Some(("Awaiting Input", theme::INDIGO_300))
         } else if thread.is_running() {
@@ -422,7 +424,7 @@ impl App {
                     "GitHub repository",
                     Action::Missing("Cloning from GitHub"),
                 );
-                github.icon = Icon::Brand("github", theme::FOREGROUND);
+                github.icon = Icon::Brand("github", theme::foreground());
                 github.subtitle = Some("Clone GitHub owner/repo".into());
                 vec![Group {
                     label: "Sources",
@@ -595,7 +597,7 @@ impl App {
                 ui.painter().rect_filled(
                     backdrop,
                     0.0,
-                    Color32::from_rgba_unmultiplied(10, 10, 10, 200),
+                    theme::alpha(theme::background(), 200.0 / 255.0),
                 );
                 if response.clicked() && !ui.rect_contains_pointer(rect) {
                     close = true;
@@ -603,8 +605,8 @@ impl App {
                 ui.painter().rect(
                     rect,
                     CornerRadius::same(18),
-                    SURFACE,
-                    Stroke::new(1.0, theme::INPUT),
+                    surface(),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
 
@@ -625,9 +627,9 @@ impl App {
                     {
                         back = true;
                     }
-                    theme::paint_icon(ui, "arrow-left", icon_rect, 16.0, theme::FOREGROUND);
+                    theme::paint_icon(ui, "arrow-left", icon_rect, 16.0, theme::foreground());
                 } else {
-                    theme::paint_icon(ui, "search", icon_rect, 16.0, theme::MUTED_FOREGROUND);
+                    theme::paint_icon(ui, "search", icon_rect, 16.0, theme::muted_foreground());
                 }
                 let mut input_right = search.right() - 8.0;
                 if view == View::Browse {
@@ -652,13 +654,13 @@ impl App {
                         Vec2::new(38.0, 20.0),
                     );
                     ui.painter()
-                        .rect_filled(kbd, CornerRadius::same(4), theme::MUTED);
+                        .rect_filled(kbd, CornerRadius::same(4), theme::muted());
                     widgets::text_in(
                         ui,
                         Rect::from_min_max(kbd.min + Vec2::new(4.0, 0.0), kbd.max),
                         "Enter",
                         font(12.0, Weight::Medium),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                     input_right = add.left() - 8.0;
                 }
@@ -678,11 +680,11 @@ impl App {
                         .frame(egui::Frame::NONE)
                         .margin(egui::Margin::ZERO)
                         .font(font(14.0, Weight::Regular))
-                        .text_color(theme::FOREGROUND)
+                        .text_color(theme::foreground())
                         .hint_text(
                             egui::RichText::new(placeholder)
                                 .font(font(14.0, Weight::Regular))
-                                .color(theme::MUTED_FOREGROUND),
+                                .color(theme::muted_foreground()),
                         )
                         .desired_width(input.width()),
                 );
@@ -719,7 +721,7 @@ impl App {
                                 Rect::from_min_max(header.min + Vec2::new(8.0, 0.0), header.max),
                                 group.label,
                                 font(12.0, Weight::Medium),
-                                theme::MUTED_FOREGROUND,
+                                theme::muted_foreground(),
                             );
                             for item in &group.items {
                                 let (row, _) = ui.allocate_exact_size(
@@ -740,7 +742,7 @@ impl App {
                                     ui.painter().rect_filled(
                                         row,
                                         CornerRadius::same(6),
-                                        theme::ACCENT,
+                                        theme::accent(),
                                     );
                                     if down || up {
                                         response.scroll_to_me(None);
@@ -768,7 +770,7 @@ impl App {
                         sw: 17,
                         se: 17,
                     },
-                    theme::white(0.025),
+                    theme::overlay(0.025),
                 );
                 let mut x = footer.left() + 16.0;
                 let y = footer.top() + 10.0;
@@ -780,16 +782,16 @@ impl App {
                     };
                     let chip = Rect::from_min_size(Pos2::new(x, y), Vec2::new(width.ceil(), 20.0));
                     ui.painter()
-                        .rect_filled(chip, CornerRadius::same(4), theme::white(0.078));
+                        .rect_filled(chip, CornerRadius::same(4), theme::overlay(0.078));
                     if icon {
-                        theme::paint_icon(ui, content, chip, 12.0, theme::FOREGROUND);
+                        theme::paint_icon(ui, content, chip, 12.0, theme::foreground());
                     } else {
                         widgets::text_in(
                             ui,
                             Rect::from_min_max(chip.min + Vec2::new(4.0, 0.0), chip.max),
                             content,
                             font(12.0, Weight::Medium),
-                            theme::FOREGROUND,
+                            theme::foreground(),
                         );
                     }
                     chip.right()
@@ -800,7 +802,7 @@ impl App {
                         Rect::from_min_max(Pos2::new(x, y), Pos2::new(footer.right(), y + 20.0)),
                         text,
                         font(14.0, Weight::Regular),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                     x + width
                 };
@@ -928,7 +930,9 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         Vec2::splat(16.0),
     );
     match &item.icon {
-        Icon::Lucide(name) => theme::paint_icon(ui, name, icon_rect, 16.0, theme::MUTED_FOREGROUND),
+        Icon::Lucide(name) => {
+            theme::paint_icon(ui, name, icon_rect, 16.0, theme::muted_foreground())
+        }
         Icon::Project(project) => project_icon::paint(ui, icon_rect, project),
         Icon::Brand(name, color) => theme::paint_icon(ui, name, icon_rect, 16.0, *color),
     }
@@ -942,13 +946,14 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
                 Vec2::splat(16.0),
             ),
             16.0,
-            theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+            theme::alpha(theme::muted_foreground(), 0.7),
         );
         right -= 22.0;
     }
     if let Some(shortcut) = item.shortcut {
         let mut job = egui::text::LayoutJob::default();
-        let mut format = widgets::format(font(12.0, Weight::Medium), theme::MUTED_FOREGROUND, 16.0);
+        let mut format =
+            widgets::format(font(12.0, Weight::Medium), theme::muted_foreground(), 16.0);
         format.extra_letter_spacing = 1.2;
         job.append(shortcut, 0.0, format);
         let galley = ui.fonts_mut(|f| f.layout_job(job));
@@ -956,7 +961,7 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         ui.painter().galley(
             Pos2::new(right - width, row.center().y - 8.0),
             galley,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         right -= width + 12.0;
     }
@@ -970,7 +975,7 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
             ),
             time,
             font(12.0, Weight::Regular),
-            theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+            theme::alpha(theme::muted_foreground(), 0.7),
         );
         right -= width + 12.0;
     }
@@ -996,7 +1001,7 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         Rect::from_min_max(Pos2::new(x, title_top), Pos2::new(right, title_top + 20.0)),
         &item.title,
         font(14.0, Weight::Regular),
-        theme::FOREGROUND,
+        theme::foreground(),
     );
     if let Some(bold) = &item.bold {
         widgets::text_in(
@@ -1007,7 +1012,7 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
             ),
             bold,
             font(14.0, Weight::SemiBold),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
     }
     if let Some(badge) = item.badge {
@@ -1019,8 +1024,8 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
         ui.painter().rect(
             chip,
             CornerRadius::same(4),
-            theme::alpha(theme::WARNING_FOREGROUND, 0.12),
-            Stroke::new(1.0, theme::alpha(theme::WARNING_FOREGROUND, 0.5)),
+            theme::alpha(theme::warning_foreground(), 0.12),
+            Stroke::new(1.0, theme::alpha(theme::warning_foreground(), 0.5)),
             StrokeKind::Inside,
         );
         widgets::text_in(
@@ -1028,15 +1033,15 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
             Rect::from_min_max(chip.min + Vec2::new(6.0, 0.0), chip.max),
             badge,
             font(11.0, Weight::Medium),
-            theme::WARNING_FOREGROUND,
+            theme::warning_foreground(),
         );
     }
     let sub_top = title_top + 20.0;
-    let muted = theme::alpha(theme::MUTED_FOREGROUND, 0.7);
+    let muted = theme::alpha(theme::muted_foreground(), 0.7);
     if let Some(meta) = &item.thread {
         // Project · Local · branch · provider glyph (`ThreadCommandSubtitle`).
         let small = font(12.0, Weight::Regular);
-        let dot_color = theme::alpha(theme::MUTED_FOREGROUND, 0.5);
+        let dot_color = theme::alpha(theme::muted_foreground(), 0.5);
         let text = |ui: &Ui, x: f32, value: &str, color: Color32| -> f32 {
             let rect = Rect::from_min_max(Pos2::new(x, sub_top), Pos2::new(right, sub_top + 16.0));
             x + widgets::text_in(ui, rect, value, small.clone(), color)
@@ -1062,7 +1067,7 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
                 icon,
                 glyph_rect(x),
                 12.0,
-                theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                theme::alpha(theme::muted_foreground(), 0.7),
             );
         }
     } else if let Some(subtitle) = &item.subtitle {

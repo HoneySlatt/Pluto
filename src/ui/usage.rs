@@ -237,7 +237,7 @@ fn bar_color(driver: &str) -> Color32 {
     if driver == "claudeAgent" {
         CLAUDE
     } else {
-        theme::FOREGROUND
+        theme::foreground()
     }
 }
 
@@ -272,13 +272,13 @@ impl App {
 
     /// The Usage page in the workspace area.
     pub(crate) fn usage_page(&mut self, ui: &mut Ui, rect: Rect) {
-        ui.painter().rect_filled(rect, 0.0, theme::BACKGROUND);
+        ui.painter().rect_filled(rect, 0.0, theme::background());
         // Header: "Usage / All environments", the metric and period groups, refresh.
         let mut x = rect.left() + 20.0;
         for (text, weight, color) in [
-            ("Usage", Weight::Medium, theme::MUTED_FOREGROUND),
-            ("/", Weight::Regular, theme::MUTED_FOREGROUND),
-            ("All environments", Weight::Medium, theme::FOREGROUND),
+            ("Usage", Weight::Medium, theme::muted_foreground()),
+            ("/", Weight::Regular, theme::muted_foreground()),
+            ("All environments", Weight::Medium, theme::foreground()),
         ] {
             let width = widgets::text_width(ui, text, font(14.0, weight));
             widgets::text_in(
@@ -297,7 +297,7 @@ impl App {
             "usage-refresh",
             "refresh-cw",
             14.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "",
         )
         .clicked()
@@ -360,7 +360,7 @@ impl App {
                         Pos2::new(left, y),
                         "No provider on the selected environments reports subscription limits.",
                         font(14.0, Weight::Regular),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                         20.0,
                     );
                     y += 20.0;
@@ -369,7 +369,7 @@ impl App {
                     // Heading: the provider glyph (size-5 slot) and its name.
                     if let Some((icon, tint)) = crate::ui::pickers::provider_icon(&pool.driver) {
                         let tint = if pool.driver == "codex" {
-                            theme::alpha(theme::FOREGROUND, 0.8)
+                            theme::alpha(theme::foreground(), 0.8)
                         } else {
                             tint
                         };
@@ -386,7 +386,7 @@ impl App {
                         Rect::from_min_size(Pos2::new(left + 28.0, y), Vec2::new(COLUMN, 20.0)),
                         driver_label(&pool.driver),
                         font(14.0, Weight::Medium),
-                        theme::FOREGROUND,
+                        theme::foreground(),
                     );
                     y += 20.0 + 12.0;
                     for window in &pool.windows {
@@ -410,7 +410,7 @@ impl App {
             card,
             CornerRadius::same(10),
             Color32::TRANSPARENT,
-            Stroke::new(1.0, theme::white(0.036)),
+            Stroke::new(1.0, theme::overlay(0.036)),
             StrokeKind::Inside,
         );
         let left = card.left() + 17.0;
@@ -420,7 +420,7 @@ impl App {
             Rect::from_min_size(Pos2::new(left, top), Vec2::new(LABEL_COLUMN, 20.0)),
             &window.label,
             font(14.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         let percent = format!("{}%", window.remaining);
         let big = font(30.0, Weight::SemiBold);
@@ -429,7 +429,7 @@ impl App {
             Pos2::new(left, top + 24.0),
             &percent,
             big,
-            theme::FOREGROUND,
+            theme::foreground(),
             36.0,
         );
         // "left" shares the big number's baseline (`items-baseline`).
@@ -439,7 +439,7 @@ impl App {
             Pos2::new(left_x, top + 37.0),
             "left",
             font(14.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             20.0,
         );
         if let Some(icon) = window.pace {
@@ -449,7 +449,7 @@ impl App {
                 icon,
                 Rect::from_min_size(Pos2::new(x, top + 38.0), Vec2::splat(14.0)),
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
         // The bar: one segment per account, 4px apart.
@@ -480,7 +480,7 @@ fn paint_segment(
     color: Color32,
 ) {
     let painter = ui.painter();
-    painter.rect_filled(segment, CornerRadius::same(8), theme::white(0.03));
+    painter.rect_filled(segment, CornerRadius::same(8), theme::overlay(0.03));
     let fill_width = segment.width() * remaining as f32 / 100.0;
     let fill = Rect::from_min_size(segment.min, Vec2::new(fill_width, segment.height()));
     painter.rect_filled(fill, CornerRadius::same(8), theme::alpha(color, 0.35));
@@ -508,7 +508,7 @@ fn paint_segment(
         Pos2::new(segment.left() + 8.0, segment.center().y - 8.0),
         &format!("{remaining}%"),
         font(12.0, Weight::SemiBold),
-        theme::FOREGROUND,
+        theme::foreground(),
         16.0,
     );
     if let Some(reset) = reset {
@@ -521,14 +521,14 @@ fn paint_segment(
         painter.rect_filled(
             plate,
             CornerRadius::same(6),
-            theme::alpha(theme::BACKGROUND, 0.85),
+            theme::alpha(theme::background(), 0.85),
         );
         widgets::tabular_text(
             ui,
             Pos2::new(plate.left() + 6.0, plate.top() + 2.0),
             reset,
             small,
-            theme::FOREGROUND,
+            theme::foreground(),
             16.0,
         );
     }
@@ -566,7 +566,7 @@ pub(crate) fn segmented(
         Pos2::new(right, top + 28.0),
     );
     ui.painter()
-        .rect_filled(group, CornerRadius::same(10), theme::white(0.032));
+        .rect_filled(group, CornerRadius::same(10), theme::overlay(0.032));
     let mut x = right - total + 2.0;
     let mut clicked = None;
     for (index, (label, text_width)) in labels.iter().zip(&text_widths).enumerate() {
@@ -584,16 +584,16 @@ pub(crate) fn segmented(
             ui.painter().rect_filled(
                 button,
                 CornerRadius::same(8),
-                theme::alpha(theme::white(0.0576), opacity),
+                theme::alpha(theme::overlay(0.0576), opacity),
             );
         } else if hovered {
             ui.painter()
-                .rect_filled(button, CornerRadius::same(8), theme::white(0.0256));
+                .rect_filled(button, CornerRadius::same(8), theme::overlay(0.0256));
         }
         let color = if index == active || hovered {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         widgets::text_in(
             ui,

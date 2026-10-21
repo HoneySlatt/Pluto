@@ -22,7 +22,7 @@ reads it from a file at startup instead; it is kept in memory only.
 
 | Area | State |
 |---|---|
-| Theme | Dark theme tokens, Geist fonts, Lucide 0.564 icons, pierre file-type icons |
+| Theme | Dark theme tokens, Geist fonts, Lucide 0.564 icons, pierre file-type icons; follows the environment theme (`t3 theme set`, published as `environmentThemesUpdated`), with `pierre-light` code under light themes |
 | Sidebar | Wordmark, search filter, project scope filter, thread cards (project monogram, Approval/Input/Working/Failed/Done/Woke status, time, branch, provider glyph), active/pinned ordering, snoozed and settled shelves, settle/snooze/wake/un-settle actions, inline rename |
 | Thread menu | The full context menu with Snooze, Auto-settle and Copy submenus, mark unread, filter by project, archive, delete with confirmation |
 | Command palette | Ctrl+K actions and recent threads, project and thread search, new thread in project, add project with folder browsing |
@@ -39,7 +39,8 @@ reads it from a file at startup instead; it is kept in memory only.
 
 Not ported yet (buttons for these show a "not implemented" notice):
 
-- settings: the Appearance and Providers pages, settings search and scope
+- settings: the Appearance page (built-in themes, contrast and the other
+  appearance controls) and the Providers page, settings search and scope
   pickers, the default and source control writer model pickers, keybinding
   editing, project settings, device setup (enabling the hub or agent access,
   adding hosts), the Git fetch interval and Bitbucket credentials panels, and
@@ -54,6 +55,12 @@ Not ported yet (buttons for these show a "not implemented" notice):
   sub-actions (themes, go to file, git clone), and "New thread on <branch>"
   branch carry-over (it opens a draft in the thread's project on its current
   checkout).
+
+Environment themes map their colors onto the app tokens like the web client's
+`html[data-theme-id]` rule. Surfaces measured as white tints of the stock dark
+palette become tints of the theme's text color over its canvas, which
+approximates the upstream mixes. Built-in theme ids keep the stock palette, and
+clearing the environment theme returns to it (upstream keeps the last theme).
 
 The Usage page's metric and period live in memory (upstream: local storage).
 Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`

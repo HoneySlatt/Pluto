@@ -168,7 +168,7 @@ impl App {
                     Pos2::new(list.center().x - text_width / 2.0, list.top() + 8.0),
                     label,
                     label_font.clone(),
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                     20.0,
                 );
                 return;
@@ -195,9 +195,9 @@ impl App {
                         }
                         let selected = row.map(|p| p.id.clone()) == scope;
                         let background = if index == highlight {
-                            Some(theme::ACCENT)
+                            Some(theme::accent())
                         } else if selected {
-                            Some(theme::alpha(theme::FOREGROUND, 0.08))
+                            Some(theme::alpha(theme::foreground(), 0.08))
                         } else {
                             None
                         };
@@ -227,7 +227,7 @@ impl App {
                                     ui.painter().rect_filled(
                                         gear,
                                         egui::CornerRadius::same(8),
-                                        theme::ACCENT,
+                                        theme::accent(),
                                     );
                                 }
                                 theme::paint_icon(
@@ -236,9 +236,9 @@ impl App {
                                     gear,
                                     14.0,
                                     if gear_response.hovered() {
-                                        theme::FOREGROUND
+                                        theme::foreground()
                                     } else {
-                                        theme::MUTED_FOREGROUND
+                                        theme::muted_foreground()
                                     },
                                 );
                                 let gear_response = gear_response.on_hover_text(format!(
@@ -250,23 +250,27 @@ impl App {
                                     continue;
                                 }
                             }
-                            None => {
-                                theme::paint_icon(ui, "folder", icon, 16.0, theme::MUTED_FOREGROUND)
-                            }
+                            None => theme::paint_icon(
+                                ui,
+                                "folder",
+                                icon,
+                                16.0,
+                                theme::muted_foreground(),
+                            ),
                         }
                         let label = row.map_or("All projects", |p| p.title.as_str());
                         let galley = widgets::galley_truncated(
                             ui,
                             label,
                             label_font.clone(),
-                            theme::FOREGROUND,
+                            theme::foreground(),
                             20.0,
                             label_right - (item.left() + 32.0),
                         );
                         ui.painter().galley(
                             Pos2::new(item.left() + 32.0, item.center().y - 10.0),
                             galley,
-                            theme::FOREGROUND,
+                            theme::foreground(),
                         );
                         if response.clicked() {
                             chosen = Some(row.map(|p| p.id.clone()));

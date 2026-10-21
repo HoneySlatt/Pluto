@@ -199,7 +199,7 @@ impl App {
         let height = 40.0 + 8.0 + rows.len() as f32 * 28.0 + 8.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(10), theme::white(0.016));
+            .rect_filled(rect, CornerRadius::same(10), theme::overlay(0.016));
 
         // Header.
         let header = Rect::from_min_size(rect.min, Vec2::new(width, 40.0));
@@ -211,7 +211,7 @@ impl App {
             Rect::from_min_max(Pos2::new(x, header.top()), header.max),
             &label,
             font(12.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         ) + 12.0;
         let additions: u64 = files.iter().map(|f| f.additions).sum();
         let deletions: u64 = files.iter().map(|f| f.deletions).sum();
@@ -239,13 +239,13 @@ impl App {
         );
         let response = ui.interact(open, ui.id().with(("open-diff", turn_id)), Sense::click());
         let color = if response.hovered() {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         if response.hovered() {
             ui.painter()
-                .rect_filled(open, CornerRadius::same(8), theme::ACCENT);
+                .rect_filled(open, CornerRadius::same(8), theme::accent());
         }
         theme::paint_icon(
             ui,
@@ -287,7 +287,7 @@ impl App {
                 ("toggle-folders", turn_id),
                 icon,
                 12.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 tip,
             )
             .clicked()
@@ -319,7 +319,7 @@ impl App {
             );
             if response.hovered() {
                 ui.painter()
-                    .rect_filled(line, CornerRadius::same(6), theme::white(0.024));
+                    .rect_filled(line, CornerRadius::same(6), theme::overlay(0.024));
             }
             let mut x = line.left() + 8.0 + row.depth as f32 * 14.0;
             let icon_rect =
@@ -334,7 +334,7 @@ impl App {
                     },
                     icon_rect(x),
                     14.0,
-                    theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                    theme::alpha(theme::muted_foreground(), 0.7),
                 );
                 x += 22.0;
                 theme::paint_icon(
@@ -346,13 +346,13 @@ impl App {
                     },
                     icon_rect(x),
                     14.0,
-                    theme::alpha(theme::MUTED_FOREGROUND, 0.75),
+                    theme::alpha(theme::muted_foreground(), 0.75),
                 );
                 x += 22.0;
                 let color = if response.hovered() {
-                    theme::alpha(theme::FOREGROUND, 0.9)
+                    theme::alpha(theme::foreground(), 0.9)
                 } else {
-                    theme::alpha(theme::MUTED_FOREGROUND, 0.9)
+                    theme::alpha(theme::muted_foreground(), 0.9)
                 };
                 widgets::text_in(
                     ui,
@@ -373,13 +373,13 @@ impl App {
                     file_icon(&row.name),
                     icon_rect(x),
                     14.0,
-                    theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                    theme::alpha(theme::muted_foreground(), 0.7),
                 );
                 x += 22.0;
                 let color = if response.hovered() {
-                    theme::FOREGROUND
+                    theme::foreground()
                 } else {
-                    theme::alpha(theme::FOREGROUND, 0.85)
+                    theme::alpha(theme::foreground(), 0.85)
                 };
                 widgets::text_in(
                     ui,

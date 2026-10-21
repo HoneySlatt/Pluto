@@ -31,9 +31,10 @@ const PLOT_TOP: f32 = 8.0;
 const PLOT_HEIGHT: f32 = 224.0; // h-56
 const TICK_COUNT: f64 = 4.0;
 
-/// `PROVIDER_PRESENTATION`, in its reading order: kind, label, color.
+/// `PROVIDER_PRESENTATION`, in its reading order: kind, label, color
+/// (`PLACEHOLDER` for Codex's `--contrast-foreground`).
 const PROVIDERS: [(&str, &str, Color32); 6] = [
-    ("codex", "Codex", theme::FOREGROUND),
+    ("codex", "Codex", Color32::PLACEHOLDER),
     ("claude", "Claude Code", Color32::from_rgb(0xd9, 0x77, 0x57)),
     // `color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))`.
     ("grok", "Grok Build", Color32::from_rgb(179, 179, 179)),
@@ -50,8 +51,15 @@ fn presentation(provider: &str) -> (&'static str, Color32) {
     PROVIDERS
         .iter()
         .find(|p| p.0 == provider)
-        .map(|p| (p.1, p.2))
-        .unwrap_or(("Unknown", theme::MUTED_FOREGROUND))
+        .map(|p| {
+            let color = if p.2 == Color32::PLACEHOLDER {
+                theme::foreground()
+            } else {
+                p.2
+            };
+            (p.1, color)
+        })
+        .unwrap_or(("Unknown", theme::muted_foreground()))
 }
 
 /// The provider's mark (`ProviderMark`), centered in a `size` square.
@@ -571,7 +579,7 @@ fn skeleton(ui: &Ui, rect: Rect, radius: u8) {
     ui.painter().rect_filled(
         rect,
         CornerRadius::same(radius),
-        theme::alpha(theme::MUTED_FOREGROUND, 0.15),
+        theme::alpha(theme::muted_foreground(), 0.15),
     );
 }
 
@@ -581,7 +589,7 @@ fn h2(ui: &Ui, pos: Pos2, text: &str) {
         pos,
         text,
         font(14.0, Weight::Medium),
-        theme::FOREGROUND,
+        theme::foreground(),
         20.0,
     );
 }
@@ -672,7 +680,7 @@ impl App {
                                 Pos2::new(left, y),
                                 message,
                                 font(14.0, Weight::Regular),
-                                theme::MUTED_FOREGROUND,
+                                theme::muted_foreground(),
                                 20.0,
                             );
                             y += 36.0;
@@ -725,7 +733,7 @@ impl App {
             Pos2::new(left, top),
             &total,
             font(36.0, Weight::SemiBold),
-            theme::FOREGROUND,
+            theme::foreground(),
             40.0,
         );
         let mut subline = format!("{} sessions", format_count(merged.sessions));
@@ -738,7 +746,7 @@ impl App {
             Pos2::new(left, top + 44.0),
             &subline,
             small.clone(),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             16.0,
         );
         if !tokens && merged.unpriced_share > 0.0 {
@@ -746,7 +754,7 @@ impl App {
                 + widgets::text_width(ui, &subline, small.clone())
                 + widgets::text_width(ui, " ", small.clone());
             let icon = Rect::from_min_size(Pos2::new(x, top + 44.0), Vec2::splat(12.0));
-            theme::paint_icon(ui, "info", icon, 12.0, theme::MUTED_FOREGROUND);
+            theme::paint_icon(ui, "info", icon, 12.0, theme::muted_foreground());
             ui.interact(icon, ui.id().with("usage-unpriced"), Sense::hover())
                 .on_hover_text(format!(
                     "API estimate excludes {} unpriced records.",
@@ -767,7 +775,7 @@ impl App {
                 provider,
                 Pos2::new(left + 16.0, y + 3.0),
                 16.0,
-                theme::FOREGROUND,
+                theme::foreground(),
             );
             let label_font = font(14.0, Weight::Regular);
             widgets::text(
@@ -775,7 +783,7 @@ impl App {
                 Pos2::new(left + 40.0, y + 1.0),
                 label,
                 label_font.clone(),
-                theme::FOREGROUND,
+                theme::foreground(),
                 20.0,
             );
             let session_label = format!(
@@ -795,7 +803,7 @@ impl App {
                 ),
                 &session_label,
                 font(11.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
             let value = if tokens {
@@ -810,7 +818,7 @@ impl App {
                 Pos2::new(left + SUMMARY_WIDTH - width, y),
                 &value,
                 value_font,
-                theme::FOREGROUND,
+                theme::foreground(),
                 20.0,
             );
             let detail = match (tokens, totals) {
@@ -830,7 +838,7 @@ impl App {
                 Pos2::new(left, y + 25.0),
                 &detail,
                 small.clone(),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
             y += 61.0;
@@ -882,7 +890,7 @@ impl App {
                 Pos2::new(x, y + 32.0),
                 label,
                 small.clone(),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
             widgets::tabular_text(
@@ -890,7 +898,7 @@ impl App {
                 Pos2::new(x, y + 50.0),
                 value,
                 font(16.0, Weight::Medium),
-                theme::FOREGROUND,
+                theme::foreground(),
                 24.0,
             );
         }
@@ -1003,7 +1011,7 @@ impl App {
                 Pos2::new(x, y + 32.0),
                 label,
                 font(12.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
             skeleton(
@@ -1082,7 +1090,7 @@ fn paint_chart(
     let tick_font = font(10.0, Weight::Regular);
     for tick in &ticks {
         let y = to_screen(Pos2::new(0.0, to_y(*tick))).y;
-        painter.hline(plot.x_range(), y, Stroke::new(1.0, theme::BORDER));
+        painter.hline(plot.x_range(), y, Stroke::new(1.0, theme::border()));
         let label = if *tick == 0.0 {
             "0".into()
         } else {
@@ -1094,7 +1102,7 @@ fn paint_chart(
             y - 8.0,
             &label,
             10.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
     }
     // Heavier series first so the lighter one is not buried; fills, then lines.
@@ -1161,7 +1169,7 @@ fn paint_chart(
                 Pos2::new(x, plot.bottom() + 4.0),
                 text,
                 tick_font.clone(),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 14.0,
             );
             x += width + gap;
@@ -1183,7 +1191,7 @@ fn paint_chart(
     painter.vline(
         x,
         to_screen(Pos2::new(0.0, PLOT_TOP)).y..=plot.bottom(),
-        Stroke::new(1.0, theme::MUTED_FOREGROUND),
+        Stroke::new(1.0, theme::muted_foreground()),
     );
     let period = &periods[index];
     let title = match (hourly, reference) {
@@ -1244,8 +1252,8 @@ fn paint_chart(
         card,
         CornerRadius::same(12),
         // `surface-glass`: 80% background over a backdrop blur, which egui lacks.
-        theme::alpha(theme::BACKGROUND, 0.95),
-        Stroke::new(1.0, theme::white(0.03)),
+        theme::alpha(theme::background(), 0.95),
+        Stroke::new(1.0, theme::overlay(0.03)),
         StrokeKind::Inside,
     );
     let inner_left = card.left() + 11.0;
@@ -1256,7 +1264,7 @@ fn paint_chart(
         Pos2::new(inner_left, y),
         &title,
         small.clone(),
-        theme::MUTED_FOREGROUND,
+        theme::muted_foreground(),
         16.0,
     );
     y += 20.0;
@@ -1268,7 +1276,7 @@ fn paint_chart(
                 provider,
                 Pos2::new(x, y + 2.0),
                 12.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             x += 18.0;
         }
@@ -1277,16 +1285,16 @@ fn paint_chart(
             Pos2::new(x, y),
             label,
             small.clone(),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             16.0,
         );
-        tabular_right(ui, inner_right, y, value, 12.0, theme::FOREGROUND);
+        tabular_right(ui, inner_right, y, value, 12.0, theme::foreground());
         y += 16.0;
     }
     painter.hline(
         card.left() + 11.0..=card.right() - 11.0,
         y + 4.5,
-        Stroke::new(1.0, theme::BORDER),
+        Stroke::new(1.0, theme::border()),
     );
     y += 9.0;
     widgets::text(
@@ -1294,10 +1302,10 @@ fn paint_chart(
         Pos2::new(inner_left, y),
         "Total",
         small.clone(),
-        theme::MUTED_FOREGROUND,
+        theme::muted_foreground(),
         16.0,
     );
-    tabular_right(ui, inner_right, y, &total, 12.0, theme::FOREGROUND);
+    tabular_right(ui, inner_right, y, &total, 12.0, theme::foreground());
 }
 
 /// One breakdown table: header labels and cells laid out over fractional
@@ -1335,14 +1343,14 @@ impl Table<'_> {
                 Pos2::new(x, top + 8.0),
                 label,
                 small.clone(),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 16.0,
             );
         }
         self.ui.painter().rect_filled(
             Rect::from_min_size(Pos2::new(self.left, top + 32.0), Vec2::new(COLUMN, 1.0)),
             0.0,
-            theme::BORDER,
+            theme::border(),
         );
         top + 33.0
     }
@@ -1357,7 +1365,7 @@ impl Table<'_> {
         {
             self.ui
                 .painter()
-                .rect_filled(rect, 0.0, theme::alpha(theme::MUTED, 0.5));
+                .rect_filled(rect, 0.0, theme::alpha(theme::muted(), 0.5));
         }
         for (index, (text, color)) in cells.iter().enumerate() {
             if index == 0 {
@@ -1368,7 +1376,7 @@ impl Table<'_> {
                         provider,
                         Pos2::new(x, top + 11.0),
                         14.0,
-                        theme::FOREGROUND,
+                        theme::foreground(),
                     );
                     x += 22.0;
                 }
@@ -1389,7 +1397,7 @@ impl Table<'_> {
         self.ui.painter().rect_filled(
             Rect::from_min_size(Pos2::new(self.left, top + 36.0), Vec2::new(COLUMN, 1.0)),
             0.0,
-            theme::white(0.03),
+            theme::overlay(0.03),
         );
         top + 37.0
     }
@@ -1402,7 +1410,7 @@ impl Table<'_> {
             Pos2::new(self.left + (COLUMN - width) / 2.0, top + 24.0),
             text,
             font(14.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             20.0,
         );
         top + 68.0
@@ -1427,11 +1435,11 @@ fn breakdown_by_model(ui: &Ui, left: f32, top: f32, merged: &Merged, tokens: boo
     for model in models {
         let unknown = model.cost_unknown();
         let cells = [
-            (model.model.clone(), theme::FOREGROUND),
+            (model.model.clone(), theme::foreground()),
             if unknown {
-                ("Unpriced".into(), theme::MUTED_FOREGROUND)
+                ("Unpriced".into(), theme::muted_foreground())
             } else {
-                (format_usd(model.cost), theme::FOREGROUND)
+                (format_usd(model.cost), theme::foreground())
             },
             (
                 if unknown {
@@ -1439,9 +1447,9 @@ fn breakdown_by_model(ui: &Ui, left: f32, top: f32, merged: &Merged, tokens: boo
                 } else {
                     format_percent(model.cost_share)
                 },
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             ),
-            (format_tokens(model.tokens), theme::MUTED_FOREGROUND),
+            (format_tokens(model.tokens), theme::muted_foreground()),
         ];
         let id = format!("{}:{}", model.provider, model.model);
         y = table.row(y, &id, &cells, Some(&model.provider));
@@ -1481,16 +1489,16 @@ fn breakdown_by_period(
             } else {
                 format_day_short(&period.key)
             },
-            theme::FOREGROUND,
+            theme::foreground(),
         )];
         cells.extend(providers.iter().map(|p| {
             (
                 format_usd(period.by_provider.get(*p).map_or(0.0, |t| t.cost)),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             )
         }));
-        cells.push((format_usd(period.cost), theme::FOREGROUND));
-        cells.push((format_tokens(period.tokens), theme::MUTED_FOREGROUND));
+        cells.push((format_usd(period.cost), theme::foreground()));
+        cells.push((format_tokens(period.tokens), theme::muted_foreground()));
         y = table.row(y, &period.key, &cells, None);
     }
     y

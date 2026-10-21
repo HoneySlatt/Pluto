@@ -295,7 +295,7 @@ fn layout_inlines(
                 job.append(
                     code,
                     0.0,
-                    widgets::format(code_font, theme::FOREGROUND, line_height),
+                    widgets::format(code_font, theme::foreground(), line_height),
                 );
                 job.append(" ", 0.0, pad);
                 chips.extend([Some(chip), Some(chip), Some(chip)]);
@@ -360,8 +360,8 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
                 painter.rect(
                     rect,
                     CornerRadius::same(6),
-                    theme::MUTED,
-                    Stroke::new(1.0, theme::BORDER),
+                    theme::muted(),
+                    Stroke::new(1.0, theme::border()),
                     StrokeKind::Inside,
                 );
             }
@@ -387,7 +387,7 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) {
         }
     }
     let rect = Rect::from_min_size(pos, inlines.galley.size());
-    painter.galley(pos, inlines.galley.clone(), theme::FOREGROUND);
+    painter.galley(pos, inlines.galley.clone(), theme::foreground());
     if inlines.links.iter().any(Option::is_some) {
         let response = ui.interact(rect, id, Sense::click());
         if let Some(pointer) = response.hover_pos() {
@@ -431,7 +431,7 @@ impl Markdown<'_> {
     }
 
     fn block(&mut self, ui: &mut Ui, block: &Block, width: f32, depth: usize, id: egui::Id) {
-        let paragraph_color = theme::alpha(theme::FOREGROUND, 0.8);
+        let paragraph_color = theme::alpha(theme::foreground(), 0.8);
         match block {
             Block::Paragraph(inlines) => {
                 let laid = layout_inlines(
@@ -455,9 +455,9 @@ impl Markdown<'_> {
                     _ => 14.0,
                 };
                 let color = if *level == 6 {
-                    theme::MUTED_FOREGROUND
+                    theme::muted_foreground()
                 } else {
-                    theme::FOREGROUND
+                    theme::foreground()
                 };
                 let laid = layout_inlines(
                     ui,
@@ -545,12 +545,12 @@ impl Markdown<'_> {
                 ui.painter().rect_filled(
                     Rect::from_min_max(Pos2::new(left, top), Pos2::new(left + 2.0, bottom)),
                     0.0,
-                    theme::BORDER,
+                    theme::border(),
                 );
             }
             Block::Rule => {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
-                ui.painter().rect_filled(rect, 0.0, theme::BORDER);
+                ui.painter().rect_filled(rect, 0.0, theme::border());
             }
         }
     }
@@ -571,9 +571,9 @@ impl Markdown<'_> {
         let height = 1.0 + 30.0 + 12.8 + galley.size().y + 12.8 + 1.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(10), theme::CONTROL_SURFACE);
+            .rect_filled(rect, CornerRadius::same(10), theme::control_surface());
         // Header: language, wrap toggle (pressed), copy.
-        let header_color = theme::alpha(Color32::from_rgb(250, 250, 250), 0.72);
+        let header_color = theme::alpha(theme::code_foreground(), 0.72);
         let header = Rect::from_min_size(rect.min + Vec2::new(13.0, 7.0), Vec2::new(200.0, 24.0));
         if let Some((icon, color)) = language_icon(language) {
             theme::paint_icon(
@@ -592,15 +592,15 @@ impl Markdown<'_> {
         );
         let wrap = copy.translate(Vec2::new(-26.0, 0.0));
         ui.painter()
-            .rect_filled(wrap, CornerRadius::same(8), theme::MUTED);
-        theme::paint_icon(ui, "text-wrap", wrap, 12.0, theme::FOREGROUND);
+            .rect_filled(wrap, CornerRadius::same(8), theme::muted());
+        theme::paint_icon(ui, "text-wrap", wrap, 12.0, theme::foreground());
         if widgets::icon_button(
             ui,
             copy,
             id.with("copy"),
             "copy",
             12.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Copy code",
         )
         .clicked()
@@ -608,7 +608,7 @@ impl Markdown<'_> {
             ui.ctx().copy_text(code.to_owned());
         }
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);
-        ui.painter().galley(pos, galley, theme::FOREGROUND);
+        ui.painter().galley(pos, galley, theme::foreground());
     }
 
     fn table(
@@ -620,7 +620,7 @@ impl Markdown<'_> {
         width: f32,
         id: egui::Id,
     ) {
-        let color = theme::alpha(theme::FOREGROUND, 0.8);
+        let color = theme::alpha(theme::foreground(), 0.8);
         let columns = head.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
         if columns == 0 {
             return;
@@ -651,7 +651,7 @@ impl Markdown<'_> {
         } else {
             natural.iter().map(|w| w * width / total).collect()
         };
-        let border = theme::white(0.036);
+        let border = theme::overlay(0.036);
         let paint_row = |ui: &mut Ui, cells: &[Vec<Inline>], header: bool| {
             let pad_y = if header { 8.8 } else { 7.2 };
             let weight = if header {
@@ -710,8 +710,8 @@ impl Markdown<'_> {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
         let expand = Rect::from_min_size(bar.min, Vec2::splat(24.0));
         ui.painter()
-            .rect_filled(expand, CornerRadius::same(8), theme::MUTED);
-        theme::paint_icon(ui, "minimize-2", expand, 12.0, theme::FOREGROUND);
+            .rect_filled(expand, CornerRadius::same(8), theme::muted());
+        theme::paint_icon(ui, "minimize-2", expand, 12.0, theme::foreground());
         let copy = Rect::from_min_size(Pos2::new(bar.right() - 24.0, bar.top()), Vec2::splat(24.0));
         if widgets::icon_button(
             ui,
@@ -719,7 +719,7 @@ impl Markdown<'_> {
             id.with("table-copy"),
             "copy",
             12.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Copy table",
         )
         .clicked()

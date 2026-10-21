@@ -13,7 +13,7 @@ const MESSAGE_LINE: f32 = 22.75;
 
 impl App {
     pub(crate) fn main_area(&mut self, ui: &mut Ui, rect: Rect) {
-        ui.painter().rect_filled(rect, 0.0, theme::BACKGROUND);
+        ui.painter().rect_filled(rect, 0.0, theme::background());
         let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), theme::TOPBAR_HEIGHT));
         let body = Rect::from_min_max(Pos2::new(rect.left(), header.bottom()), rect.max);
         let thread = self.current_thread();
@@ -42,7 +42,7 @@ impl App {
                     Pos2::new(column_left + column, body.bottom()),
                 ),
                 0.0,
-                theme::BACKGROUND,
+                theme::background(),
             );
             self.composer(
                 ui,
@@ -102,7 +102,7 @@ impl App {
                     ui,
                     rect_button,
                     "initialize-git",
-                    Some(("git-branch-plus", theme::MUTED_FOREGROUND)),
+                    Some(("git-branch-plus", theme::muted_foreground())),
                     label,
                     CornerRadius::same(8),
                 )
@@ -129,7 +129,7 @@ impl App {
                 ui,
                 rect_button,
                 "add-action",
-                Some(("plus", theme::MUTED_FOREGROUND)),
+                Some(("plus", theme::muted_foreground())),
                 label,
                 CornerRadius::same(8),
             )
@@ -154,7 +154,7 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, crumb.top()), crumb.max),
                 &project.title,
                 font(14.0, Weight::Medium),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             x += width + 12.0;
             let slash = widgets::text_in(
@@ -162,7 +162,7 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, crumb.top()), crumb.max),
                 "/",
                 font(14.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             x += slash + 12.0;
         }
@@ -171,7 +171,7 @@ impl App {
             Rect::from_min_max(Pos2::new(x, crumb.top()), crumb.max),
             title,
             font(14.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
     }
 
@@ -197,9 +197,9 @@ impl App {
             Vec2::new(width, 24.0),
         );
         let tint = if icon == "zed" {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         let left_corners = CornerRadius {
             nw: 8,
@@ -223,12 +223,12 @@ impl App {
         )
         .clicked();
         let menu = widgets::outline_button(ui, chevron, (id, "menu"), None, "", right_corners);
-        theme::paint_icon(ui, "chevron-down", chevron, 16.0, theme::MUTED_FOREGROUND);
+        theme::paint_icon(ui, "chevron-down", chevron, 16.0, theme::muted_foreground());
         // Shared 1px divider between the halves.
         ui.painter().rect_filled(
             Rect::from_min_size(Pos2::new(main.right(), 14.0), Vec2::new(1.0, 24.0)),
             0.0,
-            theme::INPUT,
+            theme::input(),
         );
         if clicked || menu.clicked() {
             self.status = Some(format!("{label} is not implemented yet"));
@@ -245,7 +245,7 @@ impl App {
             Pos2::new(center.x - width / 2.0, center.y - 82.0),
             headline,
             font(30.0, Weight::SemiBold),
-            theme::FOREGROUND,
+            theme::foreground(),
             36.0,
         );
         let sub = "Add a project, or start without one.";
@@ -255,7 +255,7 @@ impl App {
             Pos2::new(center.x - width / 2.0, center.y - 42.0),
             sub,
             font(14.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             20.0,
         );
     }
@@ -271,10 +271,10 @@ impl App {
         let regular = font(30.0, Weight::Regular);
         let medium = font(30.0, Weight::Medium);
         let mut job = egui::text::LayoutJob::default();
-        let mut format = widgets::format(regular, theme::FOREGROUND, 36.0);
+        let mut format = widgets::format(regular, theme::foreground(), 36.0);
         format.extra_letter_spacing = -0.75;
         job.append("What should we build in ", 0.0, format.clone());
-        let mut name = widgets::format(medium, theme::FOREGROUND, 36.0);
+        let mut name = widgets::format(medium, theme::foreground(), 36.0);
         name.extra_letter_spacing = -0.75;
         job.append(&project.title, 0.0, name);
         job.append("?", 0.0, format);
@@ -293,11 +293,11 @@ impl App {
             ui.painter().rect_filled(
                 Rect::from_min_size(Pos2::new(dot_x, underline_y), Vec2::new(1.5, 1.5)),
                 0.0,
-                theme::alpha(theme::FOREGROUND, 0.4),
+                theme::alpha(theme::foreground(), 0.4),
             );
             dot_x += 4.0;
         }
-        ui.painter().galley(pos, galley, theme::FOREGROUND);
+        ui.painter().galley(pos, galley, theme::foreground());
         let sub = "or start without a project";
         let sub_width = widgets::text_width(ui, sub, font(14.0, Weight::Medium));
         let sub_rect = Rect::from_min_size(
@@ -315,9 +315,9 @@ impl App {
             sub,
             font(14.0, Weight::Medium),
             if response.hovered() {
-                theme::FOREGROUND
+                theme::foreground()
             } else {
-                theme::MUTED_FOREGROUND
+                theme::muted_foreground()
             },
         );
         if response.clicked() {
@@ -428,7 +428,7 @@ impl App {
             ui,
             message.text.trim_end(),
             font(14.0, Weight::Regular),
-            theme::FOREGROUND,
+            theme::foreground(),
             MESSAGE_LINE,
             max_width - 24.0,
         );
@@ -440,9 +440,9 @@ impl App {
             bubble_size,
         );
         ui.painter()
-            .rect_filled(bubble, CornerRadius::same(18), theme::MESSAGE_SURFACE);
+            .rect_filled(bubble, CornerRadius::same(18), theme::message_surface());
         ui.painter()
-            .galley(bubble.min + Vec2::splat(12.0), galley, theme::FOREGROUND);
+            .galley(bubble.min + Vec2::splat(12.0), galley, theme::foreground());
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
             let meta_top = bubble.bottom() + 4.0;
             let copy = Rect::from_min_size(
@@ -455,7 +455,7 @@ impl App {
                 ("copy-user", &message.id),
                 "copy",
                 12.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "Copy message",
             )
             .clicked()
@@ -472,7 +472,7 @@ impl App {
                 ),
                 &time,
                 font(12.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
     }
@@ -524,7 +524,7 @@ impl App {
                     ("copy-assistant", &message.id),
                     "copy",
                     12.0,
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                     "Copy message",
                 )
                 .clicked()
@@ -538,7 +538,7 @@ impl App {
                         Rect::from_min_max(Pos2::new(copy.right() + 8.0, meta.top()), meta.max),
                         &time,
                         font(12.0, Weight::Regular),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                 }
             }
@@ -562,9 +562,9 @@ impl App {
             Sense::click(),
         );
         let color = if response.hovered() {
-            theme::FOREGROUND
+            theme::foreground()
         } else {
-            theme::MUTED_FOREGROUND
+            theme::muted_foreground()
         };
         widgets::text(
             ui,
@@ -591,7 +591,7 @@ impl App {
         ui.painter().rect_filled(
             Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 1.0), rect.max),
             0.0,
-            theme::white(0.036),
+            theme::overlay(0.036),
         );
         response
     }
@@ -617,7 +617,7 @@ impl App {
         );
         if toggle.is_some() && response.hovered() {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(6), theme::white(0.008));
+                .rect_filled(rect, CornerRadius::same(6), theme::overlay(0.008));
         }
         theme::paint_icon(
             ui,
@@ -627,14 +627,14 @@ impl App {
                 Vec2::new(24.0, height),
             ),
             16.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         widgets::text_in(
             ui,
             Rect::from_min_max(Pos2::new(rect.left() + 32.0, rect.top()), rect.max),
             label,
             font(14.0, Weight::Regular),
-            theme::SECONDARY_LABEL,
+            theme::secondary_label(),
         );
         response
     }
@@ -673,18 +673,18 @@ impl App {
         );
         if can_expand && response.hovered() {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(6), theme::white(0.008));
+                .rect_filled(rect, CornerRadius::same(6), theme::overlay(0.008));
         }
         let (icon, icon_color) = if destructive {
             ("circle-alert", DESTRUCTIVE)
         } else if entry.question.is_some() {
-            ("message-circle", theme::MUTED_FOREGROUND)
+            ("message-circle", theme::muted_foreground())
         } else {
             let icon = work_icon(entry);
             let color = if tool_like || matches!(entry.tone.as_str(), "thinking" | "info") {
-                theme::MUTED_FOREGROUND
+                theme::muted_foreground()
             } else {
-                theme::FOREGROUND
+                theme::foreground()
             };
             (icon, color)
         };
@@ -702,11 +702,11 @@ impl App {
         let (label_font, label_color) = if destructive {
             (font(14.0, Weight::Medium), DESTRUCTIVE)
         } else if tool_like {
-            (font(14.0, Weight::Regular), theme::SECONDARY_LABEL)
+            (font(14.0, Weight::Regular), theme::secondary_label())
         } else {
             (
                 font(14.0, Weight::Regular),
-                theme::alpha(theme::FOREGROUND, 0.8),
+                theme::alpha(theme::foreground(), 0.8),
             )
         };
         let text_right = line.right() - 22.0;
@@ -731,7 +731,7 @@ impl App {
                     ),
                     &answer.answers.join(" · "),
                     font(14.0, Weight::Regular),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
             }
         }
@@ -748,7 +748,7 @@ impl App {
                     Vec2::new(16.0, MESSAGE_LINE),
                 ),
                 12.0,
-                theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                theme::alpha(theme::muted_foreground(), 0.7),
             );
             if response.clicked() {
                 if !self.expansion.groups.remove(&key) {
@@ -765,7 +765,7 @@ impl App {
                 ui,
                 &body,
                 theme::mono(11.0),
-                theme::SECONDARY_LABEL,
+                theme::secondary_label(),
                 17.875,
                 inner_width,
             );
@@ -776,11 +776,11 @@ impl App {
                 Vec2::new(width - 30.0, height),
             );
             ui.painter()
-                .rect_filled(frame, CornerRadius::same(6), theme::white(0.012));
+                .rect_filled(frame, CornerRadius::same(6), theme::overlay(0.012));
             ui.painter().with_clip_rect(frame.shrink(1.0)).galley(
                 frame.min + Vec2::new(12.0, 8.0),
                 galley,
-                theme::SECONDARY_LABEL,
+                theme::secondary_label(),
             );
         }
     }
@@ -799,7 +799,7 @@ impl App {
             Pos2::new(rect.left() + 4.0, rect.top() + 2.0),
             &elapsed,
             font(14.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             MESSAGE_LINE,
         );
         ui.ctx()

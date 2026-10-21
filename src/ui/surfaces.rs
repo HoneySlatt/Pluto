@@ -160,7 +160,7 @@ impl App {
             Pos2::new(launcher.center().x - title_width / 2.0, top + 24.0),
             title,
             font(14.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
             20.0,
         );
         let mut y = top + 24.0 + 20.0 + 12.0;
@@ -185,11 +185,11 @@ impl App {
                 ui.painter().rect_filled(
                     row,
                     widgets::radius(theme::CONTROL_RADIUS as f32),
-                    theme::white(0.024),
+                    theme::overlay(0.024),
                 );
             }
             let alpha = if slot.is_some() { 1.0 } else { 0.5 };
-            let color = theme::alpha(theme::FOREGROUND, alpha);
+            let color = theme::alpha(theme::foreground(), alpha);
             theme::paint_icon(
                 ui,
                 surface.icon,
@@ -217,7 +217,7 @@ impl App {
             ui.painter().rect_filled(
                 kbd,
                 CornerRadius::same(4),
-                theme::alpha(theme::white(0.03), alpha),
+                theme::alpha(theme::overlay(0.03), alpha),
             );
             let key_font = font(12.0, Weight::Medium);
             let key_width = widgets::text_width(ui, surface.shortcut, key_font.clone());
@@ -229,7 +229,7 @@ impl App {
                 ),
                 surface.shortcut,
                 key_font,
-                theme::alpha(theme::MUTED_FOREGROUND, alpha),
+                theme::alpha(theme::muted_foreground(), alpha),
             );
             let response = if slot.is_none() {
                 response.on_hover_text(surface.hint)
@@ -250,7 +250,7 @@ impl App {
         let open = self.open_menu.as_deref() == Some(ADD_MENU);
         if open {
             ui.painter()
-                .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
+                .rect_filled(button, CornerRadius::same(8), theme::accent());
         }
         if widgets::icon_button(
             ui,
@@ -259,9 +259,9 @@ impl App {
             "plus",
             14.0,
             if open {
-                theme::FOREGROUND
+                theme::foreground()
             } else {
-                theme::MUTED_FOREGROUND
+                theme::muted_foreground()
             },
             "",
         )

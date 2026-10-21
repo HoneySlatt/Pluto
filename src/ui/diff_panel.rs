@@ -59,11 +59,29 @@ const SEPARATOR: f32 = 24.0;
 const MODIFIED: Color32 = Color32::from_rgb(0, 159, 255); // --diffs-modified-base
 const ADDED: Color32 = Color32::from_rgb(7, 196, 128);
 const DELETED: Color32 = Color32::from_rgb(255, 45, 62);
-const DELETION_ROW: Color32 = Color32::from_rgb(28, 16, 15);
-const ADDITION_ROW: Color32 = Color32::from_rgb(12, 23, 19);
-const DELETION_EMPHASIS: Color32 = Color32::from_rgb(73, 22, 25);
-const ADDITION_EMPHASIS: Color32 = Color32::from_rgb(9, 56, 40);
-const CONTEXT_NUMBER: Color32 = Color32::from_rgb(122, 122, 122);
+fn deletion_row() -> Color32 {
+    theme::stock_or(Color32::from_rgb(28, 16, 15), |p| {
+        theme::mix(p.background, DELETED, 0.08)
+    })
+}
+fn addition_row() -> Color32 {
+    theme::stock_or(Color32::from_rgb(12, 23, 19), |p| {
+        theme::mix(p.background, ADDED, 0.08)
+    })
+}
+fn deletion_emphasis() -> Color32 {
+    theme::stock_or(Color32::from_rgb(73, 22, 25), |p| {
+        theme::mix(p.background, DELETED, 0.25)
+    })
+}
+fn addition_emphasis() -> Color32 {
+    theme::stock_or(Color32::from_rgb(9, 56, 40), |p| {
+        theme::mix(p.background, ADDED, 0.25)
+    })
+}
+fn context_number() -> Color32 {
+    theme::stock_or(Color32::from_rgb(122, 122, 122), |p| p.muted_foreground)
+}
 const STAT_ADDITION: Color32 = Color32::from_rgb(0, 188, 125);
 const STAT_DELETION: Color32 = Color32::from_rgb(251, 65, 74);
 
@@ -93,11 +111,11 @@ impl App {
     }
 
     pub(crate) fn diff_panel(&mut self, ui: &mut Ui, rect: Rect) {
-        ui.painter().rect_filled(rect, 0.0, theme::BACKGROUND);
+        ui.painter().rect_filled(rect, 0.0, theme::background());
         ui.painter().rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())),
             0.0,
-            theme::BORDER,
+            theme::border(),
         );
         self.resize_handle(ui, rect);
         let inner = Rect::from_min_max(Pos2::new(rect.left() + 1.0, rect.top()), rect.max);
@@ -115,7 +133,7 @@ impl App {
         // tab is hovered) and the "+" surface menu.
         let tab = Rect::from_min_size(Pos2::new(inner.left() + 8.0, 14.0), Vec2::new(51.0, 24.0));
         ui.painter()
-            .rect_filled(tab, CornerRadius::same(8), theme::ACCENT);
+            .rect_filled(tab, CornerRadius::same(8), theme::accent());
         let tab_hovered = ui.rect_contains_pointer(tab);
         let close = Rect::from_min_size(
             Pos2::new(tab.left() + 6.0, tab.center().y - 8.0),
@@ -126,21 +144,21 @@ impl App {
             .on_hover_text("Close Diff");
         if close_response.hovered() {
             ui.painter()
-                .rect_filled(close, CornerRadius::same(6), theme::MUTED);
+                .rect_filled(close, CornerRadius::same(6), theme::muted());
         }
         theme::paint_icon(
             ui,
             if tab_hovered { "x" } else { "file-diff" },
             close,
             12.0,
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         widgets::text_in(
             ui,
             Rect::from_min_max(tab.min + Vec2::new(24.0, 0.0), tab.max),
             "Diff",
             font(12.0, Weight::Regular),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         if close_response.clicked()
             && let Some(panel) = self.panel_mut()
@@ -194,9 +212,9 @@ impl App {
             scope_button,
             CornerRadius::same(8),
             if response.hovered() {
-                theme::white(0.05)
+                theme::overlay(0.05)
             } else {
-                theme::MUTED
+                theme::muted()
             },
         );
         widgets::text_in(
@@ -204,7 +222,7 @@ impl App {
             Rect::from_min_max(scope_button.min + Vec2::new(8.0, 0.0), scope_button.max),
             &scope_label,
             font(12.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         theme::paint_icon(
             ui,
@@ -214,7 +232,7 @@ impl App {
                 Vec2::new(14.0, 24.0),
             ),
             14.0,
-            theme::alpha(theme::FOREGROUND, 0.7),
+            theme::alpha(theme::foreground(), 0.7),
         );
         // The press that closes an open menu must not reopen it on release.
         if self.diff_scope_menu.is_some()
@@ -294,7 +312,7 @@ impl App {
                 ),
                 &head,
                 refs_font.clone(),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             x += head_width + 8.0;
             theme::paint_icon(
@@ -302,7 +320,7 @@ impl App {
                 "arrow-right",
                 Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(14.0, bar.height())),
                 14.0,
-                theme::alpha(theme::MUTED_FOREGROUND, 0.7),
+                theme::alpha(theme::muted_foreground(), 0.7),
             );
             x += 22.0;
             widgets::text_in(
@@ -310,7 +328,7 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, bar.top()), bar.max),
                 &base,
                 refs_font,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
 
@@ -323,9 +341,9 @@ impl App {
             let response = ui.interact(button, ui.id().with(id), Sense::click());
             if active || response.hovered() {
                 ui.painter()
-                    .rect_filled(button, CornerRadius::same(10), theme::ACCENT);
+                    .rect_filled(button, CornerRadius::same(10), theme::accent());
             }
-            theme::paint_icon(ui, icon, button, 14.0, theme::FOREGROUND);
+            theme::paint_icon(ui, icon, button, 14.0, theme::foreground());
             response.on_hover_text(tip).clicked()
         };
         if has_files {
@@ -356,7 +374,7 @@ impl App {
         }
         let segmented = Rect::from_min_size(Pos2::new(x - 70.0, bar.top()), Vec2::new(70.0, 28.0));
         ui.painter()
-            .rect_filled(segmented, CornerRadius::same(10), theme::white(0.032));
+            .rect_filled(segmented, CornerRadius::same(10), theme::overlay(0.032));
         let unified =
             Rect::from_min_size(segmented.min + Vec2::new(2.0, 2.0), Vec2::new(32.0, 24.0));
         let split = unified.translate(Vec2::new(34.0, 0.0));
@@ -374,10 +392,10 @@ impl App {
                 .on_hover_text(tip);
             if active {
                 ui.painter()
-                    .rect_filled(button, CornerRadius::same(8), theme::white(0.0576));
+                    .rect_filled(button, CornerRadius::same(8), theme::overlay(0.0576));
             } else if response.hovered() {
                 ui.painter()
-                    .rect_filled(button, CornerRadius::same(8), theme::ACCENT);
+                    .rect_filled(button, CornerRadius::same(8), theme::accent());
             }
             theme::paint_icon(
                 ui,
@@ -385,9 +403,9 @@ impl App {
                 button,
                 14.0,
                 if active || response.hovered() {
-                    theme::FOREGROUND
+                    theme::foreground()
                 } else {
-                    theme::MUTED_FOREGROUND
+                    theme::muted_foreground()
                 },
             );
             if response.clicked() {
@@ -417,7 +435,7 @@ impl App {
                     "chevrons-up-down"
                 },
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 if all_open {
                     "Collapse all files"
                 } else {
@@ -445,7 +463,7 @@ impl App {
                 "diff-refresh",
                 "refresh-cw",
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "Refresh diff",
             )
             .clicked()
@@ -636,11 +654,11 @@ impl App {
     /// folder chains are flattened, and rows keep the diff's order.
     fn diff_file_tree(&mut self, ui: &mut Ui, rect: Rect, files: &[FileDiff], key: &str) {
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, 0.0, theme::BACKGROUND);
+        painter.rect_filled(rect, 0.0, theme::background());
         painter.rect_filled(
             Rect::from_min_size(rect.min, Vec2::new(1.0, rect.height())),
             0.0,
-            theme::white(0.036),
+            theme::overlay(0.036),
         );
         let aside = Rect::from_min_max(Pos2::new(rect.left() + 1.0, rect.top()), rect.max);
         let rows = tree_rows(files, &self.diff_tree_collapsed);
@@ -657,7 +675,7 @@ impl App {
             Rect::from_min_max(Pos2::new(header.left() + 12.0, header.top()), header.max),
             "Files",
             font(12.0, Weight::Medium),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         let mut count_right = header.right() - 8.0;
         if !directories.is_empty() {
@@ -676,7 +694,7 @@ impl App {
                     "chevrons-up-down"
                 },
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 if all_open {
                     "Collapse all folders"
                 } else {
@@ -703,7 +721,7 @@ impl App {
             ),
             &count,
             font(12.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
 
         // Rows.
@@ -727,13 +745,13 @@ impl App {
                 painter.rect_filled(
                     item,
                     CornerRadius::same(5),
-                    theme::alpha(theme::FOREGROUND, 0.12),
+                    theme::alpha(theme::foreground(), 0.12),
                 );
             } else if response.hovered() {
                 painter.rect_filled(
                     item,
                     CornerRadius::same(5),
-                    theme::alpha(theme::FOREGROUND, 0.07),
+                    theme::alpha(theme::foreground(), 0.07),
                 );
             }
             // One indent guide per ancestor level, centered on its icon slot.
@@ -770,9 +788,9 @@ impl App {
                 theme::paint_icon(ui, icon, slot, 16.0, color);
             }
             let name_color = if row.directory {
-                theme::FOREGROUND
+                theme::foreground()
             } else {
-                status_color.unwrap_or(theme::FOREGROUND)
+                status_color.unwrap_or(theme::foreground())
             };
             widgets::text_in(
                 ui,
@@ -842,7 +860,7 @@ impl App {
             x -= 32.0;
             if active {
                 ui.painter()
-                    .rect_filled(button, CornerRadius::same(10), theme::ACCENT);
+                    .rect_filled(button, CornerRadius::same(10), theme::accent());
             }
             if widgets::icon_button(
                 ui,
@@ -850,7 +868,7 @@ impl App {
                 ("panel-control", icon),
                 icon,
                 16.0,
-                theme::FOREGROUND,
+                theme::foreground(),
                 tip,
             )
             .clicked()
@@ -889,7 +907,7 @@ impl App {
             ui.painter().rect_filled(
                 Rect::from_min_size(row.min, Vec2::new(3.0, row.height())),
                 0.0,
-                theme::white(0.25),
+                theme::overlay(0.25),
             );
         }
         let chevron = Rect::from_min_size(
@@ -898,7 +916,7 @@ impl App {
         );
         if open {
             ui.painter()
-                .rect_filled(chevron, CornerRadius::same(6), theme::ACCENT);
+                .rect_filled(chevron, CornerRadius::same(6), theme::accent());
         }
         theme::paint_icon(
             ui,
@@ -935,7 +953,7 @@ impl App {
             ),
             &file.path,
             font(13.0, Weight::Regular),
-            theme::FOREGROUND,
+            theme::foreground(),
         );
         let copy = Rect::from_min_size(
             Pos2::new(row.left() + 58.0 + path_width + 8.0, row.top() + 6.0),
@@ -947,7 +965,7 @@ impl App {
             ("copy-path", &file.path),
             "copy",
             12.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
             "Copy path",
         )
         .clicked()
@@ -1124,7 +1142,7 @@ impl App {
             job.append(
                 " ",
                 0.0,
-                widgets::format(egui::FontId::monospace(13.0), theme::FOREGROUND, LINE),
+                widgets::format(egui::FontId::monospace(13.0), theme::foreground(), LINE),
             );
         }
         job.wrap.max_width = wrap;
@@ -1143,7 +1161,7 @@ fn centered_note(ui: &Ui, rect: Rect, text: &str) {
         Pos2::new(rect.center().x - width / 2.0, rect.center().y - 8.0),
         text,
         font(12.0, Weight::Regular),
-        theme::MUTED_FOREGROUND,
+        theme::muted_foreground(),
         16.0,
     );
 }
@@ -1163,7 +1181,7 @@ fn separator_row(ui: &mut Ui, width: f32, content: f32, text: &str, split: bool)
             ),
             text,
             font(11.0, Weight::Regular),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         return;
     }
@@ -1178,16 +1196,14 @@ fn separator_row(ui: &mut Ui, width: f32, content: f32, text: &str, split: bool)
         Pos2::new(center.x + label_width / 2.0 + 8.0, line_y),
         Pos2::new(row.right() - 8.0, line_y + 1.0),
     );
-    ui.painter()
-        .rect_filled(left, 0.0, Color32::from_rgb(29, 29, 29));
-    ui.painter()
-        .rect_filled(right, 0.0, Color32::from_rgb(29, 29, 29));
+    ui.painter().rect_filled(left, 0.0, theme::shade(29));
+    ui.painter().rect_filled(right, 0.0, theme::shade(29));
     widgets::text_in(
         ui,
         Rect::from_min_max(Pos2::new(center.x - label_width / 2.0, row.top()), row.max),
         text,
         font(11.0, Weight::Regular),
-        theme::MUTED_FOREGROUND,
+        theme::muted_foreground(),
     );
 }
 
@@ -1246,13 +1262,18 @@ fn paint_diff_cell(
     );
     let (tint, bar, number_color, emphasis) = match line.kind {
         LineKind::Deletion => (
-            Some(DELETION_ROW),
+            Some(deletion_row()),
             Some(DELETED),
             DELETED,
-            DELETION_EMPHASIS,
+            deletion_emphasis(),
         ),
-        LineKind::Addition => (Some(ADDITION_ROW), Some(ADDED), ADDED, ADDITION_EMPHASIS),
-        LineKind::Context => (None, None, CONTEXT_NUMBER, Color32::TRANSPARENT),
+        LineKind::Addition => (
+            Some(addition_row()),
+            Some(ADDED),
+            ADDED,
+            addition_emphasis(),
+        ),
+        LineKind::Context => (None, None, context_number(), Color32::TRANSPARENT),
     };
     if let Some(tint) = tint {
         painter.rect_filled(
@@ -1320,7 +1341,7 @@ fn paint_diff_cell(
             Pos2::new(origin.x, column.top()),
             column.max,
         ))
-        .galley(origin, galley, theme::FOREGROUND);
+        .galley(origin, galley, theme::foreground());
 }
 
 /// The empty side of a split row: a tinted gutter and diagonal hatching that
@@ -1333,14 +1354,14 @@ fn paint_filler(ui: &Ui, column: Rect, gap: f32, shift: f32) {
             Pos2::new(column.left() + GUTTER + shift, column.bottom()),
         ),
         0.0,
-        theme::white(0.037),
+        theme::overlay(0.037),
     );
     let hatch = Rect::from_min_max(
         Pos2::new(column.left() + GUTTER + shift, column.top()),
         Pos2::new(column.right() + gap, column.bottom()),
     );
     let clipped = painter.with_clip_rect(hatch.intersect(painter.clip_rect()));
-    let stroke = egui::Stroke::new(std::f32::consts::SQRT_2, theme::white(0.075));
+    let stroke = egui::Stroke::new(std::f32::consts::SQRT_2, theme::overlay(0.075));
     // "/" stripes 2px wide every 8px, phased on screen coordinates.
     let height = hatch.height();
     let mut c = ((hatch.left() + hatch.top()) / 8.0).floor() * 8.0 + 4.5;

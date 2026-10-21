@@ -265,8 +265,8 @@ impl App {
         ui.painter().rect(
             rect,
             CornerRadius::same(4),
-            theme::CARD,
-            Stroke::new(1.0, theme::FOREGROUND),
+            theme::card(),
+            Stroke::new(1.0, theme::foreground()),
             StrokeKind::Inside,
         );
         let mut child =
@@ -276,7 +276,7 @@ impl App {
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
                 .font(font(14.0, Weight::Medium))
-                .text_color(theme::FOREGROUND)
+                .text_color(theme::foreground())
                 .desired_width(rect.width() - 8.0)
                 .vertical_align(egui::Align::Center),
         );
@@ -336,7 +336,7 @@ impl App {
                     ui,
                     &confirm.message,
                     font(14.0, Weight::Regular),
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                     20.0,
                     width - 48.0,
                 );
@@ -344,7 +344,7 @@ impl App {
                     ui,
                     &confirm.title,
                     font(16.0, Weight::SemiBold),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                     24.0,
                     width - 48.0,
                 );
@@ -353,17 +353,20 @@ impl App {
                 ui.painter().rect(
                     dialog,
                     CornerRadius::same(14),
-                    theme::CARD,
-                    Stroke::new(1.0, theme::INPUT),
+                    theme::card(),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
                 let title_height = title.size().y;
-                ui.painter()
-                    .galley(dialog.min + Vec2::new(24.0, 24.0), title, theme::FOREGROUND);
+                ui.painter().galley(
+                    dialog.min + Vec2::new(24.0, 24.0),
+                    title,
+                    theme::foreground(),
+                );
                 ui.painter().galley(
                     dialog.min + Vec2::new(24.0, 24.0 + title_height + 8.0),
                     message,
-                    theme::MUTED_FOREGROUND,
+                    theme::muted_foreground(),
                 );
                 let confirm_width =
                     (widgets::text_width(ui, confirm.confirm_label, font(14.0, Weight::Medium))
@@ -407,11 +410,11 @@ impl App {
                     cancel_rect,
                     CornerRadius::same(8),
                     if cancel_response.hovered() {
-                        theme::white(0.06)
+                        theme::overlay(0.06)
                     } else {
-                        theme::CONTROL_SURFACE
+                        theme::control_surface()
                     },
-                    Stroke::new(1.0, theme::INPUT),
+                    Stroke::new(1.0, theme::input()),
                     StrokeKind::Inside,
                 );
                 widgets::text_in(
@@ -419,7 +422,7 @@ impl App {
                     Rect::from_min_max(cancel_rect.min + Vec2::new(12.0, 0.0), cancel_rect.max),
                     "Cancel",
                     font(14.0, Weight::Medium),
-                    theme::FOREGROUND,
+                    theme::foreground(),
                 );
                 if confirm_response.clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
                     decision = Some(true);

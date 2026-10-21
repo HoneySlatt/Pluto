@@ -13,11 +13,25 @@ use crate::ui::widgets;
 /// Banners slide 17px under the composer surface (`--chat-composer-attachment-overlap`).
 pub const OVERLAP: f32 = 17.0;
 const INSET: f32 = 22.0; // --chat-composer-drawer-inset
-const WARNING: Color32 = Color32::from_rgb(254, 154, 0); // --warning
-const WARNING_SURFACE: Color32 = Color32::from_rgb(35, 27, 15);
-const WARNING_OUTLINE: Color32 = Color32::from_rgb(96, 63, 10);
-const NEUTRAL_SURFACE: Color32 = Color32::from_rgb(16, 16, 16);
-const NEUTRAL_OUTLINE: Color32 = Color32::from_rgb(28, 28, 28);
+fn warning() -> Color32 {
+    theme::warning()
+}
+fn warning_surface() -> Color32 {
+    theme::stock_or(Color32::from_rgb(35, 27, 15), |p| {
+        theme::mix(p.background, p.warning, 0.1)
+    })
+}
+fn warning_outline() -> Color32 {
+    theme::stock_or(Color32::from_rgb(96, 63, 10), |p| {
+        theme::mix(p.background, p.warning, 0.35)
+    })
+}
+fn neutral_surface() -> Color32 {
+    theme::shade(16)
+}
+fn neutral_outline() -> Color32 {
+    theme::shade(28)
+}
 const OPTION_HEIGHT: f32 = 54.0;
 const OPTION_HEIGHT_PLAIN: f32 = 36.0;
 
@@ -77,7 +91,7 @@ impl App {
                 ui,
                 &question.question,
                 font(14.0, Weight::Regular),
-                theme::FOREGROUND,
+                theme::foreground(),
                 20.0,
                 width - 2.0 * INSET - 40.0,
             );
@@ -108,14 +122,14 @@ impl App {
             Pos2::new(surface.left() + INSET, surface.top() + OVERLAP - height),
             Pos2::new(surface.right() - INSET, surface.top() + OVERLAP),
         );
-        banner_surface(ui, rect, WARNING_SURFACE, WARNING_OUTLINE);
+        banner_surface(ui, rect, warning_surface(), warning_outline());
         let top = rect.top() + 12.0;
         theme::paint_icon(
             ui,
             "shield",
             Rect::from_min_size(Pos2::new(rect.left() + 16.0, top + 2.0), Vec2::splat(16.0)),
             16.0,
-            WARNING,
+            warning(),
         );
         let content_left = rect.left() + 12.0 + 24.0 + 8.0;
         let content_height = 16.0 + 4.0 + 16.0 * detail_lines(approval) as f32;
@@ -144,7 +158,7 @@ impl App {
                 "",
                 CornerRadius::same(8),
             );
-            theme::paint_icon(ui, "ellipsis", button, 14.0, theme::FOREGROUND);
+            theme::paint_icon(ui, "ellipsis", button, 14.0, theme::foreground());
             if response.clicked() && !responding {
                 self.open_menu = Some("approval-more".into());
             }
@@ -206,7 +220,7 @@ impl App {
             Rect::from_min_max(Pos2::new(content_left, top), Pos2::new(x - 8.0, top + 16.0)),
             label,
             font(11.0, Weight::Medium),
-            WARNING,
+            warning(),
         );
         if let Some(app) = &approval.app_name {
             widgets::text_in(
@@ -217,7 +231,7 @@ impl App {
                 ),
                 app,
                 font(11.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
         if count > 1 {
@@ -231,7 +245,7 @@ impl App {
                 ),
                 &counter,
                 font(11.0, Weight::Regular),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
         }
         let detail = approval.detail.as_deref().unwrap_or(label);
@@ -244,7 +258,7 @@ impl App {
                 ui,
                 detail,
                 font(12.0, Weight::Regular),
-                theme::FOREGROUND,
+                theme::foreground(),
                 16.0,
                 clip.width(),
             )
@@ -253,14 +267,14 @@ impl App {
                 ui,
                 detail,
                 theme::mono(12.0),
-                theme::FOREGROUND,
+                theme::foreground(),
                 16.0,
                 f32::INFINITY,
             )
         };
         ui.painter()
             .with_clip_rect(clip)
-            .galley(clip.min, detail_galley, theme::FOREGROUND);
+            .galley(clip.min, detail_galley, theme::foreground());
 
         if let Some(decision) = decision {
             let mut command = crate::model::command("thread.approval.respond", thread_id);
@@ -286,7 +300,7 @@ impl App {
             Pos2::new(surface.left() + INSET, surface.top() + OVERLAP - height),
             Pos2::new(surface.right() - INSET, surface.top() + OVERLAP),
         );
-        banner_surface(ui, rect, NEUTRAL_SURFACE, NEUTRAL_OUTLINE);
+        banner_surface(ui, rect, neutral_surface(), neutral_outline());
         let collapsed = self.question_collapsed.as_deref() == Some(question.id.as_str());
         let responding = self.responding.contains(&input.request_id);
 
@@ -306,7 +320,7 @@ impl App {
                 "question-dismiss",
                 "x",
                 14.0,
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
                 "Dismiss question without answering",
             )
             .clicked()
@@ -325,7 +339,7 @@ impl App {
             },
             toggle,
             14.0,
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         right = toggle.left() - 4.0;
         if input.questions.len() > 1 {
@@ -339,7 +353,7 @@ impl App {
                 ),
                 &counter,
                 font(10.0, Weight::Medium),
-                theme::MUTED_FOREGROUND,
+                theme::muted_foreground(),
             );
             right -= counter_width + 4.0;
         }
@@ -357,7 +371,7 @@ impl App {
             ),
             &question.header,
             font(12.0, Weight::Medium),
-            theme::MUTED_FOREGROUND,
+            theme::muted_foreground(),
         );
         if collapsed {
             widgets::text_in(
@@ -368,7 +382,7 @@ impl App {
                 ),
                 &question.question,
                 font(12.0, Weight::Regular),
-                theme::SECONDARY_LABEL,
+                theme::secondary_label(),
             );
         }
         if header_response.clicked()
@@ -389,13 +403,13 @@ impl App {
                 ui,
                 &question.question,
                 font(14.0, Weight::Regular),
-                theme::alpha(theme::FOREGROUND, 0.85),
+                theme::alpha(theme::foreground(), 0.85),
                 20.0,
                 body_width,
             );
             let text_height = text.size().y;
             ui.painter()
-                .galley(Pos2::new(content_left, y), text, theme::FOREGROUND);
+                .galley(Pos2::new(content_left, y), text, theme::foreground());
             y += text_height;
             if question.multi_select {
                 widgets::text(
@@ -403,7 +417,7 @@ impl App {
                     Pos2::new(content_left, y + 4.0),
                     "Select one or more options.",
                     font(12.0, Weight::Regular),
-                    theme::SECONDARY_LABEL,
+                    theme::secondary_label(),
                     16.0,
                 );
                 y += 20.0;
@@ -435,15 +449,15 @@ impl App {
                 let selected = !custom_active && draft.selected.contains(&option.value);
                 if selected {
                     ui.painter()
-                        .rect_filled(row, CornerRadius::same(6), theme::white(0.0165));
+                        .rect_filled(row, CornerRadius::same(6), theme::overlay(0.0165));
                 } else if response.hovered() {
                     ui.painter()
-                        .rect_filled(row, CornerRadius::same(6), theme::white(0.009));
+                        .rect_filled(row, CornerRadius::same(6), theme::overlay(0.009));
                 }
                 let color = if selected {
-                    theme::FOREGROUND
+                    theme::foreground()
                 } else {
-                    theme::alpha(theme::FOREGROUND, 0.85)
+                    theme::alpha(theme::foreground(), 0.85)
                 };
                 widgets::text(
                     ui,
@@ -461,7 +475,7 @@ impl App {
                         Pos2::new(row.left() + 10.0, row.top() + 30.0),
                         description,
                         font(11.0, Weight::Regular),
-                        theme::SECONDARY_LABEL,
+                        theme::secondary_label(),
                         16.0,
                     );
                 }
@@ -470,7 +484,7 @@ impl App {
                     Vec2::splat(20.0),
                 );
                 if selected {
-                    theme::paint_icon(ui, "check", slot, 14.0, theme::PRIMARY);
+                    theme::paint_icon(ui, "check", slot, 14.0, theme::primary());
                 } else if index < 9 {
                     let digit = (index + 1).to_string();
                     let digit_width = widgets::text_width(ui, &digit, theme::mono(10.0));
@@ -482,7 +496,7 @@ impl App {
                         ),
                         &digit,
                         theme::mono(10.0),
-                        theme::MUTED_FOREGROUND,
+                        theme::muted_foreground(),
                     );
                 }
                 if response.clicked() {

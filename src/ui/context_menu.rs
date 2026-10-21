@@ -15,9 +15,17 @@ const MIN_WIDTH: f32 = 128.0; // min-w-32
 const MAX_WIDTH: f32 = 384.0; // max-w-sm
 const MAX_HEIGHT: f32 = 384.0; // max-h-[min(24rem,70vh)]
 const SCROLLBAR: f32 = 6.0; // --app-scrollbar-width
-const SURFACE: Color32 = Color32::from_rgb(16, 16, 16); // dropdown glass over the app
-const OUTLINE: Color32 = Color32::from_rgba_premultiplied(25, 25, 25, 26); // white 10%
-const THUMB: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 20); // #ffffff14
+fn surface() -> Color32 {
+    theme::popover()
+}
+fn outline() -> Color32 {
+    theme::stock_or(Color32::from_rgba_premultiplied(25, 25, 25, 26), |_| {
+        theme::overlay(0.1)
+    })
+}
+fn thumb() -> Color32 {
+    theme::overlay(0.078)
+}
 const DESTRUCTIVE: Color32 = Color32::from_rgb(251, 65, 74); // --destructive
 
 /// One entry of a `ContextMenuItem` tree.
@@ -276,8 +284,8 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                 ui.painter().rect(
                     rect,
                     CornerRadius::same(10),
-                    SURFACE,
-                    Stroke::new(1.0, OUTLINE),
+                    surface(),
+                    Stroke::new(1.0, outline()),
                     StrokeKind::Inside,
                 );
                 let viewport = rect.shrink(1.0);
@@ -293,7 +301,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                                 Vec2::new(row.width() - 16.0, 1.0),
                             ),
                             0.0,
-                            theme::BORDER,
+                            theme::border(),
                         );
                     }
                     let destructive =
@@ -304,7 +312,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                         painter.rect_filled(
                             *row,
                             CornerRadius::same(6),
-                            theme::alpha(theme::FOREGROUND, 0.08),
+                            theme::alpha(theme::foreground(), 0.08),
                         );
                     }
                     if highlighted {
@@ -314,17 +322,17 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             if destructive {
                                 theme::alpha(DESTRUCTIVE, 0.1)
                             } else {
-                                theme::ACCENT
+                                theme::accent()
                             },
                         );
                     }
                     let (text_color, icon_color) = if item.disabled {
-                        let muted = theme::alpha(theme::MUTED_FOREGROUND, 0.64);
+                        let muted = theme::alpha(theme::muted_foreground(), 0.64);
                         (muted, muted)
                     } else if destructive {
-                        (theme::ERROR_FOREGROUND, theme::ERROR_FOREGROUND)
+                        (theme::error_foreground(), theme::error_foreground())
                     } else {
-                        (theme::FOREGROUND, theme::MUTED_FOREGROUND)
+                        (theme::foreground(), theme::muted_foreground())
                     };
                     let mut x = row.left() + 8.0;
                     let icon = match item.checked {
@@ -355,7 +363,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             ),
                             detail,
                             detail_font,
-                            theme::MUTED_FOREGROUND,
+                            theme::muted_foreground(),
                         );
                         label_right -= width + 8.0;
                     }
@@ -378,7 +386,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             "chevron-right",
                             chevron_rect,
                             16.0,
-                            theme::alpha(theme::MUTED_FOREGROUND, 0.8),
+                            theme::alpha(theme::muted_foreground(), 0.8),
                         );
                     }
                     if released
@@ -402,7 +410,7 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             Vec2::new(SCROLLBAR, thumb_height),
                         ),
                         CornerRadius::same(3),
-                        THUMB,
+                        thumb(),
                     );
                 }
             });
