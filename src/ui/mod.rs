@@ -15,6 +15,7 @@ pub mod providers;
 pub mod pull_requests;
 pub mod requests_panel;
 pub mod settings;
+pub mod settings_search;
 pub mod sidebar;
 pub mod source_control;
 pub mod surfaces;

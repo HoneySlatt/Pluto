@@ -1952,45 +1952,10 @@ impl App {
     fn settings_sidebar(&mut self, ui: &mut Ui, rect: Rect, page: usize) {
         self.sidebar_chrome(ui, rect);
         let left = rect.left();
-        // Search: the settings search is not ported; the field keeps its look.
-        theme::paint_icon(
-            ui,
-            "search",
-            Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
-            16.0,
-            theme::alpha(theme::sidebar_muted(), 0.8),
-        );
-        let input_rect = Rect::from_min_size(Pos2::new(left + 40.0, 66.5), Vec2::new(170.0, 21.0));
-        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
-        search_ui.add(
-            egui::TextEdit::singleline(&mut self.settings_search)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .font(font(14.0, Weight::Medium))
-                .text_color(theme::sidebar_foreground())
-                .hint_text(
-                    egui::RichText::new("Search")
-                        .font(font(14.0, Weight::Medium))
-                        .color(theme::sidebar_muted()),
-                )
-                .desired_width(170.0),
-        );
-        let kbd = Rect::from_min_size(Pos2::new(left + 219.0, 66.0), Vec2::splat(20.0));
-        ui.painter()
-            .rect_filled(kbd, CornerRadius::same(4), theme::background());
-        let key_width = widgets::text_width(ui, "/", font(12.0, Weight::Medium));
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(kbd.center().x - key_width / 2.0, kbd.top()),
-                kbd.max,
-            ),
-            "/",
-            font(12.0, Weight::Medium),
-            theme::sidebar_muted(),
-        );
+        self.settings_search_field(ui, left);
+        let searching = self.settings_search_results(ui, left);
 
-        for (index, (label, icon)) in PAGES.iter().enumerate() {
+        for (index, (label, icon)) in PAGES.iter().enumerate().filter(|_| !searching) {
             let item = Rect::from_min_size(
                 Pos2::new(left + 8.0, 100.0 + index as f32 * 36.0),
                 Vec2::new(239.0, 32.0),
@@ -2033,21 +1998,26 @@ impl App {
                 text_color,
             );
             if response.clicked() {
-                self.settings_page = Some(index);
-                if index == ARCHIVE_PAGE {
-                    self.request_archived();
-                }
-                if index == INTEGRATIONS_PAGE {
-                    self.request_device_state();
-                }
-                if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
-                    self.request_discovery();
-                }
+                self.open_settings_page(index);
             }
         }
 
         if self.sidebar_back(ui, rect, "settings-back") {
             self.settings_page = None;
+        }
+    }
+
+    /// Shows a settings page, loading what it lists.
+    pub(crate) fn open_settings_page(&mut self, index: usize) {
+        self.settings_page = Some(index);
+        if index == ARCHIVE_PAGE {
+            self.request_archived();
+        }
+        if index == INTEGRATIONS_PAGE {
+            self.request_device_state();
+        }
+        if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
+            self.request_discovery();
         }
     }
 
@@ -2375,6 +2345,7 @@ impl App {
         row: &Row,
         divided: bool,
     ) -> Option<RowAction> {
+        self.settings_target_row(ui, &row.id, rect);
         let inner_top = rect.top() + if divided { 1.0 } else { 0.0 } + ROW_PAD_Y;
         let mut left = rect.left() + ROW_PAD_X;
         let base_left = left;
@@ -3331,7 +3302,7 @@ const USAGE_COMMANDS: [&str; 7] = [
 ];
 
 /// `commandLabel`: "chat.newLocal" reads "Chat: New Local".
-fn command_label(command: &str) -> String {
+pub(crate) fn command_label(command: &str) -> String {
     if command == "thread.copyReference" {
         return "Pull Request: Copy Link or Thread ID".into();
     }

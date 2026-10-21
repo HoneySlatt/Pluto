@@ -102,6 +102,8 @@ pub struct App {
     pub(crate) client_settings: Value,
     pub(crate) client_settings_path: Option<std::path::PathBuf>,
     pub(crate) settings_search: String,
+    pub(crate) settings_search_active: usize,
+    pub(crate) settings_target: Option<crate::ui::settings_search::Target>,
     pub(crate) settings_legacy_open: bool,
     /// The archived shell snapshot for the Archive page; `None` while loading.
     pub(crate) archived: Option<Result<Value, String>>,
@@ -268,6 +270,8 @@ impl App {
             ),
             client_settings_path: options.client_settings_path.clone(),
             settings_search: String::new(),
+            settings_search_active: 0,
+            settings_target: None,
             settings_legacy_open: false,
             archived: None,
             archive_menu: None,
