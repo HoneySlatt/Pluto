@@ -65,12 +65,37 @@ impl App {
     }
 
     pub(crate) fn traits_menu(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
-        if self.open_menu.as_deref() != Some("traits-picker") {
-            return;
-        }
         let selection = self.composer_model_selection(draft);
-        let Some(model) = self.model_entry(&selection) else {
-            return;
+        if let Some(next) = self.traits_menu_popup(ui, anchor, "traits-picker", &selection, true) {
+            self.set_selection(draft, next);
+        }
+    }
+
+    /// The model's traits menu (reasoning, fast mode…) open as `menu`;
+    /// returns the selection with the chosen option. Options may be a map
+    /// (composer drafts) or `[{id, value}]` (server settings); the result
+    /// keeps the input's shape.
+    pub(crate) fn traits_menu_popup(
+        &mut self,
+        ui: &mut Ui,
+        anchor: Rect,
+        menu: &str,
+        selection: &ModelSelection,
+        above: bool,
+    ) -> Option<ModelSelection> {
+        if self.open_menu.as_deref() != Some(menu) {
+            return None;
+        }
+        let model = self.model_entry(selection)?;
+        let option_of = |id: &str| -> Option<Value> {
+            let options = selection.options.as_ref()?;
+            match options {
+                Value::Array(list) => list
+                    .iter()
+                    .find(|o| o["id"] == id)
+                    .map(|o| o["value"].clone()),
+                _ => options.get(id).cloned(),
+            }
         };
         let descriptors = model["capabilities"]["optionDescriptors"]
             .as_array()
@@ -78,11 +103,7 @@ impl App {
             .unwrap_or_default();
         let current = |descriptor: &Value| -> Value {
             let id = descriptor["id"].as_str().unwrap_or_default();
-            selection
-                .options
-                .as_ref()
-                .and_then(|o| o.get(id).cloned())
-                .unwrap_or_else(|| descriptor["currentValue"].clone())
+            option_of(id).unwrap_or_else(|| descriptor["currentValue"].clone())
         };
         // Owned strings first; menu entries borrow them.
         struct Row {
@@ -172,21 +193,25 @@ impl App {
                 }
             })
             .collect();
-        if let Some(index) = widgets::menu(
-            ui,
-            &mut self.open_menu,
-            "traits-picker",
-            anchor,
-            true,
-            &entries,
-        ) {
-            let row = &rows[index];
-            let mut next = selection.clone();
-            let mut options = next.options.take().unwrap_or_else(|| json!({}));
-            options[&row.descriptor] = row.value.clone();
-            next.options = Some(options);
-            self.set_selection(draft, next);
-        }
+        let index = widgets::menu(ui, &mut self.open_menu, menu, anchor, above, &entries)?;
+        let row = &rows[index];
+        let mut next = selection.clone();
+        let options = match next.options.take() {
+            Some(Value::Array(mut list)) => {
+                match list.iter_mut().find(|o| o["id"] == row.descriptor.as_str()) {
+                    Some(entry) => entry["value"] = row.value.clone(),
+                    None => list.push(json!({"id": row.descriptor, "value": row.value})),
+                }
+                Value::Array(list)
+            }
+            Some(mut map) if map.is_object() => {
+                map[&row.descriptor] = row.value.clone();
+                map
+            }
+            _ => json!({ row.descriptor.clone(): row.value.clone() }),
+        };
+        next.options = Some(options);
+        Some(next)
     }
 
     pub(crate) fn runtime_menu(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
@@ -218,10 +243,26 @@ impl App {
     }
 
     pub(crate) fn model_picker(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
-        if self.open_menu.as_deref() != Some("model-picker") {
-            return;
-        }
         let selection = self.composer_model_selection(draft);
+        if let Some(chosen) = self.model_picker_popup(ui, anchor, "model-picker", selection, false)
+        {
+            self.set_selection(draft, chosen);
+        }
+    }
+
+    /// The model picker (`ProviderModelPicker`) open as `menu`, above
+    /// `anchor` or below it; returns the model chosen.
+    pub(crate) fn model_picker_popup(
+        &mut self,
+        ui: &mut Ui,
+        anchor: Rect,
+        menu: &str,
+        selection: ModelSelection,
+        below: bool,
+    ) -> Option<ModelSelection> {
+        if self.open_menu.as_deref() != Some(menu) {
+            return None;
+        }
         let providers: Vec<Value> = self
             .providers()
             .into_iter()
@@ -232,7 +273,11 @@ impl App {
         }
         let active = self.picker_provider.clone().unwrap_or_default();
         let rect = Rect::from_min_size(
-            Pos2::new(anchor.left(), anchor.top() - 4.0 - PICKER_HEIGHT),
+            if below {
+                Pos2::new(anchor.left(), anchor.bottom() + 4.0)
+            } else {
+                Pos2::new(anchor.left(), anchor.top() - 4.0 - PICKER_HEIGHT)
+            },
             Vec2::new(PICKER_WIDTH, PICKER_HEIGHT),
         );
         let mut chosen: Option<ModelSelection> = None;
@@ -244,7 +289,7 @@ impl App {
         let favorites = self.favorite_models.clone();
         let legacy_open = self.picker_legacy_open;
         let mut toggle_legacy = false;
-        widgets::popup(ui, &mut open, "model-picker", rect, anchor, |ui, rect| {
+        widgets::popup(ui, &mut open, menu, rect, anchor, |ui, rect| {
             let inner = rect.shrink(1.0);
             // Provider rail.
             let rail = Rect::from_min_size(inner.min, Vec2::new(SIDEBAR_WIDTH, inner.height()));
@@ -538,14 +583,14 @@ impl App {
             }
             self.save_favorites();
         }
-        if let Some(selection) = chosen {
-            self.set_selection(draft, selection);
+        if chosen.is_some() {
             self.open_menu = None;
         }
         if self.open_menu.is_none() {
             self.picker_provider = None;
             self.picker_query.clear();
         }
+        chosen
     }
 }
 

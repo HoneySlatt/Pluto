@@ -1877,6 +1877,57 @@ impl App {
         action
     }
 
+    /// The model picker of a settings model row, below its button; a choice
+    /// saves the row's server setting.
+    fn settings_model_picker(&mut self, ui: &mut Ui) {
+        let Some((row, anchor)) = self.settings_picker.clone() else {
+            return;
+        };
+        let model_menu = format!("settings-model:{row}");
+        let traits_menu = format!("settings-traits:{row}");
+        let open = self.open_menu.clone().unwrap_or_default();
+        if open != model_menu && open != traits_menu {
+            self.settings_picker = None;
+            return;
+        }
+        let key = if row == "text-generation-model" {
+            "textGenerationModelSelection"
+        } else {
+            "defaultModelSelection"
+        };
+        let current =
+            serde_json::from_value::<crate::model::ModelSelection>(self.server_setting(key))
+                .ok()
+                .filter(|s| !s.model.is_empty())
+                .unwrap_or_else(|| self.composer_model_selection(true));
+        if open == traits_menu {
+            if let Some(next) = self.traits_menu_popup(ui, anchor, &traits_menu, &current, false) {
+                let mut value = json!({"instanceId": next.instance_id, "model": next.model});
+                if let Some(options) = next.options {
+                    // Settings keep options as `[{id, value}]`.
+                    value["options"] = match options {
+                        Value::Object(map) => Value::Array(
+                            map.into_iter()
+                                .map(|(id, value)| json!({"id": id, "value": value}))
+                                .collect(),
+                        ),
+                        other => other,
+                    };
+                }
+                self.update_setting(Store::Server, key, value);
+            }
+            return;
+        }
+        if let Some(chosen) = self.model_picker_popup(ui, anchor, &model_menu, current, true) {
+            self.update_setting(
+                Store::Server,
+                key,
+                json!({"instanceId": chosen.instance_id, "model": chosen.model}),
+            );
+            self.settings_picker = None;
+        }
+    }
+
     /// The settings screen: its sidebar and the selected page.
     pub(crate) fn settings_screen(&mut self, ui: &mut Ui, screen: Rect) {
         let Some(page) = self.settings_page else {
@@ -1893,6 +1944,7 @@ impl App {
         let main = Rect::from_min_max(Pos2::new(sidebar.right(), screen.top()), screen.max);
         ui.painter().rect_filled(main, 0.0, theme::background());
         self.settings_page_view(ui, main, page);
+        self.settings_model_picker(ui);
         self.settings_sidebar(ui, sidebar, page);
         self.archive_context_menu(ui);
     }
@@ -2688,7 +2740,14 @@ impl App {
                         ui.id().with(("settings-model", &row.id, index)),
                         Sense::click(),
                     );
-                    if response.hovered() {
+                    let kind = if index + 1 == buttons.len() {
+                        "model"
+                    } else {
+                        "traits"
+                    };
+                    let menu_open = self.open_menu.as_deref()
+                        == Some(format!("settings-{kind}:{}", row.id).as_str());
+                    if response.hovered() || menu_open {
                         ui.painter()
                             .rect_filled(button, CornerRadius::same(8), theme::accent());
                     }
@@ -2723,7 +2782,21 @@ impl App {
                         14.0,
                         theme::muted_foreground(),
                     );
-                    clicked |= response.clicked();
+                    // The model button (the last one) opens the model picker,
+                    // the traits button the traits menu.
+                    if response.clicked() {
+                        let kind = if index + 1 == buttons.len() {
+                            "model"
+                        } else {
+                            "traits"
+                        };
+                        let menu = format!("settings-{kind}:{}", row.id);
+                        self.open_menu =
+                            (self.open_menu.as_deref() != Some(menu.as_str())).then_some(menu);
+                        self.settings_picker = Some((row.id.clone(), button));
+                    } else {
+                        clicked |= response.clicked();
+                    }
                 }
                 clicked.then_some(RowAction::Click)
             }

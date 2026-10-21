@@ -77,6 +77,8 @@ pub struct App {
     pub(crate) search: String,
     /// The open settings page (index into `settings::PAGES`), if any.
     pub(crate) settings_page: Option<usize>,
+    /// The settings model row whose picker is open, and its button.
+    pub(crate) settings_picker: Option<(String, eframe::egui::Rect)>,
     /// The Usage page replaces the workspace (`/usage`).
     pub(crate) usage_open: bool,
     /// `server.discoverSourceControl` for the Source Control settings.
@@ -248,6 +250,7 @@ impl App {
             question_collapsed: None,
             responding: Default::default(),
             settings_page: None,
+            settings_picker: None,
             usage_open: false,
             discovery: Default::default(),
             device_state: None,
