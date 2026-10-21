@@ -6,6 +6,7 @@ pub mod content_search;
 pub mod context_menu;
 pub mod diff_panel;
 pub mod files;
+pub mod keybindings;
 pub mod markdown;
 pub mod palette;
 pub mod pickers;

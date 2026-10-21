@@ -3395,61 +3395,28 @@ fn when_expression(node: &Value) -> String {
     }
 }
 
-/// `shortcutToKeybindingInput` split into `KeybindingPill` labels.
-fn shortcut_parts(shortcut: &Value) -> Vec<String> {
-    let mut parts = Vec::new();
-    for (flag, label) in [
-        ("modKey", "Ctrl"),
-        ("metaKey", "meta"),
-        ("ctrlKey", "\u{2303}"),
-        ("altKey", "Alt"),
-        ("shiftKey", "\u{21e7}"),
-    ] {
-        if shortcut[flag] == true {
-            parts.push(label.to_owned());
-        }
-    }
-    let key = shortcut["key"].as_str().unwrap_or_default();
-    let key = match key {
-        " " => "space".to_owned(),
-        "escape" => "esc".to_owned(),
-        k if k.chars().count() == 1 => k.to_uppercase(),
-        k => k.to_owned(),
-    };
-    parts.push(key);
-    parts
-}
-
 impl App {
-    /// `KeybindingsSettings` (read-only): the bindings, sorted by command,
-    /// with their when clause and keys. Editing, adding, search and the
-    /// JSON file action are not ported.
+    /// `KeybindingsSettings`: the bindings, sorted by command, with their
+    /// when clause and keys; shortcuts edit in place (see `keybindings`).
+    /// Adding, search and the JSON file action are not ported.
     fn keybindings_list(&mut self, ui: &mut Ui, left: f32, mut y: f32) -> f32 {
-        let mut rows: Vec<(String, String, Vec<String>)> = self.state.config["keybindings"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|binding| {
-                let command = binding["command"].as_str().unwrap_or_default().to_owned();
-                (
-                    command,
-                    when_expression(&binding["whenAst"]),
-                    shortcut_parts(&binding["shortcut"]),
-                )
-            })
-            .collect();
+        let mut rows =
+            crate::ui::keybindings::build_rows(&self.state.config["keybindings"], when_expression);
         let order = |command: &str| -> (String, usize) {
             match USAGE_COMMANDS.iter().position(|c| *c == command) {
                 Some(rank) => (USAGE_COMMANDS[0].to_owned(), rank),
                 None => (command.to_owned(), 0),
             }
         };
+        let pill = |key: &str| {
+            crate::ui::keybindings::pill_parts(key)
+                .join("+")
+                .to_lowercase()
+        };
         rows.sort_by(|a, b| {
-            order(&a.0).cmp(&order(&b.0)).then_with(|| {
-                a.2.join("+")
-                    .to_lowercase()
-                    .cmp(&b.2.join("+").to_lowercase())
-            })
+            order(&a.command)
+                .cmp(&order(&b.command))
+                .then_with(|| pill(&a.key).cmp(&pill(&b.key)))
         });
 
         // Header: title, binding count and the (unported) actions.
@@ -3505,7 +3472,8 @@ impl App {
             StrokeKind::Inside,
         );
         let mut top = card.top() + 1.0;
-        for (index, (command, when, keys)) in rows.iter().enumerate() {
+        for (index, kb) in rows.iter().enumerate() {
+            let (command, when) = (&kb.command, &kb.when);
             let height = if index == 0 { 71.0 } else { 72.0 };
             let row = Rect::from_min_size(
                 Pos2::new(card.left() + 1.0, top),
@@ -3524,13 +3492,41 @@ impl App {
                 );
             }
             let text_left = row.left() + ROW_PAD_X;
-            widgets::text_in(
+            let title_width = widgets::text_in(
                 ui,
                 Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(600.0, 20.0)),
                 &command_label(command),
                 font(14.0, Weight::Medium),
                 theme::foreground(),
             );
+            if kb.custom {
+                // `KeybindingSourceBadge`: an outline `sm` badge.
+                let label = if command.starts_with("script.") {
+                    "Project"
+                } else {
+                    "Custom"
+                };
+                let width =
+                    (widgets::text_width(ui, label, font(10.0, Weight::Medium)) + 8.0).ceil();
+                let badge = Rect::from_min_size(
+                    Pos2::new(text_left + title_width + 8.0, inner_top + 2.0),
+                    Vec2::new(width, 16.0),
+                );
+                ui.painter().rect(
+                    badge,
+                    CornerRadius::same(4),
+                    theme::control_surface(),
+                    Stroke::new(1.0, theme::input()),
+                    StrokeKind::Inside,
+                );
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(Pos2::new(badge.left() + 4.0, badge.top()), badge.max),
+                    label,
+                    font(10.0, Weight::Medium),
+                    theme::foreground(),
+                );
+            }
             // "When" line (h-6): label, then the clause button.
             let when_top = inner_top + 24.0;
             widgets::text_in(
@@ -3573,41 +3569,10 @@ impl App {
                 theme::muted_foreground(),
             );
             // Keys: `KbdGroup` chips inside a 28px ghost button.
-            let chip_font = font(12.0, Weight::Medium);
-            let widths: Vec<f32> = keys
-                .iter()
-                .map(|k| {
-                    (widgets::text_width(ui, k, chip_font.clone()) + 8.0)
-                        .max(20.0)
-                        .ceil()
-                })
-                .collect();
-            let total = widths.iter().sum::<f32>() + 4.0 * (widths.len().saturating_sub(1)) as f32;
             let right = row.right() - ROW_PAD_X;
             let center_y = row.top() + (if index == 0 { 0.0 } else { 1.0 }) + 36.0
                 - if index == 0 { 0.5 } else { 0.0 };
-            // The chips end at the content edge; the button padding overhangs.
-            let mut chip_x = right - total;
-            for (key, width) in keys.iter().zip(&widths) {
-                let chip = Rect::from_min_size(
-                    Pos2::new(chip_x, center_y - 10.0),
-                    Vec2::new(*width, 20.0),
-                );
-                ui.painter()
-                    .rect_filled(chip, CornerRadius::same(4), theme::overlay(0.03));
-                let text_width = widgets::text_width(ui, key, chip_font.clone());
-                widgets::text_in(
-                    ui,
-                    Rect::from_min_max(
-                        Pos2::new(chip.center().x - text_width / 2.0, chip.top()),
-                        chip.max,
-                    ),
-                    key,
-                    chip_font.clone(),
-                    theme::muted_foreground(),
-                );
-                chip_x += width + 4.0;
-            }
+            self.keybinding_control(ui, row, kb, right, center_y);
         }
         card.bottom()
     }

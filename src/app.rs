@@ -49,6 +49,7 @@ pub struct App {
     pub(crate) last_row_click: Option<(String, f64)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
+    pub(crate) keybinding_edit: Option<crate::ui::keybindings::KeybindingEdit>,
     pub(crate) panel_width: f32,
     /// Diff scope per thread (`diffPanelStore.ts`), Working tree by default.
     pub(crate) diff_scopes: std::collections::HashMap<String, crate::ui::diff_panel::DiffScope>,
@@ -234,6 +235,7 @@ impl App {
             last_row_click: None,
             confirm: None,
             snooze_dialog: None,
+            keybinding_edit: None,
             panel_width: 540.0,
             diff_scopes: Default::default(),
             diff_scope_menu: None,
@@ -934,6 +936,10 @@ impl App {
             self.terminals.receive(&key, result);
         } else if key.starts_with("files-") {
             self.files.receive(&key, result);
+        } else if key.starts_with("keybinding-") {
+            if let Err(error) = result {
+                self.status = Some(format!("Could not save the keybinding: {error}"));
+            }
         } else if key.starts_with("content-search:") {
             self.content_search.receive(&key, result);
         } else if key.starts_with("prs:") {
