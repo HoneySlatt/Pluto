@@ -537,7 +537,9 @@ impl App {
                 self.open_lightbox(items, start);
             }
         }
-        ui.painter().galley(
+        widgets::selectable_galley(
+            ui,
+            ui.id().with(("user-text", &message.id)),
             bubble.min + Vec2::new(12.0, 12.0 + grid.y),
             galley,
             theme::foreground(),
@@ -548,19 +550,16 @@ impl App {
                 Pos2::new(row_rect.right() - 4.0 - 24.0, meta_top),
                 Vec2::splat(24.0),
             );
-            if widgets::icon_button(
+            widgets::copy_button(
                 ui,
                 copy,
                 ("copy-user", &message.id),
-                "copy",
-                12.0,
-                theme::muted_foreground(),
                 "Copy message",
-            )
-            .clicked()
-            {
-                ui.ctx().copy_text(message.text.clone());
-            }
+                "Copy message",
+                theme::primary(),
+                1.0,
+                || message.text.clone(),
+            );
             let time = widgets::clock_time(&message.created_at, self.now);
             let time_width = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
             widgets::text_in(
@@ -621,19 +620,16 @@ impl App {
                     Pos2::new(meta.left() + 4.0, meta.top()),
                     Vec2::splat(24.0),
                 );
-                if widgets::icon_button(
+                widgets::copy_button(
                     ui,
                     copy,
                     ("copy-assistant", &message.id),
-                    "copy",
-                    12.0,
-                    theme::muted_foreground(),
                     "Copy message",
-                )
-                .clicked()
-                {
-                    ui.ctx().copy_text(message.text.clone());
-                }
+                    "Copy message",
+                    theme::primary(),
+                    1.0,
+                    || message.text.clone(),
+                );
                 if !message.streaming {
                     let time = widgets::clock_time(&message.updated_at, self.now);
                     widgets::text_in(

@@ -124,6 +124,11 @@ fn main() {
                     modifiers: egui::Modifiers::NONE,
                 });
                 harness.step();
+                for command in &harness.output().platform_output.commands {
+                    if let egui::OutputCommand::CopyText(text) = command {
+                        eprintln!("copied: {text:?}");
+                    }
+                }
             }
         };
         match op.as_str() {
@@ -197,7 +202,19 @@ fn main() {
                     modifiers |= egui::Modifiers::ALT;
                 }
                 let key = egui::Key::from_name(name).expect("key name");
-                for pressed in [true, false] {
+                // egui-winit sends a copy event instead of Ctrl+C's press.
+                let copy = modifiers.command && key == egui::Key::C;
+                if copy {
+                    // The release comes on a later frame, as from a hand.
+                    harness.event(egui::Event::Copy);
+                    harness.step();
+                    for command in &harness.output().platform_output.commands {
+                        if let egui::OutputCommand::CopyText(text) = command {
+                            eprintln!("copied: {text:?}");
+                        }
+                    }
+                }
+                for pressed in [true, false].into_iter().filter(|p| !(copy && *p)) {
                     harness.event(egui::Event::Key {
                         key,
                         physical_key: None,
@@ -211,6 +228,11 @@ fn main() {
         }
         for _ in 0..30 {
             harness.step();
+            for command in &harness.output().platform_output.commands {
+                if let egui::OutputCommand::CopyText(text) = command {
+                    eprintln!("copied: {text:?}");
+                }
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
     }

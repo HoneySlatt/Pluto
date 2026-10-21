@@ -259,6 +259,7 @@ pub struct Options {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, options: Options) -> Self {
         theme::install(&cc.egui_ctx);
+        cc.egui_ctx.add_plugin(crate::ui::widgets::CopyCleanup);
         let mut app = Self {
             screen: Screen::Connect,
             connect: ConnectForm {

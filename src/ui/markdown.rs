@@ -383,7 +383,9 @@ fn build_inlines(
         let original = chips.len() - inserted.len();
         if breaks.contains(&original) {
             inserted.push(chips.len());
-            job.append("\n", 0.0, newline.clone());
+            // The zero-width space marks the break as layout-only, so copies
+            // drop it (`widgets::CopyCleanup`).
+            job.append("\u{200B}\n", 0.0, newline.clone());
             chips.push(None);
             files.push(None);
             icons.push(None);
@@ -742,32 +744,29 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
             char_index += 1;
         }
     }
-    let rect = Rect::from_min_size(pos, inlines.galley.size());
-    painter.galley(pos, inlines.galley.clone(), theme::foreground());
+    let response =
+        widgets::selectable_galley(ui, id, pos, inlines.galley.clone(), theme::foreground());
     let mut opened = None;
-    if inlines.links.iter().any(Option::is_some) || !file_rects.is_empty() {
-        let response = ui.interact(rect, id, Sense::click());
-        if let Some(pointer) = response.hover_pos() {
-            if let Some((_, file)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                let path = match file.line {
-                    Some(line) => format!("{}:{line}", file.path),
-                    None => file.path.clone(),
-                };
-                let clicked = response.clicked();
-                response.on_hover_text(path);
-                if clicked {
-                    opened = Some(file.clone());
-                }
-                return opened;
+    if let Some(pointer) = response.hover_pos() {
+        if let Some((_, file)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let path = match file.line {
+                Some(line) => format!("{}:{line}", file.path),
+                None => file.path.clone(),
+            };
+            let clicked = response.clicked();
+            response.on_hover_text(path);
+            if clicked {
+                opened = Some(file.clone());
             }
-            let cursor = inlines.galley.cursor_from_pos(pointer - pos);
-            let section = sections.get(cursor.index.0).copied();
-            if let Some(url) = section.and_then(|s| inlines.links.get(s).cloned().flatten()) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                if response.clicked() {
-                    widgets::open_external(&url);
-                }
+            return opened;
+        }
+        let cursor = inlines.galley.cursor_from_pos(pointer - pos);
+        let section = sections.get(cursor.index.0).copied();
+        if let Some(url) = section.and_then(|s| inlines.links.get(s).cloned().flatten()) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                widgets::open_external(&url);
             }
         }
     }
@@ -803,18 +802,26 @@ impl<'a> Markdown<'a> {
         collect_files(&blocks, &mut files);
         self.suffixes = md_links::parent_suffixes(&files);
         let top = ui.cursor().top();
-        self.blocks(ui, &blocks, width, 0);
+        self.blocks(ui, &blocks, width, 0, self.id);
         ui.cursor().top() - top
     }
 
-    fn blocks(&mut self, ui: &mut Ui, blocks: &[Block], width: f32, depth: usize) {
+    /// Block ids nest under `parent` so list items and quotes never collide.
+    fn blocks(
+        &mut self,
+        ui: &mut Ui,
+        blocks: &[Block],
+        width: f32,
+        depth: usize,
+        parent: egui::Id,
+    ) {
         let mut previous_bottom: Option<f32> = None;
         for (index, block) in blocks.iter().enumerate() {
             let (top, bottom) = margins(block);
             if let Some(previous) = previous_bottom {
                 ui.add_space(previous.max(top));
             }
-            let id = self.id.with((depth, index));
+            let id = parent.with(index);
             self.block(ui, block, width, depth, id);
             previous_bottom = Some(bottom);
         }
@@ -885,7 +892,7 @@ impl<'a> Markdown<'a> {
                             Pos2::new(left + 20.0, top),
                             Vec2::new(width - 20.0, f32::INFINITY),
                         )),
-                        |ui| self.blocks(ui, item, width - 20.0, depth + 1),
+                        |ui| self.blocks(ui, item, width - 20.0, depth + 1, id.with(number)),
                     );
                     let marker_center = Pos2::new(left + 6.5, top + BODY_LINE / 2.0);
                     match start {
@@ -942,7 +949,7 @@ impl<'a> Markdown<'a> {
                     )),
                     |ui| {
                         let quoted = std::mem::replace(&mut self.quoted, true);
-                        self.blocks(ui, blocks, width - 14.8, depth + 1);
+                        self.blocks(ui, blocks, width - 14.8, depth + 1, id.with("quote"));
                         self.quoted = quoted;
                     },
                 );
@@ -999,21 +1006,18 @@ impl<'a> Markdown<'a> {
         ui.painter()
             .rect_filled(wrap, CornerRadius::same(8), theme::muted());
         theme::paint_icon(ui, "text-wrap", wrap, 12.0, theme::foreground());
-        if widgets::icon_button(
+        widgets::copy_button(
             ui,
             copy,
             id.with("copy"),
-            "copy",
-            12.0,
-            theme::muted_foreground(),
             "Copy code",
-        )
-        .clicked()
-        {
-            ui.ctx().copy_text(code.to_owned());
-        }
+            "Copied",
+            theme::muted_foreground(),
+            1.2,
+            || code.to_owned(),
+        );
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);
-        ui.painter().galley(pos, galley, theme::foreground());
+        widgets::selectable_galley(ui, id.with("code"), pos, galley, theme::foreground());
     }
 
     fn table(
@@ -1142,31 +1146,174 @@ impl<'a> Markdown<'a> {
         ui.painter()
             .rect_filled(expand, CornerRadius::same(8), theme::muted());
         theme::paint_icon(ui, "minimize-2", expand, 12.0, theme::foreground());
+        // Copy opens "Copy as Markdown" / "Copy as CSV"; the check shows 1.2s.
         let copy = Rect::from_min_size(Pos2::new(bar.right() - 24.0, bar.top()), Vec2::splat(24.0));
+        let menu_id = format!("table-copy-{id:?}");
+        let copied_key = id.with("table-copied");
+        let open_key = id.with("table-menu");
+        let now = ui.input(|i| i.time);
+        let copied = ui
+            .data(|d| d.get_temp::<f64>(copied_key))
+            .map(|at| 1.2 - (now - at))
+            .filter(|left| *left > 0.0);
+        if let Some(left) = copied {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(left));
+        }
+        let mut open: Option<String> = ui.data(|d| d.get_temp(open_key)).flatten();
         if widgets::icon_button(
             ui,
             copy,
             id.with("table-copy"),
-            "copy",
+            if copied.is_some() { "check" } else { "copy" },
             12.0,
             theme::muted_foreground(),
-            "Copy table",
+            if copied.is_some() {
+                "Copied"
+            } else {
+                "Copy table"
+            },
         )
         .clicked()
         {
-            let lines: Vec<String> = std::iter::once(head)
-                .chain(rows.iter().map(Vec::as_slice))
-                .map(|cells| {
-                    cells
-                        .iter()
-                        .map(|c| plain(c))
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                })
-                .collect();
-            ui.ctx().copy_text(lines.join("\n"));
+            open = if open.is_some() {
+                None
+            } else {
+                Some(menu_id.clone())
+            };
         }
+        let entries = [
+            widgets::MenuEntry::Item(widgets::MenuItem::new("Copy as Markdown")),
+            widgets::MenuEntry::Item(widgets::MenuItem::new("Copy as CSV")),
+        ];
+        if let Some(choice) =
+            widgets::menu_aligned(ui, &mut open, &menu_id, copy, false, true, &entries)
+        {
+            let text = if choice == 0 {
+                table_markdown(alignments, head, rows)
+            } else {
+                table_csv(head, rows)
+            };
+            ui.ctx().copy_text(text);
+            ui.data_mut(|d| d.insert_temp(copied_key, now));
+            open = None;
+        }
+        ui.data_mut(|d| d.insert_temp(open_key, open));
     }
+}
+
+/// `serializeTableElementToMarkdown`: pipe rows with the alignment separator
+/// after the header, cells as inline markdown on one line.
+fn table_markdown(
+    alignments: &[Alignment],
+    head: &[Vec<Inline>],
+    rows: &[Vec<Vec<Inline>>],
+) -> String {
+    let cell = |inlines: &[Inline]| {
+        inline_markdown(inlines)
+            .split('\n')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .replace('|', "\\|")
+    };
+    let row = |cells: &[Vec<Inline>]| {
+        let cells: Vec<String> = cells.iter().map(|c| cell(c)).collect();
+        format!("| {} |", cells.join(" | "))
+    };
+    let separator: Vec<&str> = (0..head.len())
+        .map(|i| match alignments.get(i) {
+            Some(Alignment::Center) => ":---:",
+            Some(Alignment::Right) => "---:",
+            _ => "---",
+        })
+        .collect();
+    std::iter::once(row(head))
+        .chain(std::iter::once(format!("| {} |", separator.join(" | "))))
+        .chain(rows.iter().map(|r| row(r)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `serializeTableElementToCsv`: the cells' text, quoted when needed.
+fn table_csv(head: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> String {
+    let cell = |inlines: &[Inline]| {
+        let text = plain(inlines)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text.contains(['"', ',', '\n']) {
+            format!("\"{}\"", text.replace('"', "\"\""))
+        } else {
+            text
+        }
+    };
+    std::iter::once(head)
+        .chain(rows.iter().map(Vec::as_slice))
+        .map(|cells| cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(","))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Inline markdown for copying (`serializeNode`): emphasis markers, links
+/// with an http(s) target, code spans; file chips as their code span.
+fn inline_markdown(inlines: &[Inline]) -> String {
+    // `wrapInlineMarker`: surrounding whitespace stays outside the markers.
+    let wrap = |text: &str, marker: &str| {
+        let core = text.trim();
+        if core.is_empty() {
+            return text.to_owned();
+        }
+        let start = &text[..text.len() - text.trim_start().len()];
+        let end = &text[text.trim_end().len()..];
+        format!("{start}{marker}{core}{marker}{end}")
+    };
+    // `wrapInlineCode`: a fence longer than any backtick run inside.
+    let code = |text: &str| {
+        let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+        let fence = "`".repeat(if longest > 0 { longest + 1 } else { 1 });
+        let pad = if text.starts_with('`') || text.ends_with('`') {
+            " "
+        } else {
+            ""
+        };
+        format!("{fence}{pad}{text}{pad}{fence}")
+    };
+    inlines
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text(text, style) => {
+                let mut out = text.clone();
+                if style.strike {
+                    out = wrap(&out, "~~");
+                }
+                if style.italic {
+                    out = wrap(&out, "*");
+                }
+                if style.bold {
+                    out = wrap(&out, "**");
+                }
+                match &style.link {
+                    Some(href) if href.starts_with("http://") || href.starts_with("https://") => {
+                        let label = out.trim();
+                        if label == href {
+                            href.clone()
+                        } else {
+                            format!("[{label}]({href})")
+                        }
+                    }
+                    _ => out,
+                }
+            }
+            Inline::Code(text) => code(text),
+            Inline::File(file) => code(&match file.line {
+                Some(line) => format!("{}:{line}", file.path),
+                None => file.path.clone(),
+            }),
+            Inline::Break => "\n".to_owned(),
+        })
+        .collect()
 }
 
 fn plain(inlines: &[Inline]) -> String {

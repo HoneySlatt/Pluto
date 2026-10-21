@@ -174,6 +174,95 @@ pub fn icon_button(
     }
 }
 
+/// A galley whose text the pointer selects (drag, double click) and Ctrl+C
+/// copies, egui's label selection running across every selectable galley
+/// of the frame; returns its click-and-drag response.
+pub fn selectable_galley(
+    ui: &Ui,
+    id: egui::Id,
+    pos: Pos2,
+    galley: Arc<Galley>,
+    color: Color32,
+) -> Response {
+    let rect = Rect::from_min_size(pos, galley.size());
+    let response = ui.interact(rect, id, Sense::click_and_drag() - Sense::FOCUSABLE);
+    egui::text_selection::LabelSelectionState::label_text_selection(
+        ui,
+        &response,
+        pos,
+        galley,
+        color,
+        Stroke::NONE,
+    );
+    response
+}
+
+/// Cleans text the selection copies: layout-only line breaks (marked with a
+/// zero-width space) go, and the no-break spaces that keep chips whole
+/// become plain spaces.
+pub struct CopyCleanup;
+
+impl egui::Plugin for CopyCleanup {
+    fn debug_name(&self) -> &'static str {
+        "CopyCleanup"
+    }
+
+    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+        for command in &mut output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                *text = text.replace("\u{200B}\n", "").replace('\u{a0}', " ");
+            }
+        }
+    }
+}
+
+/// A copy button: `CopyIcon`, swapped for `CheckIcon` in `copied_tint` for
+/// `feedback` seconds once `text` is on the clipboard.
+#[allow(clippy::too_many_arguments)]
+pub fn copy_button(
+    ui: &mut Ui,
+    rect: Rect,
+    id: impl egui::AsIdSalt,
+    tooltip: &str,
+    copied_tooltip: &str,
+    copied_tint: Color32,
+    feedback: f64,
+    text: impl FnOnce() -> String,
+) {
+    let id = ui.id().with(id);
+    let key = id.with("copied");
+    let now = ui.input(|i| i.time);
+    let left = ui
+        .data(|d| d.get_temp::<f64>(key))
+        .map(|at| feedback - (now - at))
+        .filter(|left| *left > 0.0);
+    let response = icon_button(
+        ui,
+        rect,
+        id,
+        if left.is_some() { "check" } else { "copy" },
+        12.0,
+        if left.is_some() {
+            copied_tint
+        } else {
+            theme::muted_foreground()
+        },
+        if left.is_some() {
+            copied_tooltip
+        } else {
+            tooltip
+        },
+    );
+    if let Some(left) = left {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(left));
+    }
+    if response.clicked() {
+        ui.ctx().copy_text(text());
+        ui.data_mut(|d| d.insert_temp(key, now));
+    }
+}
+
 /// Outline button used by the workspace header (`variant="outline" size="xs"`).
 pub fn outline_button(
     ui: &mut Ui,
