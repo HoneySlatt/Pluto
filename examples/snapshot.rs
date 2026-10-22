@@ -87,6 +87,10 @@ fn main() {
             if args.iter().any(|a| a == "--running") {
                 app.simulate_running_turn();
             }
+            // `--diff` opens the diff panel on the thread's last turn.
+            if args.iter().any(|a| a == "--diff") {
+                app.open_last_diff();
+            }
             break;
         }
     }

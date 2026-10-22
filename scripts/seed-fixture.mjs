@@ -387,4 +387,18 @@ const longCite = new URLSearchParams({
 message(long, "user", `[Assistant quote](t3-citation://v1/${[environmentId, long, firstLongAnswer].map(encodeURIComponent).join("/")}?${longCite}) Et pour la toute première étape ?`, 1800);
 message(long, "assistant", "La première étape suit le même découpage.", 1799, randomUUID());
 
+// A turn rewriting one large file, for measuring the diff panel.
+const bigDiff = thread(web, "Grand diff", 2100);
+const bigTurn = randomUUID();
+message(bigDiff, "user", "Réécris le module de rendu.", 2100);
+gitCheckpoints(path.join(workspaces, "web-demo"), bigDiff, {
+  "src/render.ts": lines("export const oldValue =", 800),
+}, {
+  "src/render.ts": lines("export const oldValue =", 200) + lines("export const newValue =", 1400),
+});
+const bigAnswer = message(bigDiff, "assistant", "Le module de rendu est réécrit.", 2098, bigTurn);
+completeTurn(bigDiff, bigTurn, 1, [
+  { path: "src/render.ts", kind: "modified", additions: 1400, deletions: 600 },
+], 2098, bigAnswer);
+
 console.log("seeded fixture events");

@@ -260,6 +260,44 @@ fn main() {
         bench.step(&mut after);
     }
     report("idle (end)", &after);
+
+    // The diff panel on the fixture's large turn, its files expanded.
+    if bench.app.open_thread_titled("Grand diff") {
+        bench.settle(Duration::from_secs(5), |app| app.is_loaded());
+        bench.app.open_last_diff();
+        bench.settle(Duration::from_secs(2), |_| false);
+        let expand_all = egui::pos2(1247.0, 66.0);
+        bench.events.push(egui::Event::PointerMoved(expand_all));
+        for pressed in [true, false] {
+            bench.events.push(egui::Event::PointerButton {
+                pos: expand_all,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            bench.settle(Duration::from_millis(50), |_| false);
+        }
+        bench.settle(Duration::from_secs(2), |_| false);
+        let mut diff = Samples::default();
+        for _ in 0..120 {
+            bench.step(&mut diff);
+        }
+        report("diff idle", &diff);
+        let mut diff_scroll = Samples::default();
+        for i in 0..240 {
+            bench
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(1200.0, 450.0)));
+            bench.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, if i < 120 { -40.0 } else { 40.0 }),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            bench.step(&mut diff_scroll);
+        }
+        report("diff scroll", &diff_scroll);
+    }
     let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     for line in status
         .lines()

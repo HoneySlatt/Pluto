@@ -1038,6 +1038,16 @@ impl App {
         found
     }
 
+    /// Opens the diff panel on the open thread's last turn (dev benches).
+    pub fn open_last_diff(&mut self) {
+        let turn = self
+            .current_thread()
+            .and_then(|t| t.checkpoints.last().map(|c| c.turn_id.clone()));
+        if let Some(turn) = turn {
+            self.open_diff(&turn, None);
+        }
+    }
+
     /// Shows a settings page, or closes settings (dev benches).
     pub fn show_settings(&mut self, page: Option<usize>) {
         match page {
