@@ -1035,6 +1035,14 @@ impl App {
         found
     }
 
+    /// Shows a settings page, or closes settings (dev benches).
+    pub fn show_settings(&mut self, page: Option<usize>) {
+        match page {
+            Some(page) => self.open_settings_page(page),
+            None => self.settings_page = None,
+        }
+    }
+
     /// Whether the shell (and the selected thread, if any) has loaded.
     pub fn is_loaded(&self) -> bool {
         self.connected()

@@ -338,4 +338,53 @@ request(question, questionTurn, "user-input.requested", "User input requested", 
   ],
 }, 19);
 
+// A long thread (60 turns of mixed markdown and tool work), for measuring
+// frame times while scrolling and switching threads.
+const long = thread(web, "Long fil de discussion", 2000);
+let firstLongAnswer;
+for (let i = 0; i < 60; i++) {
+  const minutes = 1990 - i * 3;
+  const longTurn = randomUUID();
+  message(long, "user", `Étape ${i + 1} : peux-tu revoir le module \`step_${i + 1}.rs\` et expliquer ce qui change ?`, minutes);
+  tool(long, longTurn, "Ran command", "command_execution", `rg -n "fn " src/step_${i + 1}.rs`, minutes - 1, { command: `rg -n "fn " src/step_${i + 1}.rs` });
+  tool(long, longTurn, "Read file", "file_read", `src/step_${i + 1}.rs`, minutes - 1);
+  tool(long, longTurn, "File change", "file_change", `src/step_${i + 1}.rs`, minutes - 1);
+  const longAnswer = message(long, "assistant", [
+    `## Étape ${i + 1}`,
+    "",
+    `Le module \`src/step_${i + 1}.rs\` regroupe maintenant la **lecture**, la *validation* et l'écriture des données. Chaque fonction garde une seule responsabilité, et les erreurs remontent avec leur contexte au lieu d'être avalées.`,
+    "",
+    "- La lecture passe par un tampon unique, réutilisé d'un appel à l'autre.",
+    "- La validation renvoie la liste complète des problèmes, pas seulement le premier.",
+    "- L'écriture est atomique : un fichier temporaire, puis un renommage.",
+    "",
+    "```rust",
+    `pub fn step_${i + 1}(input: &str) -> Result<Vec<Entry>, Error> {`,
+    "    let mut entries = Vec::new();",
+    "    for (line, text) in input.lines().enumerate() {",
+    "        let entry = Entry::parse(text).map_err(|e| e.at(line + 1))?;",
+    "        if entry.is_valid() {",
+    "            entries.push(entry);",
+    "        }",
+    "    }",
+    "    Ok(entries)",
+    "}",
+    "```",
+    "",
+    "| Fonction | Avant | Après |",
+    "| --- | --- | --- |",
+    `| \`read\` | ${40 + i} lignes | ${20 + i} lignes |`,
+    `| \`validate\` | ${30 + i} lignes | ${25 + i} lignes |`,
+    "",
+    "> Les tests existants passent sans modification.",
+  ].join("\n"), minutes - 2, longTurn);
+  firstLongAnswer ??= longAnswer;
+}
+// A follow-up citing the first answer, far up the thread.
+const longCite = new URLSearchParams({
+  text: "regroupe maintenant", start: "30", end: "49", prefix: "Le module step_1.rs ", suffix: " la lecture",
+});
+message(long, "user", `[Assistant quote](t3-citation://v1/${[environmentId, long, firstLongAnswer].map(encodeURIComponent).join("/")}?${longCite}) Et pour la toute première étape ?`, 1800);
+message(long, "assistant", "La première étape suit le même découpage.", 1799, randomUUID());
+
 console.log("seeded fixture events");

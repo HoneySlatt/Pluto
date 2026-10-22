@@ -104,6 +104,10 @@ ELECTRON=/path/to/electron scripts/reference/shot.sh /tmp/ref.png /
 cargo run --example snapshot -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer /tmp/egui.png
 ```
 
+`cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer`
+measures the per-frame CPU cost (idle, hover, scrolling the fixture's long
+thread, switching threads, opening settings) against the same fixture.
+
 `scripts/gen-icons.mjs` and `scripts/gen-lang-icons.mjs` regenerate the icon
 assets from the upstream packages; `scripts/gen-lucide-catalog.mjs` bundles the
 whole Lucide catalog (`assets/lucide/catalog.txt`) for project icons.
