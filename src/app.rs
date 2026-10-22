@@ -98,6 +98,8 @@ pub struct App {
     pub(crate) git: crate::ui::git_actions::GitActions,
     /// Proposed plan cards: folds, menu and save dialog.
     pub(crate) plans: crate::ui::plan_card::PlanState,
+    /// The "Publish repository" wizard, while open.
+    pub(crate) publish: Option<crate::ui::publish::PublishDialog>,
     /// The editor last opened with (`t3code:last-editor`), persisted.
     pub(crate) last_editor: Option<String>,
     /// The "Open in" editor list and the path it opens.
@@ -407,6 +409,7 @@ impl App {
             toasts: Default::default(),
             git: Default::default(),
             plans: Default::default(),
+            publish: None,
             last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
             open_in_menu: None,
             legacy_grouping: None,
@@ -941,6 +944,7 @@ impl eframe::App for App {
                 self.git_dialogs(ui, rect);
                 self.plan_menu(ui);
                 self.plan_save_dialog(ui, rect);
+                self.publish_dialog(ui, rect);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
@@ -1179,6 +1183,7 @@ impl App {
             || self.open_in_result(&key, &result)
             || self.git_result(&key, &result)
             || self.plan_result(&key, &result)
+            || self.publish_result(&key, &result)
         {
             return;
         }

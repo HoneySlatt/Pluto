@@ -43,6 +43,7 @@ pub mod project_scope;
 pub mod projects_page;
 pub mod prompt_history;
 pub mod providers;
+pub mod publish;
 pub mod pull_requests;
 pub mod queue;
 pub mod requests_panel;

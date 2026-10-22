@@ -481,9 +481,7 @@ impl App {
         let (action, _) = self.git_quick_action();
         match action.kind {
             QuickKind::OpenPr => self.open_existing_pr(),
-            QuickKind::OpenPublish => {
-                self.status = Some("Publishing a repository is not implemented yet".into());
-            }
+            QuickKind::OpenPublish => self.open_publish_dialog(),
             QuickKind::RunPull => self.git_pull(),
             QuickKind::ShowHint(hint) => {
                 self.toasts
@@ -820,6 +818,12 @@ impl App {
                 item
             })
             .collect();
+        // `canPublishRepository`: a repository without a primary remote.
+        if status.is_some() && !has_remote {
+            let mut publish = Item::new("publish", "Publish repository...").icon("cloud-upload");
+            publish.disabled = busy;
+            items.push(publish);
+        }
         let note = |id: &str, text: &str| {
             let mut item = Item::new(id, text);
             item.note = Some(theme::warning());
@@ -861,6 +865,7 @@ impl App {
                 action: "create_pr".into(),
                 ..Default::default()
             }),
+            Some("publish") => self.open_publish_dialog(),
             _ => {}
         }
     }

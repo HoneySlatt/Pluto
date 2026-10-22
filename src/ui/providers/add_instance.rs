@@ -343,7 +343,20 @@ impl App {
 }
 
 /// `WizardSteps`: numbered tabs; done steps get a check, the current one a card.
-fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
+pub(crate) fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
+    step_strip_with(ui, rect, &STEPS, &[], current, |_| false)
+}
+
+/// `WizardSteps` for `steps`, a done step showing its summary
+/// (`showSummaries`) and disabled steps left inert (`isStepDisabled`).
+pub(crate) fn step_strip_with(
+    ui: &Ui,
+    rect: Rect,
+    steps: &[&str],
+    summaries: &[Option<String>],
+    current: usize,
+    disabled: impl Fn(usize) -> bool,
+) -> Option<usize> {
     ui.painter().rect(
         rect,
         CornerRadius::same(14),
@@ -351,9 +364,10 @@ fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
         Stroke::new(1.0, theme::overlay(0.05)),
         StrokeKind::Inside,
     );
-    let width = (rect.width() - 8.0 - 8.0) / 3.0;
+    let count = steps.len() as f32;
+    let width = (rect.width() - 8.0 - 4.0 * (count - 1.0)) / count;
     let mut clicked = None;
-    for (index, step) in STEPS.iter().enumerate() {
+    for (index, step) in steps.iter().enumerate() {
         let item = Rect::from_min_size(
             Pos2::new(
                 rect.left() + 4.0 + index as f32 * (width + 4.0),
@@ -361,7 +375,16 @@ fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
             ),
             Vec2::new(width, 36.0),
         );
-        let response = ui.interact(item, ui.id().with(("wizard-step", index)), Sense::click());
+        let inert = disabled(index);
+        let response = ui.interact(
+            item,
+            ui.id().with(("wizard-step", index)),
+            if inert {
+                Sense::hover()
+            } else {
+                Sense::click()
+            },
+        );
         if index == current {
             ui.painter().rect(
                 item,
@@ -370,7 +393,7 @@ fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
                 Stroke::new(1.0, theme::overlay(0.05)),
                 StrokeKind::Inside,
             );
-        } else if response.hovered() {
+        } else if response.hovered() && !inert {
             ui.painter()
                 .rect_filled(item, CornerRadius::same(10), theme::card());
         }
@@ -410,17 +433,23 @@ fn step_strip(ui: &Ui, rect: Rect, current: usize) -> Option<usize> {
                 20.0,
             );
         }
-        widgets::text(
+        let label = match summaries.get(index).and_then(Option::as_ref) {
+            Some(summary) if index < current => format!("{step}: {summary}"),
+            _ => (*step).to_owned(),
+        };
+        widgets::text_in(
             ui,
-            Pos2::new(item.left() + 38.0, item.top() + 8.0),
-            step,
+            Rect::from_min_max(
+                Pos2::new(item.left() + 38.0, item.top() + 8.0),
+                Pos2::new(item.right() - 10.0, item.top() + 28.0),
+            ),
+            &label,
             font(14.0, Weight::Medium),
             if index == current {
                 theme::foreground()
             } else {
                 theme::muted_foreground()
             },
-            20.0,
         );
         if response.clicked() {
             clicked = Some(index);
@@ -839,7 +868,13 @@ fn config_step(
 }
 
 /// The dialog `Input` (32px, radius 10, 12px insets); returns whether it changed.
-fn text_input(ui: &mut Ui, rect: Rect, id: &str, text: &mut String, placeholder: &str) -> bool {
+pub(crate) fn text_input(
+    ui: &mut Ui,
+    rect: Rect,
+    id: &str,
+    text: &mut String,
+    placeholder: &str,
+) -> bool {
     ui.painter().rect(
         rect,
         CornerRadius::same(10),
@@ -877,18 +912,45 @@ fn text_input(ui: &mut Ui, rect: Rect, id: &str, text: &mut String, placeholder:
 }
 
 #[derive(Clone, Copy)]
-enum Kind {
+pub(crate) enum Kind {
     Primary,
     Outline,
     GhostMuted,
 }
 
 /// A dialog footer `Button` (32px).
-fn dialog_button(ui: &Ui, rect: Rect, label: &str, icon: Option<&str>, kind: Kind) -> bool {
+pub(crate) fn dialog_button(
+    ui: &mut Ui,
+    rect: Rect,
+    label: &str,
+    icon: Option<&str>,
+    kind: Kind,
+) -> bool {
+    dialog_button_enabled(ui, rect, label, icon, kind, true)
+}
+
+/// A footer `Button`, at 64% and inert when disabled.
+pub(crate) fn dialog_button_enabled(
+    ui: &mut Ui,
+    rect: Rect,
+    label: &str,
+    icon: Option<&str>,
+    kind: Kind,
+    enabled: bool,
+) -> bool {
+    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    if !enabled {
+        ui.multiply_opacity(0.64);
+    }
+    let ui = &ui;
     let response = ui.interact(
         rect,
         ui.id().with(("add-instance-button", label)),
-        Sense::click(),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
     );
     let hovered = response.hovered();
     let text = match kind {

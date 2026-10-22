@@ -48,7 +48,7 @@ pub struct Discovery {
 }
 
 /// `Option` fields arrive as `{"_tag": "Some", "value": …}`.
-fn some(value: &Value) -> Option<&str> {
+pub(crate) fn some(value: &Value) -> Option<&str> {
     (value["_tag"] == "Some")
         .then(|| value["value"].as_str())
         .flatten()

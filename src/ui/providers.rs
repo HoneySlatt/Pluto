@@ -31,7 +31,7 @@ use crate::ui::settings::{
 };
 use crate::ui::widgets;
 
-mod add_instance;
+pub(crate) mod add_instance;
 mod environment;
 pub(crate) use add_instance::AddInstance;
 pub(crate) use environment::EnvDraft;
