@@ -76,10 +76,12 @@ fn thread_timestamp(thread: &Thread, order: &str) -> i64 {
 
 /// `sortThreads`: newest first, then the larger id.
 fn sort_threads(threads: &mut [&Thread], order: &str) {
-    threads.sort_by(|a, b| {
-        thread_timestamp(b, order)
-            .cmp(&thread_timestamp(a, order))
-            .then_with(|| b.id.cmp(&a.id))
+    // Each stamp is parsed once, not in every comparison.
+    threads.sort_by_cached_key(|&t| {
+        (
+            std::cmp::Reverse(thread_timestamp(t, order)),
+            std::cmp::Reverse(t.id.as_str()),
+        )
     });
 }
 
@@ -90,11 +92,15 @@ fn sort_groups(groups: &mut [ProjectGroup], threads: &[&Thread], order: &str) {
     if order == "manual" {
         return;
     }
+    let thread_stamps: Vec<(&str, i64)> = threads
+        .iter()
+        .map(|t| (t.project_id.as_str(), thread_timestamp(t, order)))
+        .collect();
     let stamp = |group: &ProjectGroup| -> i64 {
-        let latest = threads
+        let latest = thread_stamps
             .iter()
-            .filter(|t| group.members.iter().any(|(_, m)| m.id == t.project_id))
-            .map(|t| thread_timestamp(t, order))
+            .filter(|(project, _)| group.members.iter().any(|(_, m)| m.id == *project))
+            .map(|(_, stamp)| *stamp)
             .max();
         if let Some(latest) = latest {
             return latest;

@@ -22,30 +22,35 @@ fn timestamp_ms(iso: Option<&str>) -> i64 {
 }
 
 /// `sortActiveThreadsByOrderKey`: unkeyed threads first by anchor time, then keyed ones.
+/// Keys are computed once per thread: parsing timestamps in every
+/// comparison added up every frame.
 pub fn sort_active(threads: &mut [&Thread]) {
-    threads.sort_by(|a, b| {
-        let anchor = |t: &Thread| {
-            timestamp_ms(Some(&t.created_at)).max(timestamp_ms(t.unsettled_at.as_deref()))
+    threads.sort_by_cached_key(|&t| {
+        let anchor = match t.active_order_key {
+            Some(_) => 0,
+            None => timestamp_ms(Some(&t.created_at)).max(timestamp_ms(t.unsettled_at.as_deref())),
         };
-        match (&a.active_order_key, &b.active_order_key) {
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (Some(x), Some(y)) => x.cmp(y),
-            (None, None) => anchor(b).cmp(&anchor(a)),
-        }
-        .then_with(|| a.id.cmp(&b.id))
+        (
+            t.active_order_key.as_deref(),
+            std::cmp::Reverse(anchor),
+            t.id.as_str(),
+        )
     });
 }
 
 /// `sortPinnedThreadsByOrderKey`: keyed threads by key, then keyless by creation time.
 pub fn sort_pinned(threads: &mut [&Thread]) {
-    threads.sort_by(|a, b| match (&a.pin_order_key, &b.pin_order_key) {
-        (Some(x), Some(y)) => x.cmp(y).then_with(|| a.id.cmp(&b.id)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => timestamp_ms(Some(&b.created_at))
-            .cmp(&timestamp_ms(Some(&a.created_at)))
-            .then_with(|| a.id.cmp(&b.id)),
+    threads.sort_by_cached_key(|&t| {
+        let created = match t.pin_order_key {
+            Some(_) => 0,
+            None => timestamp_ms(Some(&t.created_at)),
+        };
+        (
+            t.pin_order_key.is_none(),
+            t.pin_order_key.as_deref(),
+            std::cmp::Reverse(created),
+            t.id.as_str(),
+        )
     });
 }
 
@@ -94,11 +99,12 @@ pub fn sections<'a>(
     // Soonest wake first.
     sections
         .snoozed
-        .sort_by_key(|t| timestamp_ms(t.snoozed_until.as_deref()));
-    sections.settled.sort_by(|a, b| {
-        timestamp_ms(settled_timestamp(b))
-            .cmp(&timestamp_ms(settled_timestamp(a)))
-            .then_with(|| a.id.cmp(&b.id))
+        .sort_by_cached_key(|t| timestamp_ms(t.snoozed_until.as_deref()));
+    sections.settled.sort_by_cached_key(|&t| {
+        (
+            std::cmp::Reverse(timestamp_ms(settled_timestamp(t))),
+            t.id.as_str(),
+        )
     });
     sections
 }
