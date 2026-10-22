@@ -56,6 +56,20 @@ pub struct FilesState {
     pub tree: bool,
     /// The revealed line (path, line) and whether it was scrolled to.
     reveal: Option<(String, usize, bool)>,
+    /// The open file's lines laid out.
+    rendered: Option<Rendered>,
+}
+
+/// A read file laid out: one galley per line, where each starts and how
+/// tall it is, for the read, wrap width and theme in `layout`.
+pub(crate) struct Rendered {
+    identity: (usize, usize),
+    layout: ((usize, usize), usize, u32, bool, u32, u32),
+    highlighted: bool,
+    galleys: Vec<std::sync::Arc<egui::Galley>>,
+    tops: Vec<f32>,
+    heights: Vec<f32>,
+    width: f32,
 }
 
 impl Default for FilesState {
@@ -70,6 +84,7 @@ impl Default for FilesState {
             wrap: true,
             tree: true,
             reveal: None,
+            rendered: None,
         }
     }
 }
@@ -448,8 +463,7 @@ impl App {
             "projects.readFile",
             json!({"cwd": cwd, "relativePath": path}),
         );
-        let read = self.files.reads.get(&key).cloned();
-        let value = match read {
+        let value = match self.files.reads.get(&key) {
             None => {
                 widgets::text(
                     ui,
@@ -479,30 +493,14 @@ impl App {
             }
             Some(Ok(value)) => value,
         };
-        let contents = value["contents"].as_str().unwrap_or_default().to_owned();
-        let extension = name_of(path)
-            .rsplit('.')
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        let spans: Vec<(String, Color32)> = self.highlighter.spans_or_plain(&contents, &extension);
-        // Split the spans into lines.
-        let mut lines: Vec<Vec<(String, Color32)>> = vec![Vec::new()];
-        for (text, color) in spans {
-            let mut parts = text.split('\n').peekable();
-            while let Some(part) = parts.next() {
-                if !part.is_empty() {
-                    lines
-                        .last_mut()
-                        .expect("one line")
-                        .push((part.to_owned(), color));
-                }
-                if parts.peek().is_some() {
-                    lines.push(Vec::new());
-                }
-            }
-        }
-        let digits = lines.len().to_string().len().max(1) as f32;
+        let contents = value["contents"].as_str().unwrap_or_default();
+        // The read's text stays put until the file is read again.
+        let identity = (contents.as_ptr() as usize, contents.len());
+        let line_count = match &self.files.rendered {
+            Some(rendered) if rendered.identity == identity => rendered.galleys.len(),
+            _ => contents.split('\n').count(),
+        };
+        let digits = line_count.to_string().len().max(1) as f32;
         let digit = widgets::text_width(ui, "0", theme::code_font());
         let number_right = 25.0 + (digits - 1.0) * digit;
         let code_left = number_right + 17.0;
@@ -510,6 +508,101 @@ impl App {
             (rect.width() - code_left - 12.0).max(40.0)
         } else {
             f32::INFINITY
+        };
+        let extension = name_of(path).rsplit('.').next().unwrap_or_default();
+        // Lines are laid out once per read, width and theme; plain lines
+        // until the highlighter answers. epaint rebuilds its font atlas now
+        // and then, which outdates kept galleys: a probe galley it lays out
+        // again then tells.
+        let probe =
+            ui.fonts_mut(|f| f.layout_no_wrap("0".into(), theme::code_font(), Color32::WHITE));
+        let layout = (
+            identity,
+            std::sync::Arc::as_ptr(&probe) as usize,
+            wrap_width.to_bits(),
+            theme::palette().dark,
+            theme::code_font().size.to_bits(),
+            code_line_height().to_bits(),
+        );
+        let fresh = self.files.rendered.as_ref().is_some_and(|rendered| {
+            rendered.layout == layout
+                && (rendered.highlighted || self.highlighter.spans(contents, extension).is_none())
+        });
+        if !fresh {
+            let spans = self
+                .highlighter
+                .spans(contents, extension)
+                .map(<[_]>::to_vec);
+            let highlighted = spans.is_some();
+            let spans =
+                spans.unwrap_or_else(|| vec![(contents.to_owned(), crate::highlight::plain())]);
+            // Split the spans into lines.
+            let mut lines: Vec<Vec<(String, Color32)>> = vec![Vec::new()];
+            for (text, color) in spans {
+                let mut parts = text.split('\n').peekable();
+                while let Some(part) = parts.next() {
+                    if !part.is_empty() {
+                        lines
+                            .last_mut()
+                            .expect("one line")
+                            .push((part.to_owned(), color));
+                    }
+                    if parts.peek().is_some() {
+                        lines.push(Vec::new());
+                    }
+                }
+            }
+            let galleys: Vec<std::sync::Arc<egui::Galley>> = lines
+                .iter()
+                .map(|line| {
+                    let mut job = egui::text::LayoutJob::default();
+                    for (text, color) in line {
+                        job.append(
+                            text,
+                            0.0,
+                            widgets::format(theme::code_font(), *color, code_line_height()),
+                        );
+                    }
+                    if line.is_empty() {
+                        job.append(
+                            " ",
+                            0.0,
+                            widgets::format(
+                                theme::code_font(),
+                                theme::code_foreground(),
+                                code_line_height(),
+                            ),
+                        );
+                    }
+                    job.wrap.max_width = wrap_width;
+                    ui.fonts_mut(|f| f.layout_job(job))
+                })
+                .collect();
+            let heights: Vec<f32> = galleys
+                .iter()
+                .map(|g| g.size().y.max(code_line_height()))
+                .collect();
+            let tops = heights
+                .iter()
+                .scan(0.0, |top, height| {
+                    let line_top = *top;
+                    *top += height;
+                    Some(line_top)
+                })
+                .collect();
+            let width = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
+            self.files.rendered = Some(Rendered {
+                identity,
+                layout,
+                highlighted,
+                galleys,
+                tops,
+                heights,
+                width,
+            });
+        }
+        let Some(rendered) = &self.files.rendered else {
+            return;
         };
         let reveal = self
             .files
@@ -530,39 +623,8 @@ impl App {
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
                 let origin = ui.max_rect().min;
-                let galleys: Vec<std::sync::Arc<egui::Galley>> = lines
-                    .iter()
-                    .map(|line| {
-                        let mut job = egui::text::LayoutJob::default();
-                        for (text, color) in line {
-                            job.append(
-                                text,
-                                0.0,
-                                widgets::format(theme::code_font(), *color, code_line_height()),
-                            );
-                        }
-                        if line.is_empty() {
-                            job.append(
-                                " ",
-                                0.0,
-                                widgets::format(
-                                    theme::code_font(),
-                                    theme::code_foreground(),
-                                    code_line_height(),
-                                ),
-                            );
-                        }
-                        job.wrap.max_width = wrap_width;
-                        ui.fonts_mut(|f| f.layout_job(job))
-                    })
-                    .collect();
-                let height: f32 = galleys
-                    .iter()
-                    .map(|g| g.size().y.max(code_line_height()))
-                    .sum::<f32>()
-                    + 16.0;
-                let width =
-                    galleys.iter().map(|g| g.size().x).fold(0.0, f32::max) + code_left + 12.0;
+                let height = rendered.heights.iter().sum::<f32>() + 16.0;
+                let width = rendered.width + code_left + 12.0;
                 let area = Rect::from_min_size(origin, Vec2::new(width.max(rect.width()), height));
                 ui.painter().rect_filled(
                     Rect::from_min_size(origin, Vec2::new(area.width(), height)),
@@ -571,45 +633,56 @@ impl App {
                         theme::mix(p.background, p.overlay, 0.03)
                     }),
                 );
-                let mut y = origin.y + 8.0;
-                for (index, galley) in galleys.into_iter().enumerate() {
+                let top = origin.y + 8.0;
+                if let Some((line, scrolled)) = reveal
+                    && let Some(index) = line.checked_sub(1).filter(|i| *i < rendered.tops.len())
+                {
+                    // Pierre's selected line, as rendered on the stock theme.
+                    let row = Rect::from_min_size(
+                        Pos2::new(origin.x, top + rendered.tops[index]),
+                        Vec2::new(area.width(), rendered.heights[index]),
+                    );
+                    let gutter = Rect::from_min_max(
+                        row.min,
+                        Pos2::new(origin.x + number_right + 7.0, row.bottom()),
+                    );
+                    ui.painter().rect_filled(
+                        gutter,
+                        0.0,
+                        theme::stock_or(Color32::from_rgb(37, 69, 102), |p| {
+                            theme::mix(p.background, p.primary, 0.35)
+                        }),
+                    );
+                    ui.painter().rect_filled(
+                        Rect::from_min_max(Pos2::new(gutter.right() + 1.0, row.top()), row.max),
+                        0.0,
+                        theme::stock_or(Color32::from_rgb(32, 48, 68), |p| {
+                            theme::mix(p.background, p.primary, 0.2)
+                        }),
+                    );
+                    if !scrolled {
+                        ui.scroll_to_rect(row, Some(egui::Align::Center));
+                        revealed = true;
+                    }
+                }
+                // Only the lines in view are drawn.
+                let clip = ui.clip_rect();
+                let first = rendered
+                    .tops
+                    .partition_point(|t| top + t <= clip.top())
+                    .saturating_sub(1);
+                for index in first..rendered.galleys.len() {
+                    let y = top + rendered.tops[index];
+                    if y > clip.bottom() {
+                        break;
+                    }
                     let number = (index + 1).to_string();
                     let number_width = widgets::text_width(ui, &number, theme::code_font());
-                    let row_height = galley.size().y.max(code_line_height());
-                    let mut number_color = theme::muted_foreground();
-                    if let Some((line, scrolled)) = reveal
-                        && line == index + 1
-                    {
-                        // Pierre's selected line, as rendered on the stock theme.
-                        let row = Rect::from_min_size(
-                            Pos2::new(origin.x, y),
-                            Vec2::new(area.width(), row_height),
-                        );
-                        let gutter = Rect::from_min_max(
-                            row.min,
-                            Pos2::new(origin.x + number_right + 7.0, row.bottom()),
-                        );
-                        ui.painter().rect_filled(
-                            gutter,
-                            0.0,
-                            theme::stock_or(Color32::from_rgb(37, 69, 102), |p| {
-                                theme::mix(p.background, p.primary, 0.35)
-                            }),
-                        );
-                        ui.painter().rect_filled(
-                            Rect::from_min_max(Pos2::new(gutter.right() + 1.0, row.top()), row.max),
-                            0.0,
-                            theme::stock_or(Color32::from_rgb(32, 48, 68), |p| {
-                                theme::mix(p.background, p.primary, 0.2)
-                            }),
-                        );
-                        number_color =
-                            theme::stock_or(Color32::from_rgb(114, 182, 255), |p| p.primary);
-                        if !scrolled {
-                            ui.scroll_to_rect(row, Some(egui::Align::Center));
-                            revealed = true;
-                        }
-                    }
+                    let number_color = if reveal.is_some_and(|(line, _)| line == index + 1) {
+                        theme::stock_or(Color32::from_rgb(114, 182, 255), |p| p.primary)
+                    } else {
+                        theme::muted_foreground()
+                    };
                     widgets::text(
                         ui,
                         Pos2::new(origin.x + number_right - number_width, y),
@@ -620,10 +693,9 @@ impl App {
                     );
                     ui.painter().galley(
                         Pos2::new(origin.x + code_left, y),
-                        galley,
+                        rendered.galleys[index].clone(),
                         theme::code_foreground(),
                     );
-                    y += row_height;
                 }
                 ui.allocate_rect(area, Sense::hover());
             });
