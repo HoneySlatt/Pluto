@@ -150,7 +150,9 @@ pub struct App {
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
-    pub(crate) diff_contents: std::collections::HashMap<String, Result<Vec<String>, String>>,
+    pub(crate) diff_contents: std::collections::HashMap<String, Result<Arc<Vec<String>>, String>>,
+    /// Rows each wrapped diff cell takes, by its text and wrap width.
+    pub(crate) diff_rows: std::collections::HashMap<u64, usize>,
     /// Revealed context per (file key, gap): lines after the previous hunk
     /// and before the next.
     pub(crate) diff_expanded: std::collections::HashMap<(String, usize), (u32, u32)>,
@@ -410,6 +412,7 @@ impl App {
             diff_scope_menu: None,
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
+            diff_rows: Default::default(),
             diff_expanded: Default::default(),
             diff_base_refs: Default::default(),
             base_ref_query: String::new(),
@@ -1233,7 +1236,7 @@ impl App {
             let lines = result.map(|value| {
                 let text = value["newContents"].as_str().unwrap_or_default();
                 let text = text.strip_suffix('\n').unwrap_or(text);
-                text.split('\n').map(str::to_owned).collect()
+                Arc::new(text.split('\n').map(str::to_owned).collect())
             });
             self.diff_contents.insert(key, lines);
         } else if key.starts_with("keybinding-") {

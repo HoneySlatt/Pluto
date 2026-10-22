@@ -1156,7 +1156,7 @@ impl App {
         };
         let contents_key =
             source.map(|s| format!("diff-contents:{}\0{}\0{patch_hash:x}", s.key, file.path));
-        let contents: Option<Vec<String>> = contents_key
+        let contents: Option<std::sync::Arc<Vec<String>>> = contents_key
             .as_ref()
             .and_then(|k| self.diff_contents.get(k))
             .and_then(|r| r.as_ref().ok())
@@ -1193,7 +1193,7 @@ impl App {
                     ui,
                     GapPlace {
                         key: contents_key.as_deref().filter(|_| expandable),
-                        contents: contents.as_deref(),
+                        contents: contents.as_deref().map(Vec::as_slice),
                         index,
                         first: previous_end,
                         last: hunk.new_start - 1,
@@ -1213,6 +1213,16 @@ impl App {
             }
             if !self.diff_split {
                 for line in hunk.lines() {
+                    // Rows out of view keep their place without a layout.
+                    let height =
+                        self.cell_rows(ui, &line.text, content, shift) as f32 * code_line_height();
+                    if !ui.is_rect_visible(Rect::from_min_size(
+                        ui.cursor().min,
+                        Vec2::new(width, height),
+                    )) {
+                        ui.add_space(height);
+                        continue;
+                    }
                     let galley = self.code_galley(ui, line, &language, content, shift);
                     let height = galley.rows.len().max(1) as f32 * code_line_height();
                     let (row, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
@@ -1238,6 +1248,19 @@ impl App {
             }
             let right_width = content - left_width - 2.0;
             for (old, new) in rows {
+                let rows_of = |app: &Self, line: Option<&diff::Line>, column: f32| {
+                    line.map_or(1, |l| app.cell_rows(ui, &l.text, column, shift))
+                };
+                let height = rows_of(self, old, left_width).max(rows_of(self, new, right_width))
+                    as f32
+                    * code_line_height();
+                if !ui.is_rect_visible(Rect::from_min_size(
+                    ui.cursor().min,
+                    Vec2::new(width, height),
+                )) {
+                    ui.add_space(height);
+                    continue;
+                }
                 let old_galley = old.map(|l| self.code_galley(ui, l, &language, left_width, shift));
                 let new_galley =
                     new.map(|l| self.code_galley(ui, l, &language, right_width, shift));
@@ -1660,6 +1683,21 @@ impl App {
         (language, width, content, left_width, shift): (&str, f32, f32, f32, f32),
     ) {
         for line in lines {
+            let height = if self.diff_split {
+                let right_width = content - left_width - 2.0;
+                self.cell_rows(ui, &line.text, left_width, shift)
+                    .max(self.cell_rows(ui, &line.text, right_width, shift))
+            } else {
+                self.cell_rows(ui, &line.text, content, shift)
+            } as f32
+                * code_line_height();
+            if !ui.is_rect_visible(Rect::from_min_size(
+                ui.cursor().min,
+                Vec2::new(width, height),
+            )) {
+                ui.add_space(height);
+                continue;
+            }
             if !self.diff_split {
                 let galley = self.code_galley(ui, line, language, content, shift);
                 let height = galley.rows.len().max(1) as f32 * code_line_height();
@@ -1698,7 +1736,31 @@ impl App {
         } else {
             f32::INFINITY
         };
-        self.diff_line_galley(ui, line, language, wrap)
+        let galley = self.diff_line_galley(ui, line, language, wrap);
+        if self.diff_wrap {
+            if self.diff_rows.len() > 50_000 {
+                self.diff_rows.clear();
+            }
+            self.diff_rows
+                .insert(cell_key(&line.text, wrap), galley.rows.len().max(1));
+        }
+        galley
+    }
+
+    /// How many rows a cell takes: one unwrapped; wrapped, as many as when
+    /// it was last laid out, else an estimate from the monospace advance
+    /// (cells out of view are not laid out).
+    fn cell_rows(&self, ui: &Ui, text: &str, column: f32, shift: f32) -> usize {
+        if !self.diff_wrap {
+            return 1;
+        }
+        let wrap = column - CODE_TEXT - shift - 8.0;
+        if let Some(rows) = self.diff_rows.get(&cell_key(text, wrap)) {
+            return *rows;
+        }
+        let advance = widgets::text_width(ui, "0", theme::code_font()).max(1.0);
+        let per_row = ((wrap / advance).floor() as usize).max(1);
+        text.chars().count().div_ceil(per_row).max(1)
     }
 
     fn diff_line_galley(
@@ -1857,6 +1919,14 @@ const GUTTER: f32 = 47.0;
 const NUMBER_RIGHT: f32 = 40.0;
 const CODE_BG: f32 = 49.0;
 const CODE_TEXT: f32 = 57.0;
+
+/// A wrapped diff cell's key in `diff_rows`.
+fn cell_key(text: &str, wrap: f32) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (text, wrap.to_bits()).hash(&mut hasher);
+    hasher.finish()
+}
 
 /// One line in a column: change bar and tints, gutter number, emphasis and
 /// highlighted code.
