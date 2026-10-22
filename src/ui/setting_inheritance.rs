@@ -161,7 +161,13 @@ fn machine_icon(config: &Value) -> &'static str {
 }
 
 /// An `InlineButton`: medium text that underlines on hover.
-fn inline_button(ui: &mut Ui, pos: Pos2, id: impl egui::AsIdSalt, label: &str, size: f32) -> bool {
+pub(crate) fn inline_button(
+    ui: &mut Ui,
+    pos: Pos2,
+    id: impl egui::AsIdSalt,
+    label: &str,
+    size: f32,
+) -> bool {
     let label_font = font(size, Weight::Medium);
     let line = widgets::line_height_for(size);
     let width = widgets::text_width(ui, label, label_font.clone());

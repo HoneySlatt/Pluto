@@ -286,6 +286,28 @@ impl App {
                 (id, models)
             })
             .collect();
+        // `shouldOfferModelPickerSetup`: instances that can be installed or
+        // signed in stay selectable and show their setup notice.
+        let setup: std::collections::HashMap<String, (String, String)> = providers
+            .iter()
+            .filter(|p| {
+                let id = p["instanceId"].as_str().unwrap_or_default();
+                let models = model_lists.get(id).map(Vec::as_slice).unwrap_or_default();
+                p["enabled"] != false
+                    && p["status"] != "disabled"
+                    && has_provider_setup(p)
+                    && (!ready(p)
+                        || p["installed"] == false
+                        || p["auth"]["status"] == "unauthenticated"
+                        || models.iter().all(|m| m["isUnavailable"] == true))
+            })
+            .map(|p| {
+                let id = p["instanceId"].as_str().unwrap_or_default().to_owned();
+                let name = p["displayName"].as_str().unwrap_or(&id).to_owned();
+                (id, (name, provider_status_message(p)))
+            })
+            .collect();
+        let mut open_setup: Option<String> = None;
         let bindings = self.state.config["keybindings"].clone();
         let jump = self.picker_jump.take();
         // `adjacentModelPickerProvider`: Favorites, then the ready instances,
@@ -376,7 +398,7 @@ impl App {
                 let driver = provider["driver"].as_str().unwrap_or_default();
                 let (icon, tint) =
                     provider_icon(driver).unwrap_or(("circle-alert", theme::muted_foreground()));
-                let enabled = ready(provider);
+                let enabled = ready(provider) || setup.contains_key(&id);
                 let slot = Rect::from_min_size(Pos2::new(rail.left() + 12.0, y), Vec2::splat(20.0));
                 let response = rail_button(
                     ui,
@@ -409,7 +431,7 @@ impl App {
                 let label = provider["displayName"].as_str().unwrap_or(&id).to_owned();
                 let tooltip = if provider["enabled"] == false || provider["status"] == "disabled" {
                     format!("{label} — Disabled in settings.")
-                } else if enabled {
+                } else if ready(provider) {
                     label
                 } else {
                     let kind = match provider["status"].as_str() {
@@ -501,9 +523,97 @@ impl App {
                 current.sort_by_key(|entry| !favorite(entry));
                 legacy.sort_by_key(|entry| !favorite(entry));
             }
+            // The setup notices of the selected instance (or, on an empty
+            // Favorites tab, every one), under the list.
+            let notices: Vec<(&String, &(String, String))> = if needle.is_empty() {
+                setup
+                    .iter()
+                    .filter(|(id, _)| {
+                        **id == active
+                            || (active == FAVORITES && current.is_empty() && legacy.is_empty())
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let notice_font = font(12.0, Weight::Regular);
+            let notice_heights: Vec<f32> = notices
+                .iter()
+                .map(|(_, (_, message))| {
+                    let lines = widgets::galley(
+                        ui,
+                        message,
+                        notice_font.clone(),
+                        theme::muted_foreground(),
+                        16.0,
+                        content.width() - 1.0 - 16.0 - 8.0,
+                    )
+                    .rows
+                    .len()
+                    .min(3) as f32;
+                    6.0 + lines * 16.0 + 4.0 + 16.0 + 6.0
+                })
+                .collect();
+            let notices_height = if notices.is_empty() {
+                0.0
+            } else {
+                (notice_heights.iter().sum::<f32>() + 16.0 + 1.0).min(176.0)
+            };
+            if !notices.is_empty() {
+                // `border-t border-border/70 p-2`, then each notice.
+                let panel = Rect::from_min_max(
+                    Pos2::new(content.left() + 1.0, content.bottom() - notices_height),
+                    content.max,
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(panel.min, Vec2::new(panel.width(), 1.0)),
+                    0.0,
+                    theme::alpha(theme::border(), 0.7),
+                );
+                let mut y = panel.top() + 1.0 + 8.0;
+                for ((id, (name, message)), height) in notices.iter().zip(&notice_heights) {
+                    let galley = widgets::galley(
+                        ui,
+                        message,
+                        notice_font.clone(),
+                        theme::muted_foreground(),
+                        16.0,
+                        panel.width() - 16.0 - 8.0,
+                    );
+                    let text_height = galley.size().y.min(48.0);
+                    ui.painter()
+                        .with_clip_rect(Rect::from_min_size(
+                            Pos2::new(panel.left() + 12.0, y + 6.0),
+                            Vec2::new(panel.width() - 24.0, text_height),
+                        ))
+                        .galley(
+                            Pos2::new(panel.left() + 12.0, y + 6.0),
+                            galley,
+                            theme::muted_foreground(),
+                        );
+                    let label = if notices.len() > 1 {
+                        format!("Set up {name}")
+                    } else {
+                        "Open provider setup".to_owned()
+                    };
+                    if crate::ui::setting_inheritance::inline_button(
+                        ui,
+                        Pos2::new(panel.left() + 12.0, y + 6.0 + text_height + 4.0),
+                        ("picker-setup", *id),
+                        &label,
+                        12.0,
+                    ) {
+                        open_setup = Some((*id).clone());
+                    }
+                    y += height;
+                }
+            }
             let list = Rect::from_min_max(
                 Pos2::new(content.left() + 13.0, search.bottom() + 11.0),
-                Pos2::new(content.right() - 12.0, content.bottom() - 8.0),
+                Pos2::new(
+                    content.right() - 12.0,
+                    content.bottom() - 8.0 - notices_height,
+                ),
             );
             let mut list_ui = ui.new_child(eframe::egui::UiBuilder::new().max_rect(list));
             eframe::egui::ScrollArea::vertical()
@@ -527,11 +637,11 @@ impl App {
                             options: None,
                         });
                     }
-                    if rows.is_empty() && legacy.is_empty() {
+                    if rows.is_empty() && legacy.is_empty() && notices.is_empty() {
                         widgets::text(
                             ui,
                             ui.cursor().min + Vec2::new(8.0, 8.0),
-                            "No models",
+                            "No models found",
                             font(12.0, Weight::Regular),
                             theme::muted_foreground(),
                             16.0,
@@ -713,6 +823,13 @@ impl App {
         if chosen.is_some() {
             self.open_menu = None;
         }
+        // `openProviderSetup`: Settings → Providers on that instance.
+        if let Some(id) = open_setup {
+            self.open_menu = None;
+            self.open_settings();
+            self.open_settings_page(crate::ui::settings::PROVIDERS_PAGE);
+            self.providers_selected = Some(id);
+        }
         if self.open_menu.is_none() {
             self.picker_provider = None;
             self.picker_query.clear();
@@ -757,6 +874,79 @@ impl App {
                 .unwrap_or(usize::MAX)
         });
         models
+    }
+}
+
+/// `formatProviderDriverKindLabel`: "claudeAgent" reads "Claude Agent".
+fn driver_kind_label(driver: &str) -> String {
+    let mut spaced = String::new();
+    let mut previous_lower = false;
+    for c in driver.chars() {
+        if c.is_ascii_uppercase() && previous_lower {
+            spaced.push(' ');
+        }
+        previous_lower = c.is_ascii_lowercase();
+        spaced.push(if c == '_' || c == '-' { ' ' } else { c });
+    }
+    spaced
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `hasProviderSetup`.
+fn has_provider_setup(provider: &Value) -> bool {
+    provider["driver"] == "antigravity"
+        || provider["setup"]["canAuthenticate"] == true
+        || provider["setup"]["canInstall"] == true
+}
+
+/// `getProviderStatusMessage`: broken-version guidance first, then the
+/// server's message, then what setup or sign-in would fix.
+fn provider_status_message(provider: &Value) -> String {
+    let unauthenticated = provider["auth"]["status"] == "unauthenticated";
+    let advisory = &provider["compatibilityAdvisory"];
+    if !unauthenticated
+        && advisory["status"] == "broken"
+        && let Some(message) = advisory["message"].as_str().filter(|m| !m.is_empty())
+    {
+        return message.to_owned();
+    }
+    if let Some(message) = provider["message"].as_str().filter(|m| !m.is_empty()) {
+        return message.to_owned();
+    }
+    let driver = provider["driver"].as_str().unwrap_or_default();
+    let kind = driver_kind_label(driver);
+    let name = provider["displayName"]
+        .as_str()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&kind)
+        .to_owned();
+    if provider["installed"] == false && has_provider_setup(provider) {
+        return format!("Open provider setup to install {kind} on this environment.");
+    }
+    if unauthenticated {
+        if has_provider_setup(provider) {
+            return if driver == "antigravity" {
+                "Open provider setup to sign in with Google.".into()
+            } else {
+                "Open provider setup to sign in.".into()
+            };
+        }
+        return "Sign in via the CLI to authenticate again.".into();
+    }
+    match provider["status"].as_str() {
+        Some("ready") => "No models are available for this provider.".into(),
+        Some("error") => format!("{name} provider is unavailable."),
+        _ => format!("{name} provider has limited availability."),
     }
 }
 
@@ -855,4 +1045,27 @@ fn paint_kbd(ui: &Ui, label: &str, right: f32, center_y: f32) {
         rect.max,
     );
     widgets::text_in(ui, text, label, label_font, theme::muted_foreground());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn driver_kinds_read_as_words() {
+        assert_eq!(driver_kind_label("claudeAgent"), "Claude Agent");
+        assert_eq!(driver_kind_label("opencode"), "Opencode");
+    }
+
+    #[test]
+    fn status_messages_explain_the_fix() {
+        let provider = serde_json::json!({
+            "driver": "opencode", "installed": false, "status": "error",
+            "auth": {"status": "unknown"}, "setup": {"canInstall": true},
+        });
+        assert_eq!(
+            provider_status_message(&provider),
+            "Open provider setup to install Opencode on this environment."
+        );
+    }
 }
