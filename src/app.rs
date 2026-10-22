@@ -97,6 +97,8 @@ pub struct App {
     /// and whether Copy applies, both read when it opened.
     pub(crate) text_menu: Option<(crate::ui::context_menu::State, Option<String>, bool)>,
     pub(crate) pending_copy: bool,
+    /// Citing assistant text (`cite`).
+    pub(crate) cite: crate::ui::cite::CiteState,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -362,6 +364,7 @@ impl App {
             legacy_streams: false,
             text_menu: None,
             pending_copy: false,
+            cite: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -957,6 +960,7 @@ impl eframe::App for App {
                 self.sidebar(ui, sidebar);
                 self.thread_menu(ui);
                 self.text_menu(ui);
+                self.cite_overlays(ui);
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);

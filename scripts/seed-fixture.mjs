@@ -211,7 +211,15 @@ tool(web1, web1Turn, "Image view", "image_view", undefined, 89, {
     savedPath: path.join(generatedDir, `${web1Call}.png`),
   },
 }, web1Call);
-message(web1, "assistant", "Voici ta pomme rouge 🍎", 88, web1Turn);
+const web1Answer = message(web1, "assistant", "Voici ta pomme rouge 🍎", 88, web1Turn);
+// A follow-up citing the answer (`serializeAssistantCitation`).
+const environmentId = fs.readFileSync(path.join(baseDir, "userdata", "environment-id"), "utf8").trim();
+const citePath = [environmentId, web1, web1Answer].map(encodeURIComponent).join("/");
+const citeQuery = new URLSearchParams({
+  text: "pomme rouge", start: "9", end: "20", prefix: "Voici ta ", suffix: " 🍎",
+});
+message(web1, "user", `[Assistant quote](t3-citation://v1/${citePath}?${citeQuery}) Tu peux la rendre plus grosse ?`, 87);
+message(web1, "assistant", "Bien sûr, la voici en plus grand.", 86, randomUUID());
 
 // A synthetic 320x240 PNG (a red disc on a sky gradient), stored like an
 // uploaded image (`<thread segment>-<uuid>.png` in the attachments dir).

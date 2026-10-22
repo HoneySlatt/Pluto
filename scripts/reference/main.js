@@ -37,7 +37,8 @@ app.whenReady().then(async () => {
   // CLICKS points prefixed with "r" (e.g. "r60,150") are right clicks and
   // points prefixed with "m" only move the pointer there (hover); "c" and "s"
   // hold Ctrl or Shift for the click.
-  for (const point of (process.env.CLICKS || "").split(";").filter(Boolean)) {
+  const click = async (points) => {
+  for (const point of (points || "").split(";").filter(Boolean)) {
     const button = point.startsWith("r") ? "right" : "left";
     const modifiers = point.startsWith("c") ? ["control"] : point.startsWith("s") ? ["shift"] : [];
     const [x, y] = point.replace(/^[rmcs]/, "").split(",").map((v) => Math.round(v * scale));
@@ -50,8 +51,11 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: 1, modifiers });
     await sleep(800);
   }
+  };
+  await click(process.env.CLICKS);
   // DRAG="x1,y1,x2,y2" presses at the first point and moves to the second
-  // without releasing, for a mid-drag capture.
+  // without releasing, for a mid-drag capture; with DRAG_RELEASE it releases
+  // there, then clicks the AFTER points (CLICKS syntax).
   if (process.env.DRAG) {
     const [x1, y1, x2, y2] = process.env.DRAG.split(",").map((v) => Math.round(v * scale));
     win.webContents.sendInputEvent({ type: "mouseMove", x: x1, y: y1 });
@@ -62,7 +66,11 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: "mouseMove", x, y, button: "left", modifiers: ["leftbuttondown"] });
       await sleep(40);
     }
+    if (process.env.DRAG_RELEASE) {
+      win.webContents.sendInputEvent({ type: "mouseUp", x: x2, y: y2, button: "left", clickCount: 1 });
+    }
     await sleep(800);
+    await click(process.env.AFTER);
   }
   // KEYS="Ctrl+K;Escape" sends key chords (modifiers joined with +).
   for (const chord of (process.env.KEYS || "").split(";").filter(Boolean)) {

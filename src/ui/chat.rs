@@ -6,7 +6,8 @@ use crate::app::App;
 use crate::model::{Message, Project};
 use crate::theme::{self, Weight, font};
 use crate::timeline::{self, Row, WorkEntry};
-use crate::ui::markdown::Markdown;
+use crate::ui::citations;
+use crate::ui::markdown::{Markdown, PlainText};
 use crate::ui::{attachments, project_icon, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
@@ -36,6 +37,7 @@ impl App {
             let timeline_width = theme::CHAT_WIDTH.min(body.width() - 52.0);
             let timeline_left = (body.center().x - timeline_width / 2.0).round();
             self.timeline(ui, body, timeline_left, timeline_width, overlay);
+            self.cite_selection(ui, body);
             ui.painter().rect_filled(
                 Rect::from_min_max(
                     Pos2::new(column_left, composer_top + 22.0),
@@ -323,7 +325,24 @@ impl App {
         let Some(thread) = self.current_thread() else {
             return;
         };
-        let rows = timeline::rows(&thread, &self.expansion);
+        let mut rows = timeline::rows(&thread, &self.expansion);
+        // A revealed citation's message: its folded turn opens, and the
+        // timeline stops following its end until it is in view.
+        if let Some(message_id) = self.citation_scroll_target(&thread.id) {
+            let shown = rows
+                .iter()
+                .any(|r| matches!(r, Row::Assistant { message, .. } if message.id == message_id));
+            let turn = thread
+                .messages
+                .iter()
+                .find(|m| m.id == message_id)
+                .and_then(|m| m.turn_id.clone());
+            if !shown && let Some(turn) = turn {
+                self.expansion.turns.insert(turn);
+                rows = timeline::rows(&thread, &self.expansion);
+            }
+            self.keep_scroll = true;
+        }
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         egui::ScrollArea::vertical()
             .id_salt(("timeline", &thread.id))
@@ -540,14 +559,27 @@ impl App {
 
     fn user_row(&mut self, ui: &mut Ui, message: &Message, width: f32) {
         let max_width = (width * 0.8).floor();
+        let text = message.text.trim_end();
         let galley = widgets::galley(
             ui,
-            message.text.trim_end(),
+            text,
             font(14.0, Weight::Regular),
             theme::foreground(),
             MESSAGE_LINE,
             max_width - 24.0,
         );
+        // Citation links show as their chips.
+        let rich = (!citations::collect(text).is_empty()).then(|| {
+            PlainText::layout(
+                ui,
+                text,
+                14.0,
+                MESSAGE_LINE,
+                theme::foreground(),
+                max_width - 24.0,
+            )
+        });
+        let text_size = rich.as_ref().map_or(galley.size(), PlainText::size);
         // Image attachments sit above the text (`mb-2`).
         let images = attachments::images(&message.attachments);
         let (grid_height, cell) = attachments::grid_size(images.len(), max_width - 24.0);
@@ -556,10 +588,7 @@ impl App {
         } else {
             Vec2::new(2.0 * cell.x + 8.0, grid_height + 8.0)
         };
-        let bubble_size = Vec2::new(
-            galley.size().x.max(grid.x) + 24.0,
-            grid.y + galley.size().y + 24.0,
-        );
+        let bubble_size = Vec2::new(text_size.x.max(grid.x) + 24.0, grid.y + text_size.y + 24.0);
         let (row_rect, response) =
             ui.allocate_exact_size(Vec2::new(width, bubble_size.y + 4.0 + 24.0), Sense::hover());
         let bubble = Rect::from_min_size(
@@ -597,13 +626,15 @@ impl App {
                 self.open_lightbox(items, start);
             }
         }
-        widgets::selectable_galley(
-            ui,
-            ui.id().with(("user-text", &message.id)),
-            bubble.min + Vec2::new(12.0, 12.0 + grid.y),
-            galley,
-            theme::foreground(),
-        );
+        let text_pos = bubble.min + Vec2::new(12.0, 12.0 + grid.y);
+        let text_id = ui.id().with(("user-text", &message.id));
+        if let Some(rich) = rich {
+            if let Some(citation) = rich.paint(ui, text_pos, text_id) {
+                self.open_citation_source(&citation);
+            }
+        } else {
+            widgets::selectable_galley(ui, text_id, text_pos, galley, theme::foreground());
+        }
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
             let meta_top = bubble.bottom() + 4.0;
             let copy = Rect::from_min_size(
@@ -657,14 +688,25 @@ impl App {
             Vec2::new(width - 8.0, f32::INFINITY),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+            let highlight = self.citation_highlight(ui.ctx(), &message.id);
+            let plugin = ui.ctx().plugin::<widgets::CopyCleanup>();
+            // The message's text can be cited (`data-assistant-citation-source`).
+            plugin.lock().source = Some(message.id.clone());
             let mut markdown = Markdown::new(
                 &mut self.highlighter,
                 ui.id().with(("markdown", &message.id)),
             );
+            markdown.highlight = highlight;
             markdown.show(ui, text, width - 8.0);
+            plugin.lock().source = None;
+            let opened_file = markdown.opened_file.take();
+            let opened_citation = markdown.opened_citation.take();
             // `openFileInPanel`: a file chip opens in the right panel.
-            if let Some(file) = markdown.opened_file.take() {
+            if let Some(file) = opened_file {
                 self.open_markdown_file(&file.path);
+            }
+            if let Some(citation) = opened_citation {
+                self.open_citation_source(&citation);
             }
             if let Some((turn_id, files)) = changes {
                 ui.add_space(16.0);
@@ -672,6 +714,23 @@ impl App {
             }
         });
         ui.add_space(2.0);
+        // A revealed citation's message scrolls into view, then pulses.
+        if self
+            .cite
+            .target
+            .as_ref()
+            .is_some_and(|t| t.message_id == message.id)
+            && self.current_thread().is_some_and(|t| {
+                self.citation_scroll_target(&t.id).as_deref() == Some(message.id.as_str())
+            })
+        {
+            let rect = Rect::from_min_max(
+                Pos2::new(left, top),
+                Pos2::new(left + width, ui.cursor().top()),
+            );
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            self.citation_revealed(ui.ctx());
+        }
         if show_meta {
             ui.add_space(6.0);
             let (meta, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());

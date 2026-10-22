@@ -192,6 +192,13 @@ pub fn selectable_galley(
         let plugin = ui.ctx().plugin::<CopyCleanup>();
         let mut plugin = plugin.lock();
         plugin.rects.push(rect);
+        if let Some(source) = plugin.source.clone() {
+            plugin.sourced.push(Sourced {
+                source,
+                pos,
+                galley: galley.clone(),
+            });
+        }
         if response.dragged() || response.double_clicked() || response.triple_clicked() {
             plugin.has_range = true;
         }
@@ -224,6 +231,15 @@ pub fn selectable_galley(
         Stroke::NONE,
     );
     response
+}
+
+/// A selectable galley of an assistant message, for citing its text.
+#[derive(Clone)]
+pub struct Sourced {
+    /// The message id.
+    pub source: String,
+    pub pos: Pos2,
+    pub galley: Arc<Galley>,
 }
 
 /// Where a right click on selectable text asks for the text menu: the
@@ -259,6 +275,10 @@ pub struct CopyCleanup {
     pub has_range: bool,
     /// A right click being kept from egui, press through release.
     intercepting: bool,
+    /// The assistant message whose text is being drawn, and this pass's
+    /// galleys of assistant messages (`cite`).
+    pub source: Option<String>,
+    pub sourced: Vec<Sourced>,
 }
 
 impl egui::Plugin for CopyCleanup {
@@ -304,6 +324,7 @@ impl egui::Plugin for CopyCleanup {
 
     fn on_begin_pass(&mut self, ui: &mut Ui) {
         self.collected.clear();
+        self.sourced.clear();
         self.last_rects = std::mem::take(&mut self.rects);
         if !self.menu_open && ui.input(|i| i.pointer.primary_pressed()) {
             self.has_range = false;
@@ -328,7 +349,9 @@ impl egui::Plugin for CopyCleanup {
     fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
         for command in &mut output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
-                *text = text.replace("\u{200B}\n", "").replace('\u{a0}', " ");
+                *text = crate::ui::cite::restore_copied(
+                    &text.replace("\u{200B}\n", "").replace('\u{a0}', " "),
+                );
             }
         }
         if self.capture > 0 {

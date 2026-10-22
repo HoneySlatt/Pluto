@@ -897,6 +897,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "diffs-symbol-moved",
         "pin-off",
         "pencil",
+        "quote",
         "refresh-cw",
         "hash",
         "archive",

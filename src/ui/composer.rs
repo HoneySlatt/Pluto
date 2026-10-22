@@ -11,7 +11,7 @@ use crate::model::{ModelSelection, now_iso};
 use crate::requests::{PendingApproval, PendingUserInput};
 use crate::theme::{self, Weight, font};
 use crate::ui::requests_panel::OVERLAP;
-use crate::ui::widgets;
+use crate::ui::{cite, widgets};
 
 const MIN_TEXT_HEIGHT: f32 = 70.0;
 const MAX_TEXT_HEIGHT: f32 = 200.0;
@@ -129,14 +129,9 @@ impl App {
     }
 
     fn composer_text_height(&self, ui: &Ui, width: f32) -> f32 {
-        let galley = widgets::galley(
-            ui,
-            &self.composer,
-            theme::composer_font(),
-            theme::foreground(),
-            theme::composer_line(),
-            width - 34.0,
-        );
+        let collapsed = cite::collapse(&self.composer);
+        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
+        let galley = cite::composer_galley(ui, &collapsed.display, &labels, width - 34.0);
         galley.size().y.clamp(MIN_TEXT_HEIGHT, MAX_TEXT_HEIGHT)
     }
 
@@ -281,37 +276,41 @@ impl App {
 
         // Prompt editor.
         let editor_id = ui.id().with("composer-editor");
+        self.cite.editor_id = Some(editor_id);
         let focused = ui.memory(|m| m.has_focus(editor_id));
-        let submit = focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
+        // Ctrl+Enter in a citation's comment editor sends too.
+        let submit = (focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
+            || std::mem::take(&mut self.cite.send);
+        // Citation links are edited as chips, one character each.
+        cite::pad_chips(&mut self.composer);
+        let collapsed = cite::collapse(&self.composer);
+        cite::set_copy_tokens(&collapsed);
+        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
+        let mut display = collapsed.display.clone();
         let mut editor_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
         egui::ScrollArea::vertical()
             .id_salt("composer-scroll")
             .max_height(text_height)
             .show(&mut editor_ui, |ui| {
-                ui.add_sized(
-                    Vec2::new(text_rect.width(), text_height),
-                    egui::TextEdit::multiline(&mut self.composer)
-                        .id(editor_id)
-                        .frame(egui::Frame::NONE)
-                        .margin(egui::Margin::ZERO)
-                        .font(theme::composer_font())
-                        .text_color(theme::foreground())
-                        .desired_width(text_rect.width())
-                        .layouter(&mut |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                            let mut job = egui::text::LayoutJob::default();
-                            job.append(
-                                text.as_str(),
-                                0.0,
-                                widgets::format(
-                                    theme::composer_font(),
-                                    theme::foreground(),
-                                    theme::composer_line(),
-                                ),
-                            );
-                            job.wrap.max_width = wrap;
-                            widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)))
-                        }),
-                );
+                let output = egui::TextEdit::multiline(&mut display)
+                    .id(editor_id)
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO)
+                    .font(theme::composer_font())
+                    .text_color(theme::foreground())
+                    .desired_width(text_rect.width())
+                    .min_size(Vec2::new(text_rect.width(), text_height))
+                    .layouter(&mut |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                        cite::composer_galley(ui, text.as_str(), &labels, wrap)
+                    })
+                    .show(ui);
+                if display != collapsed.display {
+                    self.composer = cite::expand(&display, &collapsed.tokens);
+                    if cite::collapse(&self.composer).display != display {
+                        self.remap_composer_caret(ui.ctx(), &display, &collapsed.tokens);
+                    }
+                }
+                self.composer_chips(ui, &output.galley, output.galley_pos, &collapsed);
             });
 
         // An image paste: egui only pastes text, and drops a paste the text
@@ -970,7 +969,11 @@ impl App {
         }
         let runtime = self.composer_runtime_mode(draft);
         let now = now_iso();
-        let title = title_seed(&text, &self.composer_images);
+        // `assistantCitationsToPlainText`: titles read quotes, not links.
+        let title = title_seed(
+            crate::ui::citations::to_plain_text(&text).trim(),
+            &self.composer_images,
+        );
         let model = self.composer_model_json(draft);
         let (thread_id, interaction, bootstrap) = if draft {
             let Some(project) = self.draft_project() else {

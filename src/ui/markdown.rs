@@ -14,6 +14,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 
 use crate::highlight::Highlighter;
 use crate::theme::{self, Weight, font};
+use crate::ui::citations::{self, Citation};
 use crate::ui::md_links::{self, FileRef};
 use crate::ui::widgets;
 
@@ -36,6 +37,8 @@ enum Inline {
     Code(String),
     /// A file reference, drawn as a chip.
     File(FileRef),
+    /// An assistant citation link, drawn as its chip.
+    Citation(Citation),
     Break,
 }
 
@@ -45,6 +48,20 @@ fn code_inline(code: &str) -> Inline {
     md_links::inline_code_candidate(code)
         .and_then(|candidate| md_links::parse_file_link(&candidate))
         .map_or_else(|| Inline::Code(code.to_owned()), Inline::File)
+}
+
+/// A link drawn as a chip: an assistant citation or a file reference.
+fn link_chip(href: &str) -> Option<Inline> {
+    citations::parse_href(href)
+        .map(Inline::Citation)
+        .or_else(|| md_links::parse_file_link(href).map(Inline::File))
+}
+
+/// A chip of the inline layout and what a click on it opens.
+#[derive(Clone, Debug)]
+pub(crate) enum ChipRef {
+    File(FileRef),
+    Citation(Citation),
 }
 
 /// Skips a link's content up to and past its end.
@@ -249,11 +266,11 @@ fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => match md_links::parse_file_link(dest_url) {
-                Some(file) => {
+            Event::Start(Tag::Link { dest_url, .. }) => match link_chip(dest_url) {
+                Some(chip) => {
                     *index += 1;
                     skip_link(events, index);
-                    out.push(Inline::File(file));
+                    out.push(chip);
                     continue;
                 }
                 None => style.link = Some(dest_url.to_string()),
@@ -296,10 +313,10 @@ fn parse_inlines(events: &[Event], index: &mut usize, end: TagEnd) -> Vec<Inline
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => match md_links::parse_file_link(dest_url) {
-                Some(file) => {
+            Event::Start(Tag::Link { dest_url, .. }) => match link_chip(dest_url) {
+                Some(chip) => {
                     skip_link(events, index);
-                    out.push(Inline::File(file));
+                    out.push(chip);
                 }
                 None => style.link = Some(dest_url.to_string()),
             },
@@ -324,13 +341,30 @@ struct Inlines {
     galley: Arc<Galley>,
     /// Section index → inline code chip group.
     chips: Vec<Option<usize>>,
-    /// Section index → file chip group and its file.
-    files: Vec<Option<(usize, FileRef)>>,
+    /// Section index → file or citation chip group and its target.
+    files: Vec<Option<(usize, ChipRef)>>,
     /// Section index → the icon a link's leading space holds.
     icons: Vec<Option<md_links::LinkIcon>>,
     links: Vec<Option<String>>,
     /// The text size (chip metrics are in em).
     size: f32,
+}
+
+/// `label` cut with an ellipsis to fit `max_width` in `font` (CSS `truncate`).
+fn truncate_label(ui: &Ui, label: &str, font: &egui::FontId, max_width: f32) -> String {
+    if widgets::text_width(ui, label, font.clone()) <= max_width {
+        return label.to_owned();
+    }
+    let chars: Vec<char> = label.chars().collect();
+    let mut keep = chars.len();
+    while keep > 0 {
+        keep -= 1;
+        let candidate: String = chars[..keep].iter().collect::<String>() + "…";
+        if widgets::text_width(ui, &candidate, font.clone()) <= max_width {
+            return candidate;
+        }
+    }
+    "…".to_owned()
 }
 
 /// A file chip's room before its label: the border, the padding, the icon
@@ -376,7 +410,7 @@ fn build_inlines(
     let newline = widgets::format(font(size, base_weight), Color32::TRANSPARENT, line_height);
     let break_before = |job: &mut LayoutJob,
                         chips: &mut Vec<Option<usize>>,
-                        files: &mut Vec<Option<(usize, FileRef)>>,
+                        files: &mut Vec<Option<(usize, ChipRef)>>,
                         icons: &mut Vec<Option<md_links::LinkIcon>>,
                         links: &mut Vec<Option<String>>,
                         inserted: &mut Vec<usize>| {
@@ -472,7 +506,42 @@ fn build_inlines(
                 );
                 for _ in 0..2 {
                     chips.push(None);
-                    files.push(Some((file_chip, file.clone())));
+                    files.push(Some((file_chip, ChipRef::File(file.clone()))));
+                    icons.push(None);
+                    links.push(None);
+                }
+                file_chip += 1;
+            }
+            Inline::Citation(citation) => {
+                // `AssistantCitationChip`: the quote icon and the label
+                // truncated at 16em, laid out like a file chip.
+                let chip_size = size * 0.86;
+                let chip_font = font(chip_size, Weight::Medium);
+                let label = truncate_label(ui, &citation.label(), &chip_font, 16.0 * chip_size)
+                    .replace(' ', "\u{a0}");
+                // Inside chat text the source link takes the link color.
+                let text = INFO_FOREGROUND;
+                break_before(
+                    &mut job,
+                    &mut chips,
+                    &mut files,
+                    &mut icons,
+                    &mut links,
+                    &mut inserted,
+                );
+                job.append(
+                    &label,
+                    chip_lead(chip_size),
+                    widgets::format(chip_font.clone(), text, line_height),
+                );
+                job.append(
+                    "\u{a0}",
+                    0.0,
+                    spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
+                );
+                for _ in 0..2 {
+                    chips.push(None);
+                    files.push(Some((file_chip, ChipRef::Citation(citation.clone()))));
                     icons.push(None);
                     links.push(None);
                 }
@@ -615,20 +684,73 @@ fn char_sections(galley: &Galley) -> Vec<usize> {
         .collect()
 }
 
+/// A cited quote marked in the galley (`::highlight(t3-assistant-citation)`:
+/// the primary color at `alpha`); a quote spanning blocks is matched line
+/// by line.
+fn paint_quote_highlight(ui: &Ui, pos: Pos2, galley: &Galley, quote: &str, alpha: f32) {
+    if alpha <= 0.0 {
+        return;
+    }
+    let text = galley.text();
+    let color = theme::primary().gamma_multiply(alpha);
+    for piece in quote.split('\n').map(str::trim).filter(|p| !p.is_empty()) {
+        let Some((start, end)) = citations::find_quote(text, piece, 0) else {
+            continue;
+        };
+        let range = text[..start].chars().count()..text[..end].chars().count();
+        let mut char_index = 0usize;
+        for placed in &galley.rows {
+            let mut span: Option<(f32, f32)> = None;
+            for glyph in &placed.row.glyphs {
+                if range.contains(&char_index) {
+                    let right = glyph.pos.x + glyph.advance_width;
+                    span = Some(span.map_or((glyph.pos.x, right), |(l, _)| (l, right)));
+                }
+                char_index += 1;
+            }
+            if let Some((left, right)) = span {
+                let row = placed.rect().translate(pos.to_vec2());
+                ui.painter().rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(pos.x + placed.pos.x + left, row.top()),
+                        Pos2::new(pos.x + placed.pos.x + right, row.bottom()),
+                    ),
+                    0.0,
+                    color,
+                );
+            }
+            if placed.ends_with_newline {
+                char_index += 1;
+            }
+        }
+    }
+}
+
 /// Paints inline text, chip backgrounds and icons, and handles link clicks;
-/// returns a file chip that was clicked.
-fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Option<FileRef> {
+/// returns a file or citation chip that was clicked.
+fn paint_inlines(
+    ui: &mut Ui,
+    pos: Pos2,
+    inlines: &Inlines,
+    id: egui::Id,
+    highlight: Option<&(String, f32)>,
+) -> Option<ChipRef> {
     let painter = ui.painter().clone();
+    if let Some((quote, alpha)) = highlight {
+        paint_quote_highlight(ui, pos, &inlines.galley, quote, *alpha);
+    }
     let sections = char_sections(&inlines.galley);
     let chip_size = inlines.size * 0.86;
     let [chip_border, chip_fill, _] =
         md_links::mention_colors(theme::border(), theme::foreground());
-    let mut file_rects: Vec<(Rect, FileRef)> = Vec::new();
+    let [citation_border, citation_fill, _] = citations::chip_colors();
+    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let mut file_rects: Vec<(Rect, ChipRef)> = Vec::new();
     // Rows hold one glyph per character; a trailing `\n` is omitted.
     let mut char_index = 0usize;
     for placed in &inlines.galley.rows {
         let mut run: Option<(usize, f32, f32)> = None;
-        let mut file_run: Option<(usize, f32, f32, FileRef)> = None;
+        let mut file_run: Option<(usize, f32, f32, ChipRef)> = None;
         let row_top = pos.y + placed.pos.y;
         let row_height = placed.row.size.y;
         let row_x = pos.x + placed.pos.x;
@@ -650,8 +772,8 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
             }
         };
         // A file chip: the fill, the border over it, the file-type icon.
-        let mut flush_file = |file_run: &mut Option<(usize, f32, f32, FileRef)>| {
-            if let Some((_, left, right, file)) = file_run.take() {
+        let mut flush_file = |file_run: &mut Option<(usize, f32, f32, ChipRef)>| {
+            if let Some((_, left, right, chip)) = file_run.take() {
                 let height = (1.41 * chip_size).round();
                 let top = row_top + ((row_height - height) / 2.0).round();
                 let rect = Rect::from_min_max(
@@ -659,13 +781,18 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
                     Pos2::new((row_x + right).round(), top + height),
                 );
                 let radius = CornerRadius::same((0.5 * chip_size).round() as u8);
-                painter.rect_filled(rect, radius, chip_fill);
-                painter.rect_stroke(
-                    rect,
-                    radius,
-                    Stroke::new(1.0, chip_border),
-                    StrokeKind::Inside,
-                );
+                let (fill, border) = match chip {
+                    ChipRef::File(_) => (chip_fill, chip_border),
+                    ChipRef::Citation(_) => (citation_fill, citation_border),
+                };
+                painter.rect_filled(rect, radius, fill);
+                // A citation's source link tints on hover.
+                if matches!(chip, ChipRef::Citation(_)) && pointer.is_some_and(|p| rect.contains(p))
+                {
+                    let hover = citations::chip_accent().gamma_multiply(0.17);
+                    painter.rect_filled(rect.shrink(1.0), CornerRadius::same(4), hover);
+                }
+                painter.rect_stroke(rect, radius, Stroke::new(1.0, border), StrokeKind::Inside);
                 let icon_size = (1.17 * chip_size).round();
                 let icon = Rect::from_min_size(
                     Pos2::new(
@@ -674,14 +801,15 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
                     ),
                     Vec2::splat(icon_size),
                 );
-                let directory = !md_links::basename(&file.path).contains('.');
-                let (name, tint) = if directory {
-                    ("folder", theme::muted_foreground())
-                } else {
-                    crate::ui::files::file_icon(&file.path)
+                let (name, tint) = match &chip {
+                    ChipRef::File(file) if !md_links::basename(&file.path).contains('.') => {
+                        ("folder", theme::muted_foreground())
+                    }
+                    ChipRef::File(file) => crate::ui::files::file_icon(&file.path),
+                    ChipRef::Citation(_) => ("quote", INFO_FOREGROUND),
                 };
                 theme::paint_icon(ui, name, icon, icon_size, tint);
-                file_rects.push((rect, file));
+                file_rects.push((rect, chip));
             }
         };
         for glyph in &placed.row.glyphs {
@@ -760,16 +888,19 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
     }
     let mut opened = None;
     if let Some(pointer) = response.hover_pos() {
-        if let Some((_, file)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
+        if let Some((_, chip)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            let path = match file.line {
-                Some(line) => format!("{}:{line}", file.path),
-                None => file.path.clone(),
+            let tooltip = match chip {
+                ChipRef::File(file) => match file.line {
+                    Some(line) => format!("{}:{line}", file.path),
+                    None => file.path.clone(),
+                },
+                ChipRef::Citation(_) => "View source".to_owned(),
             };
             let clicked = response.clicked();
-            response.on_hover_text(path);
+            response.on_hover_text(tooltip);
             if clicked {
-                opened = Some(file.clone());
+                opened = Some(chip.clone());
             }
             return opened;
         }
@@ -785,11 +916,71 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
     opened
 }
 
+/// Plain text with its citation links drawn as chips (a user message,
+/// whose text this client does not render as markdown).
+pub(crate) struct PlainText(Inlines);
+
+impl PlainText {
+    pub(crate) fn layout(
+        ui: &Ui,
+        text: &str,
+        size: f32,
+        line_height: f32,
+        color: Color32,
+        wrap: f32,
+    ) -> Self {
+        let mut inlines = Vec::new();
+        let push_text = |inlines: &mut Vec<Inline>, text: &str| {
+            for (index, line) in text.split('\n').enumerate() {
+                if index > 0 {
+                    inlines.push(Inline::Break);
+                }
+                if !line.is_empty() {
+                    inlines.push(Inline::Text(line.to_owned(), Style::default()));
+                }
+            }
+        };
+        let mut cursor = 0;
+        for (citation, range) in citations::collect(text) {
+            push_text(&mut inlines, &text[cursor..range.start]);
+            inlines.push(Inline::Citation(citation));
+            cursor = range.end;
+        }
+        push_text(&mut inlines, &text[cursor..]);
+        Self(layout_inlines(
+            ui,
+            &inlines,
+            size,
+            line_height,
+            Weight::Regular,
+            color,
+            wrap,
+            &HashMap::new(),
+        ))
+    }
+
+    pub(crate) fn size(&self) -> Vec2 {
+        self.0.galley.size()
+    }
+
+    /// Paints the text; returns a citation chip that was clicked.
+    pub(crate) fn paint(&self, ui: &mut Ui, pos: Pos2, id: egui::Id) -> Option<Citation> {
+        match paint_inlines(ui, pos, &self.0, id, None) {
+            Some(ChipRef::Citation(citation)) => Some(citation),
+            _ => None,
+        }
+    }
+}
+
 pub struct Markdown<'a> {
     pub highlighter: &'a mut Highlighter,
     pub id: egui::Id,
     /// A file chip clicked during `show`.
     pub(crate) opened_file: Option<FileRef>,
+    /// A citation chip clicked during `show`.
+    pub(crate) opened_citation: Option<Citation>,
+    /// A cited quote to mark and its strength.
+    pub(crate) highlight: Option<(String, f32)>,
     /// Parent-folder suffixes of file chips sharing a basename.
     suffixes: HashMap<String, String>,
     /// Inside a quote, text takes the muted color.
@@ -802,8 +993,17 @@ impl<'a> Markdown<'a> {
             highlighter,
             id,
             opened_file: None,
+            opened_citation: None,
+            highlight: None,
             suffixes: HashMap::new(),
             quoted: false,
+        }
+    }
+
+    fn open_chip(&mut self, chip: ChipRef) {
+        match chip {
+            ChipRef::File(file) => self.opened_file = Some(file),
+            ChipRef::Citation(citation) => self.opened_citation = Some(citation),
         }
     }
 
@@ -860,8 +1060,9 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                if let Some(file) = paint_inlines(ui, rect.min, &laid, id) {
-                    self.opened_file = Some(file);
+                if let Some(chip) = paint_inlines(ui, rect.min, &laid, id, self.highlight.as_ref())
+                {
+                    self.open_chip(chip);
                 }
             }
             Block::Heading(level, inlines) => {
@@ -888,8 +1089,9 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                if let Some(file) = paint_inlines(ui, rect.min, &laid, id) {
-                    self.opened_file = Some(file);
+                if let Some(chip) = paint_inlines(ui, rect.min, &laid, id, self.highlight.as_ref())
+                {
+                    self.open_chip(chip);
                 }
             }
             Block::List { start, items } => {
@@ -1049,6 +1251,7 @@ impl<'a> Markdown<'a> {
         }
         let cell_line = 19.5; // 12px × 1.625
         let suffixes = self.suffixes.clone();
+        let highlight = self.highlight.clone();
         let mut opened = None;
         let measure = |ui: &Ui, inlines: &[Inline], weight| {
             layout_inlines(
@@ -1124,13 +1327,14 @@ impl<'a> Markdown<'a> {
                     Some(Alignment::Center) => (widths[i] - cell_width) / 2.0,
                     _ => 12.0,
                 };
-                if let Some(file) = paint_inlines(
+                if let Some(chip) = paint_inlines(
                     ui,
                     Pos2::new(x + offset, rect.top() + pad_y),
                     cell,
                     id.with(("cell", header, i, rect.top() as i32)),
+                    highlight.as_ref(),
                 ) {
-                    opened = Some(file);
+                    opened = Some(chip);
                 }
                 x += widths[i];
             }
@@ -1149,8 +1353,8 @@ impl<'a> Markdown<'a> {
         for row in rows {
             paint_row(ui, row, false);
         }
-        if opened.is_some() {
-            self.opened_file = opened;
+        if let Some(chip) = opened {
+            self.open_chip(chip);
         }
         // Toolbar: expand toggle (expanded by default) and copy.
         ui.add_space(2.0);
@@ -1324,6 +1528,7 @@ fn inline_markdown(inlines: &[Inline]) -> String {
                 Some(line) => format!("{}:{line}", file.path),
                 None => file.path.clone(),
             }),
+            Inline::Citation(citation) => citation.serialize(),
             Inline::Break => "\n".to_owned(),
         })
         .collect()
@@ -1338,6 +1543,7 @@ fn plain(inlines: &[Inline]) -> String {
                 Some(line) => format!("{}:{line}", file.path),
                 None => file.path.clone(),
             },
+            Inline::Citation(citation) => citation.text.clone(),
             Inline::Break => " ".to_owned(),
         })
         .collect()
