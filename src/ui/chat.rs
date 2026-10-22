@@ -449,9 +449,8 @@ impl App {
         let mut next = (output.state.offset.y + shift).clamp(0.0, max);
         // A drag on the bar, a reveal or the wheel decide whether the view
         // still follows the end.
-        view.scrolled = scrolled
-            || (used - offset).abs() > 0.5
-            || (output.state.offset.y - used).abs() > 0.5;
+        view.scrolled =
+            scrolled || (used - offset).abs() > 0.5 || (output.state.offset.y - used).abs() > 0.5;
         let moved = view.scrolled || keep_scroll;
         if moved {
             view.follow = next >= max - 1.0;
