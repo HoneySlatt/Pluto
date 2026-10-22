@@ -503,11 +503,22 @@ pub fn apply_palette(ctx: &egui::Context) {
 fn symbol_fonts() -> &'static [std::sync::Arc<Vec<u8>>] {
     static FONTS: std::sync::OnceLock<Vec<std::sync::Arc<Vec<u8>>>> = std::sync::OnceLock::new();
     FONTS.get_or_init(|| {
+        // The lookups run side by side: each `fc-match` takes ~12ms.
+        let lookups: Vec<_> = ["2713", "2717", "25b3", "2192", "2014"]
+            .iter()
+            .filter_map(|code| {
+                std::process::Command::new("fc-match")
+                    .args(["-f", "%{file}", &format!(":charset={code}")])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .ok()
+            })
+            .collect();
         let mut files: Vec<String> = Vec::new();
-        for code in ["2713", "2717", "25b3", "2192", "2014"] {
-            let file = std::process::Command::new("fc-match")
-                .args(["-f", "%{file}", &format!(":charset={code}")])
-                .output()
+        for lookup in lookups {
+            let file = lookup
+                .wait_with_output()
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .filter(|f| !f.is_empty());

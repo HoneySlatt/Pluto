@@ -198,6 +198,18 @@ fn resolve_font(preference: &str, weight: u32, monospace: bool) -> Option<Arc<Ve
         })
 }
 
+/// Lists the installed families off the UI thread, so the Appearance
+/// page opens without waiting on `fc-list`.
+pub(crate) fn prefetch_families() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        std::thread::spawn(|| {
+            installed_families(false);
+            installed_families(true);
+        });
+    });
+}
+
 /// Installed families (`fc-list`), sorted; monospace ones only for code.
 fn installed_families(monospace: bool) -> Arc<Vec<String>> {
     static ALL: OnceLock<Arc<Vec<String>>> = OnceLock::new();

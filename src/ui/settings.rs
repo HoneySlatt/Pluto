@@ -349,6 +349,7 @@ fn options(list: &[(&str, &str)]) -> Vec<(String, String)> {
 
 impl App {
     pub(crate) fn open_settings(&mut self) {
+        crate::ui::typography::prefetch_families();
         self.settings_page = Some(0);
         self.open_menu = None;
     }
@@ -2153,6 +2154,7 @@ impl App {
 
     /// Shows a settings page, loading what it lists.
     pub(crate) fn open_settings_page(&mut self, index: usize) {
+        crate::ui::typography::prefetch_families();
         self.settings_page = Some(index);
         if index == ARCHIVE_PAGE {
             self.request_archived();
