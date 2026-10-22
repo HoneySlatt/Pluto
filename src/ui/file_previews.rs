@@ -18,6 +18,8 @@ use crate::theme::{self, Weight, font};
 use crate::ui::markdown::Markdown;
 use crate::ui::widgets;
 
+const PREVIEW_URL_REQUEST: &str = "file-preview-url";
+
 /// `WORKSPACE_IMAGE_PREVIEW_EXTENSIONS`.
 const IMAGE_EXTENSIONS: [&str; 8] = [
     ".avif", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".webp",
@@ -460,6 +462,54 @@ impl App {
                     Sense::hover(),
                 );
             });
+    }
+
+    /// `openFileInPreview`: the file's signed asset URL (`workspace-file`)
+    /// in a new Browser tab.
+    pub(crate) fn open_file_in_preview(&mut self, cwd: &str, path: &str) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let absolute = format!("{}/{}", cwd.trim_end_matches('/'), path);
+        self.send_request(
+            PREVIEW_URL_REQUEST.into(),
+            "assets.createUrl",
+            serde_json::json!({"resource": {
+                "_tag": "workspace-file", "threadId": thread, "path": absolute,
+            }}),
+        );
+    }
+
+    /// The asset URL's answer: the Browser tab, or the failure's toast.
+    pub(crate) fn preview_url_result(
+        &mut self,
+        key: &str,
+        result: &Result<serde_json::Value, String>,
+        ctx: &egui::Context,
+    ) -> bool {
+        if key != PREVIEW_URL_REQUEST {
+            return false;
+        }
+        let url = result.as_ref().map_err(Clone::clone).and_then(|value| {
+            let relative = value["relativeUrl"].as_str().ok_or("An error occurred.")?;
+            url::Url::parse(self.connect.server.trim())
+                .and_then(|base| base.join(relative))
+                .map(|url| url.to_string())
+                .map_err(|error| error.to_string())
+        });
+        match url {
+            Ok(url) => self.open_browser_tab(ctx, Some(url)),
+            Err(error) => {
+                self.toasts.add(
+                    crate::ui::toasts::Toast::new(
+                        crate::ui::toasts::Kind::Error,
+                        "Unable to open file in browser",
+                    )
+                    .description(error),
+                );
+            }
+        }
+        true
     }
 
     /// Requests a markdown widget's images and opens what it clicked.

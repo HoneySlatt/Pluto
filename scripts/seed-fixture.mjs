@@ -501,6 +501,10 @@ fs.mkdirSync(path.join(workspaces, "web-demo", "docs"), { recursive: true });
 fs.writeFileSync(path.join(workspaces, "web-demo", "docs", "capture.png"), syntheticPng());
 // A document and a table for the Files surface's rendered previews.
 fs.writeFileSync(
+  path.join(workspaces, "web-demo", "docs", "page.html"),
+  "<!doctype html><title>Page de démo</title><body style=\"font-family:sans-serif;background:#123;color:#eee\"><h1>Page de démo</h1><p>Servie par le fixture.</p></body>\n",
+);
+fs.writeFileSync(
   path.join(workspaces, "web-demo", "docs", "guide.md"),
   [
     "# Guide de rendu",

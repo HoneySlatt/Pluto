@@ -415,6 +415,20 @@ impl App {
             },
             self.files.tree,
         )];
+        // `isBrowserPreviewFile` while a preview browser is installed.
+        let lower = path.to_ascii_lowercase();
+        if [".htm", ".html", ".pdf"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+            && crate::preview::browser_binary().is_some()
+        {
+            buttons.push((
+                "files-browser",
+                "globe",
+                "Open file in preview browser",
+                false,
+            ));
+        }
         if raw_text {
             buttons.push((
                 "files-wrap",
@@ -450,6 +464,7 @@ impl App {
                 match id {
                     "files-tree" => self.files.tree = !self.files.tree,
                     "files-wrap" => self.files.wrap = !self.files.wrap,
+                    "files-browser" => self.open_file_in_preview(&cwd, &path),
                     _ => {
                         if markdown {
                             self.files.render_markdown = !rendered;

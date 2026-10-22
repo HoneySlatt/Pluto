@@ -1194,6 +1194,11 @@ impl App {
         {
             return;
         }
+        if let Some(ctx) = self.egui_ctx.clone()
+            && self.preview_url_result(&key, &result, &ctx)
+        {
+            return;
+        }
         if let Some(project) = key.strip_prefix("favicon:") {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.favicon_url(project, result, &ctx);
