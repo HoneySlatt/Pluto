@@ -78,6 +78,7 @@ pub struct Thread {
     pub latest_user_message_at: Option<String>,
     pub has_pending_approvals: bool,
     pub has_pending_user_input: bool,
+    pub has_actionable_proposed_plan: bool,
     pub background_liveness: Option<String>,
     /// `ThreadPullRequestLink`s, kept as sent.
     pub pull_requests: Vec<Value>,

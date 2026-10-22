@@ -4,10 +4,8 @@
 //! `threadSort.ts`), with the status pills of `resolveThreadStatusPill` and
 //! the "Sidebar options" sort menu.
 //!
-//! Not ported: project grouping across environments (every project is its
-//! own entry), manual drag ordering ("Manual" keeps the server's order),
-//! multi-select, file drops, PR, terminal, worktree and port indicators,
-//! thread jump hints, the project context menu and the "Plan Ready" pill.
+//! Not ported: the legacy pull request lookup for unsynced links and the
+//! preview panel the port globe opens upstream.
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -27,6 +25,7 @@ const MORE_ROW: f32 = 28.0; // SidebarMenuSubButton h-7
 const SORT_MENU: &str = "legacy-sidebar-sort";
 const AMBER_300: Color32 = Color32::from_rgb(0xff, 0xd2, 0x30);
 const SKY_300: Color32 = Color32::from_rgb(0x74, 0xd4, 0xff);
+const VIOLET_300: Color32 = Color32::from_rgb(0xc4, 0xb4, 0xff);
 const TEAL_300: Color32 = Color32::from_rgb(0x46, 0xec, 0xd5);
 const EMERALD_400: Color32 = Color32::from_rgb(0x00, 0xd4, 0x92); // --success-foreground
 const ICON_MUTED: Color32 = Color32::from_rgb(84, 84, 84); // --icon-muted
@@ -161,6 +160,19 @@ fn grouping_description(mode: &str) -> &'static str {
     }
 }
 
+/// `isLatestTurnSettled`: the latest turn started and completed, and the
+/// session is not running.
+fn turn_settled(thread: &Thread) -> bool {
+    thread.latest_turn.as_ref().is_some_and(|turn| {
+        turn.started_at.is_some()
+            && turn.completed_at.is_some()
+            && thread
+                .session
+                .as_ref()
+                .is_none_or(|s| s.status != "running")
+    })
+}
+
 /// The status pulse (`animate-status-pulse`): 2s, full then half opacity,
 /// each change in six steps.
 fn pulse_alpha(time: f64) -> f32 {
@@ -175,7 +187,7 @@ fn pulse_alpha(time: f64) -> f32 {
 }
 
 impl App {
-    /// `resolveThreadStatusPill` (without "Plan Ready").
+    /// `resolveThreadStatusPill`.
     fn legacy_pill(&self, thread: &Thread) -> Option<Pill> {
         let pill = |label, color: Color32, alpha, pulse, priority| Pill {
             label,
@@ -189,10 +201,18 @@ impl App {
             Some(pill("Pending Approval", AMBER_300, 0.9, false, 6))
         } else if thread.has_pending_user_input {
             Some(pill("Awaiting Input", theme::INDIGO_300, 0.9, false, 5))
-        } else if session == Some("running") || liveness == Some("working") {
+        } else if session == Some("running") {
             Some(pill("Working", SKY_300, 0.8, true, 4))
         } else if session == Some("starting") {
             Some(pill("Connecting", SKY_300, 0.8, true, 4))
+        } else if thread.interaction_mode == "plan"
+            && turn_settled(thread)
+            && thread.has_actionable_proposed_plan
+        {
+            // An actionable plan outranks lingering background work.
+            Some(pill("Plan Ready", VIOLET_300, 0.9, false, 3))
+        } else if liveness == Some("working") {
+            Some(pill("Working", SKY_300, 0.8, true, 4))
         } else if liveness == Some("monitoring") {
             Some(pill("Monitoring", SKY_300, 0.8, false, 2))
         } else if self.is_unread(thread) {

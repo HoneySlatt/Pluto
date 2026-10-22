@@ -277,6 +277,15 @@ impl App {
                 .collect(),
         );
         let ready = |p: &Value| p["status"] == "ready" && p["availability"] != "unavailable";
+        // Each instance's models after its Settings → Providers preferences.
+        let model_lists: std::collections::HashMap<String, Vec<Value>> = providers
+            .iter()
+            .map(|p| {
+                let id = p["instanceId"].as_str().unwrap_or_default().to_owned();
+                let models = self.picker_models(&id, p);
+                (id, models)
+            })
+            .collect();
         let bindings = self.state.config["keybindings"].clone();
         let jump = self.picker_jump.take();
         if self.picker_provider.is_none() {
@@ -417,7 +426,7 @@ impl App {
                     continue;
                 }
                 let name = provider["displayName"].as_str().unwrap_or(&id).to_owned();
-                for model in provider["models"].as_array().into_iter().flatten() {
+                for model in model_lists.get(&id).into_iter().flatten() {
                     let slug = model["slug"].as_str().unwrap_or_default();
                     let key = format!("{id}/{slug}");
                     if active == FAVORITES && needle.is_empty() && !favorites.contains(&key) {
@@ -440,6 +449,14 @@ impl App {
                         current.push(entry);
                     }
                 }
+            }
+            // `sortProviderModelItems`: within a provider, favorites lead.
+            if active != FAVORITES && needle.is_empty() {
+                let favorite = |(id, _, m): &(String, String, Value)| {
+                    favorites.contains(&format!("{id}/{}", m["slug"].as_str().unwrap_or_default()))
+                };
+                current.sort_by_key(|entry| !favorite(entry));
+                legacy.sort_by_key(|entry| !favorite(entry));
             }
             let list = Rect::from_min_max(
                 Pos2::new(content.left() + 13.0, search.bottom() + 11.0),
@@ -658,6 +675,45 @@ impl App {
             self.picker_query.clear();
         }
         chosen
+    }
+}
+
+impl App {
+    /// `getAppModelOptionsForInstance`: the instance's models without the
+    /// ones hidden in Settings → Providers (custom models always show), in
+    /// the saved order, then the server's (`sortModelsForProviderInstance`).
+    fn picker_models(&self, instance_id: &str, provider: &Value) -> Vec<Value> {
+        let prefs = &self.client_settings["providerModelPreferences"][instance_id];
+        let list = |key: &str| -> Vec<String> {
+            prefs[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        };
+        let hidden = list("hiddenModels");
+        let order = list("modelOrder");
+        let mut models: Vec<Value> = provider["models"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|m| {
+                m["isCustom"] == true
+                    || !hidden
+                        .iter()
+                        .any(|h| m["slug"].as_str() == Some(h.as_str()))
+            })
+            .cloned()
+            .collect();
+        // A stable sort keeps the server order among unranked models.
+        models.sort_by_key(|m| {
+            m["slug"]
+                .as_str()
+                .and_then(|slug| order.iter().position(|o| o == slug))
+                .unwrap_or(usize::MAX)
+        });
+        models
     }
 }
 
