@@ -38,6 +38,12 @@ fn main() -> eframe::Result<()> {
         "t3-code-rust",
         eframe::NativeOptions {
             viewport,
+            // Frames take little GPU work: one frame queued instead of two
+            // keeps the screen a frame closer to the input.
+            wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+                surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
+                ..Default::default()
+            },
             ..Default::default()
         },
         Box::new(move |cc| Ok(Box::new(t3_code_rust::app::App::new(cc, options)))),
