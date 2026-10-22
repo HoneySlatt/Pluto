@@ -34,6 +34,8 @@ pub struct Item {
     pub id: String,
     pub label: String,
     pub icon: Option<&'static str>,
+    /// The icon's color when not the muted one (brand marks).
+    pub icon_tint: Option<egui::Color32>,
     /// A project's icon in the icon slot (project pickers).
     pub project: Option<crate::model::Project>,
     pub destructive: bool,
@@ -87,6 +89,8 @@ pub struct State {
     dropdown: bool,
     /// Centered on `at` (`align="center"`) instead of starting there.
     centered: bool,
+    /// Ending at `at` (`align="end"`).
+    end: bool,
 }
 
 impl State {
@@ -100,12 +104,19 @@ impl State {
             min_width: MIN_WIDTH,
             dropdown: false,
             centered: false,
+            end: false,
         }
     }
 
     /// A `SelectPopup` at least as wide as its trigger.
     pub fn with_min_width(mut self, width: f32) -> Self {
         self.min_width = self.min_width.max(width);
+        self
+    }
+
+    /// Its right edge at `at`.
+    pub fn aligned_end(mut self) -> Self {
+        self.end = true;
         self
     }
 
@@ -216,7 +227,17 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
         rect: Rect::from_min_size(
             clamp(
                 screen,
-                state.at - Vec2::new(if state.centered { size.x / 2.0 } else { 0.0 }, 0.0),
+                state.at
+                    - Vec2::new(
+                        if state.centered {
+                            size.x / 2.0
+                        } else if state.end {
+                            size.x
+                        } else {
+                            0.0
+                        },
+                        0.0,
+                    ),
                 size,
             ),
             size,
@@ -376,7 +397,11 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             Pos2::new(x, row.center().y - 8.0),
                             Vec2::splat(16.0),
                         );
-                        theme::paint_icon(ui, icon, icon_rect, 16.0, icon_color);
+                        let tint = item
+                            .icon_tint
+                            .filter(|_| !item.disabled)
+                            .unwrap_or(icon_color);
+                        theme::paint_icon(ui, icon, icon_rect, 16.0, tint);
                     } else if let Some(project) = &item.project {
                         let icon_rect = Rect::from_min_size(
                             Pos2::new(x, row.center().y - 8.0),

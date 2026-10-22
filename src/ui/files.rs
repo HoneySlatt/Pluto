@@ -389,18 +389,35 @@ impl App {
             Pos2::new(right - 50.0, toolbar.top() + 2.0),
             Vec2::new(50.0, 24.0),
         );
-        let response = ui.interact(split, ui.id().with("files-open-in"), Sense::click());
+        // The compact `OpenInPicker`: the file in the preferred editor, or
+        // the chevron's list.
+        let main_half =
+            Rect::from_min_max(split.min, Pos2::new(split.left() + 25.0, split.bottom()));
+        let menu_half = Rect::from_min_max(Pos2::new(split.left() + 26.0, split.top()), split.max);
+        let main_response = ui.interact(main_half, ui.id().with("files-open-in"), Sense::click());
+        let menu_response = ui.interact(
+            menu_half,
+            ui.id().with("files-open-in-menu"),
+            Sense::click(),
+        );
         ui.painter().rect(
             split,
             CornerRadius::same(8),
-            if response.hovered() {
-                theme::overlay(0.05)
-            } else {
-                theme::control_surface()
-            },
+            theme::control_surface(),
             eframe::egui::Stroke::new(1.0, theme::input()),
             eframe::egui::StrokeKind::Inside,
         );
+        for (half, response) in [(main_half, &main_response), (menu_half, &menu_response)] {
+            if response.hovered() {
+                ui.painter().rect_filled(
+                    half.shrink(1.0),
+                    CornerRadius::same(7),
+                    theme::overlay(0.05),
+                );
+            }
+        }
+        let preferred = self.preferred_editor();
+        let absolute = format!("{}/{}", cwd.trim_end_matches('/'), path);
         ui.painter().rect_filled(
             Rect::from_min_size(
                 Pos2::new(split.left() + 25.0, split.top()),
@@ -409,16 +426,22 @@ impl App {
             0.0,
             theme::input(),
         );
-        theme::paint_icon(
-            ui,
-            "zed",
-            Rect::from_min_size(
-                Pos2::new(split.left() + 6.0, split.center().y - 7.0),
-                Vec2::splat(14.0),
-            ),
-            14.0,
-            theme::foreground(),
-        );
+        if let Some((icon, brand)) = preferred.and_then(crate::ui::open_in::editor_icon) {
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_min_size(
+                    Pos2::new(split.left() + 6.0, split.center().y - 7.0),
+                    Vec2::splat(14.0),
+                ),
+                14.0,
+                if brand {
+                    theme::foreground()
+                } else {
+                    theme::muted_foreground()
+                },
+            );
+        }
         theme::paint_icon(
             ui,
             "chevron-down",
@@ -429,8 +452,13 @@ impl App {
             16.0,
             theme::muted_foreground(),
         );
-        if response.clicked() {
-            self.status = Some("Opening files in an editor is not implemented yet".into());
+        if main_response.clicked()
+            && let Some(editor) = preferred
+        {
+            self.open_in_editor(&absolute, editor);
+        }
+        if menu_response.clicked() {
+            self.toggle_open_in_menu(Some(absolute), split.right_bottom() + Vec2::new(0.0, 4.0));
         }
 
         // Source (and the tree beside it).

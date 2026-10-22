@@ -85,6 +85,10 @@ pub struct App {
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The draft hero's project picker, while open.
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
+    /// The editor last opened with (`t3code:last-editor`), persisted.
+    pub(crate) last_editor: Option<String>,
+    /// The "Open in" editor list and the path it opens.
+    pub(crate) open_in_menu: Option<(String, crate::ui::context_menu::State)>,
     /// An image's right-click menu, while open.
     pub(crate) media_menu: Option<(crate::ui::media::Source, crate::ui::context_menu::State)>,
     /// A Scratch project asked for, until it is in the shell.
@@ -380,6 +384,8 @@ impl App {
             hero_project_menu: None,
             scratch: None,
             media_menu: None,
+            last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
+            open_in_menu: None,
             legacy_grouping: None,
             legacy_grouping_select: None,
             legacy_selection: Default::default(),
@@ -999,6 +1005,7 @@ impl eframe::App for App {
                 self.text_menu(ui);
                 self.cite_overlays(ui);
                 self.media_menu(ui);
+                self.open_in_menu(ui);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
@@ -1222,7 +1229,7 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
-        if self.scratch_result(&key, &result) {
+        if self.scratch_result(&key, &result) || self.open_in_result(&key, &result) {
             return;
         }
         if let Some(project) = key.strip_prefix("favicon:") {
@@ -1373,7 +1380,11 @@ fn ui_state_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBu
 /// and the manual project order.
 fn load_ui_state(
     settings: Option<&std::path::Path>,
-) -> (std::collections::HashMap<String, bool>, Vec<String>) {
+) -> (
+    std::collections::HashMap<String, bool>,
+    Vec<String>,
+    Option<String>,
+) {
     let value = ui_state_path(settings)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
@@ -1381,6 +1392,7 @@ fn load_ui_state(
     (
         serde_json::from_value(value["projectExpandedById"].clone()).unwrap_or_default(),
         serde_json::from_value(value["projectOrder"].clone()).unwrap_or_default(),
+        value["lastEditor"].as_str().map(str::to_owned),
     )
 }
 
@@ -1391,6 +1403,7 @@ pub(crate) fn save_ui_state(app: &App) {
     let value = serde_json::json!({
         "projectExpandedById": app.legacy_project_expanded,
         "projectOrder": app.legacy_project_order,
+        "lastEditor": app.last_editor,
     });
     let temp = path.with_extension("json.tmp");
     if std::fs::write(&temp, value.to_string()).is_ok() {

@@ -12,6 +12,14 @@ use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
 
+/// A header split button: where it starts, and which half was clicked.
+struct Split {
+    left: f32,
+    main: bool,
+    menu: bool,
+    chevron: Rect,
+}
+
 impl App {
     pub(crate) fn main_area(&mut self, ui: &mut Ui, rect: Rect) {
         ui.painter().rect_filled(rect, 0.0, theme::background());
@@ -117,11 +125,34 @@ impl App {
                 }
                 right = rect_button.left() - gap;
             } else if let Some(action) = self.git_action_label() {
-                right = self.split_button(ui, right, &action.0, action.1, "git-action", compact);
-                right -= gap;
+                let split =
+                    self.split_button(ui, right, &action.0, Some(action.1), "git-action", compact);
+                if split.main || split.menu {
+                    self.status = Some(format!("{} is not implemented yet", action.0));
+                }
+                right = split.left - gap;
             }
-            right = self.split_button(ui, right, "Open", "zed", "open-in", compact);
-            right -= gap;
+            // `OpenInPicker`: the workspace in the preferred editor, or another.
+            let preferred = self.preferred_editor();
+            let icon = preferred.and_then(crate::ui::open_in::editor_icon);
+            let split = self.split_button(
+                ui,
+                right,
+                "Open",
+                icon.map(|(icon, _)| icon),
+                "open-in",
+                compact,
+            );
+            let cwd = self.workspace_cwd();
+            if split.main
+                && let (Some(cwd), Some(editor)) = (&cwd, preferred)
+            {
+                self.open_in_editor(cwd, editor);
+            }
+            if split.menu {
+                self.toggle_open_in_menu(cwd, split.chevron.right_bottom() + Vec2::new(0.0, 4.0));
+            }
+            right = split.left - gap;
             // `ProjectScriptsControl`: the actions, or "Add action".
             let target = project
                 .as_ref()
@@ -173,10 +204,10 @@ impl App {
         ui: &mut Ui,
         right: f32,
         label: &str,
-        icon: &str,
+        icon: Option<&str>,
         id: &str,
         compact: bool,
-    ) -> f32 {
+    ) -> Split {
         let chevron = Rect::from_min_size(Pos2::new(right - 24.0, 14.0), Vec2::new(24.0, 24.0));
         let width = if compact {
             25.0
@@ -188,10 +219,10 @@ impl App {
             Pos2::new(chevron.left() - 1.0 - width, 14.0),
             Vec2::new(width, 24.0),
         );
-        let tint = if icon == "zed" {
-            theme::foreground()
-        } else {
-            theme::muted_foreground()
+        // Brand marks take the text color, generic icons the muted one.
+        let tint = match icon {
+            Some("zed" | "provider-cursor" | "provider-antigravity") => theme::foreground(),
+            _ => theme::muted_foreground(),
         };
         let left_corners = CornerRadius {
             nw: 8,
@@ -209,7 +240,7 @@ impl App {
             ui,
             main,
             (id, "main"),
-            Some((icon, tint)),
+            icon.map(|icon| (icon, tint)),
             shown,
             left_corners,
         )
@@ -222,10 +253,12 @@ impl App {
             0.0,
             theme::input(),
         );
-        if clicked || menu.clicked() {
-            self.status = Some(format!("{label} is not implemented yet"));
+        Split {
+            left: main.left(),
+            main: clicked,
+            menu: menu.clicked(),
+            chevron,
         }
-        main.left()
     }
 
     fn empty_state(&mut self, ui: &mut Ui, body: Rect) {
