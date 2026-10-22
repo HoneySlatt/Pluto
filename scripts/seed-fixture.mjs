@@ -405,6 +405,51 @@ completeTurn(bigDiff, bigTurn, 1, [
   { path: "src/render.ts", kind: "modified", additions: 1400, deletions: 600 },
 ], 2098, bigAnswer);
 
+// A plan-mode thread whose settled turn proposed a plan.
+const planThreadId = randomUUID();
+{
+  const createdAt = at(2200);
+  emit("thread", planThreadId, "thread.created", createdAt, {
+    threadId: planThreadId, projectId: web, title: "Planifier la migration", modelSelection: model,
+    runtimeMode: "full-access", interactionMode: "plan", branch: "main", worktreePath: null,
+    createdAt, updatedAt: createdAt,
+  }, "client");
+}
+const planTurn = randomUUID();
+message(planThreadId, "user", "Prépare un plan pour migrer le rendu vers le nouveau moteur.", 2200);
+const planAnswer = message(planThreadId, "assistant", "Voici le plan proposé.", 2199, planTurn);
+{
+  const createdAt = at(2199);
+  emit("thread", planThreadId, "thread.proposed-plan-upserted", createdAt, {
+    threadId: planThreadId,
+    proposedPlan: {
+      id: randomUUID(),
+      turnId: planTurn,
+      planMarkdown: [
+        "# Migrer le rendu vers le nouveau moteur",
+        "",
+        "## Summary",
+        "",
+        "Remplacer l'ancien moteur de rendu par le nouveau, module par module.",
+        "",
+        "## Étapes",
+        "",
+        ...Array.from({ length: 14 }, (_, i) => `${i + 1}. Porter le module \`render/part${i + 1}.ts\` et vérifier sa capture.`),
+        "",
+        "## Vérification",
+        "",
+        "- Comparer les captures avant et après.",
+        "- Lancer `cargo test`.",
+      ].join("\n"),
+      implementedAt: null,
+      implementationThreadId: null,
+      createdAt,
+      updatedAt: createdAt,
+    },
+  }, "provider");
+}
+completeTurn(planThreadId, planTurn, 1, [], 2198, planAnswer);
+
 // The image the "Styles markdown" answer shows, written last so no turn
 // checkpoint of web-demo picks it up.
 fs.mkdirSync(path.join(workspaces, "web-demo", "docs"), { recursive: true });

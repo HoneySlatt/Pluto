@@ -94,6 +94,7 @@ pub struct Thread {
     pub messages: Vec<Message>,
     pub activities: Vec<Activity>,
     pub checkpoints: Vec<Checkpoint>,
+    pub proposed_plans: Vec<ProposedPlan>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -130,6 +131,19 @@ pub struct CheckpointFile {
     pub kind: String,
     pub additions: u64,
     pub deletions: u64,
+}
+
+/// `OrchestrationProposedPlan`: a plan a plan-mode turn proposed.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProposedPlan {
+    pub id: String,
+    pub turn_id: Option<String>,
+    pub plan_markdown: String,
+    pub implemented_at: Option<String>,
+    pub implementation_thread_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -575,6 +589,8 @@ fn apply_thread_event(thread: &mut Value, event: &Value) -> Applied {
             });
             array_mut(thread, "activities")
                 .retain(|a| a["turnId"].is_null() || retained.contains(&a["turnId"]));
+            array_mut(thread, "proposedPlans")
+                .retain(|p| p["turnId"].is_null() || retained.contains(&p["turnId"]));
             thread["latestTurn"] = match latest {
                 None => Value::Null,
                 Some(c) => json!({
@@ -586,6 +602,20 @@ fn apply_thread_event(thread: &mut Value, event: &Value) -> Applied {
                     "assistantMessageId": c["assistantMessageId"],
                 }),
             };
+            thread["updatedAt"] = occurred_at;
+        }
+        "thread.proposed-plan-upserted" => {
+            let plan = payload["proposedPlan"].clone();
+            let plans = array_mut(thread, "proposedPlans");
+            plans.retain(|p| p["id"] != plan["id"]);
+            plans.push(plan);
+            // `proposedPlanOrder`: by creation time, then id.
+            plans.sort_by(|a, b| {
+                a["createdAt"]
+                    .as_str()
+                    .cmp(&b["createdAt"].as_str())
+                    .then_with(|| a["id"].as_str().cmp(&b["id"].as_str()))
+            });
             thread["updatedAt"] = occurred_at;
         }
         "thread.activity-appended" => {
@@ -721,6 +751,37 @@ mod tests {
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
         json!({"kind":"event","event":{"sequence":sequence,"type":kind,"occurredAt":"2026-01-01T00:00:00.000Z","payload":payload}})
+    }
+
+    #[test]
+    fn proposed_plans_upsert_in_order() {
+        let mut state = detail();
+        let plan = |id: &str, at: &str, text: &str| {
+            json!({"threadId":"t","proposedPlan":{"id":id,"turnId":null,"planMarkdown":text,
+                "implementedAt":null,"implementationThreadId":null,"createdAt":at,"updatedAt":at}})
+        };
+        let b = event(
+            2,
+            "thread.proposed-plan-upserted",
+            plan("b", "2026-01-02T00:00:00Z", "B"),
+        );
+        state.thread("t", &b).unwrap();
+        let a = event(
+            3,
+            "thread.proposed-plan-upserted",
+            plan("a", "2026-01-01T00:00:00Z", "A"),
+        );
+        state.thread("t", &a).unwrap();
+        let a2 = event(
+            4,
+            "thread.proposed-plan-upserted",
+            plan("a", "2026-01-01T00:00:00Z", "A2"),
+        );
+        state.thread("t", &a2).unwrap();
+        state.refresh_detail().unwrap();
+        let plans = &state.detail.as_ref().unwrap().proposed_plans;
+        let texts: Vec<&str> = plans.iter().map(|p| p.plan_markdown.as_str()).collect();
+        assert_eq!(texts, ["A2", "B"]);
     }
 
     #[test]

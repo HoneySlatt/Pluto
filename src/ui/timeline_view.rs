@@ -101,6 +101,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::WorkDetails { group_id, .. } => Id::new(("details", group_id)),
         Row::Working { .. } => Id::new("working"),
         Row::GeneratedImage { tool_call_id } => Id::new(("generated", tool_call_id)),
+        Row::Plan(plan) => Id::new(("plan", &plan.id)),
     }
 }
 
@@ -135,6 +136,12 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
         Row::Working { .. } => LINE + 4.0 + 6.0,
         Row::GeneratedImage { .. } => 0.0,
+        // The card: padding, header, its text (a long plan folded to 26rem
+        // and the Expand button) and the row's space.
+        Row::Plan(plan) => {
+            let text = (lines(&plan.plan_markdown, width - 48.0) * LINE).min(416.0 + 60.0);
+            4.0 + 40.0 + 24.0 + 16.0 + text + 16.0
+        }
     };
     // Whole points, like the layout the guess stands in for.
     height.round()

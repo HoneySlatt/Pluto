@@ -78,7 +78,7 @@ impl App {
             images: std::mem::take(&mut self.composer_images),
             model,
             runtime,
-            interaction: thread.interaction_mode.clone(),
+            interaction: self.composer_interaction_mode(false),
             queued_after: latest_tool_call(thread),
         };
         self.composer.clear();

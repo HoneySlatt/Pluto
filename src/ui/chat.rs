@@ -726,6 +726,10 @@ impl App {
                     ui.add_space(16.0);
                 }
             }
+            Row::Plan(plan) => {
+                self.plan_row(ui, plan, width);
+                ui.add_space(16.0);
+            }
         }
     }
 

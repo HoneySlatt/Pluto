@@ -23,7 +23,7 @@ fn outline() -> Color32 {
     theme::shade(28)
 }
 const DESTRUCTIVE: Color32 = Color32::from_rgb(251, 65, 74); // --destructive
-fn message_action_hover() -> Color32 {
+pub(crate) fn message_action_hover() -> Color32 {
     theme::primary_hover()
 }
 
@@ -40,6 +40,8 @@ pub fn runtime_label(mode: &str) -> (&'static str, &'static str) {
 #[derive(Clone)]
 pub(crate) enum Mode {
     Normal,
+    /// After a settled plan-mode turn proposed a plan (`showPlanFollowUpPrompt`).
+    Plan(Box<crate::model::ProposedPlan>),
     Approval(PendingApproval, usize),
     Question(PendingUserInput),
 }
@@ -125,7 +127,10 @@ impl App {
             return Mode::Question(input.clone());
         }
         self.question_request = None;
-        Mode::Normal
+        match self.plan_follow_up(thread) {
+            Some(plan) => Mode::Plan(Box::new(plan)),
+            None => Mode::Normal,
+        }
     }
 
     fn composer_text_height(&self, ui: &Ui, width: f32) -> f32 {
@@ -149,7 +154,7 @@ impl App {
     fn surface_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         let strip = self.image_strip_height(width);
         match mode {
-            Mode::Normal => {
+            Mode::Normal | Mode::Plan(_) => {
                 17.0 + strip + self.composer_text_height(ui, width) + 10.0 + 28.0 + 19.0
             }
             Mode::Question(_) => 17.0 + self.composer_text_height(ui, width) + 16.0 + 28.0 + 17.0,
@@ -160,6 +165,7 @@ impl App {
     fn banner_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         match mode {
             Mode::Normal => 0.0,
+            Mode::Plan(_) => crate::ui::plan_card::PLAN_BANNER,
             Mode::Approval(approval, _) => self.approval_banner_height(approval),
             Mode::Question(input) => self.question_banner_height(ui, input, width),
         }
@@ -199,6 +205,7 @@ impl App {
                 self.approval_banner(ui, surface, approval, *count, &thread_id)
             }
             Mode::Question(input) => self.question_banner(ui, surface, input, &thread_id),
+            Mode::Plan(plan) => self.plan_banner(ui, surface, plan),
             Mode::Normal => {}
         }
 
@@ -239,7 +246,7 @@ impl App {
 
         self.take_incoming_images();
         // Answers to agent questions take no attachments here.
-        let normal = matches!(mode, Mode::Normal);
+        let normal = matches!(mode, Mode::Normal | Mode::Plan(_));
         let strip_height = if normal {
             self.image_strip_height(width)
         } else {
@@ -258,6 +265,7 @@ impl App {
                 "Type your own answer, or leave this blank to use the selected option"
             }
             Mode::Normal => "Ask for changes, send follow-ups, or attach images",
+            Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
         };
         // Attached images count as context, which hides the placeholder.
         if (self.composer.is_empty() && self.composer_images.is_empty())
@@ -387,6 +395,11 @@ impl App {
         if let Some(rect) = traits_rect {
             self.traits_menu(ui, rect, draft);
         }
+        if self.plan_mode_enabled(draft) {
+            let x = runtime_rect.right() + 6.0;
+            self.separator(ui, x, bar_top);
+            self.interaction_toggle(ui, x + 7.0, bar_top, draft);
+        }
         self.runtime_menu(ui, runtime_rect, draft);
 
         let right = surface.right() - 17.0;
@@ -394,6 +407,7 @@ impl App {
             Mode::Question(input) => {
                 self.question_actions(ui, right, bar_top, input, &thread_id, submit)
             }
+            Mode::Plan(plan) => self.plan_actions(ui, right, bar_top, plan, submit),
             _ => self.send_actions(ui, right, bar_top, draft, submit),
         };
         let attach = Rect::from_min_size(
@@ -410,7 +424,7 @@ impl App {
             "Attach files",
         )
         .clicked()
-            && matches!(mode, Mode::Normal)
+            && normal
         {
             crate::ui::attachments::pick_files(&self.incoming_images, ui.ctx());
         }
@@ -951,7 +965,7 @@ impl App {
     }
 
     /// The composer's model selection as sent on the wire.
-    fn composer_model_json(&self, draft: bool) -> serde_json::Value {
+    pub(crate) fn composer_model_json(&self, draft: bool) -> serde_json::Value {
         let selection = self.composer_model_selection(draft);
         let mut model = json!({"instanceId": selection.instance_id, "model": selection.model});
         if let Some(options) = &selection.options {
@@ -1056,7 +1070,8 @@ impl App {
             &self.composer_images,
         );
         let model = self.composer_model_json(draft);
-        let (thread_id, interaction, bootstrap) = if draft {
+        let interaction = self.composer_interaction_mode(draft);
+        let (thread_id, bootstrap) = if draft {
             let Some(project) = self.draft_project() else {
                 return;
             };
@@ -1066,17 +1081,17 @@ impl App {
                 "title": title,
                 "modelSelection": model,
                 "runtimeMode": runtime,
-                "interactionMode": "default",
+                "interactionMode": interaction,
                 "branch": null,
                 "worktreePath": null,
                 "createdAt": now,
             }});
-            (thread_id, "default".to_owned(), Some(bootstrap))
+            (thread_id, Some(bootstrap))
         } else {
             let Some(thread) = self.current_thread() else {
                 return;
             };
-            (thread.id.clone(), thread.interaction_mode.clone(), None)
+            (thread.id.clone(), None)
         };
         let mut command = turn_start_command(
             &thread_id,

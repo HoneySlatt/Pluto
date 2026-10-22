@@ -621,7 +621,10 @@ impl App {
     /// caret (a space before it when needed, one after), the selection
     /// clears and the comment editor opens under the quote.
     fn cite_toolbar(&mut self, ui: &Ui, toolbar: Toolbar) {
-        let accepts = matches!(self.composer_mode(false), crate::ui::composer::Mode::Normal);
+        let accepts = matches!(
+            self.composer_mode(false),
+            crate::ui::composer::Mode::Normal | crate::ui::composer::Mode::Plan(_)
+        );
         if !accepts {
             self.cite.toolbar = Some(toolbar);
             return;

@@ -41,6 +41,8 @@ pub struct App {
     pub(crate) open_menu: Option<String>,
     pub(crate) composer_selection: std::collections::HashMap<String, crate::model::ModelSelection>,
     pub(crate) composer_runtime: std::collections::HashMap<String, String>,
+    /// The composer's interaction mode (plan or default) by composer key.
+    pub(crate) composer_interaction: std::collections::HashMap<String, String>,
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
     pub(crate) picker_legacy_open: bool,
@@ -89,6 +91,8 @@ pub struct App {
     pub(crate) toasts: crate::ui::toasts::Toasts,
     /// The header's git actions: what runs, its menu and dialogs.
     pub(crate) git: crate::ui::git_actions::GitActions,
+    /// Proposed plan cards: folds, menu and save dialog.
+    pub(crate) plans: crate::ui::plan_card::PlanState,
     /// The editor last opened with (`t3code:last-editor`), persisted.
     pub(crate) last_editor: Option<String>,
     /// The "Open in" editor list and the path it opens.
@@ -363,6 +367,7 @@ impl App {
             open_menu: None,
             composer_selection: Default::default(),
             composer_runtime: Default::default(),
+            composer_interaction: Default::default(),
             picker_provider: None,
             picker_query: String::new(),
             picker_legacy_open: false,
@@ -393,6 +398,7 @@ impl App {
             media_pending: None,
             toasts: Default::default(),
             git: Default::default(),
+            plans: Default::default(),
             last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
             open_in_menu: None,
             legacy_grouping: None,
@@ -925,6 +931,8 @@ impl eframe::App for App {
                 self.open_in_menu(ui);
                 self.git_menu(ui);
                 self.git_dialogs(ui, rect);
+                self.plan_menu(ui);
+                self.plan_save_dialog(ui, rect);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
@@ -999,6 +1007,11 @@ impl App {
     /// Opens a workspace file in the right panel (dev benches).
     pub fn show_file(&mut self, path: &str) {
         self.open_file(path.to_owned());
+    }
+
+    /// Overrides a server setting in this client only (snapshots).
+    pub fn override_setting(&mut self, key: &str, value: serde_json::Value) {
+        self.state.config["settings"][key] = value;
     }
 
     /// Opens a workspace file with Markdown rendered (dev benches).
@@ -1157,6 +1170,7 @@ impl App {
         if self.scratch_result(&key, &result)
             || self.open_in_result(&key, &result)
             || self.git_result(&key, &result)
+            || self.plan_result(&key, &result)
         {
             return;
         }

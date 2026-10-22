@@ -132,6 +132,11 @@ fn banner_surface(ui: &Ui, rect: Rect, fill: Color32, outline: Color32) {
     );
 }
 
+/// The neutral (`variant="info"`) attached surface, as the plan banner uses.
+pub(crate) fn plan_banner_surface(ui: &Ui, rect: Rect) {
+    banner_surface(ui, rect, neutral_surface(), neutral_outline());
+}
+
 fn detail_lines(approval: &PendingApproval) -> usize {
     approval
         .detail

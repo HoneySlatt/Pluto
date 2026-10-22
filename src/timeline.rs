@@ -1,12 +1,13 @@
 //! Timeline rows for the chat, ported from upstream
 //! `session-logic.ts` (work log) and `MessagesTimeline.logic.ts` (rows,
-//! settled-turn folds, tool group summaries). Subagent batches, user input
-//! answers and proposed plans are not ported yet.
+//! settled-turn folds, tool group summaries). Proposed plans sit among
+//! messages by creation time and never fold. Subagent batches and user input
+//! answers are not ported yet.
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::Value;
 
-use crate::model::{Activity, LatestTurn, Message, Thread};
+use crate::model::{Activity, LatestTurn, Message, ProposedPlan, Thread};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkEntry {
@@ -27,6 +28,7 @@ pub struct WorkEntry {
 #[derive(Clone, Debug, PartialEq)]
 enum Entry {
     Message(Message),
+    Plan(ProposedPlan),
     Work(WorkEntry),
 }
 
@@ -34,6 +36,7 @@ impl Entry {
     fn id(&self) -> &str {
         match self {
             Entry::Message(m) => &m.id,
+            Entry::Plan(p) => &p.id,
             Entry::Work(w) => &w.id,
         }
     }
@@ -41,6 +44,7 @@ impl Entry {
     fn created_at(&self) -> &str {
         match self {
             Entry::Message(m) => &m.created_at,
+            Entry::Plan(p) => &p.created_at,
             Entry::Work(w) => &w.created_at,
         }
     }
@@ -51,6 +55,7 @@ impl Entry {
                 m.turn_id.as_deref()
             }
             Entry::Message(_) => None,
+            Entry::Plan(p) => p.turn_id.as_deref(),
             Entry::Work(w) => w.turn_id.as_deref(),
         }
     }
@@ -92,6 +97,8 @@ pub enum Row {
     Working {
         started_at: Option<String>,
     },
+    /// A proposed plan (`ProposedPlanCard`).
+    Plan(Box<ProposedPlan>),
     /// An image Codex may have generated (an `image_view` call that viewed
     /// no workspace image), read from Codex's saved file by call id. Not
     /// shown upstream: this client adds it after the turn's answer.
@@ -605,6 +612,10 @@ fn turn_folds(
             boundary = Some(m.created_at.clone());
             continue;
         }
+        // Plans never fold with their turn.
+        if matches!(entry, Entry::Plan(_)) {
+            continue;
+        }
         let Some(turn) = entry.turn_id() else {
             continue;
         };
@@ -677,6 +688,7 @@ fn turn_folds(
         };
         let last_end = match last {
             Entry::Message(m) => m.updated_at.clone(),
+            Entry::Plan(p) => p.updated_at.clone(),
             Entry::Work(w) => w.created_at.clone(),
         };
         let latest_for_turn = latest.filter(|l| l.turn_id == turn);
@@ -723,6 +735,8 @@ pub fn rows(thread: &Thread, expansion: &Expansion) -> Vec<Row> {
         .filter(|m| m.role != "system")
         .cloned()
         .map(Entry::Message)
+        // On equal times messages come first, then plans, then work.
+        .chain(thread.proposed_plans.iter().cloned().map(Entry::Plan))
         .chain(
             work_entries(&thread.activities)
                 .into_iter()
@@ -882,6 +896,7 @@ pub fn rows(thread: &Thread, expansion: &Expansion) -> Vec<Row> {
                     changes,
                 });
             }
+            Entry::Plan(plan) => out.push(Row::Plan(Box::new(plan.clone()))),
             Entry::Message(_) => {}
         }
         index += 1;

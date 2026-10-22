@@ -31,6 +31,7 @@ pub mod media;
 pub mod open_in;
 pub mod palette;
 pub mod pickers;
+pub mod plan_card;
 pub mod preview;
 pub mod project_actions;
 pub mod project_file;

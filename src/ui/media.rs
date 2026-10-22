@@ -213,6 +213,24 @@ fn notify(text: String, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+/// A download (`anchor.download`): the desktop portal's save dialog, then
+/// the text written where it points, the outcome as the status toast.
+pub(crate) fn save_text_file(name: String, contents: String, ctx: &egui::Context) {
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let Some(path) = rfd::FileDialog::new().set_file_name(&name).save_file() else {
+            return;
+        };
+        notify(
+            match std::fs::write(&path, contents) {
+                Ok(()) => format!("Saved to {}", path.display()),
+                Err(error) => format!("Could not save {name}: {error}"),
+            },
+            &ctx,
+        );
+    });
+}
+
 /// The image's original bytes: its local file, else the URL it loaded from.
 fn read_bytes(source: &Source) -> Result<Vec<u8>, String> {
     if let Some(file) = &source.local_file {
