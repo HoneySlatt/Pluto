@@ -70,7 +70,7 @@ fn fit(natural: Vec2, screen: Vec2) -> (Vec2, f32) {
 
 /// A texture of `image` at the power-of-two reduction closest above
 /// `display` (downscaled on the CPU, so minification never aliases).
-fn level_texture(ui: &Ui, item: &Item, display: Vec2) -> egui::TextureHandle {
+fn level_texture(ui: &Ui, item: &Item, display: Vec2) -> Option<egui::TextureHandle> {
     let ppp = ui.ctx().pixels_per_point();
     let mut level = 0u32;
     while level < 8
@@ -86,20 +86,15 @@ fn level_texture(ui: &Ui, item: &Item, display: Vec2) -> egui::TextureHandle {
         &format!("lightbox:{}", item.key),
         width,
         height,
-        || {
-            if level == 0 {
-                item.image.as_ref().clone()
+        &item.image,
+        |image, width, height| {
+            if (width, height) == image.dimensions() {
+                image.clone()
             } else {
-                image::imageops::resize(
-                    item.image.as_ref(),
-                    width,
-                    height,
-                    image::imageops::FilterType::Triangle,
-                )
+                image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
             }
         },
     )
-    .expect("texture cache")
 }
 
 impl App {
@@ -260,12 +255,15 @@ impl App {
                 ui.painter()
                     .rect_filled(viewport, radius, theme::background());
                 let item = &lightbox.items[lightbox.index];
+                // A large image shows once it is resized, a frame or two in.
                 let texture = level_texture(ui, item, display);
-                if lightbox.zoom <= 1.0 {
+                if let Some(texture) = &texture
+                    && lightbox.zoom <= 1.0
+                {
                     egui::Image::new((texture.id(), display))
                         .corner_radius(radius)
                         .paint_at(ui, viewport);
-                } else {
+                } else if let Some(texture) = &texture {
                     // Zoomed: the scrolled image, clipped to the viewport.
                     let image_rect = Rect::from_min_size(viewport.min - lightbox.scroll, display);
                     ui.painter_at(viewport).image(

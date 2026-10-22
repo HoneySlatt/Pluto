@@ -3,7 +3,8 @@
 //! `session-logic.ts`): `assets.createUrl` with an `attachment` resource
 //! issues a signed URL, fetched (HTTP or HTTPS) on a background thread like the
 //! project favicons, then decoded and drawn cropped to its cell
-//! (`object-cover`), downscaled on the CPU to the drawn pixel size.
+//! (`object-cover`), downscaled on the CPU to the drawn pixel size (off the
+//! UI thread for large images).
 //! The preview opens in `lightbox`.
 //!
 //! Also the composer's images (`addComposerAttachments`): pasted from the
@@ -69,33 +70,92 @@ fn cover(source: &image::RgbaImage, width: u32, height: u32) -> image::RgbaImage
     )
 }
 
-/// A texture of `key` at `width`x`height` pixels, made once per size.
+type SizeKey = (String, u32, u32);
+
+enum Sized {
+    Ready(TextureHandle, std::time::Instant),
+    Pending,
+}
+
+#[derive(Default)]
+struct Textures {
+    sizes: HashMap<SizeKey, Sized>,
+    /// Images resized off the UI thread, waiting for upload.
+    done: Arc<Mutex<Vec<(SizeKey, image::RgbaImage)>>>,
+}
+
+/// A texture of `key` at `width`x`height` pixels, made once per size by
+/// `make` from `source`. Large sources are resized on a background thread
+/// (a 12-megapixel screenshot takes tens of milliseconds): meanwhile
+/// another size of the same key stands in, else nothing. Sizes unused for a
+/// minute are dropped.
 pub(crate) fn sized_texture(
     ui: &Ui,
     key: &str,
     width: u32,
     height: u32,
-    make: impl FnOnce() -> image::RgbaImage,
+    source: &Arc<image::RgbaImage>,
+    make: fn(&image::RgbaImage, u32, u32) -> image::RgbaImage,
 ) -> Option<TextureHandle> {
-    type Textures = HashMap<(String, u32, u32), TextureHandle>;
+    const INLINE_PIXELS: u64 = 512 * 512;
+    const IDLE: std::time::Duration = std::time::Duration::from_secs(60);
     static TEXTURES: OnceLock<Mutex<Textures>> = OnceLock::new();
     let mut textures = TEXTURES.get_or_init(Default::default).lock().ok()?;
-    Some(
-        textures
-            .entry((key.to_owned(), width, height))
-            .or_insert_with(|| {
-                let image = make();
-                ui.ctx().load_texture(
-                    format!("sized:{key}:{width}x{height}"),
-                    egui::ColorImage::from_rgba_premultiplied(
-                        [image.width() as usize, image.height() as usize],
-                        image.as_raw(),
-                    ),
-                    egui::TextureOptions::LINEAR,
-                )
-            })
-            .clone(),
-    )
+    let now = std::time::Instant::now();
+    let upload = |key: &SizeKey, image: &image::RgbaImage| {
+        ui.ctx().load_texture(
+            format!("sized:{}:{}x{}", key.0, key.1, key.2),
+            egui::ColorImage::from_rgba_premultiplied(
+                [image.width() as usize, image.height() as usize],
+                image.as_raw(),
+            ),
+            egui::TextureOptions::LINEAR,
+        )
+    };
+    let done = std::mem::take(&mut *textures.done.lock().ok()?);
+    for (size, image) in done {
+        let texture = upload(&size, &image);
+        textures.sizes.insert(size, Sized::Ready(texture, now));
+    }
+    let size = (key.to_owned(), width, height);
+    if let Some(Sized::Ready(texture, used)) = textures.sizes.get_mut(&size) {
+        *used = now;
+        return Some(texture.clone());
+    }
+    if !textures.sizes.contains_key(&size) {
+        textures.sizes.retain(|_, sized| match sized {
+            Sized::Ready(_, used) => now.duration_since(*used) < IDLE,
+            Sized::Pending => true,
+        });
+        let pixels = u64::from(source.width()) * u64::from(source.height());
+        if pixels <= INLINE_PIXELS {
+            let texture = upload(&size, &make(source, width, height));
+            textures
+                .sizes
+                .insert(size, Sized::Ready(texture.clone(), now));
+            return Some(texture);
+        }
+        textures.sizes.insert(size.clone(), Sized::Pending);
+        let (source, done, ctx) = (source.clone(), textures.done.clone(), ui.ctx().clone());
+        std::thread::spawn(move || {
+            let image = make(&source, width, height);
+            if let Ok(mut done) = done.lock() {
+                done.push((size, image));
+            }
+            ctx.request_repaint();
+        });
+    }
+    // Another size of the image, scaled, until this one is ready.
+    textures
+        .sizes
+        .iter()
+        .filter(|((other, ..), _)| other == key)
+        .filter_map(|((_, w, h), sized)| match sized {
+            Sized::Ready(texture, _) => Some((w.abs_diff(width) + h.abs_diff(height), texture)),
+            Sized::Pending => None,
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, texture)| texture.clone())
 }
 
 /// Paints `image` into `rect`, cropped to fill it, with rounded corners.
@@ -103,14 +163,13 @@ pub(crate) fn paint_cover(
     ui: &Ui,
     rect: Rect,
     key: &str,
-    image: &image::RgbaImage,
+    image: &Arc<image::RgbaImage>,
     corner_radius: CornerRadius,
 ) {
     let ppp = ui.ctx().pixels_per_point();
     let width = (rect.width() * ppp).round() as u32;
     let height = (rect.height() * ppp).round() as u32;
-    let Some(texture) = sized_texture(ui, key, width, height, || cover(image, width, height))
-    else {
+    let Some(texture) = sized_texture(ui, key, width, height, image, cover) else {
         return;
     };
     egui::Image::new((texture.id(), rect.size()))
@@ -124,7 +183,7 @@ pub(crate) fn paint_contain(
     ui: &Ui,
     rect: Rect,
     key: &str,
-    image: &image::RgbaImage,
+    image: &Arc<image::RgbaImage>,
     tint: egui::Color32,
 ) {
     let ppp = ui.ctx().pixels_per_point();
@@ -133,7 +192,7 @@ pub(crate) fn paint_contain(
         * ppp;
     let width = ((image.width() as f32 * scale).round() as u32).max(1);
     let height = ((image.height() as f32 * scale).round() as u32).max(1);
-    let Some(texture) = sized_texture(ui, key, width, height, || {
+    let Some(texture) = sized_texture(ui, key, width, height, image, |image, width, height| {
         image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
     }) else {
         return;
