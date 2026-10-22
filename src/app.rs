@@ -85,6 +85,8 @@ pub struct App {
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The draft hero's project picker, while open.
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
+    /// An image's right-click menu, while open.
+    pub(crate) media_menu: Option<(crate::ui::media::Source, crate::ui::context_menu::State)>,
     /// A Scratch project asked for, until it is in the shell.
     pub(crate) scratch: Option<crate::ui::scratch::Pending>,
     /// The "Project grouping" dialog: member project id and the selection.
@@ -377,6 +379,7 @@ impl App {
             legacy_new_thread_menu: None,
             hero_project_menu: None,
             scratch: None,
+            media_menu: None,
             legacy_grouping: None,
             legacy_grouping_select: None,
             legacy_selection: Default::default(),
@@ -995,6 +998,7 @@ impl eframe::App for App {
                 self.thread_menu(ui);
                 self.text_menu(ui);
                 self.cite_overlays(ui);
+                self.media_menu(ui);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);

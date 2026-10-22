@@ -25,6 +25,7 @@ pub mod lucide;
 pub mod markdown;
 pub mod md_copy;
 pub mod md_links;
+pub mod media;
 pub mod palette;
 pub mod pickers;
 pub mod preview;

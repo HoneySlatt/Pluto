@@ -723,15 +723,33 @@ impl App {
             egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
             egui::StrokeKind::Inside,
         );
+        // The menu copies Codex's saved file and reads its bytes from it.
+        let local_file = attachments::local_file(&key);
+        let source = crate::ui::media::Source {
+            name: "Generated image".into(),
+            reference: local_file.as_ref().map(|path| {
+                crate::ui::media::file_reference(
+                    &path.to_string_lossy(),
+                    self.workspace_cwd().as_deref(),
+                )
+            }),
+            key: key.clone(),
+            local_file,
+        };
         let response = ui
             .interact(
                 frame,
                 ui.id().with(("generated-image", tool_call_id)),
                 Sense::click(),
             )
-            .on_hover_text("Generated image");
+            .on_hover_text(source.tooltip().to_owned());
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+        }
+        if response.secondary_clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            self.open_media_menu(source.clone(), at);
         }
         if response.clicked() {
             self.open_lightbox(
@@ -739,6 +757,7 @@ impl App {
                     name: "Generated image".into(),
                     key,
                     image,
+                    source: Some(source),
                 }],
                 0,
             );
@@ -876,6 +895,7 @@ impl App {
                             name: other["name"].as_str().unwrap_or_default().to_owned(),
                             key: other["id"].as_str().unwrap_or_default().to_owned(),
                             image: decoded,
+                            source: None,
                         });
                     }
                 }
@@ -945,6 +965,7 @@ impl App {
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
             let highlight = self.citation_highlight(ui.ctx(), &message.id);
+            let workspace = self.workspace_cwd();
             let plugin = ui.ctx().plugin::<widgets::CopyCleanup>();
             // The message's text can be cited (`data-assistant-citation-source`).
             plugin.lock().source = Some(message.id.clone());
@@ -953,10 +974,34 @@ impl App {
                 ui.id().with(("markdown", &message.id)),
             );
             markdown.highlight = highlight;
+            markdown.media_root = workspace;
+            markdown.media_thread = self.selected.clone();
             markdown.show(ui, text, width - 8.0);
             plugin.lock().source = None;
             let opened_file = markdown.opened_file.take();
             let opened_citation = markdown.opened_citation.take();
+            let asset_requests = std::mem::take(&mut markdown.asset_requests);
+            let opened_media = markdown.opened_media.take();
+            let media_menu = markdown.media_menu.take();
+            // Images in the answer: their signed URLs, then a click expands
+            // one and a right click opens its menu.
+            for (key, payload) in asset_requests {
+                self.send_request(format!("attachment:{key}"), "assets.createUrl", payload);
+            }
+            if let Some((source, image)) = opened_media {
+                self.open_lightbox(
+                    vec![crate::ui::lightbox::Item {
+                        name: source.name.clone(),
+                        key: source.key.clone(),
+                        image,
+                        source: Some(source),
+                    }],
+                    0,
+                );
+            }
+            if let Some((source, at)) = media_menu {
+                self.open_media_menu(source, at);
+            }
             // `openFileInPanel`: a file chip opens in the right panel.
             if let Some(file) = opened_file {
                 self.open_markdown_file(&file.path);

@@ -25,6 +25,8 @@ pub(crate) struct Item {
     /// A stable texture key for the image.
     pub(crate) key: String,
     pub(crate) image: Arc<image::RgbaImage>,
+    /// What its right-click menu acts on; else its name and image alone.
+    pub(crate) source: Option<crate::ui::media::Source>,
 }
 
 /// The open preview (`ExpandedImagePreview`) and its zoom state.
@@ -109,6 +111,9 @@ impl App {
             return;
         };
         let mut close = false;
+        // An image's menu over the preview takes Escape and the clicks.
+        let menu_open = self.media_menu.is_some();
+        let mut menu_request = None;
         let count = lightbox.items.len();
         // The dialog holds the focus: the prompt editor stops taking keys.
         ui.memory_mut(|m| {
@@ -119,7 +124,7 @@ impl App {
         // Keys: Escape, the arrows, and the zoom keys.
         let (escape, left, right, enter, plus, minus, zero) = ui.input_mut(|i| {
             (
-                i.consume_key(egui::Modifiers::NONE, Key::Escape),
+                !menu_open && i.consume_key(egui::Modifiers::NONE, Key::Escape),
                 i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft),
                 i.consume_key(egui::Modifiers::NONE, Key::ArrowRight),
                 i.consume_key(egui::Modifiers::NONE, Key::Enter),
@@ -219,6 +224,17 @@ impl App {
                 {
                     let next = if lightbox.zoom > 1.0 { 1.0 } else { 2.0 };
                     zoom_to(&mut lightbox, next, at);
+                }
+                // `MediaActions` on the expanded image.
+                if response.secondary_clicked()
+                    && let Some(at) = response.interact_pointer_pos()
+                {
+                    let item = &lightbox.items[lightbox.index];
+                    let source = item
+                        .source
+                        .clone()
+                        .unwrap_or_else(|| crate::ui::media::Source::plain(&item.name, &item.key));
+                    menu_request = Some((source, at));
                 }
                 if enter {
                     let next = if lightbox.zoom > 1.0 { 1.0 } else { 2.0 };
@@ -371,10 +387,17 @@ impl App {
                     lightbox.scroll.x += if left { -40.0 } else { 40.0 };
                 }
                 // A click beside the image closes the preview.
-                if backdrop_response.clicked() && !response.hovered() && !close_response.hovered() {
+                if backdrop_response.clicked()
+                    && !menu_open
+                    && !response.hovered()
+                    && !close_response.hovered()
+                {
                     close = true;
                 }
             });
+        if let Some((source, at)) = menu_request {
+            self.open_media_menu(source, at);
+        }
         if !close {
             self.lightbox = Some(lightbox);
         }

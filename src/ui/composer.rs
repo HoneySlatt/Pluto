@@ -496,6 +496,7 @@ impl App {
                         name: image.name.clone(),
                         key: format!("composer:{}", image.id),
                         image: std::sync::Arc::new(crate::ui::attachments::decode(&image.bytes)?),
+                        source: None,
                     })
                 })
                 .collect();

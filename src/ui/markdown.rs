@@ -99,7 +99,7 @@ fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
                 head.iter().for_each(|cell| inlines(cell, out));
                 rows.iter().flatten().for_each(|cell| inlines(cell, out));
             }
-            Block::Code { .. } | Block::Rule => {}
+            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
         }
     }
 }
@@ -123,6 +123,12 @@ enum Block {
     },
     Quote(Vec<Block>),
     Rule,
+    /// An image alone in its paragraph (`markStandaloneImages`); images
+    /// within a line of text keep their alt text.
+    Image {
+        src: String,
+        alt: String,
+    },
 }
 
 fn parse(text: &str) -> Vec<Block> {
@@ -135,6 +141,45 @@ fn parse(text: &str) -> Vec<Block> {
     parse_blocks(&events, &mut index, None)
 }
 
+/// The image of a paragraph holding nothing else (whitespace aside), from
+/// just after its start; moves past the paragraph when it is one.
+fn standalone_image(events: &[Event], index: &mut usize) -> Option<Block> {
+    let blank = |event: &Event| match event {
+        Event::Text(t) => t.trim().is_empty(),
+        Event::SoftBreak | Event::HardBreak => true,
+        _ => false,
+    };
+    let mut at = *index;
+    while events.get(at).is_some_and(blank) {
+        at += 1;
+    }
+    let Some(Event::Start(Tag::Image { dest_url, .. })) = events.get(at) else {
+        return None;
+    };
+    at += 1;
+    let mut alt = String::new();
+    loop {
+        match events.get(at)? {
+            Event::End(TagEnd::Image) => break,
+            Event::Text(t) | Event::Code(t) => alt.push_str(t),
+            _ => {}
+        }
+        at += 1;
+    }
+    at += 1;
+    while events.get(at).is_some_and(blank) {
+        at += 1;
+    }
+    if !matches!(events.get(at), Some(Event::End(TagEnd::Paragraph))) {
+        return None;
+    }
+    *index = at + 1;
+    Some(Block::Image {
+        src: dest_url.to_string(),
+        alt,
+    })
+}
+
 fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut loose: Vec<Inline> = Vec::new();
@@ -143,11 +188,14 @@ fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> V
         *index += 1;
         match event {
             Event::End(end) if Some(*end) == until => break,
-            Event::Start(Tag::Paragraph) => blocks.push(Block::Paragraph(parse_inlines(
-                events,
-                index,
-                TagEnd::Paragraph,
-            ))),
+            Event::Start(Tag::Paragraph) => match standalone_image(events, index) {
+                Some(image) => blocks.push(image),
+                None => blocks.push(Block::Paragraph(parse_inlines(
+                    events,
+                    index,
+                    TagEnd::Paragraph,
+                ))),
+            },
             Event::Start(Tag::Heading { level, .. }) => {
                 let level_number = match level {
                     HeadingLevel::H1 => 1,
@@ -1061,6 +1109,14 @@ pub struct Markdown<'a> {
     suffixes: HashMap<String, String>,
     /// Inside a quote, text takes the muted color.
     quoted: bool,
+    /// The workspace and thread images resolve against.
+    pub(crate) media_root: Option<String>,
+    pub(crate) media_thread: Option<String>,
+    /// Signed URLs to ask for: (cache key, `assets.createUrl` payload).
+    pub(crate) asset_requests: Vec<(String, serde_json::Value)>,
+    /// An image clicked (expanded preview) or right-clicked (its menu).
+    pub(crate) opened_media: Option<(crate::ui::media::Source, Arc<image::RgbaImage>)>,
+    pub(crate) media_menu: Option<(crate::ui::media::Source, Pos2)>,
 }
 
 impl<'a> Markdown<'a> {
@@ -1074,6 +1130,11 @@ impl<'a> Markdown<'a> {
             prefixes: Vec::new(),
             suffixes: HashMap::new(),
             quoted: false,
+            media_root: None,
+            media_thread: None,
+            asset_requests: Vec::new(),
+            opened_media: None,
+            media_menu: None,
         }
     }
 
@@ -1278,7 +1339,196 @@ impl<'a> Markdown<'a> {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, theme::border());
             }
+            Block::Image { src, alt } => self.image_block(ui, src, alt, width, id),
         }
+    }
+
+    /// `ChatMarkdownImage` / `ChatMarkdownAssetImage`: a host file through a
+    /// signed asset URL, framed (`rounded-lg border border-border/40`), or a
+    /// direct URL, bare; at its natural size within 30rem and the column. A
+    /// 16:9 slot (or the size the server read) holds its place while it
+    /// loads and says "Image unavailable" if it fails. A click expands it;
+    /// a right click opens its menu.
+    fn image_block(&mut self, ui: &mut Ui, src: &str, alt: &str, width: f32, id: egui::Id) {
+        use crate::ui::attachments::{self, MediaState};
+        use crate::ui::media::{self, ImageSource};
+        const MAX: f32 = 480.0; // 30rem
+        let classified = media::classify(src, self.media_root.as_deref());
+        let (key, reference, framed) = match &classified {
+            ImageSource::Direct(uri) => {
+                (format!("md-direct:{uri}"), media::url_reference(uri), false)
+            }
+            ImageSource::File(path) => (
+                format!(
+                    "md-file:{}:{path}",
+                    self.media_thread.as_deref().unwrap_or_default()
+                ),
+                Some(media::file_reference(path, self.media_root.as_deref())),
+                true,
+            ),
+            ImageSource::Blocked => {
+                self.image_unavailable_chip(ui, alt);
+                return;
+            }
+        };
+        if attachments::media_state(&key).is_none() {
+            match &classified {
+                ImageSource::Direct(uri) => attachments::load_direct(&key, uri, ui.ctx()),
+                ImageSource::File(path) => {
+                    if let Some(thread) = &self.media_thread {
+                        attachments::mark_loading(&key);
+                        self.asset_requests.push((
+                            key.clone(),
+                            serde_json::json!({"resource": {
+                                "_tag": "media-file", "threadId": thread, "path": path,
+                            }}),
+                        ));
+                    }
+                }
+                ImageSource::Blocked => {}
+            }
+        }
+        let state = attachments::media_state(&key);
+        let natural = match &state {
+            Some(MediaState::Ready(image)) => Some((image.width(), image.height())),
+            _ => attachments::image_size(&key),
+        };
+        let limit = width.min(MAX);
+        let size = natural.map_or(Vec2::new(limit, (limit * 9.0 / 16.0).round()), |(w, h)| {
+            let (w, h) = (w.max(1) as f32, h.max(1) as f32);
+            let scale = 1.0_f32.min(limit / w).min(MAX / h);
+            Vec2::new((w * scale).round(), (h * scale).round())
+        });
+        let (row, _) = ui.allocate_exact_size(Vec2::new(width, size.y), Sense::hover());
+        let rect = Rect::from_min_size(row.min, size);
+        let radius = CornerRadius::same(8);
+        let border = egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.4));
+        let source = media::Source {
+            name: if alt.trim().is_empty() {
+                "image".into()
+            } else {
+                alt.trim().to_owned()
+            },
+            reference,
+            key: key.clone(),
+            local_file: None,
+        };
+        let ready = match state {
+            Some(MediaState::Ready(image)) => {
+                if framed {
+                    crate::ui::attachments::paint_cover(
+                        ui,
+                        rect.shrink(1.0),
+                        &key,
+                        &image,
+                        CornerRadius::same(7),
+                    );
+                    ui.painter()
+                        .rect_stroke(rect, radius, border, egui::StrokeKind::Inside);
+                } else {
+                    crate::ui::attachments::paint_cover(ui, rect, &key, &image, CornerRadius::ZERO);
+                }
+                Some(image)
+            }
+            state => {
+                ui.painter()
+                    .rect_filled(rect, radius, theme::alpha(theme::muted(), 0.6));
+                ui.painter()
+                    .rect_stroke(rect, radius, border, egui::StrokeKind::Inside);
+                if matches!(state, Some(MediaState::Failed) | None) {
+                    let label = if alt.is_empty() {
+                        "Image unavailable".to_owned()
+                    } else {
+                        format!("Image unavailable · {alt}")
+                    };
+                    let label_font = theme::font(12.0, theme::Weight::Regular);
+                    let text_width = widgets::text_width(ui, &label, label_font.clone())
+                        .min(rect.width() - 38.0);
+                    let left = rect.center().x - (text_width + 20.0) / 2.0;
+                    theme::paint_icon(
+                        ui,
+                        "triangle-alert",
+                        Rect::from_min_size(
+                            Pos2::new(left, rect.center().y - 7.0),
+                            Vec2::splat(14.0),
+                        ),
+                        14.0,
+                        theme::muted_foreground(),
+                    );
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_size(
+                            Pos2::new(left + 20.0, rect.center().y - 10.0),
+                            Vec2::new(text_width + 1.0, 20.0),
+                        ),
+                        &label,
+                        label_font,
+                        theme::muted_foreground(),
+                    );
+                }
+                None
+            }
+        };
+        let response = ui
+            .interact(rect, id.with("image"), Sense::click())
+            .on_hover_text(source.tooltip().to_owned());
+        if ready.is_some() && response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+        }
+        if response.secondary_clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            self.media_menu = Some((source.clone(), at));
+        }
+        if response.clicked()
+            && let Some(image) = ready
+        {
+            self.opened_media = Some((source, image));
+        }
+    }
+
+    /// `ChatMarkdownImageFallback`: an image that can never load, as an
+    /// inline chip (`rounded-md border border-border/40 bg-muted/40 px-2
+    /// py-1 text-xs`).
+    fn image_unavailable_chip(&mut self, ui: &mut Ui, alt: &str) {
+        let label = if alt.is_empty() {
+            "Image unavailable".to_owned()
+        } else {
+            format!("Image unavailable · {alt}")
+        };
+        let label_font = theme::font(12.0, theme::Weight::Regular);
+        let text_width = widgets::text_width(ui, &label, label_font.clone());
+        let (row, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
+        let chip = Rect::from_min_size(row.min, Vec2::new(text_width + 16.0 + 20.0, 26.0));
+        ui.painter().rect_filled(
+            chip,
+            CornerRadius::same(6),
+            theme::alpha(theme::muted(), 0.4),
+        );
+        ui.painter().rect_stroke(
+            chip,
+            CornerRadius::same(6),
+            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.4)),
+            egui::StrokeKind::Inside,
+        );
+        theme::paint_icon(
+            ui,
+            "triangle-alert",
+            Rect::from_min_size(
+                Pos2::new(chip.left() + 8.0, chip.center().y - 7.0),
+                Vec2::splat(14.0),
+            ),
+            14.0,
+            theme::muted_foreground(),
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(chip.left() + 28.0, chip.top()), chip.max),
+            &label,
+            label_font,
+            theme::muted_foreground(),
+        );
     }
 
     fn code_block(&mut self, ui: &mut Ui, language: &str, code: &str, width: f32, id: egui::Id) {

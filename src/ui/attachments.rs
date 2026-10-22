@@ -35,6 +35,102 @@ fn cache() -> &'static Mutex<HashMap<String, Loaded>> {
     CACHE.get_or_init(Default::default)
 }
 
+/// Where each loaded image came from (signed, direct or `data:` URL), its
+/// pixel size when the server reported it, and a local file holding it.
+#[derive(Default)]
+struct Origins {
+    urls: HashMap<String, String>,
+    sizes: HashMap<String, (u32, u32)>,
+    files: HashMap<String, std::path::PathBuf>,
+}
+
+fn origins() -> &'static Mutex<Origins> {
+    static ORIGINS: OnceLock<Mutex<Origins>> = OnceLock::new();
+    ORIGINS.get_or_init(Default::default)
+}
+
+/// A cached image's load state; None until something asked for it.
+pub(crate) enum MediaState {
+    Loading,
+    Failed,
+    Ready(Arc<image::RgbaImage>),
+}
+
+pub(crate) fn media_state(key: &str) -> Option<MediaState> {
+    cache().lock().ok()?.get(key).map(|loaded| match loaded {
+        Loaded::Pending => MediaState::Loading,
+        Loaded::Missing => MediaState::Failed,
+        Loaded::Image(image) => MediaState::Ready(image.clone()),
+    })
+}
+
+pub(crate) fn cached_image(key: &str) -> Option<Arc<image::RgbaImage>> {
+    match media_state(key)? {
+        MediaState::Ready(image) => Some(image),
+        _ => None,
+    }
+}
+
+/// Marks an image as asked for, before its request goes out.
+pub(crate) fn mark_loading(key: &str) {
+    if let Ok(mut cache) = cache().lock() {
+        cache.insert(key.to_owned(), Loaded::Pending);
+    }
+}
+
+pub(crate) fn loaded_url(key: &str) -> Option<String> {
+    origins().lock().ok()?.urls.get(key).cloned()
+}
+
+/// The pixel size the server read from the file header (`imageDimensions`).
+pub(crate) fn image_size(key: &str) -> Option<(u32, u32)> {
+    origins().lock().ok()?.sizes.get(key).copied()
+}
+
+pub(crate) fn local_file(key: &str) -> Option<std::path::PathBuf> {
+    origins().lock().ok()?.files.get(key).cloned()
+}
+
+/// Loads an image the client can reach itself (`https:`, `//`, `data:`)
+/// on a background thread.
+pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
+    mark_loading(key);
+    let (key, uri, ctx) = (key.to_owned(), uri.to_owned(), ctx.clone());
+    std::thread::spawn(move || {
+        let bytes = if let Some(data) = uri.strip_prefix("data:") {
+            data.split_once(',').and_then(|(meta, payload)| {
+                use base64::Engine;
+                meta.ends_with(";base64")
+                    .then(|| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(payload.trim())
+                            .ok()
+                    })
+                    .flatten()
+            })
+        } else {
+            let absolute = if uri.starts_with("//") {
+                format!("https:{uri}")
+            } else {
+                uri.clone()
+            };
+            url::Url::parse(&absolute)
+                .ok()
+                .and_then(|url| http_get(&url))
+        };
+        let state = bytes
+            .and_then(|bytes| decode(&bytes))
+            .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
+        if let Ok(mut origins) = origins().lock() {
+            origins.urls.insert(key.clone(), uri);
+        }
+        if let Ok(mut cache) = cache().lock() {
+            cache.insert(key, state);
+        }
+        ctx.request_repaint();
+    });
+}
+
 /// Decodes image bytes into premultiplied RGBA.
 pub(crate) fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
     let mut image = image::load_from_memory(bytes).ok()?.to_rgba8();
@@ -227,13 +323,20 @@ pub(crate) fn generated_image(
         let home = std::env::var_os("CODEX_HOME")
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::home_dir().map(|home| home.join(".codex")));
-        let state = home
+        let found = home
             .and_then(|home| std::fs::read_dir(home.join("generated_images")).ok())
             .into_iter()
             .flatten()
             .flatten()
-            .find_map(|dir| std::fs::read(dir.path().join(&file)).ok())
-            .and_then(|bytes| decode(&bytes))
+            .find_map(|dir| {
+                let path = dir.path().join(&file);
+                std::fs::read(&path).ok().map(|bytes| (path, bytes))
+            });
+        if let (Some((path, _)), Ok(mut origins)) = (&found, origins().lock()) {
+            origins.files.insert(key.clone(), path.clone());
+        }
+        let state = found
+            .and_then(|(_, bytes)| decode(&bytes))
             .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
         if let Ok(mut cache) = cache().lock() {
             cache.insert(key, state);
@@ -288,6 +391,16 @@ impl App {
         ctx: &egui::Context,
     ) {
         let base = url::Url::parse(self.connect.server.trim()).ok();
+        if let (Ok(r), Ok(mut origins)) = (&result, origins().lock())
+            && let (Some(width), Some(height)) = (
+                r["imageDimensions"]["width"].as_u64(),
+                r["imageDimensions"]["height"].as_u64(),
+            )
+        {
+            origins
+                .sizes
+                .insert(id.to_owned(), (width as u32, height as u32));
+        }
         let url = result.ok().and_then(|r| {
             let relative = r["relativeUrl"].as_str()?.to_owned();
             base?.join(&relative).ok()
@@ -298,6 +411,9 @@ impl App {
             }
             return;
         };
+        if let Ok(mut origins) = origins().lock() {
+            origins.urls.insert(id.to_owned(), url.to_string());
+        }
         let id = id.to_owned();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
