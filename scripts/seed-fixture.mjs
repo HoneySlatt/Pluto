@@ -123,6 +123,9 @@ function completeTurn(threadId, turnId, count, files, minutesAgo, assistantMessa
 const rust = project("T3 Code Rust", "demo-project", 600);
 const nixos = project("NixOS", "nixos-demo", 590);
 const web = project("web-demo", "web-demo", 580);
+// A package inside web-demo's repository: the sidebar groups it with web-demo.
+const webUi = project("web-ui", "web-demo/packages/ui", 570);
+thread(webUi, "Composants partagés", 1800);
 
 const main = thread(rust, "Reproduire T3 Code en Rust avec egui", 42);
 const turn = randomUUID();

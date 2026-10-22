@@ -93,6 +93,12 @@ impl State {
         }
     }
 
+    /// A `SelectPopup` at least as wide as its trigger.
+    pub fn with_min_width(mut self, width: f32) -> Self {
+        self.min_width = self.min_width.max(width);
+        self
+    }
+
     /// A dropdown (`MenuPopup`, `min-w-[10rem]`) opened below a trigger.
     pub fn dropdown(at: Pos2) -> Self {
         Self {
@@ -148,7 +154,9 @@ fn menu_size(ui: &Ui, items: &[Item], screen: Rect, min_width: f32) -> (Vec2, f3
     let height = content.min(MAX_HEIGHT.min(screen.height() * 0.7));
     let scrollbar = if content > height { SCROLLBAR } else { 0.0 };
     // Fractional like Chrome's layout; `show` snaps the painted edges.
-    let width = (row_content + 16.0 + PADDING * 2.0 + scrollbar + 2.0).clamp(min_width, MAX_WIDTH);
+    // A select popup may be wider than `max-w-sm`: as wide as its trigger.
+    let width = (row_content + 16.0 + PADDING * 2.0 + scrollbar + 2.0)
+        .clamp(min_width, MAX_WIDTH.max(min_width));
     (Vec2::new(width, height + 2.0), content)
 }
 

@@ -26,6 +26,7 @@ pub mod palette;
 pub mod pickers;
 pub mod project_actions;
 pub mod project_file;
+pub mod project_grouping;
 pub mod project_icon;
 pub mod project_scope;
 pub mod projects_page;

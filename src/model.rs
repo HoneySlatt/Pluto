@@ -21,6 +21,8 @@ pub struct Project {
     pub workspace_root: String,
     pub project_icon: Option<Value>,
     pub favicon_path: Option<String>,
+    /// `RepositoryIdentity` (canonical key, root path, names), kept as sent.
+    pub repository_identity: Option<Value>,
     pub created_at: String,
     pub updated_at: String,
 }

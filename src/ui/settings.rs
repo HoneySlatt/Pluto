@@ -53,6 +53,7 @@ pub fn default_client_settings() -> Value {
         "confirmThreadDelete": true,
         "confirmQuit": "hold",
         "sidebarProjectGroupingMode": "repository",
+        "sidebarProjectGroupingOverrides": {},
         "sidebarWorkingShelfEnabled": false,
         "planModeEnabled": false,
         "contextWindowMeterEnabled": false,

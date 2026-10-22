@@ -68,6 +68,15 @@ pub struct App {
     pub(crate) legacy_project_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The "Rename project" dialog: project, edited title, focus request.
     pub(crate) legacy_project_rename: Option<(String, String, bool)>,
+    /// Manual project order (`projectOrder`, physical keys, persisted).
+    pub(crate) legacy_project_order: Vec<String>,
+    /// The project group being dragged in manual sorting.
+    pub(crate) legacy_drag: Option<String>,
+    /// The member picker of a grouped project's New thread button.
+    pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// The "Project grouping" dialog: member project id and the selection.
+    pub(crate) legacy_grouping: Option<(String, String)>,
+    pub(crate) legacy_grouping_select: Option<crate::ui::context_menu::State>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -314,7 +323,12 @@ impl App {
             renaming: None,
             rename_focus: false,
             last_row_click: None,
-            legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()),
+            legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()).0,
+            legacy_project_order: load_ui_state(options.client_settings_path.as_deref()).1,
+            legacy_drag: None,
+            legacy_new_thread_menu: None,
+            legacy_grouping: None,
+            legacy_grouping_select: None,
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
             legacy_project_menu: None,
@@ -907,6 +921,7 @@ impl eframe::App for App {
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);
+                self.legacy_grouping_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
@@ -1208,20 +1223,29 @@ fn ui_state_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBu
     Some(settings?.with_file_name("ui-state.json"))
 }
 
-/// The persisted UI state (upstream's `uiStateStore`): project expansion.
-fn load_ui_state(settings: Option<&std::path::Path>) -> std::collections::HashMap<String, bool> {
-    ui_state_path(settings)
+/// The persisted UI state (upstream's `uiStateStore`): project expansion
+/// and the manual project order.
+fn load_ui_state(
+    settings: Option<&std::path::Path>,
+) -> (std::collections::HashMap<String, bool>, Vec<String>) {
+    let value = ui_state_path(settings)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|value| serde_json::from_value(value["projectExpandedById"].clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    (
+        serde_json::from_value(value["projectExpandedById"].clone()).unwrap_or_default(),
+        serde_json::from_value(value["projectOrder"].clone()).unwrap_or_default(),
+    )
 }
 
 pub(crate) fn save_ui_state(app: &App) {
     let Some(path) = ui_state_path(app.client_settings_path.as_deref()) else {
         return;
     };
-    let value = serde_json::json!({ "projectExpandedById": app.legacy_project_expanded });
+    let value = serde_json::json!({
+        "projectExpandedById": app.legacy_project_expanded,
+        "projectOrder": app.legacy_project_order,
+    });
     let temp = path.with_extension("json.tmp");
     if std::fs::write(&temp, value.to_string()).is_ok() {
         let _ = std::fs::rename(&temp, &path);

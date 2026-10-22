@@ -17,6 +17,7 @@ use crate::app::App;
 use crate::model::{Project, Thread};
 use crate::theme::{self, Weight, font};
 use crate::timeline::parse_time;
+use crate::ui::project_grouping::{self, ProjectGroup};
 use crate::ui::settings::Store;
 use crate::ui::{project_icon, widgets};
 
@@ -82,21 +83,23 @@ fn sort_threads(threads: &mut [&Thread], order: &str) {
     });
 }
 
-/// `sortProjectsForSidebar`: by their newest thread (or their own stamp),
-/// ties by title then id; "manual" keeps the given order.
-fn sort_projects(projects: &mut [&Project], threads: &[&Thread], order: &str) {
+/// `sortProjectsForSidebar`: groups by their newest thread (or their
+/// representative's stamp), ties by title then key; "manual" keeps the
+/// given order.
+fn sort_groups(groups: &mut [ProjectGroup], threads: &[&Thread], order: &str) {
     if order == "manual" {
         return;
     }
-    let stamp = |project: &Project| -> i64 {
-        let own: Vec<i64> = threads
+    let stamp = |group: &ProjectGroup| -> i64 {
+        let latest = threads
             .iter()
-            .filter(|t| t.project_id == project.id)
+            .filter(|t| group.members.iter().any(|(_, m)| m.id == t.project_id))
             .map(|t| thread_timestamp(t, order))
-            .collect();
-        if let Some(latest) = own.into_iter().max() {
+            .max();
+        if let Some(latest) = latest {
             return latest;
         }
+        let project = &group.representative;
         if order == "created_at" {
             millis(Some(&project.created_at)).unwrap_or(i64::MIN)
         } else {
@@ -105,13 +108,55 @@ fn sort_projects(projects: &mut [&Project], threads: &[&Thread], order: &str) {
                 .unwrap_or(i64::MIN)
         }
     };
-    let stamps: HashMap<String, i64> = projects.iter().map(|p| (p.id.clone(), stamp(p))).collect();
-    projects.sort_by(|a, b| {
-        stamps[&b.id]
-            .cmp(&stamps[&a.id])
-            .then_with(|| a.title.cmp(&b.title))
-            .then_with(|| a.id.cmp(&b.id))
+    let stamps: HashMap<String, i64> = groups.iter().map(|g| (g.key.clone(), stamp(g))).collect();
+    groups.sort_by(|a, b| {
+        stamps[&b.key]
+            .cmp(&stamps[&a.key])
+            .then_with(|| a.representative.title.cmp(&b.representative.title))
+            .then_with(|| a.key.cmp(&b.key))
     });
+}
+
+/// `projectExpansionPreferenceKeys`: the group, its members' physical keys
+/// and their legacy cwd keys.
+fn expansion_keys(group: &ProjectGroup) -> Vec<String> {
+    std::iter::once(group.key.clone())
+        .chain(group.members.iter().map(|(key, _)| key.clone()))
+        .chain(
+            group
+                .members
+                .iter()
+                .map(|(_, p)| project_grouping::legacy_cwd_key(&p.workspace_root)),
+        )
+        .collect()
+}
+
+/// `formatProjectMemberActionLabel`: the title alone, or the environment
+/// and path when several projects share the entry.
+fn member_label(project: &Project, members: usize, environment: Option<&str>) -> String {
+    match environment {
+        _ if members <= 1 => project.title.clone(),
+        Some(label) => format!("{label} — {}", project.workspace_root),
+        None => project.workspace_root.clone(),
+    }
+}
+
+/// `PROJECT_GROUPING_MODE_LABELS`.
+const GROUPING_MODES: [(&str, &str); 3] = [
+    ("repository", "Group by repository"),
+    ("repository_path", "Group by repository path"),
+    ("separate", "Keep separate"),
+];
+
+/// `projectGroupingModeDescription`.
+fn grouping_description(mode: &str) -> &'static str {
+    match mode {
+        "repository_path" => {
+            "Projects group only when both the repository and repo-relative path match."
+        }
+        "separate" => "Every project path gets its own sidebar row.",
+        _ => "Projects from the same repository share one sidebar row.",
+    }
 }
 
 /// The status pulse (`animate-status-pulse`): 2s, full then half opacity,
@@ -166,18 +211,47 @@ impl App {
         )
     }
 
-    /// `resolveProjectExpanded`: expanded unless collapsed before.
-    fn legacy_expanded(&self, project_id: &str) -> bool {
-        self.legacy_project_expanded
-            .get(project_id)
-            .copied()
+    /// `resolveProjectExpanded`: the first remembered key, else expanded.
+    fn legacy_expanded(&self, keys: &[String]) -> bool {
+        keys.iter()
+            .find_map(|key| self.legacy_project_expanded.get(key).copied())
             .unwrap_or(true)
     }
 
-    fn set_legacy_expanded(&mut self, project_id: &str, expanded: bool) {
-        self.legacy_project_expanded
-            .insert(project_id.to_owned(), expanded);
+    /// `setProjectExpanded`: every key of the entry takes the state.
+    fn set_legacy_expanded(&mut self, keys: &[String], expanded: bool) {
+        for key in keys {
+            self.legacy_project_expanded.insert(key.clone(), expanded);
+        }
         crate::app::save_ui_state(self);
+    }
+
+    fn environment_id(&self) -> String {
+        self.state.config["environment"]["environmentId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// Projects in the saved manual order (`orderItemsByPreferredIds`).
+    fn legacy_ordered_projects(&self) -> Vec<&Project> {
+        let projects: Vec<&Project> = self.state.projects.iter().collect();
+        project_grouping::order_projects(
+            &self.environment_id(),
+            &projects,
+            &self.legacy_project_order,
+        )
+    }
+
+    /// `buildSidebarProjectSnapshots` over the ordered projects.
+    fn legacy_groups(&self) -> Vec<ProjectGroup> {
+        let mode = self.client_setting("sidebarProjectGroupingMode");
+        project_grouping::build_groups(
+            &self.environment_id(),
+            &self.legacy_ordered_projects(),
+            mode.as_str().unwrap_or("repository"),
+            &self.client_setting("sidebarProjectGroupingOverrides"),
+        )
     }
 
     /// The legacy Search row and project trees, between the header and the
@@ -233,43 +307,133 @@ impl App {
         );
         self.legacy_project_list(ui, list);
         self.legacy_project_menu(ui);
+        self.legacy_new_thread_menu(ui);
     }
 
-    /// The project header's context menu: Rename, Copy Path, Project
-    /// settings, Remove ("Group into..." needs project grouping, not ported).
+    /// The project header's context menu: Rename, Group into..., Copy Path,
+    /// Project settings, Remove; with several projects in the entry, each
+    /// targeted item opens a submenu of the members.
     fn legacy_project_menu(&mut self, ui: &mut Ui) {
         use crate::ui::context_menu::{self, Item};
-        let Some((project_id, state)) = self.legacy_project_menu.take() else {
+        let Some((group_key, state)) = self.legacy_project_menu.take() else {
             return;
         };
-        let Some(project) = self.state.project(&project_id).cloned() else {
+        let Some(group) = self
+            .legacy_groups()
+            .into_iter()
+            .find(|g| g.key == group_key)
+        else {
             return;
         };
+        let count = group.members.len();
+        let environment = self.state.config["environment"]["label"]
+            .as_str()
+            .map(str::to_owned);
+        let targeted =
+            |action: &str, label: &str, icon: Option<&'static str>, destructive: bool| {
+                let leaf = |project: &Project, label: String| Item {
+                    destructive,
+                    ..Item::new(format!("{action}:{}", project.id), label)
+                };
+                let item = if count == 1 {
+                    leaf(&group.members[0].1, label.to_owned())
+                } else {
+                    Item {
+                        children: group
+                            .members
+                            .iter()
+                            .map(|(_, p)| leaf(p, member_label(p, count, environment.as_deref())))
+                            .collect(),
+                        ..Item::new(format!("{action}:submenu"), label)
+                    }
+                };
+                Item {
+                    icon,
+                    destructive: destructive && count == 1,
+                    ..item
+                }
+            };
         let items = [
-            Item::new("rename", "Rename"),
-            Item::new("copy-path", "Copy Path"),
+            targeted("rename", "Rename", None, false),
+            targeted("grouping", "Group into...", None, false),
+            targeted("copy-path", "Copy Path", None, false),
             Item::new("project-settings", "Project settings").icon("settings"),
-            Item {
-                destructive: true,
-                ..Item::new("delete", "Remove").icon("trash")
-            },
+            targeted("delete", "Remove", Some("trash"), true),
         ];
         let mut open = Some(state);
         let clicked = context_menu::show(ui, &mut open, &items);
         if let Some(state) = open {
-            self.legacy_project_menu = Some((project_id, state));
+            self.legacy_project_menu = Some((group_key, state));
         }
-        match clicked.as_deref() {
-            Some("rename") => {
+        let Some(clicked) = clicked else {
+            return;
+        };
+        if clicked == "project-settings" {
+            self.open_project_settings(&group.representative.id);
+            return;
+        }
+        let Some((action, project_id)) = clicked.split_once(':') else {
+            return;
+        };
+        let Some(project) = group
+            .members
+            .iter()
+            .map(|(_, p)| p)
+            .find(|p| p.id == project_id)
+            .cloned()
+        else {
+            return;
+        };
+        match action {
+            "rename" => {
                 self.legacy_project_rename = Some((project.id.clone(), project.title.clone(), true))
             }
-            Some("copy-path") => {
+            "grouping" => {
+                let key = project_grouping::physical_key(&self.environment_id(), &project);
+                let current = self.client_setting("sidebarProjectGroupingOverrides")[&key]
+                    .as_str()
+                    .unwrap_or("inherit")
+                    .to_owned();
+                self.legacy_grouping = Some((project.id.clone(), current));
+            }
+            "copy-path" => {
                 ui.ctx().copy_text(project.workspace_root.clone());
                 self.status = Some(format!("Path copied: {}", project.workspace_root));
             }
-            Some("project-settings") => self.open_project_settings(&project.id),
-            Some("delete") => self.confirm_legacy_remove(&project),
+            "delete" => self.confirm_legacy_remove(&project),
             _ => {}
+        }
+    }
+
+    /// A grouped project's New thread: pick the member to start in.
+    fn legacy_new_thread_menu(&mut self, ui: &mut Ui) {
+        use crate::ui::context_menu::{self, Item};
+        let Some((group_key, state)) = self.legacy_new_thread_menu.take() else {
+            return;
+        };
+        let Some(group) = self
+            .legacy_groups()
+            .into_iter()
+            .find(|g| g.key == group_key)
+        else {
+            return;
+        };
+        let count = group.members.len();
+        let environment = self.state.config["environment"]["label"].as_str();
+        let items: Vec<Item> = group
+            .members
+            .iter()
+            .map(|(key, p)| Item::new(key.clone(), member_label(p, count, environment)))
+            .collect();
+        let mut open = Some(state);
+        let clicked = context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.legacy_new_thread_menu = Some((group_key, state));
+        }
+        if let Some(key) = clicked
+            && let Some((_, project)) = group.members.iter().find(|(k, _)| *k == key)
+        {
+            self.start_draft(Some(project.id.clone()));
         }
     }
 
@@ -314,6 +478,353 @@ impl App {
                 "force": threads > 0,
             }),
         });
+    }
+
+    /// Manual sorting (`SortableProjectItem`): the lifted entry follows the
+    /// pointer and a line marks where it lands; dropping moves its projects
+    /// in `projectOrder` (`reorderProjects`). Upstream slides the other
+    /// entries aside instead of drawing a line.
+    fn legacy_drag_feedback(
+        &mut self,
+        ui: &Ui,
+        trees: &[Tree],
+        slots: &[(String, Rect)],
+        drag: &str,
+        dropped: bool,
+    ) {
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let from = slots.iter().position(|(key, _)| key == drag);
+        let target = pointer.and_then(|p| {
+            slots
+                .iter()
+                .position(|(_, rect)| p.y < rect.bottom() + GAP / 2.0)
+                .or(slots.len().checked_sub(1))
+        });
+        if let (Some(from), Some(target), Some(pointer)) = (from, target, pointer) {
+            if target != from {
+                let rect = slots[target].1;
+                let y = if target > from {
+                    rect.bottom() + GAP / 2.0
+                } else {
+                    rect.top() - GAP / 2.0
+                };
+                ui.painter().rect_filled(
+                    Rect::from_min_max(
+                        Pos2::new(rect.left() + 4.0, y - 1.0),
+                        Pos2::new(rect.right() - 4.0, y + 1.0),
+                    ),
+                    CornerRadius::same(1),
+                    theme::primary(),
+                );
+            }
+            // The lifted header under the pointer.
+            let header = slots[from].1;
+            let ghost = Rect::from_min_size(
+                Pos2::new(header.left(), pointer.y - ROW / 2.0),
+                Vec2::new(header.width(), ROW),
+            );
+            let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(
+                egui::Order::Tooltip,
+                ui.id().with("legacy-drag-ghost"),
+            ));
+            painter.rect(
+                ghost,
+                CornerRadius::same(8),
+                theme::sidebar(),
+                Stroke::new(1.0, theme::sidebar_border()),
+                StrokeKind::Inside,
+            );
+            painter.rect_filled(ghost, CornerRadius::same(8), sidebar_row_hover());
+            let group = &trees[from].group;
+            project_icon::paint(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(ghost.left() + 30.0, ghost.top() + 8.0),
+                    Vec2::splat(16.0),
+                ),
+                &group.representative,
+            );
+            let label = widgets::galley(
+                ui,
+                &group.label,
+                font(14.0, Weight::Medium),
+                theme::sidebar_foreground(),
+                20.0,
+                f32::INFINITY,
+            );
+            painter.galley(
+                Pos2::new(ghost.left() + 54.0, ghost.center().y - 10.0),
+                label,
+                theme::sidebar_foreground(),
+            );
+            ui.ctx().request_repaint();
+            if dropped {
+                let order: Vec<String> = self
+                    .legacy_ordered_projects()
+                    .iter()
+                    .map(|p| project_grouping::physical_key(&self.environment_id(), p))
+                    .collect();
+                let keys = |tree: &Tree| -> Vec<String> {
+                    tree.group.members.iter().map(|(k, _)| k.clone()).collect()
+                };
+                if let Some(next) =
+                    project_grouping::reorder(&order, &keys(&trees[from]), &keys(&trees[target]))
+                {
+                    self.legacy_project_order = next;
+                    crate::app::save_ui_state(self);
+                }
+            }
+        }
+        if dropped {
+            self.legacy_drag = None;
+        }
+    }
+
+    /// The "Project grouping" dialog: the project's rule, or the global
+    /// default (`saveProjectGroupingPreference`).
+    pub(crate) fn legacy_grouping_dialog(&mut self, ui: &mut Ui, screen: Rect) {
+        use crate::ui::context_menu::{self, Item};
+        let Some((project_id, mut selection)) = self.legacy_grouping.clone() else {
+            return;
+        };
+        let Some(project) = self.state.project(&project_id).cloned() else {
+            self.legacy_grouping = None;
+            return;
+        };
+        let default_mode = self.client_setting("sidebarProjectGroupingMode");
+        let default_mode = default_mode.as_str().unwrap_or("repository").to_owned();
+        let mode_label = |mode: &str| {
+            GROUPING_MODES
+                .iter()
+                .find(|(m, _)| *m == mode)
+                .map_or("", |(_, label)| *label)
+                .to_owned()
+        };
+        let trigger_label = if selection == "inherit" {
+            format!("Use global default ({})", mode_label(&default_mode))
+        } else {
+            mode_label(&selection)
+        };
+        let description = format!(
+            "Choose how {} should be grouped in the sidebar.",
+            project.workspace_root
+        );
+        let description_height = widgets::galley(
+            ui,
+            &description,
+            font(14.0, Weight::Regular),
+            theme::muted_foreground(),
+            20.0,
+            462.0,
+        )
+        .size()
+        .y;
+        // Measured on the reference: the header, then label, select, hint.
+        let panel_top = 53.0 + description_height + 12.0;
+        let footer_top = panel_top + 4.0 + 16.0 + 6.0 + 32.0 + 16.0 + 16.0 + 24.0;
+        let d = Rect::from_center_size(screen.center(), Vec2::new(512.0, footer_top + 65.0));
+        let mut decision = None;
+        let mut open_select: Option<Rect> = None;
+        let select_open = self.legacy_grouping_select.is_some();
+        egui::Area::new(ui.id().with("legacy-grouping-dialog"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ui.ctx(), |ui| {
+                let (backdrop, backdrop_response) =
+                    ui.allocate_exact_size(screen.size(), Sense::click());
+                ui.painter().rect_filled(
+                    backdrop,
+                    0.0,
+                    theme::alpha(theme::background(), 200.0 / 255.0),
+                );
+                if backdrop_response.clicked() && !ui.rect_contains_pointer(d) && !select_open {
+                    decision = Some(false);
+                }
+                ui.painter().rect(
+                    d,
+                    CornerRadius::same(18),
+                    theme::shade(12),
+                    Stroke::new(1.0, theme::input()),
+                    StrokeKind::Inside,
+                );
+                let close = Rect::from_min_size(
+                    Pos2::new(d.right() - 41.0, d.top() + 9.0),
+                    Vec2::splat(32.0),
+                );
+                if widgets::icon_button(
+                    ui,
+                    close,
+                    "legacy-grouping-close",
+                    "x",
+                    16.0,
+                    theme::muted_foreground(),
+                    "",
+                )
+                .clicked()
+                {
+                    decision = Some(false);
+                }
+                let left = d.left() + 25.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(left, d.top() + 25.0),
+                    "Project grouping",
+                    font(20.0, Weight::SemiBold),
+                    theme::foreground(),
+                    20.0,
+                );
+                let galley = widgets::galley(
+                    ui,
+                    &description,
+                    font(14.0, Weight::Regular),
+                    theme::muted_foreground(),
+                    20.0,
+                    462.0,
+                );
+                ui.painter().galley(
+                    Pos2::new(left, d.top() + 53.0),
+                    galley,
+                    theme::muted_foreground(),
+                );
+                let mut y = d.top() + panel_top + 4.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(left, y),
+                    "Grouping rule",
+                    font(12.0, Weight::Medium),
+                    theme::foreground(),
+                    16.0,
+                );
+                y += 16.0 + 6.0;
+                // `SelectTrigger`: the value, a chevron at the end.
+                let trigger = Rect::from_min_size(Pos2::new(left, y), Vec2::new(462.0, 32.0));
+                let response = ui.interact(
+                    trigger,
+                    ui.id().with("legacy-grouping-trigger"),
+                    Sense::click(),
+                );
+                ui.painter().rect(
+                    trigger,
+                    CornerRadius::same(10),
+                    if response.hovered() {
+                        theme::overlay(0.05)
+                    } else {
+                        theme::alpha(Color32::WHITE, 0.0256)
+                    },
+                    Stroke::new(1.0, theme::input()),
+                    StrokeKind::Inside,
+                );
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(
+                        Pos2::new(trigger.left() + 12.0, trigger.top()),
+                        Pos2::new(trigger.right() - 28.0, trigger.bottom()),
+                    ),
+                    &trigger_label,
+                    font(14.0, Weight::Regular),
+                    theme::foreground(),
+                );
+                theme::paint_icon(
+                    ui,
+                    "chevron-down",
+                    Rect::from_center_size(
+                        Pos2::new(trigger.right() - 14.0, trigger.center().y),
+                        Vec2::splat(12.0),
+                    ),
+                    12.0,
+                    theme::muted_foreground(),
+                );
+                if response.clicked() {
+                    open_select = Some(trigger);
+                }
+                y += 32.0 + 16.0;
+                let mode = if selection == "inherit" {
+                    default_mode.as_str()
+                } else {
+                    selection.as_str()
+                };
+                widgets::text(
+                    ui,
+                    Pos2::new(left, y),
+                    grouping_description(mode),
+                    font(12.0, Weight::Regular),
+                    theme::muted_foreground(),
+                    16.0,
+                );
+                let band = Rect::from_min_max(
+                    Pos2::new(d.left() + 1.0, d.top() + footer_top),
+                    d.max - Vec2::splat(1.0),
+                );
+                ui.painter().rect_filled(
+                    band,
+                    CornerRadius {
+                        nw: 0,
+                        ne: 0,
+                        sw: 17,
+                        se: 17,
+                    },
+                    theme::overlay(0.016),
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(band.min, Vec2::new(band.width(), 1.0)),
+                    0.0,
+                    theme::overlay(0.07),
+                );
+                use crate::ui::action_editor::{Kind, footer_button, footer_rect};
+                let top = band.top() + 16.0;
+                let save = footer_rect(ui, d.right() - 25.0, top, "Save");
+                let cancel = footer_rect(ui, save.left() - 8.0, top, "Cancel");
+                if footer_button(ui, save, "Save", Kind::Primary) {
+                    decision = Some(true);
+                }
+                if footer_button(ui, cancel, "Cancel", Kind::Outline)
+                    || (!select_open && ui.input(|i| i.key_pressed(egui::Key::Escape)))
+                {
+                    decision = Some(false);
+                }
+            });
+        if let Some(trigger) = open_select {
+            self.legacy_grouping_select = Some(
+                context_menu::State::dropdown(Pos2::new(trigger.left(), trigger.bottom() + 4.0))
+                    .with_min_width(trigger.width()),
+            );
+        }
+        // `SelectPopup`: the global default, then each rule.
+        let items: Vec<Item> = std::iter::once(("inherit", "Use global default".to_owned()))
+            .chain(GROUPING_MODES.iter().map(|(m, l)| (*m, (*l).to_owned())))
+            .map(|(value, label)| Item {
+                selected: selection == value,
+                ..Item::new(value, label)
+            })
+            .collect();
+        if let Some(chosen) = context_menu::show(ui, &mut self.legacy_grouping_select, &items) {
+            selection = chosen;
+            self.legacy_grouping_select = None;
+        }
+        match decision {
+            Some(true) => {
+                let key = project_grouping::physical_key(&self.environment_id(), &project);
+                let mut overrides = self.client_setting("sidebarProjectGroupingOverrides");
+                if !overrides.is_object() {
+                    overrides = json!({});
+                }
+                if selection == "inherit" {
+                    if let Some(map) = overrides.as_object_mut() {
+                        map.remove(&key);
+                    }
+                } else {
+                    overrides[&key] = json!(selection);
+                }
+                self.update_setting(Store::Client, "sidebarProjectGroupingOverrides", overrides);
+                self.legacy_grouping = None;
+                self.legacy_grouping_select = None;
+            }
+            Some(false) => {
+                self.legacy_grouping = None;
+                self.legacy_grouping_select = None;
+            }
+            None => self.legacy_grouping = Some((project_id, selection)),
+        }
     }
 
     /// The "Rename project" dialog.
@@ -524,19 +1035,20 @@ impl App {
             .iter()
             .filter(|t| t.archived_at.is_none())
             .collect();
-        let mut projects: Vec<&Project> = self.state.projects.iter().collect();
-        sort_projects(&mut projects, &thread_refs, &project_order);
+        let mut groups = self.legacy_groups();
+        sort_groups(&mut groups, &thread_refs, &project_order);
         let selected = self.selected.as_deref();
-        projects
-            .iter()
-            .map(|project| {
+        groups
+            .into_iter()
+            .map(|group| {
                 let mut own: Vec<&Thread> = thread_refs
                     .iter()
                     .copied()
-                    .filter(|t| t.project_id == project.id)
+                    .filter(|t| group.members.iter().any(|(_, m)| m.id == t.project_id))
                     .collect();
                 sort_threads(&mut own, &thread_order);
-                let expanded = self.legacy_expanded(&project.id);
+                let keys = expansion_keys(&group);
+                let expanded = self.legacy_expanded(&keys);
                 let pinned = (!expanded)
                     .then(|| {
                         own.iter()
@@ -544,7 +1056,7 @@ impl App {
                             .find(|t| selected == Some(t.id.as_str()))
                     })
                     .flatten();
-                let list_open = self.legacy_thread_lists.contains(&project.id);
+                let list_open = self.legacy_thread_lists.contains(&group.key);
                 let overflowing = own.len() > preview;
                 let shown: Vec<&Thread> = if list_open || !overflowing {
                     own.clone()
@@ -566,7 +1078,8 @@ impl App {
                     .copied()
                     .filter(|t| !visible.contains(t.id.as_str()));
                 Tree {
-                    project: (*project).clone(),
+                    group,
+                    keys,
                     expanded,
                     empty: expanded && own.is_empty(),
                     more: (expanded && overflowing)
@@ -645,8 +1158,12 @@ impl App {
             + GAP * trees.len().saturating_sub(1) as f32
             + 16.0;
 
-        let mut toggle: Option<(String, bool)> = None;
-        let mut new_thread: Option<String> = None;
+        let mut toggle: Option<(Vec<String>, bool)> = None;
+        let mut new_thread: Option<(String, Pos2)> = None;
+        let manual = self.client_setting("sidebarProjectSortOrder") == "manual";
+        // Manual sorting: header slots this frame and the drop target.
+        let mut slots: Vec<(String, Rect)> = Vec::new();
+        let mut dropped = false;
         let mut more: Option<(String, bool)> = None;
         let mut sort_anchor = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
@@ -727,21 +1244,41 @@ impl App {
                 for tree in &trees {
                     let header =
                         Rect::from_min_size(Pos2::new(left + 8.0, y), Vec2::new(239.0, ROW));
+                    let dragging = self.legacy_drag.as_deref() == Some(tree.group.key.as_str());
                     match self.legacy_project_header(
                         ui,
                         header,
-                        &tree.project,
+                        &tree.group,
                         tree.expanded,
                         tree.pill,
+                        manual,
                     ) {
                         Some(HeaderAction::Toggle) => {
-                            toggle = Some((tree.project.id.clone(), !tree.expanded))
+                            toggle = Some((tree.keys.clone(), !tree.expanded))
                         }
-                        Some(HeaderAction::NewThread) => new_thread = Some(tree.project.id.clone()),
+                        Some(HeaderAction::NewThread(at)) => {
+                            new_thread = Some((tree.group.key.clone(), at))
+                        }
+                        Some(HeaderAction::DragStart) => {
+                            self.legacy_drag = Some(tree.group.key.clone())
+                        }
+                        Some(HeaderAction::DragEnd) => dropped = true,
                         None => {}
+                    }
+                    if dragging {
+                        // The lifted entry keeps a faint slot.
+                        ui.painter().rect_filled(
+                            header,
+                            CornerRadius::same(8),
+                            theme::alpha(theme::sidebar_foreground(), 0.04),
+                        );
                     }
                     y += ROW;
                     let panel = panel_height(tree);
+                    slots.push((
+                        tree.group.key.clone(),
+                        Rect::from_min_max(header.min, Pos2::new(header.right(), y + panel)),
+                    ));
                     if panel > 0.0 {
                         // `border-l border-sidebar-border` along the sub list.
                         ui.painter().rect_filled(
@@ -779,22 +1316,32 @@ impl App {
                                 Pos2::new(left + 22.0, row_y),
                                 Vec2::new(218.0, MORE_ROW),
                             );
-                            if legacy_more_row(ui, row, &tree.project.id, open, hidden) {
-                                more = Some((tree.project.id.clone(), !open));
+                            if legacy_more_row(ui, row, &tree.group.key, open, hidden) {
+                                more = Some((tree.group.key.clone(), !open));
                             }
                         }
                     }
                     y += panel + GAP;
                 }
+                if let Some(drag) = self.legacy_drag.clone() {
+                    self.legacy_drag_feedback(ui, &trees, &slots, &drag, dropped);
+                }
             });
         if let Some(anchor) = sort_anchor {
             self.legacy_sort_menu(ui, anchor);
         }
-        if let Some((id, expanded)) = toggle {
-            self.set_legacy_expanded(&id, expanded);
+        if let Some((keys, expanded)) = toggle {
+            self.set_legacy_expanded(&keys, expanded);
         }
-        if let Some(id) = new_thread {
-            self.start_draft(Some(id));
+        if let Some((key, at)) = new_thread
+            && let Some(tree) = trees.iter().find(|t| t.group.key == key)
+        {
+            if tree.group.members.len() == 1 {
+                self.start_draft(Some(tree.group.members[0].1.id.clone()));
+            } else {
+                self.open_menu = None;
+                self.legacy_new_thread_menu = Some((key, crate::ui::context_menu::State::new(at)));
+            }
         }
         if let Some((id, open)) = more {
             if open {
@@ -812,21 +1359,42 @@ impl App {
         &mut self,
         ui: &mut Ui,
         rect: Rect,
-        project: &Project,
+        group: &ProjectGroup,
         expanded: bool,
         pill: Option<Pill>,
+        manual: bool,
     ) -> Option<HeaderAction> {
+        let project = &group.representative;
         let response = ui.interact(
             rect,
-            ui.id().with(("legacy-project", &project.id)),
-            Sense::click(),
+            ui.id().with(("legacy-project", &group.key)),
+            if manual {
+                Sense::click_and_drag()
+            } else {
+                Sense::click()
+            },
         );
         if response.secondary_clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
             self.open_menu = None;
             self.legacy_project_menu =
-                Some((project.id.clone(), crate::ui::context_menu::State::new(at)));
+                Some((group.key.clone(), crate::ui::context_menu::State::new(at)));
+        }
+        if manual {
+            if response.hovered() || response.dragged() {
+                ui.ctx().set_cursor_icon(if response.dragged() {
+                    egui::CursorIcon::Grabbing
+                } else {
+                    egui::CursorIcon::Grab
+                });
+            }
+            if response.drag_started() {
+                return Some(HeaderAction::DragStart);
+            }
+            if response.drag_stopped() {
+                return Some(HeaderAction::DragEnd);
+            }
         }
         let hovered = ui.rect_contains_pointer(rect);
         if response.hovered() {
@@ -866,16 +1434,34 @@ impl App {
             ),
             project,
         );
-        widgets::text_in(
+        // The name truncates; "N projects" (`shrink-0 text-3xs`) stays whole
+        // 8px after it.
+        let badge = (group.members.len() > 1).then(|| format!("{} projects", group.members.len()));
+        let badge_width = badge.as_ref().map_or(0.0, |b| {
+            widgets::text_width(ui, b, font(10.0, Weight::Regular)) + 8.0
+        });
+        let name_width = widgets::text_in(
             ui,
             Rect::from_min_max(
                 Pos2::new(rect.left() + 54.0, rect.top()),
-                Pos2::new(rect.left() + 205.0, rect.bottom()),
+                Pos2::new(rect.left() + 205.0 - badge_width, rect.bottom()),
             ),
-            &project.title,
+            &group.label,
             font(14.0, Weight::Medium),
             theme::alpha(theme::sidebar_foreground(), 0.9),
         );
+        if let Some(badge) = badge {
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(rect.left() + 54.0 + name_width + 8.0, rect.top()),
+                    Pos2::new(rect.left() + 213.0, rect.bottom()),
+                ),
+                &badge,
+                font(10.0, Weight::Regular),
+                theme::secondary_label(),
+            );
+        }
         if hovered {
             let button = Rect::from_min_size(
                 Pos2::new(rect.right() - 26.0, rect.top() + 5.0),
@@ -898,7 +1484,7 @@ impl App {
             if widgets::icon_button(
                 ui,
                 button,
-                ("legacy-new-thread", &project.id),
+                ("legacy-new-thread", &group.key),
                 "square-pen",
                 14.0,
                 theme::secondary_label(),
@@ -906,7 +1492,10 @@ impl App {
             )
             .clicked()
             {
-                return Some(HeaderAction::NewThread);
+                let at = ui
+                    .input(|i| i.pointer.interact_pos())
+                    .unwrap_or(button.center());
+                return Some(HeaderAction::NewThread(at));
             }
         }
         response.clicked().then_some(HeaderAction::Toggle)
@@ -1212,7 +1801,9 @@ impl App {
 
 /// A project's tree in the legacy sidebar.
 struct Tree {
-    project: Project,
+    group: ProjectGroup,
+    /// `projectExpansionPreferenceKeys`.
+    keys: Vec<String>,
     expanded: bool,
     rows: Vec<Thread>,
     empty: bool,
@@ -1223,7 +1814,9 @@ struct Tree {
 
 enum HeaderAction {
     Toggle,
-    NewThread,
+    NewThread(Pos2),
+    DragStart,
+    DragEnd,
 }
 
 /// `--sidebar-row-hover` in the dark theme: the foreground at 8%.
@@ -1359,20 +1952,23 @@ mod tests {
         let p1 = Project {
             id: "p1".into(),
             title: "Alpha".into(),
+            workspace_root: "/w/alpha".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             ..Project::default()
         };
         let p2 = Project {
             id: "p2".into(),
             title: "Beta".into(),
+            workspace_root: "/w/beta".into(),
             created_at: "2026-01-02T00:00:00Z".into(),
             ..Project::default()
         };
         let t = thread("t", "p1", "2026-01-09T00:00:00Z", None);
-        let mut projects = vec![&p2, &p1];
-        sort_projects(&mut projects, &[&t], "updated_at");
-        assert_eq!(projects[0].id, "p1");
-        sort_projects(&mut projects, &[], "manual");
-        assert_eq!(projects[0].id, "p1");
+        let mut groups =
+            project_grouping::build_groups("env", &[&p2, &p1], "separate", &serde_json::json!({}));
+        sort_groups(&mut groups, &[&t], "updated_at");
+        assert_eq!(groups[0].representative.id, "p1");
+        sort_groups(&mut groups, &[], "manual");
+        assert_eq!(groups[0].representative.id, "p1");
     }
 }
