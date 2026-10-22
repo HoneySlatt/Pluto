@@ -453,7 +453,7 @@ impl App {
             vcs_init: None,
             reply_commands: Default::default(),
             search: String::new(),
-            highlighter: Highlighter::default(),
+            highlighter: Highlighter::new(cc.egui_ctx.clone()),
             now: chrono::Utc::now(),
             vcs: None,
             watched_vcs: None,

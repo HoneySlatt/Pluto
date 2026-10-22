@@ -1285,7 +1285,11 @@ impl<'a> Markdown<'a> {
         let line_height = theme::code_line(17.875); // 13px × leading-snug
         let inner_width = width - 2.0 - 28.8;
         let mut job = LayoutJob::default();
-        for (text, color) in self.highlighter.spans(code, language) {
+        // Plain until the worker has highlighted it: the same glyphs, so
+        // nothing moves when the colors arrive.
+        let plain = [(code.to_owned(), crate::highlight::plain())];
+        let spans = self.highlighter.spans(code, language).unwrap_or(&plain);
+        for (text, color) in spans {
             job.append(
                 text,
                 0.0,

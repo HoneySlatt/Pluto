@@ -1709,7 +1709,7 @@ impl App {
         wrap: f32,
     ) -> std::sync::Arc<egui::Galley> {
         let mut job = LayoutJob::default();
-        for (text, color) in self.highlighter.spans(&line.text, language).to_vec() {
+        for (text, color) in self.highlighter.spans_or_plain(&line.text, language) {
             job.append(
                 &text,
                 0.0,

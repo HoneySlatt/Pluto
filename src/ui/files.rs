@@ -485,7 +485,7 @@ impl App {
             .next()
             .unwrap_or_default()
             .to_owned();
-        let spans: Vec<(String, Color32)> = self.highlighter.spans(&contents, &extension).to_vec();
+        let spans: Vec<(String, Color32)> = self.highlighter.spans_or_plain(&contents, &extension);
         // Split the spans into lines.
         let mut lines: Vec<Vec<(String, Color32)>> = vec![Vec::new()];
         for (text, color) in spans {

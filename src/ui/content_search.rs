@@ -465,7 +465,7 @@ impl App {
             theme::alpha(theme::muted_foreground(), 0.7),
         );
         let extension = path.rsplit('.').next().unwrap_or_default();
-        let spans = self.highlighter.spans(&m.content, extension).to_vec();
+        let spans = self.highlighter.spans_or_plain(&m.content, extension);
         let mut job = egui::text::LayoutJob::default();
         let mut offset = 0;
         let mut marks = Vec::new();

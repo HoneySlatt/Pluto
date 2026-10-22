@@ -2,22 +2,78 @@
 //! Shiki themes (light under a light environment theme), applied to syntect's
 //! TextMate-derived grammars. Token boundaries can differ slightly from
 //! Shiki's grammars.
-use std::collections::HashMap;
+//!
+//! Highlighting runs on a worker thread: syntect spends ~0.1ms a line and
+//! compiles a grammar on its first use (up to ~150ms), which would stall
+//! frames. Code shows in the plain foreground until its spans arrive, as
+//! upstream's Shiki highlights asynchronously too.
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::mpsc;
 
-use eframe::egui::Color32;
+use eframe::egui::{self, Color32};
 use syntect::highlighting::{
     Color, FontStyle, HighlightIterator, HighlightState, Highlighter as SyntectHighlighter,
     ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings,
 };
 use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 
+#[derive(Default)]
 pub struct Highlighter {
+    /// Spans by the hash of (light theme, language, code).
+    cache: HashMap<u64, Highlighted>,
+    /// Hashes sent to the worker and not back yet.
+    pending: HashSet<u64>,
+    worker: Option<Worker>,
+    /// Repainted when spans arrive.
+    ctx: Option<egui::Context>,
+}
+
+struct Request {
+    key: u64,
+    light: bool,
+    language: String,
+    code: String,
+}
+
+struct Highlighted {
+    request: Request,
+    spans: Vec<(String, Color32)>,
+}
+
+struct Worker {
+    requests: mpsc::Sender<Request>,
+    results: mpsc::Receiver<Highlighted>,
+}
+
+impl Worker {
+    fn start(ctx: Option<egui::Context>) -> Self {
+        let (requests, inbox) = mpsc::channel::<Request>();
+        let (outbox, results) = mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("highlight".into())
+            .spawn(move || {
+                let engine = Engine::default();
+                for request in inbox {
+                    let spans = engine.compute(&request.code, &request.language, request.light);
+                    if outbox.send(Highlighted { request, spans }).is_err() {
+                        break;
+                    }
+                    if let Some(ctx) = &ctx {
+                        ctx.request_repaint();
+                    }
+                }
+            });
+        Self { requests, results }
+    }
+}
+
+/// syntect's grammars and the pierre themes.
+struct Engine {
     syntaxes: SyntaxSet,
     dark: Theme,
     light: Theme,
-    /// Spans by (light theme, language, code).
-    cache: HashMap<(bool, String, String), Vec<(String, Color32)>>,
 }
 
 fn color(hex: &str) -> Option<Color> {
@@ -79,29 +135,84 @@ fn pierre(source: &str) -> Theme {
     }
 }
 
-impl Default for Highlighter {
+impl Default for Engine {
     fn default() -> Self {
         Self {
             syntaxes: SyntaxSet::load_defaults_newlines(),
             dark: pierre(include_str!("../assets/pierre-dark.json")),
             light: pierre(include_str!("../assets/pierre-light.json")),
-            cache: HashMap::new(),
         }
     }
 }
 
 impl Highlighter {
-    /// Colored spans for `code`; plain foreground when the language is unknown.
-    pub fn spans(&mut self, code: &str, language: &str) -> &[(String, Color32)] {
-        let light = !crate::theme::palette().dark;
-        let key = (light, language.to_owned(), code.to_owned());
-        if !self.cache.contains_key(&key) {
-            let spans = self.compute(code, language, light);
-            self.cache.insert(key.clone(), spans);
+    pub fn new(ctx: egui::Context) -> Self {
+        Self {
+            ctx: Some(ctx),
+            ..Default::default()
         }
-        &self.cache[&key]
     }
 
+    /// Colored spans for `code` (plain foreground when the language is
+    /// unknown), or None while the worker highlights it.
+    pub fn spans(&mut self, code: &str, language: &str) -> Option<&[(String, Color32)]> {
+        // Every code block on screen asks each frame: entries are kept and
+        // spans are evicted all at once past this many.
+        const MAX_ENTRIES: usize = 20_000;
+        if let Some(worker) = &self.worker {
+            while let Ok(done) = worker.results.try_recv() {
+                self.pending.remove(&done.request.key);
+                if self.cache.len() >= MAX_ENTRIES {
+                    self.cache.clear();
+                }
+                self.cache.insert(done.request.key, done);
+            }
+        }
+        let light = !crate::theme::palette().dark;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (light, language, code).hash(&mut hasher);
+        let key = hasher.finish();
+        let found = self.cache.get(&key).is_some_and(|done| {
+            done.request.light == light
+                && done.request.language == language
+                && done.request.code == code
+        });
+        if found {
+            return self.cache.get(&key).map(|done| done.spans.as_slice());
+        }
+        if self.pending.insert(key) {
+            let worker = self
+                .worker
+                .get_or_insert_with(|| Worker::start(self.ctx.clone()));
+            let _ = worker.requests.send(Request {
+                key,
+                light,
+                language: language.to_owned(),
+                code: code.to_owned(),
+            });
+        }
+        None
+    }
+
+    /// `spans`, or the whole code in the plain foreground meanwhile.
+    pub fn spans_or_plain(&mut self, code: &str, language: &str) -> Vec<(String, Color32)> {
+        match self.spans(code, language) {
+            Some(spans) => spans.to_vec(),
+            None => vec![(code.to_owned(), plain())],
+        }
+    }
+}
+
+/// The foreground of code not highlighted (yet).
+pub fn plain() -> Color32 {
+    if crate::theme::palette().dark {
+        DARK.foreground
+    } else {
+        LIGHT.foreground
+    }
+}
+
+impl Engine {
     fn compute(&self, code: &str, language: &str, light: bool) -> Vec<(String, Color32)> {
         let (theme, scheme) = if light {
             (&self.light, &LIGHT)
@@ -304,10 +415,7 @@ mod tests {
 
     #[test]
     fn rust_identifiers_follow_shiki_scopes() {
-        let mut highlighter = Highlighter::default();
-        let spans = highlighter
-            .spans("eframe::run(options, Box::new(App))", "rust")
-            .to_vec();
+        let spans = Engine::default().compute("eframe::run(options, Box::new(App))", "rust", false);
         let color = |word: &str| spans.iter().find(|(t, _)| t == word).map(|(_, c)| *c);
         assert_eq!(color("eframe"), Some(DARK.namespace));
         assert_eq!(color("Box"), Some(DARK.namespace));
@@ -316,10 +424,7 @@ mod tests {
 
     #[test]
     fn rust_keywords_and_operators_follow_shiki_scopes() {
-        let mut highlighter = Highlighter::default();
-        let spans = highlighter
-            .spans("fn f() { let x: u8 = 1 + 2; }", "rust")
-            .to_vec();
+        let spans = Engine::default().compute("fn f() { let x: u8 = 1 + 2; }", "rust", false);
         let color = |word: &str| {
             spans
                 .iter()
