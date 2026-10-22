@@ -3605,6 +3605,7 @@ impl App {
                             .into(),
                         confirm_label: "Delete",
                         command,
+                        more: Vec::new(),
                     });
                 }
             }

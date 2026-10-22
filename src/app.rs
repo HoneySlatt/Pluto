@@ -77,6 +77,11 @@ pub struct App {
     /// The "Project grouping" dialog: member project id and the selection.
     pub(crate) legacy_grouping: Option<(String, String)>,
     pub(crate) legacy_grouping_select: Option<crate::ui::context_menu::State>,
+    /// Selected legacy sidebar threads and the range anchor
+    /// (`threadSelectionStore`).
+    pub(crate) legacy_selection: std::collections::HashSet<String>,
+    pub(crate) legacy_anchor: Option<String>,
+    pub(crate) legacy_multi_menu: Option<crate::ui::context_menu::State>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -329,6 +334,9 @@ impl App {
             legacy_new_thread_menu: None,
             legacy_grouping: None,
             legacy_grouping_select: None,
+            legacy_selection: Default::default(),
+            legacy_anchor: None,
+            legacy_multi_menu: None,
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
             legacy_project_menu: None,

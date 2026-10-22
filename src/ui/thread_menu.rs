@@ -18,6 +18,8 @@ pub struct Confirm {
     pub message: String,
     pub confirm_label: &'static str,
     pub command: Value,
+    /// Further commands sent with `command` (bulk actions).
+    pub more: Vec<Value>,
 }
 
 impl App {
@@ -275,6 +277,7 @@ impl App {
                     message: "This permanently clears conversation history for this thread.".into(),
                     confirm_label: "Delete",
                     command: command("thread.delete", id),
+                    more: Vec::new(),
                 });
             }
             _ => {}
@@ -462,7 +465,18 @@ impl App {
                 if let Some(confirm) = self.confirm.take() {
                     let deleted = confirm.command["type"] == "thread.delete";
                     let thread_id = confirm.command["threadId"].as_str().map(str::to_owned);
+                    let deleted_selected = deleted
+                        && confirm
+                            .more
+                            .iter()
+                            .any(|c| c["threadId"].as_str() == self.selected.as_deref());
                     self.dispatch(confirm.command);
+                    for more in confirm.more {
+                        self.dispatch(more);
+                    }
+                    if deleted_selected {
+                        self.start_draft(None);
+                    }
                     if deleted && thread_id == self.selected {
                         self.start_draft(None);
                     }

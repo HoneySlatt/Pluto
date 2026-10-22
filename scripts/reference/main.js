@@ -35,17 +35,19 @@ app.whenReady().then(async () => {
     await sleep(1500);
   }
   // CLICKS points prefixed with "r" (e.g. "r60,150") are right clicks and
-  // points prefixed with "m" only move the pointer there (hover).
+  // points prefixed with "m" only move the pointer there (hover); "c" and "s"
+  // hold Ctrl or Shift for the click.
   for (const point of (process.env.CLICKS || "").split(";").filter(Boolean)) {
     const button = point.startsWith("r") ? "right" : "left";
-    const [x, y] = point.replace(/^[rm]/, "").split(",").map((v) => Math.round(v * scale));
+    const modifiers = point.startsWith("c") ? ["control"] : point.startsWith("s") ? ["shift"] : [];
+    const [x, y] = point.replace(/^[rmcs]/, "").split(",").map((v) => Math.round(v * scale));
     win.webContents.sendInputEvent({ type: "mouseMove", x, y });
     if (point.startsWith("m")) {
       await sleep(800);
       continue;
     }
-    win.webContents.sendInputEvent({ type: "mouseDown", x, y, button, clickCount: 1 });
-    win.webContents.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: 1 });
+    win.webContents.sendInputEvent({ type: "mouseDown", x, y, button, clickCount: 1, modifiers });
+    win.webContents.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: 1, modifiers });
     await sleep(800);
   }
   // KEYS="Ctrl+K;Escape" sends key chords (modifiers joined with +).

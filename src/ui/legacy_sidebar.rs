@@ -308,6 +308,126 @@ impl App {
         self.legacy_project_list(ui, list);
         self.legacy_project_menu(ui);
         self.legacy_new_thread_menu(ui);
+        self.legacy_multi_menu(ui);
+    }
+
+    /// `rangeSelectTo`: from the anchor to `thread_id` within the entry,
+    /// or a plain add when the anchor lies elsewhere.
+    fn legacy_range_select(&mut self, thread_id: &str, ordered: &[String]) {
+        let anchor_index = self
+            .legacy_anchor
+            .as_ref()
+            .and_then(|a| ordered.iter().position(|id| id == a));
+        let target_index = ordered.iter().position(|id| id == thread_id);
+        match (anchor_index, target_index) {
+            (Some(a), Some(t)) => {
+                for id in &ordered[a.min(t)..=a.max(t)] {
+                    self.legacy_selection.insert(id.clone());
+                }
+            }
+            _ => {
+                self.legacy_selection.insert(thread_id.to_owned());
+                self.legacy_anchor = Some(thread_id.to_owned());
+            }
+        }
+    }
+
+    /// The selection's menu (`buildMultiSelectThreadContextMenuItems`).
+    fn legacy_multi_menu(&mut self, ui: &mut Ui) {
+        use crate::ui::context_menu::{self, Item};
+        let Some(state) = self.legacy_multi_menu.take() else {
+            return;
+        };
+        let threads: Vec<Thread> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| self.legacy_selection.contains(&t.id))
+            .cloned()
+            .collect();
+        let count = threads.len();
+        if count == 0 {
+            return;
+        }
+        let items = [
+            Item::new("mark-unread", format!("Mark unread ({count})")),
+            Item {
+                disabled: threads.iter().any(Thread::is_running),
+                ..Item::new("archive", format!("Archive ({count})"))
+            },
+            Item {
+                destructive: true,
+                ..Item::new("delete", format!("Delete ({count})"))
+            },
+        ];
+        let mut open = Some(state);
+        let clicked = context_menu::show(ui, &mut open, &items);
+        self.legacy_multi_menu = open;
+        let commands = |kind: &str| -> Vec<Value> {
+            threads
+                .iter()
+                .map(|t| crate::model::command(kind, &t.id))
+                .collect()
+        };
+        let plural = if count == 1 { "" } else { "s" };
+        match clicked.as_deref() {
+            Some("mark-unread") => {
+                for thread in &threads {
+                    self.mark_unread(thread);
+                }
+                self.legacy_selection.clear();
+                self.legacy_anchor = None;
+            }
+            Some(kind @ ("archive" | "delete")) => {
+                let command_kind = if kind == "archive" {
+                    "thread.archive"
+                } else {
+                    "thread.delete"
+                };
+                let mut list = commands(command_kind);
+                let ask = if kind == "archive" {
+                    self.client_setting("confirmThreadArchive") == true
+                } else {
+                    self.client_setting("confirmThreadDelete") != false
+                };
+                if ask {
+                    let first = list.remove(0);
+                    self.confirm = Some(crate::ui::thread_menu::Confirm {
+                        title: if kind == "archive" {
+                            format!("Archive {count} thread{plural}?")
+                        } else {
+                            format!("Delete {count} thread{plural}?")
+                        },
+                        message: if kind == "archive" {
+                            String::new()
+                        } else {
+                            "This permanently clears conversation history for these threads.".into()
+                        },
+                        confirm_label: if kind == "archive" {
+                            "Archive"
+                        } else {
+                            "Delete"
+                        },
+                        command: first,
+                        more: list,
+                    });
+                } else {
+                    let deleted_selected = kind == "delete"
+                        && threads
+                            .iter()
+                            .any(|t| self.selected.as_deref() == Some(t.id.as_str()));
+                    for command in list {
+                        self.dispatch(command);
+                    }
+                    if deleted_selected {
+                        self.start_draft(None);
+                    }
+                }
+                self.legacy_selection.clear();
+                self.legacy_anchor = None;
+            }
+            _ => {}
+        }
     }
 
     /// The project header's context menu: Rename, Group into..., Copy Path,
@@ -477,6 +597,7 @@ impl App {
                 "projectId": project.id,
                 "force": threads > 0,
             }),
+            more: Vec::new(),
         });
     }
 
@@ -1078,6 +1199,7 @@ impl App {
                     .copied()
                     .filter(|t| !visible.contains(t.id.as_str()));
                 Tree {
+                    ordered: own.iter().map(|t| t.id.clone()).collect(),
                     group,
                     keys,
                     expanded,
@@ -1164,6 +1286,9 @@ impl App {
         // Manual sorting: header slots this frame and the drop target.
         let mut slots: Vec<(String, Rect)> = Vec::new();
         let mut dropped = false;
+        // Thread rows and their controls keep the selection on a press
+        // (`data-thread-item`, `data-thread-selection-safe`).
+        let mut safe: Vec<Rect> = Vec::new();
         let mut more: Option<(String, bool)> = None;
         let mut sort_anchor = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
@@ -1305,9 +1430,10 @@ impl App {
                                 Pos2::new(left + 23.0, row_y),
                                 Vec2::new(218.0, ROW),
                             );
+                            safe.push(row);
                             if ui.is_rect_visible(row) {
                                 let jump = jump_labels.get(&thread.id).map(String::as_str);
-                                self.legacy_thread_row(ui, row, thread, jump);
+                                self.legacy_thread_row(ui, row, thread, jump, &tree.ordered);
                             }
                             row_y += ROW + GAP;
                         }
@@ -1316,6 +1442,7 @@ impl App {
                                 Pos2::new(left + 22.0, row_y),
                                 Vec2::new(218.0, MORE_ROW),
                             );
+                            safe.push(row);
                             if legacy_more_row(ui, row, &tree.group.key, open, hidden) {
                                 more = Some((tree.group.key.clone(), !open));
                             }
@@ -1327,6 +1454,20 @@ impl App {
                     self.legacy_drag_feedback(ui, &trees, &slots, &drag, dropped);
                 }
             });
+        // `shouldClearThreadSelectionOnMouseDown` and Escape clear it.
+        if !self.legacy_selection.is_empty() {
+            let pointer = ui.input(|i| i.pointer.interact_pos());
+            let pressed = ui.input(|i| i.pointer.primary_pressed());
+            let on_safe = pointer.is_some_and(|p| safe.iter().any(|r| r.contains(p)));
+            let menu_open = self.legacy_multi_menu.is_some()
+                || self.thread_menu.is_some()
+                || self.confirm.is_some();
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || (pressed && !on_safe && !menu_open)
+            {
+                self.legacy_selection.clear();
+                self.legacy_anchor = None;
+            }
+        }
         if let Some(anchor) = sort_anchor {
             self.legacy_sort_menu(ui, anchor);
         }
@@ -1503,15 +1644,30 @@ impl App {
 
     /// A thread row: status label, title, and the relative time that the
     /// archive button replaces on hover.
-    fn legacy_thread_row(&mut self, ui: &mut Ui, rect: Rect, thread: &Thread, jump: Option<&str>) {
+    fn legacy_thread_row(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        thread: &Thread,
+        jump: Option<&str>,
+        ordered: &[String],
+    ) {
         let id = ui.id().with(("legacy-thread", &thread.id));
         let response = ui.interact(rect, id, Sense::click());
         let hovered = ui.rect_contains_pointer(rect);
         let active = self.selected.as_deref() == Some(thread.id.as_str());
         let running = thread.is_running();
+        let selected = self.legacy_selection.contains(&thread.id);
         if active {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(6), theme::row_active());
+        } else if selected {
+            // `--sidebar-row-selected`: the foreground at 7%.
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                theme::alpha(theme::sidebar_foreground(), 0.07),
+            );
         } else if response.hovered() {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(6), sidebar_row_hover());
@@ -1528,7 +1684,7 @@ impl App {
             );
             x += 10.0 + width + 6.0;
         }
-        let title_color = if active || response.hovered() {
+        let title_color = if active || selected || response.hovered() {
             theme::sidebar_foreground()
         } else {
             theme::alpha(theme::sidebar_muted(), 0.8)
@@ -1639,12 +1795,33 @@ impl App {
             return;
         }
         if response.clicked() {
-            self.thread_row_clicked(ui, thread);
+            // `handleThreadClick`: Ctrl toggles, Shift selects a range, a
+            // plain click clears the selection and opens the thread.
+            let modifiers = ui.input(|i| i.modifiers);
+            if modifiers.command {
+                if !self.legacy_selection.remove(&thread.id) {
+                    self.legacy_selection.insert(thread.id.clone());
+                    self.legacy_anchor = Some(thread.id.clone());
+                }
+            } else if modifiers.shift {
+                self.legacy_range_select(&thread.id, ordered);
+            } else {
+                self.legacy_selection.clear();
+                self.legacy_anchor = Some(thread.id.clone());
+                self.thread_row_clicked(ui, thread);
+            }
         }
         if response.secondary_clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
-            self.open_thread_menu(&thread.id, at);
+            if selected && !self.legacy_selection.is_empty() {
+                self.open_menu = None;
+                self.legacy_multi_menu = Some(crate::ui::context_menu::State::new(at));
+            } else {
+                self.legacy_selection.clear();
+                self.legacy_anchor = None;
+                self.open_thread_menu(&thread.id, at);
+            }
         }
         if self.legacy_pill(thread).is_some_and(|p| p.pulse) {
             ui.ctx()
@@ -1802,6 +1979,9 @@ impl App {
 /// A project's tree in the legacy sidebar.
 struct Tree {
     group: ProjectGroup,
+    /// The entry's visible threads in order (`orderedProjectThreadKeys`),
+    /// for Shift ranges.
+    ordered: Vec<String>,
     /// `projectExpansionPreferenceKeys`.
     keys: Vec<String>,
     expanded: bool,

@@ -499,6 +499,7 @@ impl App {
                         "projectId": project.id,
                         "force": true,
                     }),
+                    more: Vec::new(),
                 });
             }
             (id, action) => self.apply_general(id, action),
