@@ -203,6 +203,40 @@ fn main() {
     }
     report("scroll", &scroll);
 
+    // First visits: from the selection to the loaded thread.
+    let mut first_visits = Vec::new();
+    for prefix in [
+        "Reproduire",
+        "Brancher",
+        "Supprimer",
+        "Fix Amane",
+        "Choisir",
+        "Lancer",
+        "Composants",
+    ] {
+        if !bench.app.open_thread_titled(prefix) {
+            continue;
+        }
+        let started = Instant::now();
+        let mut ignored = Samples::default();
+        while !bench.app.is_loaded() && started.elapsed() < Duration::from_secs(5) {
+            bench.step(&mut ignored);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        first_visits.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    first_visits.sort_by(f64::total_cmp);
+    if !first_visits.is_empty() {
+        println!(
+            "first visits       load latency median {:.1} ms, max {:.1} ms ({} threads)",
+            first_visits[first_visits.len() / 2],
+            first_visits[first_visits.len() - 1],
+            first_visits.len()
+        );
+    }
+    bench.app.open_thread_titled(&title);
+    bench.settle(Duration::from_secs(5), |app| app.is_loaded());
+
     // Switches: the selection frame, then frames until the thread loads.
     let mut switch = Samples::default();
     let mut first = Samples::default();
