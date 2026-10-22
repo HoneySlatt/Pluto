@@ -143,8 +143,8 @@ impl App {
 
     fn composer_text_height(&self, ui: &Ui, width: f32) -> f32 {
         let collapsed = cite::collapse(&self.composer);
-        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
-        let galley = cite::composer_galley(ui, &collapsed.display, &labels, width - 34.0);
+        let chips: Vec<cite::Chip> = collapsed.tokens.iter().map(|(c, _)| c.clone()).collect();
+        let galley = cite::composer_galley(ui, &collapsed.display, &chips, width - 34.0);
         galley.size().y.clamp(MIN_TEXT_HEIGHT, MAX_TEXT_HEIGHT)
     }
 
@@ -316,7 +316,7 @@ impl App {
         cite::pad_chips(&mut self.composer);
         let collapsed = cite::collapse(&self.composer);
         cite::set_copy_tokens(&collapsed);
-        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
+        let chips: Vec<cite::Chip> = collapsed.tokens.iter().map(|(c, _)| c.clone()).collect();
         let mut display = collapsed.display.clone();
         let mut editor_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
         egui::ScrollArea::vertical()
@@ -332,7 +332,7 @@ impl App {
                     .desired_width(text_rect.width())
                     .min_size(Vec2::new(text_rect.width(), text_height))
                     .layouter(&mut |ui: &Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                        cite::composer_galley(ui, text.as_str(), &labels, wrap)
+                        cite::composer_galley(ui, text.as_str(), &chips, wrap)
                     })
                     .show(ui);
                 if display != collapsed.display {
@@ -1028,8 +1028,8 @@ impl App {
             return;
         }
         let collapsed = cite::collapse(&self.composer);
-        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
-        let galley = cite::composer_galley(ui, &collapsed.display, &labels, wrap);
+        let chips: Vec<cite::Chip> = collapsed.tokens.iter().map(|(c, _)| c.clone()).collect();
+        let galley = cite::composer_galley(ui, &collapsed.display, &chips, wrap);
         let row = egui::TextEdit::load_state(ui.ctx(), editor_id)
             .and_then(|state| state.cursor.char_range())
             .map_or(0, |range| galley.layout_from_cursor(range.primary).row);

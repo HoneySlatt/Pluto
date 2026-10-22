@@ -106,21 +106,61 @@ pub(crate) fn placeholder_index(c: char) -> Option<usize> {
         .then(|| (value - PLACEHOLDER_BASE) as usize)
 }
 
+/// What a composer chip stands for: a citation, or a file mention
+/// (`ComposerMentionNodeView`).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Chip {
+    Citation(Citation),
+    Mention(String),
+}
+
+impl Chip {
+    /// The chip's width at the composer's text `size`.
+    fn width(&self, ui: &Ui, size: f32) -> f32 {
+        match self {
+            Chip::Citation(citation) => citations::chip_width(ui, &citation.label(), size, true),
+            Chip::Mention(path) => mention_chip_width(ui, path, size),
+        }
+    }
+}
+
+/// The prompt's chips (citation links, then file mentions outside them),
+/// in order, with their byte ranges.
+fn chips(prompt: &str) -> Vec<(Chip, std::ops::Range<usize>)> {
+    let links = citations::collect(prompt);
+    let mut out: Vec<(Chip, std::ops::Range<usize>)> = crate::ui::mentions::collect(prompt)
+        .into_iter()
+        .filter(|(_, range)| {
+            !links
+                .iter()
+                .any(|(_, link)| range.start < link.end && range.end > link.start)
+        })
+        .map(|(path, range)| (Chip::Mention(path), range))
+        .collect();
+    out.extend(
+        links
+            .into_iter()
+            .map(|(c, range)| (Chip::Citation(c), range)),
+    );
+    out.sort_by_key(|(_, range)| range.start);
+    out
+}
+
 /// The composer's prompt as its editor shows it.
 pub(crate) struct Collapsed {
     pub(crate) display: String,
-    /// Each placeholder's citation and its link as written in the prompt.
-    pub(crate) tokens: Vec<(Citation, String)>,
+    /// Each placeholder's chip and its text as written in the prompt.
+    pub(crate) tokens: Vec<(Chip, String)>,
 }
 
 pub(crate) fn collapse(prompt: &str) -> Collapsed {
     let mut display = String::new();
     let mut tokens = Vec::new();
     let mut cursor = 0;
-    for (citation, range) in citations::collect(prompt) {
+    for (chip, range) in chips(prompt) {
         display.push_str(&prompt[cursor..range.start]);
         display.push(placeholder(tokens.len()));
-        tokens.push((citation, prompt[range.clone()].to_owned()));
+        tokens.push((chip, prompt[range.clone()].to_owned()));
         cursor = range.end;
     }
     display.push_str(&prompt[cursor..]);
@@ -129,7 +169,7 @@ pub(crate) fn collapse(prompt: &str) -> Collapsed {
 
 /// The prompt for an edited `display`: placeholders back to their links;
 /// unknown placeholders are dropped.
-pub(crate) fn expand(display: &str, tokens: &[(Citation, String)]) -> String {
+pub(crate) fn expand(display: &str, tokens: &[(Chip, String)]) -> String {
     let mut out = String::new();
     for c in display.chars() {
         match placeholder_index(c) {
@@ -147,7 +187,7 @@ pub(crate) fn expand(display: &str, tokens: &[(Citation, String)]) -> String {
 /// A chip ending a line or the prompt keeps a space after it, the room
 /// its chip is drawn in.
 pub(crate) fn pad_chips(prompt: &mut String) {
-    let ends: Vec<usize> = citations::collect(prompt)
+    let ends: Vec<usize> = chips(prompt)
         .into_iter()
         .map(|(_, range)| range.end)
         .filter(|end| matches!(prompt[*end..].chars().next(), None | Some('\n')))
@@ -158,7 +198,7 @@ pub(crate) fn pad_chips(prompt: &mut String) {
 }
 
 /// The prompt byte offset of a display character index.
-fn display_to_prompt(display: &str, tokens: &[(Citation, String)], index: usize) -> usize {
+fn display_to_prompt(display: &str, tokens: &[(Chip, String)], index: usize) -> usize {
     display
         .chars()
         .take(index)
@@ -174,7 +214,7 @@ fn display_to_prompt(display: &str, tokens: &[(Citation, String)], index: usize)
 fn prompt_to_display(prompt: &str, byte: usize) -> usize {
     let mut index = 0;
     let mut cursor = 0;
-    for (_, range) in citations::collect(prompt) {
+    for (_, range) in chips(prompt) {
         if byte <= range.start {
             break;
         }
@@ -204,14 +244,14 @@ pub(crate) fn restore_copied(text: &str) -> String {
         text,
         &tokens
             .into_iter()
-            .map(|source| (Citation::default(), source))
+            .map(|source| (Chip::Mention(String::new()), source))
             .collect::<Vec<_>>(),
     )
 }
 
 /// The composer's galley: placeholders invisible, the character after each
 /// spaced by its chip's width.
-pub(crate) fn composer_galley(ui: &Ui, text: &str, labels: &[String], wrap: f32) -> Arc<Galley> {
+pub(crate) fn composer_galley(ui: &Ui, text: &str, chips: &[Chip], wrap: f32) -> Arc<Galley> {
     let font = theme::composer_font();
     let line = theme::composer_line();
     let plain = widgets::format(font.clone(), theme::foreground(), line);
@@ -235,9 +275,9 @@ pub(crate) fn composer_galley(ui: &Ui, text: &str, labels: &[String], wrap: f32)
         job.append(&text[byte..end], 0.0, format);
         run = end;
         room = chip.map_or(0.0, |index| {
-            let width = labels.get(index).map_or(0.0, |label| {
-                citations::chip_width(ui, label, font.size, true)
-            });
+            let width = chips
+                .get(index)
+                .map_or(0.0, |chip| chip.width(ui, font.size));
             // The placeholder's own advance (a fallback glyph, which
             // `glyph_width` does not report).
             let advance = ui
@@ -252,6 +292,74 @@ pub(crate) fn composer_galley(ui: &Ui, text: &str, labels: &[String], wrap: f32)
     }
     job.wrap.max_width = wrap;
     widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)))
+}
+
+fn basename(path: &str) -> &str {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed)
+}
+
+/// A mention chip's width (`ContextChip`: `px-[0.5em]`, the entry icon,
+/// `gap-[0.33em]`, the basename at 0.86em, a 1px border).
+fn mention_chip_width(ui: &Ui, path: &str, size: f32) -> f32 {
+    let chip = size * 0.86;
+    let label = widgets::text_width(ui, basename(path), font(chip, Weight::Medium));
+    2.0 + 2.0 * 0.5 * chip + 1.17 * chip + 0.33 * chip + label
+}
+
+/// A mention chip (`kind="mention"`, accent `oklch(0.62 0.11 215)`): the
+/// entry's icon and basename, the path as its tooltip.
+fn paint_mention_chip(
+    ui: &mut Ui,
+    rect: Rect,
+    path: &str,
+    size: f32,
+    id: egui::Id,
+) -> egui::Response {
+    let chip = size * 0.86;
+    let [border, fill, text] =
+        crate::ui::md_links::chip_colors(0.11, 215.0, theme::border(), theme::foreground());
+    let radius = CornerRadius::same((0.5 * chip).round() as u8);
+    let response = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_text(path)
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let painter = ui.painter();
+    painter.rect_filled(rect, radius, fill);
+    if response.hovered() {
+        // `hover:bg-(--context-chip-accent)/17`.
+        painter.rect_filled(rect.shrink(1.0), radius, theme::alpha(fill, 0.6));
+    }
+    painter.rect_stroke(rect, radius, Stroke::new(1.0, border), StrokeKind::Inside);
+    let icon_size = (1.17 * chip).round();
+    let icon = Rect::from_min_size(
+        Pos2::new(
+            rect.left() + 1.0 + 0.5 * chip,
+            rect.center().y - icon_size / 2.0,
+        ),
+        Vec2::splat(icon_size),
+    );
+    let (name, color) = if path.ends_with(['/', '\\']) {
+        ("folder", theme::muted_foreground())
+    } else {
+        crate::ui::files::file_icon(path)
+    };
+    theme::paint_icon(ui, name, icon, icon_size, color);
+    let label_left = icon.right() + 0.33 * chip;
+    let galley = widgets::galley_truncated(
+        ui,
+        basename(path),
+        font(chip, Weight::Medium),
+        text,
+        (1.2 * chip).round(),
+        (rect.right() - 1.0 - 0.5 * chip - label_left).max(0.0),
+    );
+    ui.painter().galley(
+        Pos2::new(label_left, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text,
+    );
+    response
 }
 
 /// The ease-in-out pulse of a revealed citation: two pulses, a hold, a fade.
@@ -711,16 +819,16 @@ impl App {
         let mut rects = vec![Rect::NOTHING; collapsed.tokens.len()];
         let mut open = None;
         let mut edit = None;
+        let mut mention = None;
         for placed in &galley.rows {
             for glyph in &placed.row.glyphs {
                 let Some(index) = placeholder_index(glyph.chr) else {
                     continue;
                 };
-                let Some((citation, _)) = collapsed.tokens.get(index) else {
+                let Some((chip, _)) = collapsed.tokens.get(index) else {
                     continue;
                 };
-                let label = citation.label();
-                let width = citations::chip_width(ui, &label, size, true);
+                let width = chip.width(ui, size);
                 let row = placed.rect().translate(origin.to_vec2());
                 let rect = Rect::from_min_size(
                     Pos2::new(
@@ -731,6 +839,18 @@ impl App {
                     ),
                     Vec2::new(width.round(), height),
                 );
+                rects[index] = rect;
+                let citation = match chip {
+                    Chip::Citation(citation) => citation,
+                    Chip::Mention(path) => {
+                        let id = egui::Id::new(("composer-mention", index));
+                        if paint_mention_chip(ui, rect, path, size, id).clicked() {
+                            mention = Some(path.clone());
+                        }
+                        continue;
+                    }
+                };
+                let label = citation.label();
                 let response = citations::paint_chip(
                     ui,
                     rect,
@@ -752,12 +872,15 @@ impl App {
                 if response.is_some_and(|p| p.clicked()) {
                     edit = Some((index, citation.clone()));
                 }
-                rects[index] = rect;
             }
         }
         self.cite.chip_rects = rects;
         if let Some(citation) = open {
             self.open_citation_source(&citation);
+        }
+        // `openMention`: the file in the right panel.
+        if let Some(path) = mention {
+            self.open_markdown_file(&path);
         }
         if let Some((index, citation)) = edit {
             let toggled_off = self.cite.comment.as_ref().is_some_and(|c| c.index == index);
@@ -775,7 +898,7 @@ impl App {
     /// Replaces the composer's `index`th citation link with `citation`, or
     /// removes it.
     fn replace_composer_citation(&mut self, index: usize, citation: Option<&Citation>) {
-        if let Some((_, range)) = citations::collect(&self.composer).into_iter().nth(index) {
+        if let Some((Chip::Citation(_), range)) = chips(&self.composer).into_iter().nth(index) {
             let replacement = citation.map(Citation::serialize).unwrap_or_default();
             self.composer.replace_range(range, &replacement);
         }
@@ -1060,7 +1183,7 @@ impl App {
         &self,
         ctx: &egui::Context,
         edited: &str,
-        tokens: &[(Citation, String)],
+        tokens: &[(Chip, String)],
     ) {
         let Some(id) = self.cite.editor_id else {
             return;

@@ -283,7 +283,7 @@ fn looks_like_file_path(path: &str, authored: &str) -> bool {
     relative_file_path(authored) || relative_file_name(path)
 }
 
-fn percent_decode(value: &str) -> String {
+pub(crate) fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
