@@ -34,6 +34,7 @@ pub mod project_grouping;
 pub mod project_icon;
 pub mod project_scope;
 pub mod projects_page;
+pub mod prompt_history;
 pub mod providers;
 pub mod pull_requests;
 pub mod queue;

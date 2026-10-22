@@ -21,6 +21,8 @@ pub struct App {
     pub(crate) composer: String,
     /// Images attached to the composer, sent with the next message.
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
+    /// The prompt recalled with the arrows, and the thread it came from.
+    pub(crate) prompt_recall: Option<(String, crate::ui::prompt_history::Position)>,
     /// Clipboard and dropped images read off the UI thread.
     pub(crate) incoming_images: crate::ui::attachments::Incoming,
     /// Settings → Appearance typography.
@@ -330,6 +332,7 @@ impl App {
             draft_project_id: None,
             composer: String::new(),
             composer_images: Vec::new(),
+            prompt_recall: None,
             incoming_images: Default::default(),
             queues: Default::default(),
             lightbox: None,

@@ -281,6 +281,9 @@ impl App {
         // Ctrl+Enter in a citation's comment editor sends too.
         let submit = (focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
             || std::mem::take(&mut self.cite.send);
+        if focused && normal && self.composer_images.is_empty() {
+            self.recall_prompt(ui, editor_id, text_rect.width());
+        }
         // Citation links are edited as chips, one character each.
         cite::pad_chips(&mut self.composer);
         let collapsed = cite::collapse(&self.composer);
@@ -951,6 +954,73 @@ impl App {
 
     /// Sends the composer's message; during a turn of an existing thread the
     /// "Queue" follow-up behavior queues it instead (`followUpBehavior`).
+    /// Prompt recall (`composerPromptHistory.ts`): ArrowUp on an empty
+    /// composer, or from the first row of a recalled prompt, brings back the
+    /// open thread's previous prompt; ArrowDown from the last row walks
+    /// forward, emptying the composer past the newest. The caret lands at
+    /// the end; anywhere else the arrows move it as usual.
+    fn recall_prompt(&mut self, ui: &mut Ui, editor_id: egui::Id, wrap: f32) {
+        use crate::ui::prompt_history::{self, Direction};
+        let pressed = ui.input(|i| {
+            if !i.modifiers.is_none() {
+                None
+            } else if i.key_pressed(Key::ArrowUp) {
+                Some((Direction::Backward, Key::ArrowUp))
+            } else if i.key_pressed(Key::ArrowDown) {
+                Some((Direction::Forward, Key::ArrowDown))
+            } else {
+                None
+            }
+        });
+        let (Some((direction, key)), Some(thread)) = (pressed, self.current_thread()) else {
+            return;
+        };
+        // A recall belongs to the thread it was made in.
+        let position = self
+            .prompt_recall
+            .as_ref()
+            .filter(|(id, _)| *id == thread.id)
+            .map(|(_, position)| position.clone());
+        if position.is_none() && !self.composer.is_empty() {
+            return;
+        }
+        let collapsed = cite::collapse(&self.composer);
+        let labels: Vec<String> = collapsed.tokens.iter().map(|(c, _)| c.label()).collect();
+        let galley = cite::composer_galley(ui, &collapsed.display, &labels, wrap);
+        let row = egui::TextEdit::load_state(ui.ctx(), editor_id)
+            .and_then(|state| state.cursor.char_range())
+            .map_or(0, |range| galley.layout_from_cursor(range.primary).row);
+        let on_edge = match direction {
+            Direction::Backward => row == 0,
+            Direction::Forward => row + 1 >= galley.rows.len(),
+        };
+        if !on_edge {
+            return;
+        }
+        let entries = prompt_history::entries(
+            thread
+                .messages
+                .iter()
+                .map(|m| (m.id.as_str(), m.role.as_str(), m.text.as_str())),
+        );
+        let Some(step) =
+            prompt_history::step(direction, &entries, position.as_ref(), &self.composer)
+        else {
+            return;
+        };
+        ui.input_mut(|i| i.consume_key(Modifiers::NONE, key));
+        self.composer = step.prompt;
+        self.prompt_recall = step.position.map(|position| (thread.id.clone(), position));
+        let end = cite::collapse(&self.composer).display.chars().count();
+        let mut state = egui::TextEdit::load_state(ui.ctx(), editor_id).unwrap_or_default();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(end),
+            )));
+        state.store(ui.ctx(), editor_id);
+    }
+
     fn submit_message(&mut self, draft: bool) {
         if !draft
             && self.running()
