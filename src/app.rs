@@ -1014,9 +1014,9 @@ impl App {
         self.open_file(path.to_owned());
     }
 
-    /// Overrides a server setting in this client only (snapshots).
+    /// Overrides a client setting in memory (snapshots).
     pub fn override_setting(&mut self, key: &str, value: serde_json::Value) {
-        self.state.config["settings"][key] = value;
+        self.client_settings[key] = value;
     }
 
     /// Opens a workspace file with Markdown rendered (dev benches).

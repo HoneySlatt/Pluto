@@ -91,7 +91,7 @@ fn main() {
             if args.iter().any(|a| a == "--diff") {
                 app.open_last_diff();
             }
-            // `--setting key=json` overrides a server setting in this client.
+            // `--setting key=json` overrides a client setting in memory.
             for pair in args
                 .windows(2)
                 .filter(|w| w[0] == "--setting")

@@ -653,7 +653,7 @@ impl App {
 impl App {
     /// `resolveComposerInteractionMode`'s `enabled`.
     pub(crate) fn plan_mode_enabled(&self, draft: bool) -> bool {
-        if self.state.config["settings"]["planModeEnabled"] != true {
+        if self.client_setting("planModeEnabled") != true {
             return false;
         }
         let instance = self.composer_model_selection(draft).instance_id;
