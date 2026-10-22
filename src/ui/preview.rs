@@ -561,7 +561,8 @@ impl App {
         if let Some(frame) = &state.frame {
             let entry = self.preview.textures.get(&tab).map(|(seq, _)| *seq);
             if entry != Some(state.frame_seq) {
-                let image = (**frame).clone();
+                // The frame is shared with the texture upload, not copied.
+                let image = egui::ImageData::Color(frame.clone());
                 match self.preview.textures.get_mut(&tab) {
                     Some((seq, texture)) => {
                         texture.set(image, egui::TextureOptions::LINEAR);
@@ -580,10 +581,12 @@ impl App {
                 }
             }
             if let Some((_, texture)) = self.preview.textures.get(&tab) {
+                // One texel per physical pixel keeps the page's text crisp.
                 let size = Vec2::new(frame.size[0] as f32, frame.size[1] as f32) / ppp;
+                let min = (area.min * ppp).round() / ppp;
                 ui.painter().image(
                     texture.id(),
-                    Rect::from_min_size(area.min, size),
+                    Rect::from_min_size(min, size),
                     Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     Color32::WHITE,
                 );

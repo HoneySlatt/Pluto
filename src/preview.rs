@@ -165,6 +165,9 @@ pub struct Preview {
     commands: Sender<Input>,
     tabs: Arc<Mutex<HashMap<u64, TabState>>>,
     pub failure: Arc<Mutex<Option<String>>>,
+    /// Joined on drop, so the browser and its profile are gone before the
+    /// client exits.
+    engine: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Preview {
@@ -173,7 +176,7 @@ impl Preview {
         let tabs = Arc::new(Mutex::new(HashMap::new()));
         let failure = Arc::new(Mutex::new(None));
         let (shared, failed, browser) = (tabs.clone(), failure.clone(), commands.clone());
-        std::thread::spawn(move || {
+        let engine = std::thread::spawn(move || {
             if let Err(error) = run(inbox, browser, &shared, &ctx) {
                 if let Ok(mut failure) = failed.lock() {
                     *failure = Some(error);
@@ -185,6 +188,7 @@ impl Preview {
             commands,
             tabs,
             failure,
+            engine: Some(engine),
         }
     }
 
@@ -246,6 +250,9 @@ impl Preview {
 impl Drop for Preview {
     fn drop(&mut self) {
         self.send(Request::Shutdown);
+        if let Some(engine) = self.engine.take() {
+            let _ = engine.join();
+        }
     }
 }
 
@@ -315,10 +322,20 @@ fn launch() -> Result<(Process, File, File), String> {
             // Its own process group, so the whole tree can be stopped.
             libc::setpgid(0, 0);
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-            // The DevTools pipe: commands on fd 3, answers on fd 4.
-            if libc::dup2(commands_read, 3) < 0 || libc::dup2(answers_write, 4) < 0 {
+            // The DevTools pipe: commands on fd 3, answers on fd 4. The ends
+            // move above both first: one may already be fd 3 or 4, where
+            // dup2 would keep its close-on-exec flag (or clobber the other).
+            let commands = libc::fcntl(commands_read, libc::F_DUPFD, 10);
+            let answers = libc::fcntl(answers_write, libc::F_DUPFD, 10);
+            if commands < 0
+                || answers < 0
+                || libc::dup2(commands, 3) < 0
+                || libc::dup2(answers, 4) < 0
+            {
                 return Err(std::io::Error::last_os_error());
             }
+            libc::close(commands);
+            libc::close(answers);
             Ok(())
         });
     }
@@ -357,6 +374,12 @@ enum Pending {
     History {
         tab: u64,
         offset: i64,
+    },
+    /// A still of a page whose screencast just started: Chromium only casts
+    /// frames it paints from then on, so a page already painted sends none.
+    Still {
+        tab: u64,
+        seq: u64,
     },
     Ignore,
 }
@@ -510,6 +533,7 @@ fn run(
                             Pending::Ignore,
                         )?;
                             cast(&mut devtools, page, true)?;
+                            still(&mut devtools, page, tab, tabs)?;
                         }
                     }
                     Request::Visible { tab, visible } => {
@@ -518,6 +542,9 @@ fn run(
                         {
                             page.visible = visible;
                             cast(&mut devtools, page, visible)?;
+                            if visible {
+                                still(&mut devtools, page, tab, tabs)?;
+                            }
                         }
                     }
                     Request::Pointer {
@@ -619,6 +646,19 @@ fn run(
         if let Some(id) = message["id"].as_u64() {
             let result = &message["result"];
             match devtools.pending.remove(&id) {
+                Some(Pending::Still { tab, seq }) => {
+                    let Some(image) = result["data"].as_str().and_then(decode_frame) else {
+                        continue;
+                    };
+                    let mut image = Some(Arc::new(image));
+                    update(tab, &mut |state| {
+                        // A cast frame that came first is newer.
+                        if state.frame_seq == seq {
+                            state.frame = image.take();
+                            state.frame_seq += 1;
+                        }
+                    });
+                }
                 Some(Pending::Created { tab, url }) => {
                     let Some(target) = result["targetId"].as_str() else {
                         update(tab, &mut |state| {
@@ -723,20 +763,10 @@ fn run(
                     json!({"sessionId": ack}),
                     Pending::Ignore,
                 )?;
-                let image = params["data"]
-                    .as_str()
-                    .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
-                    .and_then(|bytes| image::load_from_memory(&bytes).ok())
-                    .map(|image| {
-                        let rgba = image.to_rgba8();
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [rgba.width() as usize, rgba.height() as usize],
-                            rgba.as_raw(),
-                        )
-                    });
-                if let Some(image) = image {
+                if let Some(image) = params["data"].as_str().and_then(decode_frame) {
+                    let mut image = Some(Arc::new(image));
                     update(tab, &mut |state| {
-                        state.frame = Some(Arc::new(image.clone()));
+                        state.frame = image.take();
                         state.frame_seq += 1;
                     });
                 }
@@ -769,6 +799,10 @@ fn run(
                 if params["frameId"].as_str() == Some(page.target.as_str()) {
                     let loading = method == "Page.frameStartedLoading";
                     update(*tab, &mut |state| state.loading = loading);
+                    // A page that painted before its cast began shows too.
+                    if !loading {
+                        still(&mut devtools, page, *tab, tabs)?;
+                    }
                 }
             }
             "Page.loadEventFired" | "Page.domContentEventFired" => {
@@ -819,6 +853,41 @@ fn run(
 }
 
 /// Starts or stops a page's screencast at its viewport size.
+/// A JPEG frame from the browser, base64-encoded, as an image.
+fn decode_frame(data: &str) -> Option<egui::ColorImage> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
+    let rgba = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [rgba.width() as usize, rgba.height() as usize],
+        rgba.as_raw(),
+    ))
+}
+
+/// Asks for a still of a page that started casting (`Pending::Still`).
+fn still(
+    devtools: &mut Devtools,
+    page: &Page,
+    tab: u64,
+    tabs: &Mutex<HashMap<u64, TabState>>,
+) -> Result<(), String> {
+    if !page.casting {
+        return Ok(());
+    }
+    let seq = tabs
+        .lock()
+        .ok()
+        .and_then(|tabs| tabs.get(&tab).map(|state| state.frame_seq))
+        .unwrap_or(0);
+    devtools.send(
+        Some(&page.session),
+        "Page.captureScreenshot",
+        json!({"format": "jpeg", "quality": 90}),
+        Pending::Still { tab, seq },
+    )
+}
+
 fn cast(devtools: &mut Devtools, page: &mut Page, on: bool) -> Result<(), String> {
     let session = page.session.clone();
     if page.casting {
