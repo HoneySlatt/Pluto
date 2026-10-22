@@ -555,7 +555,10 @@ impl App {
     }
 
     fn live_provider(&self, id: &str) -> Option<Value> {
-        self.providers().into_iter().find(|p| p["instanceId"] == id)
+        self.providers()
+            .iter()
+            .find(|p| p["instanceId"] == id)
+            .cloned()
     }
 
     /// Saves one instance (`buildProviderInstanceUpdatePatch`). The server

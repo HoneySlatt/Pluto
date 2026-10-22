@@ -314,7 +314,7 @@ impl App {
         }
         let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
-        let threads: Vec<crate::model::Thread> = self
+        let threads: Vec<std::sync::Arc<crate::model::Thread>> = self
             .state
             .threads
             .iter()
@@ -322,7 +322,8 @@ impl App {
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
             .cloned()
             .collect();
-        let sections = crate::ui::sidebar::sections(&threads, self.now);
+        let sections =
+            crate::ui::sidebar::sections(threads.iter().map(std::sync::Arc::as_ref), self.now);
         let snoozed = sections
             .snoozed
             .iter()

@@ -602,12 +602,29 @@ pub(crate) fn chip_colors(
     border: Color32,
     foreground: Color32,
 ) -> [Color32; 3] {
-    let accent = oklch(0.62, chroma, hue);
-    [
-        mix_oklab(accent, border, 0.34),
-        accent.gamma_multiply(0.11),
-        mix_oklab(accent, foreground, 0.22),
-    ]
+    // Every paragraph asks for them; the oklab mixes are kept per theme.
+    type Key = (u32, u32, Color32, Color32);
+    thread_local! {
+        static COLORS: std::cell::RefCell<Vec<(Key, [Color32; 3])>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let key = (chroma.to_bits(), hue.to_bits(), border, foreground);
+    COLORS.with_borrow_mut(|colors| {
+        if let Some((_, value)) = colors.iter().find(|(k, _)| *k == key) {
+            return *value;
+        }
+        let accent = oklch(0.62, chroma, hue);
+        let value = [
+            mix_oklab(accent, border, 0.34),
+            accent.gamma_multiply(0.11),
+            mix_oklab(accent, foreground, 0.22),
+        ];
+        if colors.len() >= 16 {
+            colors.clear();
+        }
+        colors.push((key, value));
+        value
+    })
 }
 
 #[cfg(test)]

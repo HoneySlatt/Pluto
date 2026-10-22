@@ -8,7 +8,7 @@ use crate::theme::{self, Weight, font};
 use crate::timeline::{self, Row, WorkEntry};
 use crate::ui::citations;
 use crate::ui::markdown::{Markdown, PlainText};
-use crate::ui::{attachments, project_icon, widgets};
+use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
 
@@ -325,31 +325,82 @@ impl App {
         let Some(thread) = self.current_thread() else {
             return;
         };
-        let mut rows = timeline::rows(&thread, &self.expansion);
+        let revision = self.state.revision;
+        let mut rows = self.timeline_view.rows(&thread, &self.expansion, revision);
         // A revealed citation's message: its folded turn opens, and the
         // timeline stops following its end until it is in view.
-        if let Some(message_id) = self.citation_scroll_target(&thread.id) {
+        let reveal = self.citation_scroll_target(&thread.id);
+        if let Some(message_id) = &reveal {
             let shown = rows
                 .iter()
-                .any(|r| matches!(r, Row::Assistant { message, .. } if message.id == message_id));
+                .any(|r| matches!(r, Row::Assistant { message, .. } if &message.id == message_id));
             let turn = thread
                 .messages
                 .iter()
-                .find(|m| m.id == message_id)
+                .find(|m| &m.id == message_id)
                 .and_then(|m| m.turn_id.clone());
             if !shown && let Some(turn) = turn {
                 self.expansion.turns.insert(turn);
-                rows = timeline::rows(&thread, &self.expansion);
+                rows = self.timeline_view.rows(&thread, &self.expansion, revision);
             }
             self.keep_scroll = true;
         }
+        // Toggling a fold keeps the clicked row in place instead of following the end.
+        let keep_scroll = std::mem::take(&mut self.keep_scroll);
+        let (select_all, selecting) = {
+            let plugin = ui.ctx().plugin::<widgets::CopyCleanup>();
+            let plugin = plugin.lock();
+            (plugin.select_all, plugin.has_range || plugin.select_all)
+        };
+        let mut view = std::mem::take(&mut self.timeline_view);
+        view.open(&thread.id);
+        if !selecting {
+            view.pinned.clear();
+        }
+        let viewport_height = if view.viewport > 0.0 {
+            view.viewport
+        } else {
+            rect.height()
+        };
+        let keys: Vec<egui::Id> = rows.iter().map(timeline_view::row_key).collect();
+        let guesses: Vec<f32> = rows
+            .iter()
+            .zip(&keys)
+            .map(|(row, key)| view.height(*key, row, column))
+            .collect();
+        let content_height = 24.0 + guesses.iter().sum::<f32>() + view.tail + bottom_padding;
+        // The wheel moves the view in this pass; egui would apply it after
+        // drawing, a frame late.
+        let mut offset = view.offset;
+        let mut scrolled = false;
+        let wheel = if ui.rect_contains_pointer(rect) && ui.ctx().dragged_id().is_none() {
+            ui.input(|i| i.smooth_scroll_delta.y)
+        } else {
+            0.0
+        };
+        if wheel != 0.0 {
+            ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
+            let max = (content_height - viewport_height).max(0.0);
+            offset = (offset - wheel).clamp(0.0, max);
+            scrolled = true;
+        } else if view.follow && !keep_scroll {
+            offset = (content_height - viewport_height).max(0.0);
+        }
+        let mut drawn = Vec::new();
+        let mut used = offset;
+        // Height changes of rows above the viewport, and whether a row cut
+        // by its top edge changed (what is on screen moved).
+        let mut shift = 0.0;
+        let mut cut_changed = false;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        egui::ScrollArea::vertical()
+        let output = egui::ScrollArea::vertical()
             .id_salt(("timeline", &thread.id))
             .auto_shrink([false, false])
-            // Toggling a fold keeps the clicked row in place instead of following the end.
-            .stick_to_bottom(!std::mem::take(&mut self.keep_scroll))
-            .show(&mut child, |ui| {
+            .vertical_scroll_offset(offset)
+            .show_viewport(&mut child, |ui, viewport| {
+                used = viewport.top();
+                let origin = ui.max_rect().top();
+                let overscan = (viewport.height() * 0.5).max(240.0);
                 ui.set_width(rect.width());
                 ui.add_space(24.0);
                 let inner = Rect::from_min_size(
@@ -357,14 +408,65 @@ impl App {
                     Vec2::new(column, f32::INFINITY),
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                    for row in &rows {
+                    for ((row, key), guess) in rows.iter().zip(&keys).zip(guesses.iter().copied()) {
+                        let top = ui.cursor().top() - origin;
+                        let near = top + guess >= viewport.top() - overscan
+                            && top <= viewport.bottom() + overscan;
+                        let revealing = matches!(
+                            (row, &reveal),
+                            (Row::Assistant { message, .. }, Some(id)) if &message.id == id
+                        );
+                        if !(near || select_all || revealing || view.pinned.contains(key)) {
+                            ui.add_space(guess);
+                            continue;
+                        }
+                        let before = ui.cursor().top();
                         self.row(ui, row, column);
+                        let height = ui.cursor().top() - before;
+                        view.measured(*key, height);
+                        drawn.push(*key);
+                        if (height - guess).abs() > 0.5 && top < viewport.top() {
+                            // Rows below stay where this pass expected them;
+                            // the next pass moves the offset instead.
+                            ui.add_space(guess - height);
+                            shift += height - guess;
+                            cut_changed |= top + guess > viewport.top();
+                        }
                     }
                     // Queued follow-ups close the timeline.
+                    let before = ui.cursor().top();
                     self.queued_rows(ui, &thread, column);
+                    view.tail = ui.cursor().top() - before;
                 });
                 ui.add_space(bottom_padding);
             });
+        if selecting {
+            view.pinned.extend(drawn);
+        }
+        view.viewport = output.inner_rect.height();
+        let content = output.content_size.y;
+        let max = (content + shift - view.viewport).max(0.0);
+        let mut next = (output.state.offset.y + shift).clamp(0.0, max);
+        // A drag on the bar, a reveal or the wheel decide whether the view
+        // still follows the end.
+        view.scrolled = scrolled
+            || (used - offset).abs() > 0.5
+            || (output.state.offset.y - used).abs() > 0.5;
+        let moved = view.scrolled || keep_scroll;
+        if moved {
+            view.follow = next >= max - 1.0;
+        } else if view.follow {
+            next = max;
+        }
+        // Show the corrected layout instead of this pass when what is on
+        // screen moved: the end left the bottom edge, or a row cut by the
+        // top edge changed height.
+        let misaligned = view.follow && ((content - view.viewport).max(0.0) - used).abs() > 0.5;
+        if misaligned || cut_changed {
+            ui.ctx().request_discard("timeline row heights");
+        }
+        view.offset = next;
+        self.timeline_view = view;
     }
 
     fn row(&mut self, ui: &mut Ui, row: &Row, width: f32) {

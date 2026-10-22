@@ -1,0 +1,141 @@
+//! Virtualization of the messages timeline: upstream renders it through
+//! `LegendList` (`MessagesTimeline.tsx`), which mounts only the rows near
+//! the viewport. Each row's height is kept from when it was last drawn
+//! (an estimate stands in before that), so a frame lays out and paints only
+//! the rows around the visible part; heights that change above the visible
+//! part move the scroll offset with them, keeping what is on screen in place.
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use eframe::egui::Id;
+
+use crate::model::Thread;
+use crate::timeline::{self, Expansion, Row};
+
+#[derive(Default)]
+pub(crate) struct TimelineView {
+    rows: Option<RowsCache>,
+    /// Each row's height when last drawn, the space below it included.
+    heights: HashMap<Id, f32>,
+    /// The thread `offset` and `follow` belong to.
+    pub thread_id: String,
+    /// The scroll offset for the next pass.
+    pub offset: f32,
+    /// The view sticks to the end as rows grow or arrive.
+    pub follow: bool,
+    /// Rows drawn while text is selected stay drawn until the selection
+    /// ends: egui drops a selection whose ends it does not see.
+    pub pinned: HashSet<Id>,
+    /// The viewport height of the last pass.
+    pub viewport: f32,
+    /// The height of what closes the timeline (queued follow-ups).
+    pub tail: f32,
+    /// The wheel or the scroll bar moved the view this pass (the wheel
+    /// delta is used up by then).
+    pub scrolled: bool,
+}
+
+struct RowsCache {
+    thread_id: String,
+    revision: u64,
+    expansion: Expansion,
+    rows: Arc<Vec<Row>>,
+}
+
+impl TimelineView {
+    /// The thread's rows, rebuilt only when the thread or the folds change.
+    pub fn rows(&mut self, thread: &Thread, expansion: &Expansion, revision: u64) -> Arc<Vec<Row>> {
+        if let Some(cache) = &self.rows
+            && cache.thread_id == thread.id
+            && cache.revision == revision
+            && cache.expansion == *expansion
+        {
+            return cache.rows.clone();
+        }
+        let rows = Arc::new(timeline::rows(thread, expansion));
+        self.rows = Some(RowsCache {
+            thread_id: thread.id.clone(),
+            revision,
+            expansion: expansion.clone(),
+            rows: rows.clone(),
+        });
+        rows
+    }
+
+    /// Starts over on another thread: it opens at its end.
+    pub fn open(&mut self, thread_id: &str) {
+        if self.thread_id == thread_id {
+            return;
+        }
+        self.thread_id = thread_id.to_owned();
+        self.follow = true;
+        self.pinned.clear();
+        // Heights are kept by message and turn ids, so threads opened again
+        // come back measured; the map is dropped once it grows large.
+        if self.heights.len() > 5000 {
+            self.heights.clear();
+        }
+    }
+
+    /// The row's last drawn height, else an estimate (kept until it is drawn).
+    pub fn height(&mut self, key: Id, row: &Row, width: f32) -> f32 {
+        *self
+            .heights
+            .entry(key)
+            .or_insert_with(|| estimate(row, width))
+    }
+
+    pub fn measured(&mut self, key: Id, height: f32) {
+        self.heights.insert(key, height);
+    }
+}
+
+/// A stable identity for a row across rebuilds.
+pub(crate) fn row_key(row: &Row) -> Id {
+    match row {
+        Row::User(message) => Id::new(("user", &message.id)),
+        Row::Assistant { message, .. } => Id::new(("assistant", &message.id)),
+        Row::TurnFold { turn_id, .. } => Id::new(("fold", turn_id)),
+        Row::Work { id, .. } => Id::new(("work", id)),
+        Row::WorkToggle { group_id, .. } => Id::new(("toggle", group_id)),
+        Row::WorkDetails { group_id, .. } => Id::new(("details", group_id)),
+        Row::Working { .. } => Id::new("working"),
+        Row::GeneratedImage { tool_call_id } => Id::new(("generated", tool_call_id)),
+    }
+}
+
+/// A row's height before it is drawn, from its line count at the chat's
+/// 14px type; drawing it corrects the guess.
+fn estimate(row: &Row, width: f32) -> f32 {
+    const LINE: f32 = 22.75;
+    let lines = |text: &str, width: f32| -> f32 {
+        let per_line = (width / 7.5).max(8.0);
+        text.lines()
+            .map(|line| (line.chars().count() as f32 / per_line).ceil().max(1.0))
+            .sum()
+    };
+    let height = match row {
+        Row::User(message) => {
+            let images = if message.attachments.is_empty() {
+                0.0
+            } else {
+                width * 0.3
+            };
+            lines(message.text.trim_end(), width * 0.8 - 24.0) * LINE + images + 24.0 + 28.0 + 16.0
+        }
+        Row::Assistant {
+            message, show_meta, ..
+        } => {
+            let meta = if *show_meta { 30.0 + 16.0 } else { 8.0 };
+            lines(&message.text, width - 8.0) * LINE + 4.0 + meta
+        }
+        Row::TurnFold { .. } => 4.0 + LINE + 8.0 + 1.0 + 6.0,
+        Row::Work { .. } => 9.25 + LINE + 8.0,
+        Row::WorkToggle { .. } => 6.0 + LINE + 8.0,
+        Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
+        Row::Working { .. } => LINE + 4.0 + 6.0,
+        Row::GeneratedImage { .. } => 0.0,
+    };
+    // Whole points, like the layout the guess stands in for.
+    height.round()
+}

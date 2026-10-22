@@ -117,7 +117,7 @@ impl App {
             if thread.has_pending_approvals || thread.has_pending_user_input || !self.connected() {
                 continue;
             }
-            let latest = detail.as_ref().and_then(latest_tool_call);
+            let latest = detail.as_deref().and_then(latest_tool_call);
             let status = thread.session.as_ref().map(|s| s.status.as_str());
             let Some(next) = self
                 .queues

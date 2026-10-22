@@ -463,7 +463,7 @@ impl App {
         let environment = self.state.config["environment"]["label"]
             .as_str()
             .map(str::to_owned);
-        let pools = limit_pools(&self.providers(), now, environment.as_deref());
+        let pools = limit_pools(self.providers(), now, environment.as_deref());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("usage-limits")

@@ -100,7 +100,7 @@ pub enum Row {
     },
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Expansion {
     pub turns: BTreeSet<String>,
     pub groups: BTreeSet<String>,

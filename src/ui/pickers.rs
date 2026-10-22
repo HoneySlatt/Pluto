@@ -272,8 +272,9 @@ impl App {
         // and list no models (`isProviderInstancePickerReady`).
         let providers = sort_instances(
             self.providers()
-                .into_iter()
+                .iter()
                 .filter(|p| p["enabled"] != false)
+                .cloned()
                 .collect(),
         );
         let ready = |p: &Value| p["status"] == "ready" && p["availability"] != "unavailable";

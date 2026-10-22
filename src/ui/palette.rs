@@ -231,6 +231,7 @@ impl App {
             .threads
             .iter()
             .filter(|t| t.archived_at.is_none())
+            .map(std::sync::Arc::as_ref)
             .collect();
         threads.sort_by(|a, b| {
             let at = |t: &Thread| {

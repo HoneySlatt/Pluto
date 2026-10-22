@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use eframe::egui::{self, Pos2, Rect, Vec2};
 use serde_json::Value;
 use zeroize::Zeroizing;
@@ -33,6 +35,7 @@ pub struct App {
     pub(crate) settled_expanded: bool,
     pub(crate) snoozed_expanded: bool,
     pub(crate) keep_scroll: bool,
+    pub(crate) timeline_view: crate::ui::timeline_view::TimelineView,
     pub(crate) open_menu: Option<String>,
     pub(crate) composer_selection: std::collections::HashMap<String, crate::model::ModelSelection>,
     pub(crate) composer_runtime: std::collections::HashMap<String, String>,
@@ -335,6 +338,7 @@ impl App {
             settled_expanded: false,
             snoozed_expanded: false,
             keep_scroll: false,
+            timeline_view: Default::default(),
             open_menu: None,
             composer_selection: Default::default(),
             composer_runtime: Default::default(),
@@ -518,6 +522,9 @@ impl App {
                 Event::Disconnected(message) => disconnected = Some(message),
             }
         }
+        if let Err(error) = self.state.refresh_detail() {
+            self.status = Some(error);
+        }
         if let Some(message) = disconnected {
             self.connection = None;
             self.connect.error = Some(message);
@@ -575,7 +582,11 @@ impl App {
         let Some(thread) = self.current_thread() else {
             return;
         };
-        let Some(completed_at) = thread.latest_turn.and_then(|t| t.completed_at) else {
+        let Some(completed_at) = thread
+            .latest_turn
+            .as_ref()
+            .and_then(|t| t.completed_at.clone())
+        else {
             return;
         };
         let key = (thread.id.clone(), completed_at.clone());
@@ -664,7 +675,7 @@ impl App {
 
     pub(crate) fn start_draft(&mut self, project_id: Option<String>) {
         let project_id = project_id
-            .or_else(|| self.current_thread().map(|t| t.project_id))
+            .or_else(|| self.current_thread().map(|t| t.project_id.clone()))
             .or_else(|| self.draft_project().map(|p| p.id));
         self.select_thread(None);
         self.draft_project_id = project_id;
@@ -695,7 +706,7 @@ impl App {
         }
     }
 
-    pub(crate) fn current_thread(&self) -> Option<Thread> {
+    pub(crate) fn current_thread(&self) -> Option<Arc<Thread>> {
         let selected = self.selected.as_deref()?;
         self.state
             .detail
@@ -735,8 +746,8 @@ impl App {
 
     pub(crate) fn workspace_cwd(&self) -> Option<String> {
         if let Some(thread) = self.current_thread() {
-            if let Some(path) = thread.worktree_path {
-                return Some(path);
+            if let Some(path) = &thread.worktree_path {
+                return Some(path.clone());
             }
             return self
                 .state
@@ -1058,10 +1069,11 @@ impl App {
             session.active_turn_id = Some("snapshot-turn".into());
         };
         if let Some(detail) = self.state.detail.as_mut().filter(|t| t.id == id) {
-            running(detail);
+            running(Arc::make_mut(detail));
         }
+        self.state.revision += 1;
         if let Some(thread) = self.state.threads.iter_mut().find(|t| t.id == id) {
-            running(thread);
+            running(Arc::make_mut(thread));
         }
     }
 }
@@ -1078,7 +1090,8 @@ impl App {
     /// Applies a thread stream item for the selected thread without a server.
     pub fn load_offline_thread(&mut self, item: &Value) -> Result<(), String> {
         let selected = self.selected.clone().unwrap_or_default();
-        self.state.thread(&selected, item)
+        self.state.thread(&selected, item)?;
+        self.state.refresh_detail()
     }
 
     pub fn selected_thread_id(&self) -> Option<&str> {

@@ -2,6 +2,8 @@
 //! selected thread detail. Events are applied to raw JSON exactly like the
 //! upstream reducer (`client-runtime/state/threadReducer.ts`), then decoded
 //! into typed views for rendering.
+use std::sync::Arc;
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -149,17 +151,25 @@ impl Thread {
 #[derive(Default)]
 pub struct State {
     pub projects: Vec<Project>,
-    pub threads: Vec<Thread>,
-    pub detail: Option<Thread>,
+    /// Shared so views can hold the list without copying it.
+    pub threads: Vec<Arc<Thread>>,
+    /// Shared so a frame can hold the open thread without copying it.
+    pub detail: Option<Arc<Thread>>,
     pub config: Value,
+    /// Counts changes to `threads` and `detail`, for views that cache what
+    /// they derive from them.
+    pub revision: u64,
     shell_raw: Vec<Value>,
     detail_raw: Option<Value>,
+    /// `detail_raw` changed since `detail` was decoded: a pass of events
+    /// decodes the thread once (`refresh_detail`).
+    detail_stale: bool,
     shell_sequence: Option<u64>,
     thread_sequence: Option<u64>,
 }
 
 fn decode<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, String> {
-    serde_json::from_value(value.clone()).map_err(|e| e.to_string())
+    T::deserialize(value).map_err(|e| e.to_string())
 }
 
 impl State {
@@ -190,12 +200,16 @@ impl State {
     }
 
     pub fn shell(&mut self, item: &Value) -> Result<(), String> {
+        self.revision += 1;
         if item["kind"] == "snapshot" {
             let snapshot = &item["snapshot"];
             // Decode both collections before replacing visible state.
             let projects = decode(&snapshot["projects"])?;
             let raw: Vec<Value> = snapshot["threads"].as_array().cloned().unwrap_or_default();
-            let threads = raw.iter().map(decode).collect::<Result<Vec<Thread>, _>>()?;
+            let threads = raw
+                .iter()
+                .map(|raw| decode(raw).map(Arc::new))
+                .collect::<Result<Vec<_>, _>>()?;
             self.projects = projects;
             self.shell_raw = raw;
             self.threads = threads;
@@ -218,7 +232,7 @@ impl State {
             }
             Some("project-removed") => self.projects.retain(|p| p.id != item["projectId"]),
             Some("thread-upserted") => {
-                let thread: Thread = decode(&item["thread"])?;
+                let thread: Arc<Thread> = Arc::new(decode(&item["thread"])?);
                 if let Some(index) = self.threads.iter().position(|t| t.id == thread.id) {
                     self.shell_raw[index] = item["thread"].clone();
                     self.threads[index] = thread;
@@ -242,15 +256,31 @@ impl State {
     pub fn clear_detail(&mut self) {
         self.detail = None;
         self.detail_raw = None;
+        self.detail_stale = false;
         self.thread_sequence = None;
+        self.revision += 1;
+    }
+
+    /// Decodes the selected thread after the events applied to it.
+    pub fn refresh_detail(&mut self) -> Result<(), String> {
+        if !std::mem::take(&mut self.detail_stale) {
+            return Ok(());
+        }
+        if let Some(raw) = &self.detail_raw {
+            self.detail = Some(Arc::new(decode(raw)?));
+            self.revision += 1;
+        }
+        Ok(())
     }
 
     pub fn thread(&mut self, selected: &str, item: &Value) -> Result<(), String> {
         if item["kind"] == "snapshot" {
             let raw = item["snapshot"]["thread"].clone();
             if raw["id"] == selected {
-                self.detail = Some(decode(&raw)?);
+                self.detail = Some(Arc::new(decode(&raw)?));
                 self.detail_raw = Some(raw);
+                self.detail_stale = false;
+                self.revision += 1;
                 self.thread_sequence = item["snapshot"]["snapshotSequence"].as_u64();
             }
             return Ok(());
@@ -274,7 +304,7 @@ impl State {
         }
         match apply_thread_event(raw, event) {
             Applied::Deleted => self.clear_detail(),
-            Applied::Updated => self.detail = Some(decode(raw)?),
+            Applied::Updated => self.detail_stale = true,
             Applied::Unchanged => {}
         }
         Ok(())
@@ -677,10 +707,12 @@ mod tests {
         };
         state.thread("t", &delta(2, "Hel", true)).unwrap();
         state.thread("t", &delta(3, "lo", true)).unwrap();
+        state.refresh_detail().unwrap();
         let thread = state.detail.as_ref().unwrap();
         assert_eq!(thread.messages[0].text, "Hello");
         assert_eq!(thread.latest_turn.as_ref().unwrap().state, "running");
         state.thread("t", &delta(4, "", false)).unwrap();
+        state.refresh_detail().unwrap();
         let thread = state.detail.as_ref().unwrap();
         assert_eq!(thread.messages[0].text, "Hello");
         assert_eq!(thread.latest_turn.as_ref().unwrap().state, "completed");
@@ -698,6 +730,7 @@ mod tests {
         };
         state.thread("t", &rename(3, "New")).unwrap();
         state.thread("t", &rename(2, "Old")).unwrap();
+        state.refresh_detail().unwrap();
         assert_eq!(state.detail.as_ref().unwrap().title, "New");
     }
 }

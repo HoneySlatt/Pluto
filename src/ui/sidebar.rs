@@ -67,14 +67,17 @@ pub struct Sections<'a> {
     pub settled: Vec<&'a Thread>,
 }
 
-pub fn sections(threads: &[Thread], now: chrono::DateTime<chrono::Utc>) -> Sections<'_> {
+pub fn sections<'a>(
+    threads: impl IntoIterator<Item = &'a Thread>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Sections<'a> {
     let mut sections = Sections {
         pinned: Vec::new(),
         active: Vec::new(),
         snoozed: Vec::new(),
         settled: Vec::new(),
     };
-    for thread in threads.iter().filter(|t| t.archived_at.is_none()) {
+    for thread in threads.into_iter().filter(|t| t.archived_at.is_none()) {
         // Snooze outranks settlement and pinning until the thread wakes.
         if crate::snooze::effective_snoozed(thread, now) {
             sections.snoozed.push(thread);
@@ -392,7 +395,7 @@ impl App {
     fn thread_list(&mut self, ui: &mut Ui, rect: Rect) {
         let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
-        let threads: Vec<Thread> = self
+        let threads: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
@@ -400,7 +403,7 @@ impl App {
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
             .cloned()
             .collect();
-        let sections = sections(&threads, self.now);
+        let sections = sections(threads.iter().map(std::sync::Arc::as_ref), self.now);
         let cards: Vec<&Thread> = sections
             .pinned
             .iter()

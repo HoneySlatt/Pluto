@@ -363,7 +363,7 @@ impl App {
                 i.pointer.primary_released(),
                 i.pointer.interact_pos(),
                 i.key_pressed(Key::Escape),
-                i.smooth_scroll_delta != Vec2::ZERO,
+                i.smooth_scroll_delta != Vec2::ZERO || self.timeline_view.scrolled,
             )
         });
         let plugin = ui.ctx().plugin::<CopyCleanup>();

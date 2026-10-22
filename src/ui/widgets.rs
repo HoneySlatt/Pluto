@@ -601,7 +601,29 @@ pub fn clock_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
 /// Places glyphs like a CSS line box: the tallest font gets equal
 /// half-leading above and below, and every font shares its baseline.
 /// epaint puts each glyph at the top of tall rows instead.
-pub fn center_rows(mut galley: Arc<Galley>) -> Arc<Galley> {
+///
+/// epaint hands back the same cached galley every pass while its text is
+/// shown, and centering copies every row, so results are kept by input
+/// galley; an entry goes once epaint drops the galley it came from.
+pub fn center_rows(galley: Arc<Galley>) -> Arc<Galley> {
+    type Centered = std::collections::HashMap<usize, (Arc<Galley>, Arc<Galley>)>;
+    static CENTERED: std::sync::Mutex<Option<(Centered, usize)>> = std::sync::Mutex::new(None);
+    let key = Arc::as_ptr(&galley) as usize;
+    let mut guard = CENTERED.lock().unwrap_or_else(|e| e.into_inner());
+    let (cache, kept) = guard.get_or_insert_with(Default::default);
+    if let Some((_, centered)) = cache.get(&key) {
+        return centered.clone();
+    }
+    if cache.len() >= (*kept * 2).max(256) {
+        cache.retain(|_, (input, _)| Arc::strong_count(input) > 1);
+        *kept = cache.len();
+    }
+    let centered = center_rows_uncached(galley.clone());
+    cache.insert(key, (galley, centered.clone()));
+    centered
+}
+
+fn center_rows_uncached(mut galley: Arc<Galley>) -> Arc<Galley> {
     let galley_mut = Arc::make_mut(&mut galley);
     // CSS keeps fractional line boxes (22.75px); epaint rounds every row.
     let uniform_line = galley_mut

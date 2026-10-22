@@ -452,7 +452,7 @@ impl App {
         let Some(state) = self.legacy_multi_menu.take() else {
             return;
         };
-        let threads: Vec<Thread> = self
+        let threads: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
@@ -466,7 +466,7 @@ impl App {
         let items = [
             Item::new("mark-unread", format!("Mark unread ({count})")),
             Item {
-                disabled: threads.iter().any(Thread::is_running),
+                disabled: threads.iter().any(|t| t.is_running()),
                 ..Item::new("archive", format!("Archive ({count})"))
             },
             Item {
@@ -1196,6 +1196,7 @@ impl App {
             .threads
             .iter()
             .filter(|t| t.archived_at.is_none())
+            .map(std::sync::Arc::as_ref)
             .collect();
         let mut groups = self.legacy_groups();
         sort_groups(&mut groups, &thread_refs, &project_order);

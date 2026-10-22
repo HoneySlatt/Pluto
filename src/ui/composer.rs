@@ -784,7 +784,7 @@ impl App {
         }
         let branch = self
             .current_thread()
-            .and_then(|t| t.branch)
+            .and_then(|t| t.branch.clone())
             .unwrap_or_else(|| "main".into());
         let branch_color = theme::alpha(theme::muted_foreground(), 0.7);
         let branch_width = widgets::text_width(ui, &branch, label_font.clone());
@@ -819,10 +819,10 @@ impl App {
         );
     }
 
-    pub(crate) fn providers(&self) -> Vec<Value> {
+    pub(crate) fn providers(&self) -> &[Value] {
         self.state.config["providers"]
             .as_array()
-            .cloned()
+            .map(Vec::as_slice)
             .unwrap_or_default()
     }
 
@@ -895,7 +895,7 @@ impl App {
             return selection.clone();
         }
         if !draft && let Some(thread) = self.current_thread() {
-            return thread.model_selection;
+            return thread.model_selection.clone();
         }
         let settings = &self.state.config["settings"]["defaultModelSelection"];
         if let Ok(selection) = serde_json::from_value::<ModelSelection>(settings.clone())
@@ -907,7 +907,10 @@ impl App {
             if provider["status"] != "ready" {
                 continue;
             }
-            let models = provider["models"].as_array().cloned().unwrap_or_default();
+            let models = provider["models"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             if let Some(model) = models
                 .iter()
                 .find(|m| m["isDefault"] == true)
@@ -928,7 +931,7 @@ impl App {
             return mode.clone();
         }
         if !draft && let Some(thread) = self.current_thread() {
-            return thread.runtime_mode;
+            return thread.runtime_mode.clone();
         }
         self.state.config["settings"]["defaultRuntimeMode"]
             .as_str()
@@ -995,7 +998,7 @@ impl App {
             let Some(thread) = self.current_thread() else {
                 return;
             };
-            (thread.id, thread.interaction_mode, None)
+            (thread.id.clone(), thread.interaction_mode.clone(), None)
         };
         let mut command = turn_start_command(
             &thread_id,
