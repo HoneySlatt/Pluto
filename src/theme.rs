@@ -898,6 +898,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "pin-off",
         "pencil",
         "quote",
+        "radio-tower",
         "refresh-cw",
         "hash",
         "archive",

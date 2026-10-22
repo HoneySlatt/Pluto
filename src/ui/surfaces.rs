@@ -22,7 +22,7 @@ const SURFACES: [Surface; 8] = [
         icon: "earth",
         shortcut: "B",
         key: Key::B,
-        hint: "Only available in the desktop app.",
+        hint: "Needs Chromium or another Chromium-based browser.",
     },
     Surface {
         label: "Terminal",
@@ -85,7 +85,9 @@ impl App {
     /// request surfaces need a linked pull request, the diff a repository.
     fn surface_available(&self, surface: &Surface) -> bool {
         match surface.label {
-            "Browser" | "Pull request" | "Linked pull requests" => false,
+            // The browser needs a Chromium-based browser to run headless.
+            "Browser" => crate::preview::browser_binary().is_some(),
+            "Pull request" | "Linked pull requests" => false,
             "Diff" => self.workspace_is_repo(),
             _ => true,
         }
@@ -100,6 +102,10 @@ impl App {
             }
         } else if label == "Terminal" {
             self.open_terminal_tab();
+        } else if label == "Browser" {
+            if let Some(ctx) = self.egui_ctx.clone() {
+                self.open_browser_tab(&ctx, None);
+            }
         } else if label == "Agents" {
             if let Some(panel) = self.panel_mut() {
                 panel.show(crate::app::PanelTab::Agents, |t| {
@@ -274,6 +280,9 @@ impl App {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
                 crate::app::PanelTab::Agents => ("Agents".to_owned(), "bot", theme::foreground()),
+                crate::app::PanelTab::Browser { id } => {
+                    (self.browser_tab_title(*id), "earth", theme::foreground())
+                }
                 crate::app::PanelTab::Files { file: None } => {
                     ("Files".to_owned(), "files", theme::foreground())
                 }
@@ -356,6 +365,11 @@ impl App {
             }
         } else if let Some(panel) = self.panel_mut() {
             if let Some(index) = close {
+                if let Some(crate::app::PanelTab::Browser { id }) = panel.tabs.get(index).cloned() {
+                    panel.close(index);
+                    self.close_browser_tab(id);
+                    return;
+                }
                 panel.close(index);
             } else if let Some(index) = select {
                 panel.active = index;

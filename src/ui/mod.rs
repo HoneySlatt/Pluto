@@ -27,6 +27,7 @@ pub mod md_copy;
 pub mod md_links;
 pub mod palette;
 pub mod pickers;
+pub mod preview;
 pub mod project_actions;
 pub mod project_file;
 pub mod project_grouping;

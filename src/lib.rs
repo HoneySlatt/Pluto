@@ -3,6 +3,7 @@ pub mod diff;
 pub mod highlight;
 pub mod http;
 pub mod model;
+pub mod preview;
 pub mod protocol;
 pub mod requests;
 pub mod snooze;

@@ -288,12 +288,8 @@ impl App {
                 method: "subscribeTerminalMetadata",
                 payload: json!({}),
             });
-            self.send(crate::protocol::Action::Stream {
-                key: "discovered-servers".into(),
-                method: "subscribeDiscoveredLocalServers",
-                payload: json!({}),
-            });
         }
+        self.watch_discovered_servers();
         // Search: opens the command palette.
         let search = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(239.0, 32.0));
         let response = ui.interact(search, ui.id().with("legacy-search"), Sense::click());
@@ -1919,13 +1915,17 @@ impl App {
             if response.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            // Upstream opens the port in the thread's preview panel, which
-            // this client lacks: the thread opens and the URL goes to the browser.
+            // `openDiscoveredPort`: the thread opens with the port in a
+            // Browser tab (the system browser when none can run headless).
             if response.clicked()
                 && let Some(url) = first["url"].as_str()
             {
                 self.select_thread(Some(thread.id.clone()));
-                widgets::open_external(url);
+                if crate::preview::browser_binary().is_some() {
+                    self.open_browser_tab(&ui.ctx().clone(), Some(url.to_owned()));
+                } else {
+                    widgets::open_external(url);
+                }
             }
         }
         let title_rect = Rect::from_min_max(

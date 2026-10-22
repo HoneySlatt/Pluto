@@ -92,6 +92,8 @@ pub struct App {
     pub(crate) discovered_servers: Vec<Value>,
     /// Whether the legacy sidebar's metadata streams are open.
     pub(crate) legacy_streams: bool,
+    /// Whether `subscribeDiscoveredLocalServers` runs.
+    discovery_stream: bool,
     /// The text menu (Electron's context menu) and the link under it.
     /// The text menu (Electron's context menu): its state, the link under it
     /// and whether Copy applies, both read when it opened.
@@ -99,6 +101,8 @@ pub struct App {
     pub(crate) pending_copy: bool,
     /// Citing assistant text (`cite`).
     pub(crate) cite: crate::ui::cite::CiteState,
+    /// The Browser surface's preview browser (`ui::preview`).
+    pub(crate) preview: crate::ui::preview::PreviewUi,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -235,6 +239,10 @@ pub(crate) enum PanelTab {
     },
     /// The thread's subagents.
     Agents,
+    /// A Browser tab and its page in the preview browser.
+    Browser {
+        id: u64,
+    },
     /// A terminal group (`terminalIds`), shown as "Terminal N": its first
     /// session, the sessions split beside it, the active one and whether
     /// the split stacks them (`splitDirection: "vertical"`).
@@ -362,9 +370,11 @@ impl App {
             terminal_metadata: Default::default(),
             discovered_servers: Vec::new(),
             legacy_streams: false,
+            discovery_stream: false,
             text_menu: None,
             pending_copy: false,
             cite: Default::default(),
+            preview: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -961,6 +971,7 @@ impl eframe::App for App {
                 self.thread_menu(ui);
                 self.text_menu(ui);
                 self.cite_overlays(ui);
+                self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);
@@ -1122,6 +1133,19 @@ impl App {
     pub(crate) fn panel_mut(&mut self) -> Option<&mut Panel> {
         let id = self.selected.clone()?;
         Some(self.panels.entry(id).or_default())
+    }
+
+    /// Starts `subscribeDiscoveredLocalServers` once (the sidebar's port
+    /// indicators and the preview's local servers share it).
+    pub(crate) fn watch_discovered_servers(&mut self) {
+        if !self.discovery_stream && self.connected() {
+            self.discovery_stream = true;
+            self.send(crate::protocol::Action::Stream {
+                key: "discovered-servers".into(),
+                method: "subscribeDiscoveredLocalServers",
+                payload: serde_json::json!({}),
+            });
+        }
     }
 
     pub(crate) fn panel_open(&self) -> bool {
