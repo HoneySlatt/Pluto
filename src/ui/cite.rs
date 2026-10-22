@@ -452,6 +452,7 @@ impl App {
                 let mut plugin = plugin.lock();
                 plugin.captured = None;
                 plugin.capture = 3;
+                plugin.capture_plain = true;
                 self.pending_copy = true;
             }
         }

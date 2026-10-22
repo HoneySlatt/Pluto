@@ -4,6 +4,7 @@
 //! File references become file chips and external links lead with their
 //! site's icon (`md_links`).
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -15,6 +16,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 use crate::highlight::Highlighter;
 use crate::theme::{self, Weight, font};
 use crate::ui::citations::{self, Citation};
+use crate::ui::md_copy;
 use crate::ui::md_links::{self, FileRef};
 use crate::ui::widgets;
 
@@ -24,15 +26,15 @@ const BLOCK_MARGIN: f32 = 10.4; // .65rem
 const INFO_FOREGROUND: Color32 = Color32::from_rgb(81, 162, 255);
 
 #[derive(Clone, Debug, Default)]
-struct Style {
-    bold: bool,
-    italic: bool,
-    strike: bool,
-    link: Option<String>,
+pub(crate) struct Style {
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
+    pub(crate) strike: bool,
+    pub(crate) link: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-enum Inline {
+pub(crate) enum Inline {
     Text(String, Style),
     Code(String),
     /// A file reference, drawn as a chip.
@@ -348,6 +350,9 @@ struct Inlines {
     links: Vec<Option<String>>,
     /// The text size (chip metrics are in em).
     size: f32,
+    /// Section index → the inline it renders, and those inlines (copies).
+    owners: Vec<Option<usize>>,
+    source: Vec<Inline>,
 }
 
 /// `label` cut with an ellipsis to fit `max_width` in `font` (CSS `truncate`).
@@ -429,7 +434,9 @@ fn build_inlines(
     let mut chip = 0;
     let mut file_chip = 0;
     let mut previous_link: Option<String> = None;
-    for inline in inlines {
+    let mut owned: Vec<(Range<usize>, usize)> = Vec::new();
+    for (inline_index, inline) in inlines.iter().enumerate() {
+        let first_section = chips.len();
         // A link leads with its site's icon (`ms-[0.25em] me-[0.2em]`
         // around 14px), kept on the line of its first word.
         // The room goes before the link's first text (`leading_space`).
@@ -579,6 +586,16 @@ fn build_inlines(
                 links.push(None);
             }
         }
+        owned.push((first_section..chips.len(), inline_index));
+    }
+    // Section owners, without the inserted breaks.
+    let mut owners = vec![None; chips.len()];
+    for (sections, inline_index) in owned {
+        for section in sections {
+            if !inserted.contains(&section) {
+                owners[section] = Some(inline_index);
+            }
+        }
     }
     // Each section's index without the inserted breaks.
     let mut original = 0;
@@ -602,6 +619,8 @@ fn build_inlines(
             icons,
             links,
             size,
+            owners,
+            source: Vec::new(),
         },
         origins,
     )
@@ -636,6 +655,7 @@ fn layout_inlines(
         );
         job.wrap.max_width = wrap;
         laid.galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
+        laid.source = inlines.to_vec();
         let sections = char_sections(&laid.galley);
         let mut added = false;
         let mut char_index = 0usize;
@@ -682,6 +702,49 @@ fn char_sections(galley: &Galley) -> Vec<usize> {
                 .unwrap_or(0)
         })
         .collect()
+}
+
+/// Registers how the galley copies as markdown (`md_copy`): each inline's
+/// character range.
+fn register_copy(
+    ui: &Ui,
+    id: egui::Id,
+    inlines: &Inlines,
+    kind: md_copy::Kind,
+    prefixes: Vec<md_copy::Prefix>,
+) {
+    let text = &inlines.galley.job.text;
+    let mut segments: Vec<(Range<usize>, Inline)> = Vec::new();
+    let mut last_owner = None;
+    for (section, owner) in inlines.galley.job.sections.iter().zip(&inlines.owners) {
+        let Some(owner) = *owner else {
+            continue;
+        };
+        let start = text[..section.byte_range.start.0].chars().count();
+        let end = start
+            + text[section.byte_range.start.0..section.byte_range.end.0]
+                .chars()
+                .count();
+        match segments.last_mut() {
+            Some((range, _)) if last_owner == Some(owner) => range.end = end,
+            _ => {
+                if let Some(inline) = inlines.source.get(owner) {
+                    segments.push((start..end, inline.clone()));
+                    last_owner = Some(owner);
+                }
+            }
+        }
+    }
+    let recipe = md_copy::Recipe {
+        kind,
+        prefixes,
+        segments,
+    };
+    ui.ctx()
+        .plugin::<widgets::CopyCleanup>()
+        .lock()
+        .recipes
+        .insert(id, Arc::new(recipe));
 }
 
 /// A cited quote marked in the galley (`::highlight(t3-assistant-citation)`:
@@ -734,7 +797,11 @@ fn paint_inlines(
     inlines: &Inlines,
     id: egui::Id,
     highlight: Option<&(String, f32)>,
+    copy: Option<(md_copy::Kind, Vec<md_copy::Prefix>)>,
 ) -> Option<ChipRef> {
+    if let Some((kind, prefixes)) = copy {
+        register_copy(ui, id, inlines, kind, prefixes);
+    }
     let painter = ui.painter().clone();
     if let Some((quote, alpha)) = highlight {
         paint_quote_highlight(ui, pos, &inlines.galley, quote, *alpha);
@@ -965,7 +1032,14 @@ impl PlainText {
 
     /// Paints the text; returns a citation chip that was clicked.
     pub(crate) fn paint(&self, ui: &mut Ui, pos: Pos2, id: egui::Id) -> Option<Citation> {
-        match paint_inlines(ui, pos, &self.0, id, None) {
+        match paint_inlines(
+            ui,
+            pos,
+            &self.0,
+            id,
+            None,
+            Some((md_copy::Kind::Paragraph, Vec::new())),
+        ) {
             Some(ChipRef::Citation(citation)) => Some(citation),
             _ => None,
         }
@@ -981,6 +1055,8 @@ pub struct Markdown<'a> {
     pub(crate) opened_citation: Option<Citation>,
     /// A cited quote to mark and its strength.
     pub(crate) highlight: Option<(String, f32)>,
+    /// The lists and quotes around the block being drawn (copies).
+    prefixes: Vec<md_copy::Prefix>,
     /// Parent-folder suffixes of file chips sharing a basename.
     suffixes: HashMap<String, String>,
     /// Inside a quote, text takes the muted color.
@@ -995,6 +1071,7 @@ impl<'a> Markdown<'a> {
             opened_file: None,
             opened_citation: None,
             highlight: None,
+            prefixes: Vec::new(),
             suffixes: HashMap::new(),
             quoted: false,
         }
@@ -1060,8 +1137,14 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                if let Some(chip) = paint_inlines(ui, rect.min, &laid, id, self.highlight.as_ref())
-                {
+                if let Some(chip) = paint_inlines(
+                    ui,
+                    rect.min,
+                    &laid,
+                    id,
+                    self.highlight.as_ref(),
+                    Some((md_copy::Kind::Paragraph, self.prefixes.clone())),
+                ) {
                     self.open_chip(chip);
                 }
             }
@@ -1089,8 +1172,14 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
-                if let Some(chip) = paint_inlines(ui, rect.min, &laid, id, self.highlight.as_ref())
-                {
+                if let Some(chip) = paint_inlines(
+                    ui,
+                    rect.min,
+                    &laid,
+                    id,
+                    self.highlight.as_ref(),
+                    Some((md_copy::Kind::Heading(*level), self.prefixes.clone())),
+                ) {
                     self.open_chip(chip);
                 }
             }
@@ -1101,6 +1190,14 @@ impl<'a> Markdown<'a> {
                     }
                     let top = ui.cursor().top();
                     let left = ui.cursor().left();
+                    self.prefixes.push(md_copy::Prefix::Item {
+                        id: id.with(number),
+                        list: id,
+                        marker: match start {
+                            Some(first) => format!("{}. ", first + number as u64),
+                            None => "- ".to_owned(),
+                        },
+                    });
                     ui.scope_builder(
                         egui::UiBuilder::new().max_rect(Rect::from_min_size(
                             Pos2::new(left + 20.0, top),
@@ -1108,6 +1205,7 @@ impl<'a> Markdown<'a> {
                         )),
                         |ui| self.blocks(ui, item, width - 20.0, depth + 1, id.with(number)),
                     );
+                    self.prefixes.pop();
                     let marker_center = Pos2::new(left + 6.5, top + BODY_LINE / 2.0);
                     match start {
                         Some(first) => {
@@ -1163,7 +1261,9 @@ impl<'a> Markdown<'a> {
                     )),
                     |ui| {
                         let quoted = std::mem::replace(&mut self.quoted, true);
+                        self.prefixes.push(md_copy::Prefix::Quote);
                         self.blocks(ui, blocks, width - 14.8, depth + 1, id.with("quote"));
+                        self.prefixes.pop();
                         self.quoted = quoted;
                     },
                 );
@@ -1233,6 +1333,20 @@ impl<'a> Markdown<'a> {
         );
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);
         widgets::selectable_galley(ui, id.with("code"), pos, galley, theme::foreground());
+        ui.ctx()
+            .plugin::<widgets::CopyCleanup>()
+            .lock()
+            .recipes
+            .insert(
+                id.with("code"),
+                Arc::new(md_copy::Recipe {
+                    kind: md_copy::Kind::Code {
+                        language: language.to_owned(),
+                    },
+                    prefixes: self.prefixes.clone(),
+                    segments: Vec::new(),
+                }),
+            );
     }
 
     fn table(
@@ -1288,7 +1402,11 @@ impl<'a> Markdown<'a> {
             natural.iter().map(|w| w * width / total).collect()
         };
         let border = theme::overlay(0.036);
+        let prefixes = self.prefixes.clone();
+        let mut row_index = 0;
         let mut paint_row = |ui: &mut Ui, cells: &[Vec<Inline>], header: bool| {
+            let row = row_index;
+            row_index += 1;
             let pad_y = if header { 8.8 } else { 7.2 };
             let weight = if header {
                 Weight::SemiBold
@@ -1333,6 +1451,14 @@ impl<'a> Markdown<'a> {
                     cell,
                     id.with(("cell", header, i, rect.top() as i32)),
                     highlight.as_ref(),
+                    Some((
+                        md_copy::Kind::Cell {
+                            table: id,
+                            row,
+                            alignment: alignments.get(i).copied().unwrap_or(Alignment::None),
+                        },
+                        prefixes.clone(),
+                    )),
                 ) {
                     opened = Some(chip);
                 }
@@ -1475,7 +1601,7 @@ fn table_csv(head: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> String {
 
 /// Inline markdown for copying (`serializeNode`): emphasis markers, links
 /// with an http(s) target, code spans; file chips as their code span.
-fn inline_markdown(inlines: &[Inline]) -> String {
+pub(crate) fn inline_markdown(inlines: &[Inline]) -> String {
     // `wrapInlineMarker`: surrounding whitespace stays outside the markers.
     let wrap = |text: &str, marker: &str| {
         let core = text.trim();

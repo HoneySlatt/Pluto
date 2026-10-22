@@ -23,6 +23,7 @@ pub mod legacy_sidebar;
 pub mod lightbox;
 pub mod lucide;
 pub mod markdown;
+pub mod md_copy;
 pub mod md_links;
 pub mod palette;
 pub mod pickers;

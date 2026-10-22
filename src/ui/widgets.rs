@@ -192,6 +192,21 @@ pub fn selectable_galley(
         let plugin = ui.ctx().plugin::<CopyCleanup>();
         let mut plugin = plugin.lock();
         plugin.rects.push(rect);
+        plugin.placed.push(crate::ui::md_copy::Placed {
+            id,
+            galley: galley.clone(),
+        });
+        // Where the selection started, for copying it as markdown.
+        let at = if response.drag_started() {
+            ui.input(|i| i.pointer.press_origin())
+        } else if response.double_clicked() || response.triple_clicked() {
+            response.interact_pointer_pos()
+        } else {
+            None
+        };
+        if let Some(at) = at {
+            plugin.anchor = Some((id, galley.cursor_from_pos(at - pos).index.0));
+        }
         if let Some(source) = plugin.source.clone() {
             plugin.sourced.push(Sourced {
                 source,
@@ -279,6 +294,13 @@ pub struct CopyCleanup {
     /// galleys of assistant messages (`cite`).
     pub source: Option<String>,
     pub sourced: Vec<Sourced>,
+    /// This pass's selectable galleys, how rendered markdown copies, and
+    /// where the selection started and its pointer went (`md_copy`).
+    placed: Vec<crate::ui::md_copy::Placed>,
+    pub(crate) recipes: std::collections::HashMap<egui::Id, Arc<crate::ui::md_copy::Recipe>>,
+    anchor: Option<(egui::Id, usize)>,
+    /// The next capture keeps the plain text (a citation's quote).
+    pub capture_plain: bool,
 }
 
 impl egui::Plugin for CopyCleanup {
@@ -325,6 +347,12 @@ impl egui::Plugin for CopyCleanup {
     fn on_begin_pass(&mut self, ui: &mut Ui) {
         self.collected.clear();
         self.sourced.clear();
+        self.placed.clear();
+        self.recipes.clear();
+        if ui.input(|i| i.pointer.primary_pressed()) && !self.menu_open {
+            self.anchor = None;
+        }
+
         self.last_rects = std::mem::take(&mut self.rects);
         if !self.menu_open && ui.input(|i| i.pointer.primary_pressed()) {
             self.has_range = false;
@@ -347,11 +375,25 @@ impl egui::Plugin for CopyCleanup {
     }
 
     fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+        let plain = self.capture_plain && self.capture > 0;
         for command in &mut output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
-                *text = crate::ui::cite::restore_copied(
+                let cleaned = crate::ui::cite::restore_copied(
                     &text.replace("\u{200B}\n", "").replace('\u{a0}', " "),
                 );
+                // A selection in rendered markdown copies as markdown.
+                let markdown = match self.anchor {
+                    Some(anchor) if !plain && !self.select_all => {
+                        crate::ui::md_copy::selection_markdown(
+                            &self.placed,
+                            &self.recipes,
+                            anchor,
+                            &cleaned,
+                        )
+                    }
+                    _ => None,
+                };
+                *text = markdown.unwrap_or(cleaned);
             }
         }
         if self.capture > 0 {
@@ -364,6 +406,7 @@ impl egui::Plugin for CopyCleanup {
             {
                 self.captured = Some(text);
                 self.capture = 0;
+                self.capture_plain = false;
             }
         }
     }
