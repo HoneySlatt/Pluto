@@ -103,7 +103,7 @@ fn main() {
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
             "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
-            | "--key" | "--drop" | "--hold" => ops.next().cloned().unwrap_or_default(),
+            | "--key" | "--drop" | "--hold" | "--wait" => ops.next().cloned().unwrap_or_default(),
             "--size" => {
                 ops.next();
                 continue;
@@ -189,6 +189,14 @@ fn main() {
                 .input_mut()
                 .dropped_files
                 .push(std::sync::Arc::new(Dropped(value.clone().into()))),
+            // `--wait ms` lets the server catch up (streams, processes).
+            "--wait" => {
+                let until = Instant::now() + Duration::from_millis(value.parse().expect("ms"));
+                while Instant::now() < until {
+                    harness.step();
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
             // `--hold Ctrl` keeps a modifier down from here on.
             "--hold" => {
                 let mut modifiers = egui::Modifiers::NONE;

@@ -22,9 +22,10 @@ for dir in demo-project nixos-demo web-demo; do
   git -C "$root/$dir" add .
   git -C "$root/$dir" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm init
 done
-# web-demo has a remote (never contacted) and a package directory, so its
+# web-demo has a remote on a reserved host (never resolvable, so no source
+# control lookup leaves the machine) and a package directory, so its
 # projects share one repository identity.
-git -C "$root/web-demo" remote add origin https://github.com/example/web-demo.git
+git -C "$root/web-demo" remote add origin https://git.example.invalid/example/web-demo.git
 mkdir -p "$root/web-demo/packages/ui"
 echo "# ui" > "$root/web-demo/packages/ui/README.md"
 git -C "$root/web-demo" add .

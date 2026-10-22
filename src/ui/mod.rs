@@ -47,6 +47,7 @@ pub mod surfaces;
 pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod thread_menu;
+pub mod thread_pull_requests;
 pub mod typography;
 pub mod usage;
 pub mod usage_prices;

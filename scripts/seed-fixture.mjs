@@ -52,12 +52,12 @@ function project(title, dir, minutesAgo) {
   return projectId;
 }
 
-function thread(projectId, title, minutesAgo, branch = "main") {
+function thread(projectId, title, minutesAgo, branch = "main", worktreePath = null) {
   const threadId = randomUUID();
   const createdAt = at(minutesAgo);
   emit("thread", threadId, "thread.created", createdAt, {
     threadId, projectId, title, modelSelection: model, runtimeMode: "full-access",
-    interactionMode: "default", branch, worktreePath: null, createdAt, updatedAt: createdAt,
+    interactionMode: "default", branch, worktreePath, createdAt, updatedAt: createdAt,
   }, "client");
   return threadId;
 }
@@ -165,7 +165,23 @@ completeTurn(main, turn, 1, [
   { path: "src/theme.rs", kind: "modified", additions: 18, deletions: 3 },
 ], 38, answer);
 
-const second = thread(rust, "Brancher l'envoi des messages", 180, "feature/composer");
+const second = thread(rust, "Brancher l'envoi des messages", 180, "feature/composer",
+  path.join(workspaces, "worktrees", "feature-composer"));
+// A synced pull request link on a reserved host, so no sync ever reaches a real one.
+emit("thread", second, "thread.pull-request-linked", at(170), {
+  threadId: second,
+  link: {
+    host: "git.example.invalid", repository: "example/demo-project", number: 12,
+    url: "https://git.example.invalid/example/demo-project/pull/12", source: "manual",
+    linkedAt: at(170),
+    snapshot: {
+      state: "open", title: "Brancher le composer", headBranch: "feature/composer",
+      baseBranch: "main", isDraft: false, updatedAt: at(170), syncedAt: at(170),
+    },
+    stack: null,
+  },
+  updatedAt: at(170),
+}, "client");
 message(second, "user", "Branche le composer sur thread.turn.start.", 180);
 message(second, "assistant", "C'est fait : le composer envoie maintenant `thread.turn.start` avec le mode et le modèle du thread.", 178);
 

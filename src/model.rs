@@ -79,6 +79,8 @@ pub struct Thread {
     pub has_pending_approvals: bool,
     pub has_pending_user_input: bool,
     pub background_liveness: Option<String>,
+    /// `ThreadPullRequestLink`s, kept as sent.
+    pub pull_requests: Vec<Value>,
     pub messages: Vec<Message>,
     pub activities: Vec<Activity>,
     pub checkpoints: Vec<Checkpoint>,

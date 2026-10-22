@@ -27,6 +27,8 @@ const MORE_ROW: f32 = 28.0; // SidebarMenuSubButton h-7
 const SORT_MENU: &str = "legacy-sidebar-sort";
 const AMBER_300: Color32 = Color32::from_rgb(0xff, 0xd2, 0x30);
 const SKY_300: Color32 = Color32::from_rgb(0x74, 0xd4, 0xff);
+const TEAL_300: Color32 = Color32::from_rgb(0x46, 0xec, 0xd5);
+const EMERALD_400: Color32 = Color32::from_rgb(0x00, 0xd4, 0x92); // --success-foreground
 const ICON_MUTED: Color32 = Color32::from_rgb(84, 84, 84); // --icon-muted
 
 /// `SIDEBAR_SORT_LABELS` / `SIDEBAR_THREAD_SORT_LABELS`.
@@ -258,6 +260,21 @@ impl App {
     /// footer.
     pub(crate) fn legacy_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let left = rect.left();
+        // The rows' terminal and port indicators (`useThreadRunningTerminalIds`,
+        // `useThreadDiscoveredPorts`).
+        if !self.legacy_streams && self.connected() {
+            self.legacy_streams = true;
+            self.send(crate::protocol::Action::Stream {
+                key: "sidebar-terminal-metadata".into(),
+                method: "subscribeTerminalMetadata",
+                payload: json!({}),
+            });
+            self.send(crate::protocol::Action::Stream {
+                key: "discovered-servers".into(),
+                method: "subscribeDiscoveredLocalServers",
+                payload: json!({}),
+            });
+        }
         // Search: opens the command palette.
         let search = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(239.0, 32.0));
         let response = ui.interact(search, ui.id().with("legacy-search"), Sense::click());
@@ -309,6 +326,42 @@ impl App {
         self.legacy_project_menu(ui);
         self.legacy_new_thread_menu(ui);
         self.legacy_multi_menu(ui);
+    }
+
+    /// `terminalMetadata` stream events: the snapshot, then upserts and removals.
+    pub(crate) fn terminal_metadata_event(&mut self, event: &Value) {
+        let key = |t: &Value| {
+            (
+                t["threadId"].as_str().unwrap_or_default().to_owned(),
+                t["terminalId"].as_str().unwrap_or_default().to_owned(),
+            )
+        };
+        match event["type"].as_str() {
+            Some("snapshot") => {
+                self.terminal_metadata = event["terminals"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|t| (key(t), t.clone()))
+                    .collect();
+            }
+            Some("upsert") => {
+                let terminal = &event["terminal"];
+                self.terminal_metadata
+                    .insert(key(terminal), terminal.clone());
+            }
+            Some("remove") => {
+                self.terminal_metadata.remove(&key(event));
+            }
+            _ => {}
+        }
+    }
+
+    /// `selectRunningSubprocessTerminalIds` is not empty for the thread.
+    fn legacy_terminal_running(&self, thread_id: &str) -> bool {
+        self.terminal_metadata
+            .iter()
+            .any(|((thread, _), t)| thread == thread_id && t["hasRunningSubprocess"] == true)
     }
 
     /// `rangeSelectTo`: from the anchor to `thread_id` within the entry,
@@ -1673,6 +1726,31 @@ impl App {
                 .rect_filled(rect, CornerRadius::same(6), sidebar_row_hover());
         }
         let mut x = rect.left() + 8.0;
+        // The current pull request's state glyph, a link to it.
+        if let Some(link) = crate::ui::thread_pull_requests::current_link(&thread.pull_requests) {
+            let (icon, tone, tooltip) = crate::ui::thread_pull_requests::status(link).unwrap_or((
+                "git-pull-request-arrow",
+                theme::muted_foreground(),
+                format!(
+                    "PR #{}, status pending",
+                    link["number"].as_u64().unwrap_or(0)
+                ),
+            ));
+            let glyph = Rect::from_min_size(Pos2::new(x, rect.center().y - 6.0), Vec2::splat(12.0));
+            let pr = ui
+                .interact(glyph.expand(2.0), id.with("pr"), Sense::click())
+                .on_hover_text(tooltip);
+            theme::paint_icon(ui, icon, glyph, 12.0, tone);
+            if pr.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if pr.clicked()
+                && let Some(url) = link["url"].as_str()
+            {
+                widgets::open_external(url);
+            }
+            x += 12.0 + 6.0;
+        }
         if let Some(pill) = self.legacy_pill(thread) {
             paint_dot(ui, Pos2::new(x + 3.0, rect.center().y), 3.0, pill);
             let width = widgets::text_in(
@@ -1689,9 +1767,102 @@ impl App {
         } else {
             theme::alpha(theme::sidebar_muted(), 0.8)
         };
+        // Right of the title: ports, worktree and terminal glyphs, then the
+        // 48px meta slot (`ml-auto flex gap-1.5`).
+        let mut glyph_right = rect.right() - 8.0 - 48.0 - 6.0;
+        let mut glyph = |ui: &Ui, paint: &dyn Fn(&Ui, Rect), tooltip: &str, key: &str| {
+            let slot = Rect::from_min_size(
+                Pos2::new(glyph_right - 12.0, rect.center().y - 6.0),
+                Vec2::splat(12.0),
+            );
+            paint(ui, slot);
+            glyph_right -= 12.0 + 6.0;
+            ui.interact(slot, id.with(key), Sense::click())
+                .on_hover_text(tooltip)
+        };
+        if self.legacy_terminal_running(&thread.id) {
+            let alpha = pulse_alpha(ui.input(|i| i.time));
+            glyph(
+                ui,
+                &|ui, slot| {
+                    theme::paint_icon(
+                        ui,
+                        "terminal",
+                        slot,
+                        12.0,
+                        theme::alpha(TEAL_300, 0.9 * alpha),
+                    )
+                },
+                "Terminal process running",
+                "terminal",
+            );
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if let Some(path) = thread
+            .worktree_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            // `formatWorktreePathForDisplay`: the last path segment.
+            let name = path
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or(path);
+            let tooltip = match &thread.branch {
+                Some(branch) => format!("Worktree: {name} ({branch})"),
+                None => format!("Worktree: {name}"),
+            };
+            glyph(
+                ui,
+                &|ui, slot| {
+                    crate::ui::lucide::paint(
+                        ui,
+                        slot,
+                        "folder-git-2",
+                        theme::alpha(theme::muted_foreground(), 0.4),
+                    )
+                },
+                &tooltip,
+                "worktree",
+            );
+        }
+        let ports: Vec<Value> = self
+            .discovered_servers
+            .iter()
+            .filter(|s| s["terminal"]["threadId"] == thread.id.as_str())
+            .cloned()
+            .collect();
+        if let Some(first) = ports.first() {
+            let more = if ports.len() > 1 {
+                format!(" (+{})", ports.len() - 1)
+            } else {
+                String::new()
+            };
+            let tooltip = format!("Open localhost:{}{more}", first["port"]);
+            let response = glyph(
+                ui,
+                &|ui, slot| crate::ui::lucide::paint(ui, slot, "globe-2", EMERALD_400),
+                &tooltip,
+                "port",
+            );
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            // Upstream opens the port in the thread's preview panel, which
+            // this client lacks: the thread opens and the URL goes to the browser.
+            if response.clicked()
+                && let Some(url) = first["url"].as_str()
+            {
+                self.select_thread(Some(thread.id.clone()));
+                widgets::open_external(url);
+            }
+        }
         let title_rect = Rect::from_min_max(
             Pos2::new(x, rect.top()),
-            Pos2::new(rect.left() + 154.0, rect.bottom()),
+            Pos2::new(glyph_right + 6.0 - 8.0, rect.bottom()),
         );
         // Files dragged over the row (`makeWorkspaceFileDropHandlers`): a
         // ring, then the drop opens the thread with them in its composer.

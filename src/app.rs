@@ -82,6 +82,12 @@ pub struct App {
     pub(crate) legacy_selection: std::collections::HashSet<String>,
     pub(crate) legacy_anchor: Option<String>,
     pub(crate) legacy_multi_menu: Option<crate::ui::context_menu::State>,
+    /// `subscribeTerminalMetadata`: terminal summaries by (thread, terminal).
+    pub(crate) terminal_metadata: std::collections::HashMap<(String, String), Value>,
+    /// `subscribeDiscoveredLocalServers`: the latest server list.
+    pub(crate) discovered_servers: Vec<Value>,
+    /// Whether the legacy sidebar's metadata streams are open.
+    pub(crate) legacy_streams: bool,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -337,6 +343,9 @@ impl App {
             legacy_selection: Default::default(),
             legacy_anchor: None,
             legacy_multi_menu: None,
+            terminal_metadata: Default::default(),
+            discovered_servers: Vec::new(),
+            legacy_streams: false,
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
             legacy_project_menu: None,
@@ -1167,6 +1176,14 @@ impl App {
             self.prs.results.insert(key, result);
         } else if key == "providers-refresh" {
             self.providers_refreshing = false;
+        } else if key == "sidebar-terminal-metadata" {
+            if let Ok(event) = result {
+                self.terminal_metadata_event(&event);
+            }
+        } else if key == "discovered-servers" {
+            if let Ok(list) = result {
+                self.discovered_servers = list["servers"].as_array().cloned().unwrap_or_default();
+            }
         } else if key == "device-state" {
             // A stream: keep the last good state if it later fails or expires.
             if let Ok(state) = result {
