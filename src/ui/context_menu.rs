@@ -47,6 +47,11 @@ pub struct Item {
     pub selected: bool,
     /// Right-aligned muted text (`ml-auto text-xs`), e.g. a turn's time.
     pub detail: Option<String>,
+    /// A disabled item's reason, shown beside it on hover (`PopoverPopup
+    /// tooltipStyle side="left"`).
+    pub tooltip: Option<String>,
+    /// A paragraph of this color instead of an item (`px-2 py-1.5 text-xs`).
+    pub note: Option<egui::Color32>,
     pub children: Vec<Item>,
 }
 
@@ -165,6 +170,9 @@ fn menu_size(ui: &Ui, items: &[Item], screen: Rect, min_width: f32) -> (Vec2, f3
     let row_content = items
         .iter()
         .map(|item| {
+            if item.note.is_some() {
+                return widgets::text_width(ui, &item.label, detail_font.clone());
+            }
             let slot = if item.icon.is_some() || item.project.is_some() || item.checked.is_some() {
                 24.0
             } else {
@@ -356,6 +364,19 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             theme::border(),
                         );
                     }
+                    if let Some(color) = item.note {
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(row.left() + 8.0, row.top()),
+                                Pos2::new(row.right() - 8.0, row.bottom()),
+                            ),
+                            &item.label,
+                            font(12.0, Weight::Regular),
+                            color,
+                        );
+                        continue;
+                    }
                     let destructive =
                         item.children.is_empty() && (item.destructive || item.id == "delete");
                     let highlighted = !item.disabled
@@ -476,6 +497,44 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                     );
                 }
             });
+    }
+
+    // A disabled item's reason, to its left and centered on it.
+    if let (Some(depth), Some(p)) = (level_under, pointer) {
+        let level = &levels[depth];
+        let reason = rows(level, state.scroll[depth])
+            .into_iter()
+            .find(|(i, r)| r.contains(p) && level.items[*i].disabled)
+            .and_then(|(i, r)| Some((level.items[i].tooltip.as_deref()?, r)));
+        if let Some((reason, row)) = reason {
+            let text_font = font(12.0, Weight::Regular);
+            let size = Vec2::new(
+                widgets::text_width(ui, reason, text_font.clone()) + 19.0,
+                26.0,
+            );
+            let at = Pos2::new(row.left() - 4.0 - size.x, row.center().y - size.y / 2.0);
+            egui::Area::new(ui.id().with("context-menu-reason"))
+                .order(egui::Order::Tooltip)
+                .fixed_pos(clamp(screen, at, size).round())
+                .interactable(false)
+                .show(ui.ctx(), |ui| {
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    ui.painter().rect(
+                        rect,
+                        CornerRadius::same(6),
+                        surface(),
+                        Stroke::new(1.0, outline()),
+                        StrokeKind::Inside,
+                    );
+                    widgets::text_in(
+                        ui,
+                        rect.shrink2(Vec2::new(9.0, 1.0)),
+                        reason,
+                        text_font,
+                        theme::foreground(),
+                    );
+                });
+        }
     }
 
     if clicked.is_some() || close {

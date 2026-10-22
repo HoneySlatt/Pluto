@@ -277,6 +277,45 @@ pub(crate) fn build_menu_items(
     ]
 }
 
+/// `getMenuActionDisabledReason` (`GitActionsControl.tsx`).
+pub(crate) fn menu_disabled_reason(
+    entry: &MenuEntry,
+    status: Option<&Value>,
+    busy: bool,
+    has_remote: bool,
+) -> Option<String> {
+    if !entry.disabled {
+        return None;
+    }
+    if busy {
+        return Some("Git action in progress.".into());
+    }
+    let Some(status) = status else {
+        return Some("Git status is unavailable.".into());
+    };
+    let f = facts(status);
+    let t = terminology(Some(status)).singular;
+    let no_remote = !f.has_upstream && !has_remote;
+    let reason = match entry.id {
+        "commit" if !f.has_changes => "Worktree is clean. Make changes before committing.".into(),
+        "commit" => "Commit is currently unavailable.".into(),
+        "push" if !f.has_branch => "Detached HEAD: check out a branch before pushing.".into(),
+        "push" if f.has_changes => "Commit or stash local changes before pushing.".into(),
+        "push" if f.behind => "Branch is behind upstream. Pull/rebase before pushing.".into(),
+        "push" if no_remote => "Add an \"origin\" remote before pushing.".into(),
+        "push" if !f.ahead => "No local commits to push.".into(),
+        "push" => "Push is currently unavailable.".into(),
+        _ if f.open_pr => format!("View {t} is currently unavailable."),
+        _ if !f.has_branch => format!("Detached HEAD: check out a branch before creating a {t}."),
+        _ if f.has_changes => format!("Commit local changes before creating a {t}."),
+        _ if no_remote => format!("Add an \"origin\" remote before creating a {t}."),
+        _ if !f.ahead => format!("No local commits to include in a {t}."),
+        _ if f.behind => format!("Branch is behind upstream. Pull/rebase before creating a {t}."),
+        _ => format!("Create {t} is currently unavailable."),
+    };
+    Some(reason)
+}
+
 /// `buildGitActionProgressStages`.
 pub(crate) fn progress_stages(
     action: &str,
@@ -770,15 +809,37 @@ impl App {
         let has_remote = status
             .as_ref()
             .is_some_and(|s| s["hasPrimaryRemote"] == true);
-        let entries = build_menu_items(status.as_ref(), self.git_busy(), has_remote);
-        let items: Vec<Item> = entries
+        let busy = self.git_busy();
+        let entries = build_menu_items(status.as_ref(), busy, has_remote);
+        let mut items: Vec<Item> = entries
             .iter()
             .map(|entry| {
                 let mut item = Item::new(entry.id, entry.label.clone()).icon(entry.icon);
                 item.disabled = entry.disabled;
+                item.tooltip = menu_disabled_reason(entry, status.as_ref(), busy, has_remote);
                 item
             })
             .collect();
+        let note = |id: &str, text: &str| {
+            let mut item = Item::new(id, text);
+            item.note = Some(theme::warning());
+            item.disabled = true;
+            item
+        };
+        if let Some(status) = &status {
+            let count = |key: &str| status[key].as_u64().unwrap_or(0);
+            if status["refName"].is_null() {
+                items.push(note(
+                    "detached",
+                    "Detached HEAD: create and check out a branch to enable push and pull request actions.",
+                ));
+            } else if status["hasWorkingTreeChanges"] != true
+                && count("behindCount") > 0
+                && count("aheadCount") == 0
+            {
+                items.push(note("behind", "Behind upstream. Pull/rebase first."));
+            }
+        }
         let mut open = Some(state);
         let clicked = context_menu::show(ui, &mut open, &items);
         self.git.menu = open;
@@ -1532,6 +1593,40 @@ mod tests {
             base[key] = value.clone();
         }
         base
+    }
+
+    #[test]
+    fn disabled_items_say_why() {
+        let reasons = |s: Value| -> Vec<Option<String>> {
+            build_menu_items(Some(&s), false, true)
+                .iter()
+                .map(|entry| menu_disabled_reason(entry, Some(&s), false, true))
+                .collect()
+        };
+        assert_eq!(
+            reasons(status(json!({}))),
+            vec![
+                Some("Worktree is clean. Make changes before committing.".into()),
+                Some("No local commits to push.".into()),
+                Some("No local commits to include in a pull request.".into()),
+            ]
+        );
+        assert_eq!(
+            reasons(status(json!({"refName": null, "aheadCount": 1})))[1..],
+            [
+                Some("Detached HEAD: check out a branch before pushing.".into()),
+                Some("Detached HEAD: check out a branch before creating a pull request.".into()),
+            ]
+        );
+        assert_eq!(
+            reasons(status(json!({"behindCount": 1, "aheadCount": 1})))[1],
+            Some("Branch is behind upstream. Pull/rebase before pushing.".into())
+        );
+        let entry = &build_menu_items(Some(&status(json!({}))), true, true)[0];
+        assert_eq!(
+            menu_disabled_reason(entry, None, true, true).as_deref(),
+            Some("Git action in progress.")
+        );
     }
 
     #[test]
