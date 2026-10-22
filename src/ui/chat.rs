@@ -408,7 +408,67 @@ impl App {
                 self.working_row(ui, started_at.as_deref(), width);
                 ui.add_space(6.0);
             }
+            Row::GeneratedImage { tool_call_id } => {
+                if self.generated_image_row(ui, tool_call_id, width) {
+                    ui.add_space(16.0);
+                }
+            }
         }
+    }
+
+    /// A generated image, at most 384px wide, a click opening it in the
+    /// expanded preview; nothing when the server is remote or Codex saved
+    /// no file for the call. Upstream shows nothing for these items.
+    fn generated_image_row(&mut self, ui: &mut Ui, tool_call_id: &str, width: f32) -> bool {
+        let local = url::Url::parse(self.connect.server.trim())
+            .ok()
+            .and_then(|url| match url.host()? {
+                url::Host::Domain(host) => Some(host == "localhost"),
+                url::Host::Ipv4(ip) => Some(ip.is_loopback()),
+                url::Host::Ipv6(ip) => Some(ip.is_loopback()),
+            })
+            .unwrap_or(false);
+        if !local {
+            return false;
+        }
+        let Some(image) = attachments::generated_image(tool_call_id, ui.ctx()) else {
+            return false;
+        };
+        let frame_width = width.min(384.0);
+        let height = (frame_width * image.height() as f32 / image.width().max(1) as f32)
+            .min(frame_width * 1.25);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+        let frame = Rect::from_min_size(rect.min, Vec2::new(frame_width, height));
+        let radius = CornerRadius::same(8);
+        let key = format!("generated:{tool_call_id}");
+        attachments::paint_cover(ui, frame.shrink(1.0), &key, &image, CornerRadius::same(7));
+        ui.painter().rect_stroke(
+            frame,
+            radius,
+            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.8)),
+            egui::StrokeKind::Inside,
+        );
+        let response = ui
+            .interact(
+                frame,
+                ui.id().with(("generated-image", tool_call_id)),
+                Sense::click(),
+            )
+            .on_hover_text("Generated image");
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+        }
+        if response.clicked() {
+            self.open_lightbox(
+                vec![crate::ui::lightbox::Item {
+                    name: "Generated image".into(),
+                    key,
+                    image,
+                }],
+                0,
+            );
+        }
+        true
     }
 
     /// One image cell (`aspect-[4/3] overflow-hidden rounded-lg border

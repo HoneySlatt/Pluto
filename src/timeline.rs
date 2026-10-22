@@ -92,6 +92,12 @@ pub enum Row {
     Working {
         started_at: Option<String>,
     },
+    /// An image Codex may have generated (an `image_view` call that viewed
+    /// no workspace image), read from Codex's saved file by call id. Not
+    /// shown upstream: this client adds it after the turn's answer.
+    GeneratedImage {
+        tool_call_id: String,
+    },
 }
 
 #[derive(Default)]
@@ -883,7 +889,54 @@ pub fn rows(thread: &Thread, expansion: &Expansion) -> Vec<Row> {
     if is_working && working_index >= entries.len() {
         out.push(Row::Working { started_at });
     }
+    insert_generated_images(&mut out, &thread.activities);
     out
+}
+
+/// Completed `image_view` calls without a workspace image path (Codex's
+/// image generation, its item stripped by the server): call id and turn.
+pub fn generated_images(activities: &[Activity]) -> Vec<(&str, Option<&str>)> {
+    activities
+        .iter()
+        .filter(|a| {
+            a.kind == "tool.completed"
+                && a.payload["itemType"] == "image_view"
+                && a.payload["status"] != "failed"
+                && a.payload["data"]["imagePath"].is_null()
+        })
+        .filter_map(|a| Some((a.payload["toolCallId"].as_str()?, a.turn_id.as_deref())))
+        .collect()
+}
+
+/// Each generated image follows its turn's last answer (or ends the
+/// timeline before the working row), so a folded turn still shows it.
+fn insert_generated_images(out: &mut Vec<Row>, activities: &[Activity]) {
+    for (tool_call_id, turn) in generated_images(activities) {
+        let row = Row::GeneratedImage {
+            tool_call_id: tool_call_id.to_owned(),
+        };
+        let after_answer = out.iter().rposition(|r| {
+            matches!(r, Row::Assistant { message, .. }
+                if turn.is_some() && message.turn_id.as_deref() == turn)
+        });
+        match after_answer {
+            Some(index) => {
+                // After the answer and the images already placed there.
+                let mut at = index + 1;
+                while matches!(out.get(at), Some(Row::GeneratedImage { .. })) {
+                    at += 1;
+                }
+                out.insert(at, row);
+            }
+            None => {
+                let at = out
+                    .iter()
+                    .position(|r| matches!(r, Row::Working { .. }))
+                    .unwrap_or(out.len());
+                out.insert(at, row);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -980,5 +1033,30 @@ mod tests {
         assert_eq!(format_duration(4_250), "4.3s");
         assert_eq!(format_duration(42_000), "42s");
         assert_eq!(format_duration(3_723_000), "1h 2m 3s");
+    }
+
+    #[test]
+    fn generated_images_follow_their_turn_answer() {
+        let mut generated = activity("a", "2026-01-01T00:00:01Z", "Image view", "image_view", "");
+        generated.payload["toolCallId"] = json!("exec-1");
+        let mut viewed = activity("b", "2026-01-01T00:00:02Z", "Image view", "image_view", "");
+        viewed.payload["toolCallId"] = json!("exec-2");
+        viewed.payload["data"] = json!({"imagePath": "shot.png"});
+        assert_eq!(
+            generated_images(&[generated.clone(), viewed]),
+            [("exec-1", Some("turn"))]
+        );
+        let mut out = vec![
+            Row::Assistant {
+                message: message("m", "assistant", "2026-01-01T00:00:03Z", Some("turn")),
+                show_meta: true,
+                changes: None,
+            },
+            Row::Working { started_at: None },
+        ];
+        insert_generated_images(&mut out, &[generated]);
+        assert!(
+            matches!(&out[1], Row::GeneratedImage { tool_call_id } if tool_call_id == "exec-1")
+        );
     }
 }

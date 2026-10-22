@@ -146,6 +146,44 @@ pub(crate) fn paint_contain(
         .paint_at(ui, Rect::from_min_size(min, size / ppp));
 }
 
+/// An image Codex generated, read on a background thread from the file it
+/// saves for each image generation call
+/// (`$CODEX_HOME/generated_images/<thread>/<call id>.png`, CODEX_HOME
+/// defaulting to ~/.codex). The server strips the picture from activities,
+/// so only a client on the server's machine can show it.
+pub(crate) fn generated_image(
+    tool_call_id: &str,
+    ctx: &egui::Context,
+) -> Option<Arc<image::RgbaImage>> {
+    let key = format!("generated:{tool_call_id}");
+    match cache().lock().ok()?.get(&key) {
+        Some(Loaded::Image(image)) => return Some(image.clone()),
+        Some(_) => return None,
+        None => {}
+    }
+    cache().lock().ok()?.insert(key.clone(), Loaded::Pending);
+    let file = format!("{tool_call_id}.png");
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let home = std::env::var_os("CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::home_dir().map(|home| home.join(".codex")));
+        let state = home
+            .and_then(|home| std::fs::read_dir(home.join("generated_images")).ok())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find_map(|dir| std::fs::read(dir.path().join(&file)).ok())
+            .and_then(|bytes| decode(&bytes))
+            .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
+        if let Ok(mut cache) = cache().lock() {
+            cache.insert(key, state);
+        }
+        ctx.request_repaint();
+    });
+    None
+}
+
 /// The message's image attachments (`isImageAttachment`).
 pub(crate) fn images(attachments: &[Value]) -> Vec<&Value> {
     attachments

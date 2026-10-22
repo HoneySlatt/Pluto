@@ -72,13 +72,13 @@ function message(threadId, role, text, minutesAgo, turnId = null, attachments = 
   return messageId;
 }
 
-function tool(threadId, turnId, title, itemType, detail, minutesAgo, data) {
+function tool(threadId, turnId, title, itemType, detail, minutesAgo, data, toolCallId = randomUUID()) {
   const createdAt = at(minutesAgo);
   emit("thread", threadId, "thread.activity-appended", createdAt, {
     threadId,
     activity: {
       id: randomUUID(), tone: "tool", kind: "tool.completed", summary: title,
-      payload: { itemType, toolCallId: randomUUID(), status: "completed", title, detail, ...(data ? { data } : {}) },
+      payload: { itemType, toolCallId, status: "completed", title, detail, ...(data ? { data } : {}) },
       turnId, createdAt,
     },
   }, "provider");
@@ -195,10 +195,36 @@ const web1 = thread(web, "Générer une image de pomme", 90);
 message(web1, "user", "Génère une image de pomme en SVG, comme celle-ci.", 90, null, [
   imageAttachment(web1, "pomme.png"),
 ]);
+// Codex's image generation: the server strips the item, and Codex saves the
+// PNG as `$CODEX_HOME/generated_images/<thread>/<call id>.png` (the
+// fixture's CODEX_HOME is `<baseDir>/codex`).
+const web1Turn = randomUUID();
+const web1Call = `exec-${randomUUID()}`;
+const generatedDir = path.join(baseDir, "codex", "generated_images", randomUUID());
+fs.mkdirSync(generatedDir, { recursive: true });
+fs.writeFileSync(path.join(generatedDir, `${web1Call}.png`), syntheticPng());
+tool(web1, web1Turn, "Image view", "image_view", undefined, 89, {
+  item: {
+    type: "imageGeneration", id: web1Call, status: "completed", failure: null,
+    revisedPrompt: "Une pomme rouge sur un ciel dégradé", transparentBackground: null,
+    result: syntheticPng().toString("base64"),
+    savedPath: path.join(generatedDir, `${web1Call}.png`),
+  },
+}, web1Call);
+message(web1, "assistant", "Voici ta pomme rouge 🍎", 88, web1Turn);
 
 // A synthetic 320x240 PNG (a red disc on a sky gradient), stored like an
 // uploaded image (`<thread segment>-<uuid>.png` in the attachments dir).
 function imageAttachment(threadId, name) {
+  const png = syntheticPng();
+  const id = `${threadId.toLowerCase()}-${randomUUID()}`;
+  const dir = path.join(baseDir, "userdata", "attachments");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.png`), png);
+  return { type: "image", id, name, mimeType: "image/png", sizeBytes: png.length };
+}
+
+function syntheticPng() {
   const width = 320;
   const height = 240;
   const raw = Buffer.alloc((width * 3 + 1) * height);
@@ -231,11 +257,7 @@ function imageAttachment(threadId, name) {
     chunk("IDAT", zlib.deflateSync(raw)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
-  const id = `${threadId.toLowerCase()}-${randomUUID()}`;
-  const dir = path.join(baseDir, "userdata", "attachments");
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${id}.png`), png);
-  return { type: "image", id, name, mimeType: "image/png", sizeBytes: png.length };
+  return png;
 }
 
 // Every markdown construct the assistant uses, for style comparisons. Links
