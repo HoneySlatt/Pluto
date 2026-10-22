@@ -6,7 +6,7 @@ use crate::app::App;
 use crate::model::{Message, Project};
 use crate::theme::{self, Weight, font};
 use crate::timeline::{self, Row, WorkEntry};
-use crate::ui::markdown::{ChipRef, Markdown, PlainText};
+use crate::ui::markdown::Markdown;
 use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
@@ -884,30 +884,56 @@ impl App {
         clicked
     }
 
+    /// A user message's text size at most `width` wide, measured in an
+    /// invisible pass (the markdown drawn, nothing shown) and kept.
+    fn user_text_size(&mut self, ui: &mut Ui, message: &Message, text: &str, width: f32) -> Vec2 {
+        if text.is_empty() {
+            return Vec2::ZERO;
+        }
+        let key = (message.id.clone(), text.len(), width.to_bits());
+        if let Some(size) = self.user_text_sizes.get(&key) {
+            return *size;
+        }
+        let origin = ui.cursor().min;
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_size(origin, Vec2::new(width, f32::INFINITY)))
+                .invisible(),
+        );
+        let mut markdown = Markdown::new(
+            &mut self.highlighter,
+            ui.id().with(("user-text-measure", &message.id)),
+        );
+        markdown.line_breaks = true;
+        markdown.skill_chips = true;
+        let height = markdown.show(&mut child, text, width);
+        let size = Vec2::new(markdown.used_width.ceil().min(width), height);
+        if self.user_text_sizes.len() > 2000 {
+            self.user_text_sizes.clear();
+        }
+        self.user_text_sizes.insert(key, size);
+        size
+    }
+
     fn user_row(&mut self, ui: &mut Ui, message: &Message, width: f32) {
         let max_width = (width * 0.8).floor();
         let text = message.text.trim_end();
-        let galley = widgets::galley(
-            ui,
-            text,
-            font(14.0, Weight::Regular),
-            theme::foreground(),
-            MESSAGE_LINE,
-            max_width - 24.0,
-        );
-        // Citations, context references, file mentions and known skills
-        // show as their chips.
-        let rich = (!PlainText::chips(text).is_empty()).then(|| {
-            PlainText::layout(
-                ui,
-                text,
-                14.0,
-                MESSAGE_LINE,
-                theme::foreground(),
-                max_width - 24.0,
-            )
-        });
-        let text_size = rich.as_ref().map_or(galley.size(), PlainText::size);
+        // `UserMessageBody`: the text as markdown with its line breaks and
+        // chips, measured once so the bubble fits it (`max-w-[80%]`).
+        let inner_max = max_width - 24.0;
+        let measured = self.user_text_size(ui, message, text, inner_max);
+        // `shouldCollapseUserMessage`: past 600 characters or 8 lines, the
+        // body folds to 11rem behind a fade.
+        let can_collapse = !text.trim().is_empty()
+            && (text.encode_utf16().count() > 600 || text.split('\n').count() > 8);
+        let collapsed = can_collapse && !self.expanded_user_messages.contains(&message.id);
+        let body_height = if collapsed {
+            measured.y.min(176.0)
+        } else {
+            measured.y
+        };
+        let footer = if can_collapse { 6.0 + 24.0 } else { 0.0 };
+        let text_size = Vec2::new(measured.x, body_height + footer);
         // Image attachments sit above the text (`mb-2`).
         let images = attachments::images(&message.attachments);
         let (grid_height, cell) = attachments::grid_size(images.len(), max_width - 24.0);
@@ -956,28 +982,101 @@ impl App {
             }
         }
         let text_pos = bubble.min + Vec2::new(12.0, 12.0 + grid.y);
-        let text_id = ui.id().with(("user-text", &message.id));
-        if let Some(rich) = rich {
-            match rich.paint(ui, text_pos, text_id) {
-                Some(ChipRef::Citation(citation)) => self.open_citation_source(&citation),
-                Some(ChipRef::File(file)) => self.open_markdown_file(&file.path),
-                Some(ChipRef::Context { id, .. }) => {
-                    let rect = ui.ctx().data(|d| {
-                        d.get_temp::<Rect>(egui::Id::new(crate::ui::markdown::CLICKED_CHIP))
-                    });
-                    let record = message.context["records"]
-                        .as_array()
-                        .and_then(|records| records.iter().find(|r| r["contextId"] == id.as_str()))
-                        .filter(|r| r["kind"] == "terminal")
-                        .cloned();
-                    if let (Some(rect), Some(record)) = (rect, record) {
-                        self.bubble_popover = Some((rect, record));
-                    }
+        if !text.is_empty() {
+            let body = Rect::from_min_size(text_pos, Vec2::new(measured.x.max(1.0), body_height));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(
+                text_pos,
+                Vec2::new(measured.x.max(1.0) + 1.0, f32::INFINITY),
+            )));
+            child.set_clip_rect(body.expand2(Vec2::new(2.0, 0.0)).intersect(ui.clip_rect()));
+            let workspace = self.workspace_cwd();
+            let mut markdown = Markdown::new(
+                &mut self.highlighter,
+                ui.id().with(("user-text", &message.id)),
+            );
+            markdown.line_breaks = true;
+            markdown.skill_chips = true;
+            markdown.text_color = Some(theme::foreground());
+            markdown.media_root = workspace;
+            markdown.show(&mut child, text, measured.x.max(1.0) + 1.0);
+            let opened_file = markdown.opened_file.take();
+            let opened_citation = markdown.opened_citation.take();
+            let opened_context = markdown.opened_context.take();
+            if collapsed {
+                // `mask-image: linear-gradient(black calc(100% - 1.75rem), transparent)`.
+                let fade = Rect::from_min_max(
+                    Pos2::new(bubble.left(), body.bottom() - 28.0),
+                    Pos2::new(bubble.right(), body.bottom()),
+                );
+                let surface = theme::message_surface();
+                let mut mesh = egui::Mesh::default();
+                for (y, alpha) in [(fade.top(), 0.0), (fade.bottom(), 1.0)] {
+                    mesh.colored_vertex(Pos2::new(fade.left(), y), theme::alpha(surface, alpha));
+                    mesh.colored_vertex(Pos2::new(fade.right(), y), theme::alpha(surface, alpha));
                 }
-                None => {}
+                mesh.add_triangle(0, 1, 2);
+                mesh.add_triangle(1, 2, 3);
+                ui.painter().add(egui::Shape::mesh(mesh));
             }
-        } else {
-            widgets::selectable_galley(ui, text_id, text_pos, galley, theme::foreground());
+            if can_collapse {
+                // `Button size="xs" variant="ghost-muted"`, `-ml-1`.
+                let label = if collapsed {
+                    "Show full message"
+                } else {
+                    "Show less"
+                };
+                let label_font = font(12.0, Weight::Medium);
+                let button_width = widgets::text_width(ui, label, label_font.clone()).ceil() + 16.0;
+                let button = Rect::from_min_size(
+                    Pos2::new(text_pos.x - 4.0, body.bottom() + 6.0),
+                    Vec2::new(button_width, 24.0),
+                );
+                let response = ui.interact(
+                    button,
+                    ui.id().with(("user-collapse", &message.id)),
+                    Sense::click(),
+                );
+                if response.hovered() {
+                    ui.painter()
+                        .rect_filled(button, CornerRadius::same(8), theme::accent());
+                }
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_max(Pos2::new(button.left() + 8.0, button.top()), button.max),
+                    label,
+                    label_font,
+                    if response.hovered() {
+                        theme::foreground()
+                    } else {
+                        theme::muted_foreground()
+                    },
+                );
+                if response.clicked() {
+                    if !self.expanded_user_messages.remove(&message.id) {
+                        self.expanded_user_messages.insert(message.id.clone());
+                    }
+                    self.keep_scroll = true;
+                }
+            }
+            if let Some(citation) = opened_citation {
+                self.open_citation_source(&citation);
+            }
+            if let Some(file) = opened_file {
+                self.open_markdown_file(&file.path);
+            }
+            if let Some(id) = opened_context {
+                let rect = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<Rect>(egui::Id::new(crate::ui::markdown::CLICKED_CHIP)));
+                let record = message.context["records"]
+                    .as_array()
+                    .and_then(|records| records.iter().find(|r| r["contextId"] == id.as_str()))
+                    .filter(|r| r["kind"] == "terminal")
+                    .cloned();
+                if let (Some(rect), Some(record)) = (rect, record) {
+                    self.bubble_popover = Some((rect, record));
+                }
+            }
         }
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
             let meta_top = bubble.bottom() + 4.0;

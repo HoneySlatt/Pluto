@@ -58,8 +58,26 @@ fn code_inline(code: &str) -> Inline {
         .map_or_else(|| Inline::Code(code.to_owned()), Inline::File)
 }
 
-/// A link drawn as a chip: an assistant citation or a file reference.
-fn link_chip(href: &str) -> Option<Inline> {
+/// A link drawn as a chip: an assistant citation, a context reference
+/// (labelled by the link's text from `events`) or a file reference.
+fn link_chip(href: &str, events: &[Event]) -> Option<Inline> {
+    if let Some(rest) = href.strip_prefix("t3-context://v1/")
+        && let Some((kind, id)) = rest.split_once('/')
+    {
+        let mut label = String::new();
+        for event in events {
+            match event {
+                Event::End(TagEnd::Link) => break,
+                Event::Text(t) | Event::Code(t) => label.push_str(t),
+                _ => {}
+            }
+        }
+        return Some(Inline::Context {
+            kind: kind.to_owned(),
+            label: crate::ui::composer_context::sanitize_label(&label, kind),
+            id: id.to_owned(),
+        });
+    }
     citations::parse_href(href)
         .map(Inline::Citation)
         .or_else(|| md_links::parse_file_link(href).map(Inline::File))
@@ -142,12 +160,19 @@ enum Block {
     },
 }
 
-fn parse(text: &str) -> Vec<Block> {
+/// With `line_breaks`, every line break is a break (`remark-breaks`, the
+/// `lineBreaks` of user messages).
+fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
-    let events: Vec<Event> = Parser::new_ext(text, options).collect();
+    let events: Vec<Event> = Parser::new_ext(text, options)
+        .map(|event| match event {
+            Event::SoftBreak if line_breaks => Event::HardBreak,
+            event => event,
+        })
+        .collect();
     let mut index = 0;
     parse_blocks(&events, &mut index, None)
 }
@@ -327,15 +352,17 @@ fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => match link_chip(dest_url) {
-                Some(chip) => {
-                    *index += 1;
-                    skip_link(events, index);
-                    out.push(chip);
-                    continue;
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                match link_chip(dest_url, &events[*index + 1..]) {
+                    Some(chip) => {
+                        *index += 1;
+                        skip_link(events, index);
+                        out.push(chip);
+                        continue;
+                    }
+                    None => style.link = Some(dest_url.to_string()),
                 }
-                None => style.link = Some(dest_url.to_string()),
-            },
+            }
             Event::End(TagEnd::Emphasis) => style.italic = false,
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
@@ -374,13 +401,15 @@ fn parse_inlines(events: &[Event], index: &mut usize, end: TagEnd) -> Vec<Inline
             Event::Start(Tag::Emphasis) => style.italic = true,
             Event::Start(Tag::Strong) => style.bold = true,
             Event::Start(Tag::Strikethrough) => style.strike = true,
-            Event::Start(Tag::Link { dest_url, .. }) => match link_chip(dest_url) {
-                Some(chip) => {
-                    skip_link(events, index);
-                    out.push(chip);
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                match link_chip(dest_url, &events[*index..]) {
+                    Some(chip) => {
+                        skip_link(events, index);
+                        out.push(chip);
+                    }
+                    None => style.link = Some(dest_url.to_string()),
                 }
-                None => style.link = Some(dest_url.to_string()),
-            },
+            }
             Event::End(TagEnd::Emphasis) => style.italic = false,
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
@@ -1110,117 +1139,59 @@ fn paint_inlines(
 /// The temp-data key of the last clicked chip's rect.
 pub(crate) const CLICKED_CHIP: &str = "markdown-clicked-chip";
 
-/// Plain text with its citation links drawn as chips (a user message,
-/// whose text this client does not render as markdown).
-pub(crate) struct PlainText(Inlines);
-
-impl PlainText {
-    /// The chips of a user message's text, in order: citations and context
-    /// references, then file mentions and known skills outside them.
-    pub(crate) fn chips(text: &str) -> Vec<(Inline, Range<usize>)> {
-        let mut out: Vec<(Inline, Range<usize>)> = citations::collect(text)
-            .into_iter()
-            .map(|(citation, range)| (Inline::Citation(citation), range))
-            .collect();
-        out.extend(
-            crate::ui::composer_context::collect(text)
-                .into_iter()
-                .map(|r| {
-                    (
-                        Inline::Context {
-                            kind: r.kind,
-                            label: r.label,
-                            id: r.context_id,
-                        },
-                        r.range,
-                    )
-                }),
-        );
-        let free = |out: &[(Inline, Range<usize>)], range: &Range<usize>| {
-            !out.iter()
-                .any(|(_, taken)| range.start < taken.end && range.end > taken.start)
-        };
-        for (path, range) in crate::ui::mentions::collect(text) {
-            if free(&out, &range) {
-                let file = FileRef {
-                    path,
-                    line: None,
-                    column: None,
+/// `renderSkillInlineMarkdownChildren`: known `$skills` in text (not in
+/// code or links) become skill chips.
+fn skill_chip_blocks(blocks: &mut [Block]) {
+    fn inlines(list: &mut Vec<Inline>) {
+        let mut out = Vec::with_capacity(list.len());
+        for inline in list.drain(..) {
+            let Inline::Text(text, style) = &inline else {
+                out.push(inline);
+                continue;
+            };
+            if style.link.is_some() || !text.contains(crate::ui::command_menu::is_currency) {
+                out.push(inline);
+                continue;
+            }
+            // `SKILL_TOKEN_REGEX` here also matches at the text's end.
+            let padded = format!("{text} ");
+            let mut cursor = 0;
+            for (name, range) in crate::ui::mentions::collect_skills(&padded) {
+                let Some(meta) = crate::ui::cite::known_skill(&name) else {
+                    continue;
                 };
-                out.push((Inline::File(file), range));
-            }
-        }
-        // `SkillInlineText`: only skills the provider knows become chips.
-        for (name, range) in crate::ui::mentions::collect_skills(text) {
-            if let Some(meta) = crate::ui::cite::known_skill(&name)
-                && free(&out, &range)
-            {
-                out.push((
-                    Inline::Context {
-                        kind: "skill".into(),
-                        label: meta.label,
-                        id: name,
-                    },
-                    range,
-                ));
-            }
-        }
-        out.sort_by_key(|(_, range)| range.start);
-        out
-    }
-
-    pub(crate) fn layout(
-        ui: &Ui,
-        text: &str,
-        size: f32,
-        line_height: f32,
-        color: Color32,
-        wrap: f32,
-    ) -> Self {
-        let mut inlines = Vec::new();
-        let push_text = |inlines: &mut Vec<Inline>, text: &str| {
-            for (index, line) in text.split('\n').enumerate() {
-                if index > 0 {
-                    inlines.push(Inline::Break);
+                if range.start > cursor {
+                    out.push(Inline::Text(
+                        text[cursor..range.start].to_owned(),
+                        style.clone(),
+                    ));
                 }
-                if !line.is_empty() {
-                    inlines.push(Inline::Text(line.to_owned(), Style::default()));
-                }
+                out.push(Inline::Context {
+                    kind: "skill".into(),
+                    label: meta.label,
+                    id: name,
+                });
+                cursor = range.end.min(text.len());
             }
-        };
-        let mut cursor = 0;
-        for (chip, range) in Self::chips(text) {
-            push_text(&mut inlines, &text[cursor..range.start]);
-            inlines.push(chip);
-            cursor = range.end;
+            if cursor == 0 {
+                out.push(inline);
+            } else if cursor < text.len() {
+                out.push(Inline::Text(text[cursor..].to_owned(), style.clone()));
+            }
         }
-        push_text(&mut inlines, &text[cursor..]);
-        Self(layout_inlines(
-            ui,
-            &inlines,
-            size,
-            line_height,
-            Weight::Regular,
-            color,
-            wrap,
-            &HashMap::new(),
-        ))
+        *list = out;
     }
-
-    pub(crate) fn size(&self) -> Vec2 {
-        self.0.galley.size()
-    }
-
-    /// Paints the text; returns a chip that was clicked.
-    pub(crate) fn paint(&self, ui: &mut Ui, pos: Pos2, id: egui::Id) -> Option<ChipRef> {
-        paint_inlines(
-            ui,
-            pos,
-            &self.0,
-            id,
-            None,
-            Some((md_copy::Kind::Paragraph, Vec::new())),
-        )
+    for block in blocks {
+        match block {
+            Block::Paragraph(list) | Block::Heading(_, list) => inlines(list),
+            Block::List { items, .. } => items.iter_mut().for_each(|item| skill_chip_blocks(item)),
+            Block::Quote(children) => skill_chip_blocks(children),
+            Block::Table { head, rows, .. } => {
+                head.iter_mut().for_each(inlines);
+                rows.iter_mut().flatten().for_each(inlines);
+            }
+            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+        }
     }
 }
 
@@ -1250,6 +1221,17 @@ pub struct Markdown<'a> {
     /// An image clicked (expanded preview) or right-clicked (its menu).
     pub(crate) opened_media: Option<(crate::ui::media::Source, Arc<image::RgbaImage>)>,
     pub(crate) media_menu: Option<(crate::ui::media::Source, Pos2)>,
+    /// User messages: line breaks kept, the text in this color, known
+    /// `$skills` as chips.
+    /// A context chip clicked during `show` (its context id).
+    pub(crate) opened_context: Option<String>,
+    pub(crate) line_breaks: bool,
+    pub(crate) text_color: Option<Color32>,
+    pub(crate) skill_chips: bool,
+    /// How far right the drawn content reached from the column's left, for a
+    /// bubble that fits its text.
+    pub(crate) used_width: f32,
+    origin_x: f32,
 }
 
 impl<'a> Markdown<'a> {
@@ -1269,20 +1251,35 @@ impl<'a> Markdown<'a> {
             asset_requests: Vec::new(),
             opened_media: None,
             media_menu: None,
+            opened_context: None,
+            line_breaks: false,
+            text_color: None,
+            skill_chips: false,
+            used_width: 0.0,
+            origin_x: 0.0,
         }
+    }
+
+    fn note_width(&mut self, right: f32) {
+        self.used_width = self.used_width.max(right - self.origin_x);
     }
 
     fn open_chip(&mut self, chip: ChipRef) {
         match chip {
             ChipRef::File(file) => self.opened_file = Some(file),
             ChipRef::Citation(citation) => self.opened_citation = Some(citation),
-            ChipRef::Context { .. } => {}
+            ChipRef::Context { id, .. } => self.opened_context = Some(id),
         }
     }
 
     /// Renders `text` into the column starting at `ui.cursor()`; returns its height.
     pub fn show(&mut self, ui: &mut Ui, text: &str, width: f32) -> f32 {
-        let blocks = parse(text);
+        let mut blocks = parse_with(text, self.line_breaks);
+        if self.skill_chips {
+            skill_chip_blocks(&mut blocks);
+        }
+        self.origin_x = ui.cursor().left();
+        self.used_width = 0.0;
         let mut files = Vec::new();
         collect_files(&blocks, &mut files);
         self.suffixes = md_links::parent_suffixes(&files);
@@ -1307,6 +1304,13 @@ impl<'a> Markdown<'a> {
                 ui.add_space(previous.max(top));
             }
             let id = parent.with(index);
+            // Code, tables, images and rules take the column's width.
+            if matches!(
+                block,
+                Block::Code { .. } | Block::Table { .. } | Block::Image { .. } | Block::Rule
+            ) {
+                self.note_width(ui.cursor().left() + width);
+            }
             self.block(ui, block, width, depth, id);
             previous_bottom = Some(bottom);
         }
@@ -1317,7 +1321,8 @@ impl<'a> Markdown<'a> {
         let paragraph_color = if self.quoted {
             theme::muted_foreground()
         } else {
-            theme::alpha(theme::foreground(), 0.8)
+            self.text_color
+                .unwrap_or(theme::alpha(theme::foreground(), 0.8))
         };
         match block {
             Block::Paragraph(inlines) => {
@@ -1333,6 +1338,7 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
+                self.note_width(rect.left() + laid.galley.size().x);
                 if let Some(chip) = paint_inlines(
                     ui,
                     rect.min,
@@ -1368,6 +1374,7 @@ impl<'a> Markdown<'a> {
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
+                self.note_width(rect.left() + laid.galley.size().x);
                 if let Some(chip) = paint_inlines(
                     ui,
                     rect.min,

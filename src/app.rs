@@ -50,6 +50,10 @@ pub struct App {
     pub(crate) composer_contexts: Vec<serde_json::Value>,
     /// A sent terminal excerpt's popover: its chip's rect and record.
     pub(crate) bubble_popover: Option<(eframe::egui::Rect, serde_json::Value)>,
+    /// User messages opened past their fold, and their measured text sizes
+    /// by (message, text length, width).
+    pub(crate) expanded_user_messages: std::collections::HashSet<String>,
+    pub(crate) user_text_sizes: std::collections::HashMap<(String, usize, u32), eframe::egui::Vec2>,
     pub(crate) tasks_open: bool,
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
@@ -382,6 +386,8 @@ impl App {
             command_menu: Default::default(),
             composer_contexts: Vec::new(),
             bubble_popover: None,
+            expanded_user_messages: Default::default(),
+            user_text_sizes: Default::default(),
             tasks_open: false,
             tasks_thread: None,
             picker_provider: None,

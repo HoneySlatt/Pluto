@@ -450,6 +450,19 @@ const contextThread = thread(rust, "Analyser l'erreur", 2400);
   }, "client");
 }
 
+message(contextThread, "user", [
+  "Voici ce que j'ai **déjà essayé** :",
+  "- relancer `cargo clean`",
+  "- mettre à jour la chaîne d'outils",
+  "- vider le cache de *sccache*",
+  "",
+  "```sh",
+  "cargo build --release",
+  "```",
+  "Rien n'y fait.",
+  "Une idée ?",
+].join("\n"), 2399);
+
 // A plan-mode thread whose settled turn proposed a plan.
 const planThreadId = randomUUID();
 {
