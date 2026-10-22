@@ -300,6 +300,10 @@ message(styles, "assistant", [
   "",
   "---",
   "",
+  "![Capture du rendu](docs/capture.png)",
+  "",
+  "![Image manquante](docs/absente.png)",
+  "",
   "Fin.",
 ].join("\n"), 99, stylesTurn);
 
@@ -400,5 +404,10 @@ const bigAnswer = message(bigDiff, "assistant", "Le module de rendu est réécri
 completeTurn(bigDiff, bigTurn, 1, [
   { path: "src/render.ts", kind: "modified", additions: 1400, deletions: 600 },
 ], 2098, bigAnswer);
+
+// The image the "Styles markdown" answer shows, written last so no turn
+// checkpoint of web-demo picks it up.
+fs.mkdirSync(path.join(workspaces, "web-demo", "docs"), { recursive: true });
+fs.writeFileSync(path.join(workspaces, "web-demo", "docs", "capture.png"), syntheticPng());
 
 console.log("seeded fixture events");
