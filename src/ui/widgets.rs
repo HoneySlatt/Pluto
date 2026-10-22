@@ -357,6 +357,7 @@ pub fn copy_button(
     copied_tooltip: &str,
     copied_tint: Color32,
     feedback: f64,
+    toast: bool,
     text: impl FnOnce() -> String,
 ) {
     let id = ui.id().with(id);
@@ -366,6 +367,15 @@ pub fn copy_button(
         .data(|d| d.get_temp::<f64>(key))
         .map(|at| feedback - (now - at))
         .filter(|left| *left > 0.0);
+    // A message copy button is disabled while it confirms (`MessageCopyButton`).
+    if toast && left.is_some() {
+        theme::paint_icon(ui, "check", rect, 12.0, copied_tint);
+        let left = left.unwrap_or_default();
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(left));
+        copied_toast(ui, rect);
+        return;
+    }
     let response = icon_button(
         ui,
         rect,
@@ -386,11 +396,49 @@ pub fn copy_button(
     if let Some(left) = left {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_secs_f64(left));
+        if toast {
+            copied_toast(ui, rect);
+        }
     }
     if response.clicked() {
         ui.ctx().copy_text(text());
         ui.data_mut(|d| d.insert_temp(key, now));
     }
+}
+
+/// `showAnchoredCopySuccessToast`: a tooltip-style "Copied!" (`dropdown-glass
+/// rounded-md px-2 py-1 text-xs`) 4px above the button.
+fn copied_toast(ui: &Ui, anchor: Rect) {
+    let label_font = theme::font(12.0, theme::Weight::Regular);
+    let width = text_width(ui, "Copied!", label_font.clone()) + 16.0;
+    let rect = Rect::from_center_size(
+        Pos2::new(anchor.center().x, anchor.top() - 4.0 - 12.0),
+        Vec2::new(width, 24.0),
+    );
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("copied-toast"),
+    ));
+    painter.rect(
+        rect,
+        CornerRadius::same(6),
+        menu_surface(),
+        Stroke::new(1.0, menu_outline()),
+        StrokeKind::Inside,
+    );
+    let galley = galley(
+        ui,
+        "Copied!",
+        label_font,
+        theme::foreground(),
+        16.0,
+        f32::INFINITY,
+    );
+    painter.galley(
+        Pos2::new(rect.left() + 8.0, rect.top() + 4.0),
+        galley,
+        theme::foreground(),
+    );
 }
 
 /// Outline button used by the workspace header (`variant="outline" size="xs"`).

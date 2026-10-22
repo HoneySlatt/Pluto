@@ -1026,6 +1026,7 @@ impl<'a> Markdown<'a> {
             "Copied",
             theme::muted_foreground(),
             1.2,
+            false,
             || code.to_owned(),
         );
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);

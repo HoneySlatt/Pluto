@@ -102,8 +102,8 @@ fn main() {
     let mut ops = args.iter().skip(4).peekable();
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
-            "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--drag-hold"
-            | "--scroll" | "--type" | "--key" | "--drop" | "--hold" | "--wait" => {
+            "--click" | "--click-stay" | "--rclick" | "--dclick" | "--move" | "--drag"
+            | "--drag-hold" | "--scroll" | "--type" | "--key" | "--drop" | "--hold" | "--wait" => {
                 ops.next().cloned().unwrap_or_default()
             }
             "--size" => {
@@ -163,7 +163,8 @@ fn main() {
                     harness.step();
                 }
             }
-            "--click" | "--rclick" | "--dclick" => {
+            // `--click-stay` leaves the pointer over the target afterwards.
+            "--click" | "--click-stay" | "--rclick" | "--dclick" => {
                 let pos = point();
                 harness.event(egui::Event::PointerMoved(pos));
                 harness.step();
@@ -177,7 +178,7 @@ fn main() {
                     harness.step();
                     press(&mut harness, pos, button);
                 }
-                if op != "--rclick" {
+                if op != "--rclick" && op != "--click-stay" {
                     harness.event(egui::Event::PointerGone);
                 }
             }

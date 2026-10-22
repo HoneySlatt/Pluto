@@ -558,6 +558,7 @@ impl App {
                 "Copy message",
                 theme::primary(),
                 1.0,
+                true,
                 || message.text.clone(),
             );
             let time = widgets::clock_time(&message.created_at, self.now);
@@ -628,6 +629,7 @@ impl App {
                     "Copy message",
                     theme::primary(),
                     1.0,
+                    true,
                     || message.text.clone(),
                 );
                 if !message.streaming {
