@@ -1693,6 +1693,26 @@ impl App {
             Pos2::new(x, rect.top()),
             Pos2::new(rect.left() + 154.0, rect.bottom()),
         );
+        // Files dragged over the row (`makeWorkspaceFileDropHandlers`): a
+        // ring, then the drop opens the thread with them in its composer.
+        let pointer_in = ui
+            .input(|i| i.pointer.latest_pos())
+            .is_some_and(|p| rect.contains(p));
+        if pointer_in && ui.input(|i| !i.raw.hovered_files.is_empty()) {
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0, theme::alpha(theme::primary(), 0.7)),
+                StrokeKind::Inside,
+            );
+        }
+        let dropped = ui.input(|i| i.raw.dropped_files.clone());
+        if pointer_in && !dropped.is_empty() {
+            if self.selected.as_deref() != Some(thread.id.as_str()) {
+                self.select_thread(Some(thread.id.clone()));
+            }
+            crate::ui::attachments::add_dropped_files(&self.incoming_images, ui.ctx(), dropped);
+        }
         // Double click renames inline.
         let renaming = self.rename_editor(ui, &thread.id, title_rect);
         if !renaming {
