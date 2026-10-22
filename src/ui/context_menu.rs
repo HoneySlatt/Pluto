@@ -34,6 +34,8 @@ pub struct Item {
     pub id: String,
     pub label: String,
     pub icon: Option<&'static str>,
+    /// A project's icon in the icon slot (project pickers).
+    pub project: Option<crate::model::Project>,
     pub destructive: bool,
     pub disabled: bool,
     /// Option rows: a check (or an empty slot) takes the icon's place.
@@ -60,6 +62,11 @@ impl Item {
         self
     }
 
+    pub fn project(mut self, project: crate::model::Project) -> Self {
+        self.project = Some(project);
+        self
+    }
+
     pub fn separated(mut self) -> Self {
         self.separator_before = true;
         self
@@ -78,6 +85,8 @@ pub struct State {
     /// Base UI submenus open flush against their trigger row, raised so
     /// their first item lines up with it; the DOM fallback leaves a 4px gap.
     dropdown: bool,
+    /// Centered on `at` (`align="center"`) instead of starting there.
+    centered: bool,
 }
 
 impl State {
@@ -90,12 +99,19 @@ impl State {
             pointer_level: None,
             min_width: MIN_WIDTH,
             dropdown: false,
+            centered: false,
         }
     }
 
     /// A `SelectPopup` at least as wide as its trigger.
     pub fn with_min_width(mut self, width: f32) -> Self {
         self.min_width = self.min_width.max(width);
+        self
+    }
+
+    /// Centered horizontally under `at`.
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
         self
     }
 
@@ -138,7 +154,7 @@ fn menu_size(ui: &Ui, items: &[Item], screen: Rect, min_width: f32) -> (Vec2, f3
     let row_content = items
         .iter()
         .map(|item| {
-            let slot = if item.icon.is_some() || item.checked.is_some() {
+            let slot = if item.icon.is_some() || item.project.is_some() || item.checked.is_some() {
                 24.0
             } else {
                 0.0
@@ -197,7 +213,14 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
     let (size, content) = menu_size(ui, items, screen, state.min_width);
     levels.push(Level {
         items,
-        rect: Rect::from_min_size(clamp(screen, state.at, size), size),
+        rect: Rect::from_min_size(
+            clamp(
+                screen,
+                state.at - Vec2::new(if state.centered { size.x / 2.0 } else { 0.0 }, 0.0),
+                size,
+            ),
+            size,
+        ),
         content_height: content,
     });
     state.scroll.resize(state.path.len() + 1, 0.0);
@@ -354,8 +377,14 @@ pub fn show(ui: &mut Ui, open: &mut Option<State>, items: &[Item]) -> Option<Str
                             Vec2::splat(16.0),
                         );
                         theme::paint_icon(ui, icon, icon_rect, 16.0, icon_color);
+                    } else if let Some(project) = &item.project {
+                        let icon_rect = Rect::from_min_size(
+                            Pos2::new(x, row.center().y - 8.0),
+                            Vec2::splat(16.0),
+                        );
+                        crate::ui::project_icon::paint(ui, icon_rect, project);
                     }
-                    if item.icon.is_some() || item.checked.is_some() {
+                    if item.icon.is_some() || item.project.is_some() || item.checked.is_some() {
                         x += 24.0;
                     }
                     let chevron = if item.children.is_empty() { 0.0 } else { 22.0 };

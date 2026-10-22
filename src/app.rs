@@ -83,6 +83,8 @@ pub struct App {
     pub(crate) legacy_drag_grab: f32,
     /// The member picker of a grouped project's New thread button.
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// The draft hero's project picker, while open.
+    pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
     /// The "Project grouping" dialog: member project id and the selection.
     pub(crate) legacy_grouping: Option<(String, String)>,
     pub(crate) legacy_grouping_select: Option<crate::ui::context_menu::State>,
@@ -371,6 +373,7 @@ impl App {
             legacy_drag: None,
             legacy_drag_grab: 0.0,
             legacy_new_thread_menu: None,
+            hero_project_menu: None,
             legacy_grouping: None,
             legacy_grouping_select: None,
             legacy_selection: Default::default(),

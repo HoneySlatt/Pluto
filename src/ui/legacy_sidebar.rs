@@ -271,6 +271,25 @@ impl App {
     }
 
     /// `buildSidebarProjectSnapshots` over the ordered projects.
+    /// The logical projects in sidebar order (`sortLogicalProjectsForSidebar`).
+    pub(crate) fn sorted_project_groups(&self) -> Vec<ProjectGroup> {
+        let order = self.client_setting("sidebarProjectSortOrder");
+        let threads: Vec<&Thread> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| t.archived_at.is_none())
+            .map(std::sync::Arc::as_ref)
+            .collect();
+        let mut groups = self.legacy_groups();
+        sort_groups(
+            &mut groups,
+            &threads,
+            order.as_str().unwrap_or("updated_at"),
+        );
+        groups
+    }
+
     fn legacy_groups(&self) -> Vec<ProjectGroup> {
         let mode = self.client_setting("sidebarProjectGroupingMode");
         project_grouping::build_groups(

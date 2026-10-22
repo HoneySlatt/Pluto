@@ -277,15 +277,56 @@ impl App {
         let name_width = widgets::text_width(ui, &project.title, font(30.0, Weight::Medium))
             - 0.75 * project.title.chars().count() as f32;
         let underline_y = top + 33.0;
-        let mut dot_x = pos.x + prefix;
-        while dot_x < pos.x + prefix + name_width {
-            ui.painter().rect_filled(
-                Rect::from_min_size(Pos2::new(dot_x, underline_y), Vec2::new(1.5, 1.5)),
-                0.0,
-                theme::alpha(theme::foreground(), 0.4),
-            );
-            dot_x += 4.0;
+        // The project name opens the project picker (`InlineButton
+        // tone="picker"`).
+        let trigger = Rect::from_min_max(
+            Pos2::new(pos.x + prefix, top),
+            Pos2::new(pos.x + prefix + name_width, top + 36.0),
+        );
+        let picker = ui.interact(
+            trigger,
+            ui.id().with("draft-project-trigger"),
+            Sense::click(),
+        );
+        if picker.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        let open = self.hero_project_menu.is_some();
+        // Dotted at rest; solid in the text color while hovered or open.
+        if picker.hovered() || open {
+            ui.painter().rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(pos.x + prefix, underline_y),
+                    Vec2::new(name_width, 1.5),
+                ),
+                0.0,
+                theme::foreground(),
+            );
+        } else {
+            let mut dot_x = pos.x + prefix;
+            while dot_x < pos.x + prefix + name_width {
+                ui.painter().rect_filled(
+                    Rect::from_min_size(Pos2::new(dot_x, underline_y), Vec2::new(1.5, 1.5)),
+                    0.0,
+                    theme::alpha(theme::foreground(), 0.4),
+                );
+                dot_x += 4.0;
+            }
+        }
+        if picker.clicked() {
+            self.hero_project_menu = if open {
+                None
+            } else {
+                Some(
+                    crate::ui::context_menu::State::dropdown(Pos2::new(
+                        trigger.center().x,
+                        trigger.bottom() + 4.0,
+                    ))
+                    .centered(),
+                )
+            };
+        }
+        self.draft_project_menu(ui, project);
         ui.painter().galley(pos, galley, theme::foreground());
         let sub = "or start without a project";
         let sub_width = widgets::text_width(ui, sub, font(14.0, Weight::Medium));
@@ -311,6 +352,62 @@ impl App {
         );
         if response.clicked() {
             self.status = Some("Scratch threads are not implemented yet".into());
+        }
+    }
+
+    /// The draft hero's project picker (`DraftHeroHeadline`): the logical
+    /// projects, the draft's first, then Add project. A choice retargets the
+    /// open draft. "No project" needs scratch threads, not ported.
+    fn draft_project_menu(&mut self, ui: &mut Ui, project: &Project) {
+        use crate::ui::context_menu::{self, Item};
+        if self.hero_project_menu.is_none() {
+            return;
+        }
+        // `buildSidebarProjectPickerEntries`: each group's target project,
+        // the draft's own when it is a member, and that group first.
+        let mut entries: Vec<(String, String, Project, bool)> = self
+            .sorted_project_groups()
+            .into_iter()
+            .map(|group| {
+                let own = group.members.iter().find(|(_, p)| p.id == project.id);
+                let target = own
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_else(|| group.representative.clone());
+                (group.key, group.label, target, own.is_some())
+            })
+            .collect();
+        if let Some(index) = entries.iter().position(|e| e.3)
+            && index > 0
+        {
+            let preferred = entries.remove(index);
+            entries.insert(0, preferred);
+        }
+        let mut items: Vec<Item> = entries
+            .iter()
+            .map(|(key, label, target, own)| {
+                let mut item = Item::new(key.clone(), label.clone()).project(target.clone());
+                item.selected = *own;
+                item
+            })
+            .collect();
+        items.push(
+            Item::new("add-project", "Add project")
+                .icon("folder-plus")
+                .separated(),
+        );
+        let clicked = context_menu::show(ui, &mut self.hero_project_menu, &items);
+        match clicked.as_deref() {
+            Some("add-project") => {
+                self.toggle_palette(crate::ui::palette::View::AddProject);
+            }
+            Some(key) => {
+                if let Some((_, _, target, own)) = entries.iter().find(|e| e.0 == key)
+                    && !own
+                {
+                    self.draft_project_id = Some(target.id.clone());
+                }
+            }
+            None => {}
         }
     }
 
