@@ -568,7 +568,7 @@ impl App {
             return;
         }
         self.selected = id.clone();
-        self.state.clear_detail();
+        self.state.switch_detail(id.as_deref());
         self.expansion = Expansion::default();
         if id.is_some() {
             self.draft_project_id = None;

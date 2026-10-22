@@ -164,6 +164,10 @@ pub struct State {
     /// `detail_raw` changed since `detail` was decoded: a pass of events
     /// decodes the thread once (`refresh_detail`).
     detail_stale: bool,
+    /// Threads left in the last five minutes (decoded, raw, sequence, when
+    /// left): one opened again shows at once while its new subscription
+    /// catches up (`threadRetention.ts` `THREAD_SNAPSHOT_IDLE_TTL_MS`).
+    recent: Vec<(Arc<Thread>, Value, Option<u64>, std::time::Instant)>,
     shell_sequence: Option<u64>,
     thread_sequence: Option<u64>,
 }
@@ -242,6 +246,8 @@ impl State {
                 }
             }
             Some("thread-removed") => {
+                self.recent
+                    .retain(|(thread, ..)| thread.id != item["threadId"]);
                 if let Some(index) = self.threads.iter().position(|t| t.id == item["threadId"]) {
                     self.threads.remove(index);
                     self.shell_raw.remove(index);
@@ -259,6 +265,27 @@ impl State {
         self.detail_stale = false;
         self.thread_sequence = None;
         self.revision += 1;
+    }
+
+    /// Leaves the open thread for `id`, keeping the one left among the
+    /// recent threads and showing `id` from them if it is there.
+    pub fn switch_detail(&mut self, id: Option<&str>) {
+        const IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+        let _ = self.refresh_detail();
+        self.recent.retain(|(.., left)| left.elapsed() < IDLE_TTL);
+        if let (Some(detail), Some(raw)) = (self.detail.take(), self.detail_raw.take()) {
+            self.recent.retain(|(thread, ..)| thread.id != detail.id);
+            let left = std::time::Instant::now();
+            self.recent.push((detail, raw, self.thread_sequence, left));
+        }
+        self.clear_detail();
+        let found = id.and_then(|id| self.recent.iter().position(|(thread, ..)| thread.id == id));
+        if let Some(index) = found {
+            let (detail, raw, sequence, _) = self.recent.remove(index);
+            self.detail = Some(detail);
+            self.detail_raw = Some(raw);
+            self.thread_sequence = sequence;
+        }
     }
 
     /// Decodes the selected thread after the events applied to it.
@@ -691,6 +718,24 @@ mod tests {
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
         json!({"kind":"event","event":{"sequence":sequence,"type":kind,"occurredAt":"2026-01-01T00:00:00.000Z","payload":payload}})
+    }
+
+    #[test]
+    fn reopened_threads_show_from_the_recent_ones() {
+        let mut state = detail();
+        state.switch_detail(Some("other"));
+        assert!(state.detail.is_none());
+        state.switch_detail(Some("t"));
+        assert_eq!(state.detail.as_ref().unwrap().title, "T");
+        // Its events still apply after the kept sequence.
+        let rename = event(
+            2,
+            "thread.meta-updated",
+            json!({"threadId":"t","title":"New","updatedAt":"2026-01-01T00:00:00.000Z"}),
+        );
+        state.thread("t", &rename).unwrap();
+        state.refresh_detail().unwrap();
+        assert_eq!(state.detail.as_ref().unwrap().title, "New");
     }
 
     #[test]
