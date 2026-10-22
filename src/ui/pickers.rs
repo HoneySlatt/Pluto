@@ -288,6 +288,26 @@ impl App {
             .collect();
         let bindings = self.state.config["keybindings"].clone();
         let jump = self.picker_jump.take();
+        // `adjacentModelPickerProvider`: Favorites, then the ready instances,
+        // wrapping; the search clears.
+        if let Some(direction) = self.picker_cycle.take() {
+            let order: Vec<String> = std::iter::once(FAVORITES.to_owned())
+                .chain(
+                    providers
+                        .iter()
+                        .filter(|p| ready(p))
+                        .filter_map(|p| p["instanceId"].as_str().map(str::to_owned)),
+                )
+                .collect();
+            let current = self.picker_provider.clone().unwrap_or_default();
+            let next = match order.iter().position(|id| *id == current) {
+                Some(index) => (index as i32 + direction).rem_euclid(order.len() as i32) as usize,
+                None if direction > 0 => 0,
+                None => order.len() - 1,
+            };
+            self.picker_provider = Some(order[next].clone());
+            self.picker_query.clear();
+        }
         if self.picker_provider.is_none() {
             self.picker_provider = Some(selection.instance_id.clone());
         }
@@ -334,6 +354,7 @@ impl App {
                 true,
                 rail.right(),
             )
+            .on_hover_text("Favorites")
             .clicked()
             {
                 switch_provider = Some(FAVORITES.into());
@@ -384,6 +405,28 @@ impl App {
                     };
                     crate::ui::instance_badge::paint(ui, slot, 2.0, &badge, ring, 1.0);
                 }
+                // `describeUnavailableInstance`.
+                let label = provider["displayName"].as_str().unwrap_or(&id).to_owned();
+                let tooltip = if provider["enabled"] == false || provider["status"] == "disabled" {
+                    format!("{label} — Disabled in settings.")
+                } else if enabled {
+                    label
+                } else {
+                    let kind = match provider["status"].as_str() {
+                        Some("error") => "Unavailable",
+                        Some("warning") => "Limited",
+                        _ => "Not ready",
+                    };
+                    match provider["message"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|m| !m.is_empty())
+                    {
+                        Some(message) => format!("{label} — {kind}. {message}"),
+                        None => format!("{label} — {kind}."),
+                    }
+                };
+                let response = response.on_hover_text(tooltip);
                 if enabled && response.clicked() {
                     switch_provider = Some(id);
                 }

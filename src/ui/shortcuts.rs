@@ -238,6 +238,8 @@ impl App {
                 };
                 self.select_thread(Some(target));
             }
+            "modelPicker.previousProvider" => self.picker_cycle = Some(-1),
+            "modelPicker.nextProvider" => self.picker_cycle = Some(1),
             jump if jump.starts_with("modelPicker.jump.") => {
                 let index: usize = jump["modelPicker.jump.".len()..].parse().unwrap_or(0);
                 self.picker_jump = Some(index);
