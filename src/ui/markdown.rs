@@ -746,6 +746,18 @@ fn paint_inlines(ui: &mut Ui, pos: Pos2, inlines: &Inlines, id: egui::Id) -> Opt
     }
     let response =
         widgets::selectable_galley(ui, id, pos, inlines.galley.clone(), theme::foreground());
+    // A right click on a link offers Copy Link in the text menu.
+    if response.secondary_clicked()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        let cursor = inlines.galley.cursor_from_pos(at - pos);
+        let link = sections
+            .get(cursor.index.0)
+            .and_then(|s| inlines.links.get(*s).cloned().flatten())
+            .filter(|url| url.starts_with("http://") || url.starts_with("https://"));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(egui::Id::new(widgets::TEXT_MENU_REQUEST), (at, link)));
+    }
     let mut opened = None;
     if let Some(pointer) = response.hover_pos() {
         if let Some((_, file)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {

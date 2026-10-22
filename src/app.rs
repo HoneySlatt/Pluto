@@ -92,6 +92,11 @@ pub struct App {
     pub(crate) discovered_servers: Vec<Value>,
     /// Whether the legacy sidebar's metadata streams are open.
     pub(crate) legacy_streams: bool,
+    /// The text menu (Electron's context menu) and the link under it.
+    /// The text menu (Electron's context menu): its state, the link under it
+    /// and whether Copy applies, both read when it opened.
+    pub(crate) text_menu: Option<(crate::ui::context_menu::State, Option<String>, bool)>,
+    pub(crate) pending_copy: bool,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -293,7 +298,8 @@ pub struct Options {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, options: Options) -> Self {
         theme::install(&cc.egui_ctx);
-        cc.egui_ctx.add_plugin(crate::ui::widgets::CopyCleanup);
+        cc.egui_ctx
+            .add_plugin(crate::ui::widgets::CopyCleanup::default());
         let mut app = Self {
             screen: Screen::Connect,
             connect: ConnectForm {
@@ -354,6 +360,8 @@ impl App {
             terminal_metadata: Default::default(),
             discovered_servers: Vec::new(),
             legacy_streams: false,
+            text_menu: None,
+            pending_copy: false,
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -868,6 +876,10 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // The text menu's Copy lands as a copy event for this pass.
+        if std::mem::take(&mut self.pending_copy) {
+            ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));
+        }
         self.now = chrono::Utc::now();
         self.poll_events();
         self.egui_ctx = Some(ui.ctx().clone());
@@ -944,6 +956,7 @@ impl eframe::App for App {
                 }
                 self.sidebar(ui, sidebar);
                 self.thread_menu(ui);
+                self.text_menu(ui);
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);

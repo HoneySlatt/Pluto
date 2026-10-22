@@ -186,6 +186,35 @@ pub fn selectable_galley(
 ) -> Response {
     let rect = Rect::from_min_size(pos, galley.size());
     let response = ui.interact(rect, id, Sense::click_and_drag() - Sense::FOCUSABLE);
+    // "Select All" from the text menu highlights every selectable text and
+    // gathers it for the copy.
+    let select_all = {
+        let plugin = ui.ctx().plugin::<CopyCleanup>();
+        let mut plugin = plugin.lock();
+        plugin.rects.push(rect);
+        if response.dragged() || response.double_clicked() || response.triple_clicked() {
+            plugin.has_range = true;
+        }
+        if plugin.select_all {
+            plugin.collected.push(galley.text().to_owned());
+        }
+        plugin.select_all
+    };
+    if select_all {
+        for placed in &galley.rows {
+            ui.painter().rect_filled(
+                placed.rect().translate(pos.to_vec2()),
+                0.0,
+                ui.visuals().selection.bg_fill,
+            );
+        }
+    }
+    if response.secondary_clicked()
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(egui::Id::new(TEXT_MENU_REQUEST), (at, None::<String>)));
+    }
     egui::text_selection::LabelSelectionState::label_text_selection(
         ui,
         &response,
@@ -197,20 +226,121 @@ pub fn selectable_galley(
     response
 }
 
+/// Where a right click on selectable text asks for the text menu: the
+/// pointer and the link under it.
+pub const TEXT_MENU_REQUEST: &str = "text-menu-request";
+
 /// Cleans text the selection copies: layout-only line breaks (marked with a
 /// zero-width space) go, and the no-break spaces that keep chips whole
-/// become plain spaces.
-pub struct CopyCleanup;
+/// become plain spaces. It also holds the text menu's "Select All", which
+/// egui's label selection lacks: every selectable text of the frame is
+/// gathered and a copy takes them all.
+#[derive(Default)]
+pub struct CopyCleanup {
+    pub select_all: bool,
+    /// While the text menu is open a press does not drop "Select All".
+    pub menu_open: bool,
+    collected: Vec<String>,
+    /// Selectable text rects of the last pass and this one.
+    rects: Vec<Rect>,
+    last_rects: Vec<Rect>,
+    /// A right click kept away from the selection (Chromium keeps it).
+    request: Option<Pos2>,
+    /// The text menu reads the selection when it opens (a press on the
+    /// menu clears egui's selection before Copy is chosen): the next copy
+    /// is kept here instead of reaching the clipboard.
+    /// Passes left to catch that copy (it lands on the pass after the
+    /// menu opens).
+    pub capture: u8,
+    pub captured: Option<String>,
+    /// Whether text is really selected: egui keeps an empty range after a
+    /// plain click, which Chromium would not count. A drag or a double or
+    /// triple click on text selects; any new press starts over.
+    pub has_range: bool,
+    /// A right click being kept from egui, press through release.
+    intercepting: bool,
+}
 
 impl egui::Plugin for CopyCleanup {
     fn debug_name(&self) -> &'static str {
         "CopyCleanup"
     }
 
+    fn input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        // egui starts a new selection on any press; a right click on
+        // selected text opens the menu without reaching it.
+        let _ = ctx;
+        let selecting = self.select_all || self.has_range;
+        let rects = &self.last_rects;
+        let mut request = None;
+        let mut intercepting = self.intercepting;
+        input.events.retain(|event| match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed: true,
+                ..
+            } if selecting && rects.iter().any(|r| r.contains(*pos)) => {
+                intercepting = true;
+                false
+            }
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed: false,
+                ..
+            } if intercepting => {
+                intercepting = false;
+                request = Some(*pos);
+                false
+            }
+            _ => true,
+        });
+        self.intercepting = intercepting;
+        if request.is_some() {
+            self.request = request;
+        }
+    }
+
+    fn on_begin_pass(&mut self, ui: &mut Ui) {
+        self.collected.clear();
+        self.last_rects = std::mem::take(&mut self.rects);
+        if !self.menu_open && ui.input(|i| i.pointer.primary_pressed()) {
+            self.has_range = false;
+        }
+        if let Some(at) = self.request.take() {
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::new(TEXT_MENU_REQUEST), (at, None::<String>))
+            });
+        }
+        if self.select_all && !self.menu_open && ui.input(|i| i.pointer.primary_pressed()) {
+            self.select_all = false;
+        }
+    }
+
+    fn on_end_pass(&mut self, ui: &mut Ui) {
+        let copy = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)));
+        if self.select_all && copy && !self.collected.is_empty() {
+            ui.ctx().copy_text(self.collected.join("\n\n"));
+        }
+    }
+
     fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
         for command in &mut output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
                 *text = text.replace("\u{200B}\n", "").replace('\u{a0}', " ");
+            }
+        }
+        if self.capture > 0 {
+            self.capture -= 1;
+            let commands = &mut output.platform_output.commands;
+            if let Some(index) = commands
+                .iter()
+                .position(|c| matches!(c, egui::OutputCommand::CopyText(_)))
+                && let egui::OutputCommand::CopyText(text) = commands.remove(index)
+            {
+                self.captured = Some(text);
+                self.capture = 0;
             }
         }
     }
