@@ -50,6 +50,20 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: "mouseUp", x, y, button, clickCount: 1, modifiers });
     await sleep(800);
   }
+  // DRAG="x1,y1,x2,y2" presses at the first point and moves to the second
+  // without releasing, for a mid-drag capture.
+  if (process.env.DRAG) {
+    const [x1, y1, x2, y2] = process.env.DRAG.split(",").map((v) => Math.round(v * scale));
+    win.webContents.sendInputEvent({ type: "mouseMove", x: x1, y: y1 });
+    win.webContents.sendInputEvent({ type: "mouseDown", x: x1, y: y1, button: "left", clickCount: 1 });
+    for (let step = 1; step <= 12; step += 1) {
+      const x = Math.round(x1 + ((x2 - x1) * step) / 12);
+      const y = Math.round(y1 + ((y2 - y1) * step) / 12);
+      win.webContents.sendInputEvent({ type: "mouseMove", x, y, button: "left", modifiers: ["leftbuttondown"] });
+      await sleep(40);
+    }
+    await sleep(800);
+  }
   // KEYS="Ctrl+K;Escape" sends key chords (modifiers joined with +).
   for (const chord of (process.env.KEYS || "").split(";").filter(Boolean)) {
     const parts = chord.split("+");

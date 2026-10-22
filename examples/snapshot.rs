@@ -102,8 +102,10 @@ fn main() {
     let mut ops = args.iter().skip(4).peekable();
     while let Some(op) = ops.next() {
         let value = match op.as_str() {
-            "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--scroll" | "--type"
-            | "--key" | "--drop" | "--hold" | "--wait" => ops.next().cloned().unwrap_or_default(),
+            "--click" | "--rclick" | "--dclick" | "--move" | "--drag" | "--drag-hold"
+            | "--scroll" | "--type" | "--key" | "--drop" | "--hold" | "--wait" => {
+                ops.next().cloned().unwrap_or_default()
+            }
             "--size" => {
                 ops.next();
                 continue;
@@ -132,7 +134,7 @@ fn main() {
             }
         };
         match op.as_str() {
-            "--drag" => {
+            "--drag" | "--drag-hold" => {
                 let n: Vec<f32> = value.split(',').map(|v| v.parse().unwrap()).collect();
                 let (from, to) = (egui::pos2(n[0], n[1]), egui::pos2(n[2], n[3]));
                 harness.event(egui::Event::PointerMoved(from));
@@ -150,13 +152,16 @@ fn main() {
                     ));
                     harness.step();
                 }
-                harness.event(egui::Event::PointerButton {
-                    pos: to,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                });
-                harness.step();
+                // `--drag-hold` keeps the button down for the snapshot.
+                if op == "--drag" {
+                    harness.event(egui::Event::PointerButton {
+                        pos: to,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                    harness.step();
+                }
             }
             "--click" | "--rclick" | "--dclick" => {
                 let pos = point();

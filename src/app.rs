@@ -72,6 +72,8 @@ pub struct App {
     pub(crate) legacy_project_order: Vec<String>,
     /// The project group being dragged in manual sorting.
     pub(crate) legacy_drag: Option<String>,
+    /// Where the dragged header was grabbed, below its top.
+    pub(crate) legacy_drag_grab: f32,
     /// The member picker of a grouped project's New thread button.
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The "Project grouping" dialog: member project id and the selection.
@@ -337,6 +339,7 @@ impl App {
             legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()).0,
             legacy_project_order: load_ui_state(options.client_settings_path.as_deref()).1,
             legacy_drag: None,
+            legacy_drag_grab: 0.0,
             legacy_new_thread_menu: None,
             legacy_grouping: None,
             legacy_grouping_select: None,

@@ -674,103 +674,30 @@ impl App {
         });
     }
 
-    /// Manual sorting (`SortableProjectItem`): the lifted entry follows the
-    /// pointer and a line marks where it lands; dropping moves its projects
-    /// in `projectOrder` (`reorderProjects`). Upstream slides the other
-    /// entries aside instead of drawing a line.
-    fn legacy_drag_feedback(
-        &mut self,
-        ui: &Ui,
-        trees: &[Tree],
-        slots: &[(String, Rect)],
-        drag: &str,
-        dropped: bool,
-    ) {
-        let pointer = ui.input(|i| i.pointer.interact_pos());
-        let from = slots.iter().position(|(key, _)| key == drag);
-        let target = pointer.and_then(|p| {
-            slots
-                .iter()
-                .position(|(_, rect)| p.y < rect.bottom() + GAP / 2.0)
-                .or(slots.len().checked_sub(1))
-        });
-        if let (Some(from), Some(target), Some(pointer)) = (from, target, pointer) {
-            if target != from {
-                let rect = slots[target].1;
-                let y = if target > from {
-                    rect.bottom() + GAP / 2.0
-                } else {
-                    rect.top() - GAP / 2.0
-                };
-                ui.painter().rect_filled(
-                    Rect::from_min_max(
-                        Pos2::new(rect.left() + 4.0, y - 1.0),
-                        Pos2::new(rect.right() - 4.0, y + 1.0),
-                    ),
-                    CornerRadius::same(1),
-                    theme::primary(),
-                );
+    /// Dropping a dragged entry moves its projects to the target's slot in
+    /// `projectOrder` (`reorderProjects`).
+    fn legacy_drop(&mut self, trees: &[Tree], from: Option<usize>, target: Option<usize>) {
+        self.legacy_drag = None;
+        let (Some(from), Some(target)) = (from, target) else {
+            return;
+        };
+        let order: Vec<String> = self
+            .legacy_ordered_projects()
+            .iter()
+            .map(|p| project_grouping::physical_key(&self.environment_id(), p))
+            .collect();
+        let keys = |tree: &Tree| -> Vec<String> {
+            tree.group.members.iter().map(|(k, _)| k.clone()).collect()
+        };
+        if let Some(next) =
+            project_grouping::reorder(&order, &keys(&trees[from]), &keys(&trees[target]))
+        {
+            self.legacy_project_order = next;
+            crate::app::save_ui_state(self);
+            // The entries already sit in their new slots.
+            if let Some(ctx) = &self.egui_ctx {
+                ctx.clear_animations();
             }
-            // The lifted header under the pointer.
-            let header = slots[from].1;
-            let ghost = Rect::from_min_size(
-                Pos2::new(header.left(), pointer.y - ROW / 2.0),
-                Vec2::new(header.width(), ROW),
-            );
-            let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(
-                egui::Order::Tooltip,
-                ui.id().with("legacy-drag-ghost"),
-            ));
-            painter.rect(
-                ghost,
-                CornerRadius::same(8),
-                theme::sidebar(),
-                Stroke::new(1.0, theme::sidebar_border()),
-                StrokeKind::Inside,
-            );
-            painter.rect_filled(ghost, CornerRadius::same(8), sidebar_row_hover());
-            let group = &trees[from].group;
-            project_icon::paint(
-                ui,
-                Rect::from_min_size(
-                    Pos2::new(ghost.left() + 30.0, ghost.top() + 8.0),
-                    Vec2::splat(16.0),
-                ),
-                &group.representative,
-            );
-            let label = widgets::galley(
-                ui,
-                &group.label,
-                font(14.0, Weight::Medium),
-                theme::sidebar_foreground(),
-                20.0,
-                f32::INFINITY,
-            );
-            painter.galley(
-                Pos2::new(ghost.left() + 54.0, ghost.center().y - 10.0),
-                label,
-                theme::sidebar_foreground(),
-            );
-            ui.ctx().request_repaint();
-            if dropped {
-                let order: Vec<String> = self
-                    .legacy_ordered_projects()
-                    .iter()
-                    .map(|p| project_grouping::physical_key(&self.environment_id(), p))
-                    .collect();
-                let keys = |tree: &Tree| -> Vec<String> {
-                    tree.group.members.iter().map(|(k, _)| k.clone()).collect()
-                };
-                if let Some(next) =
-                    project_grouping::reorder(&order, &keys(&trees[from]), &keys(&trees[target]))
-                {
-                    self.legacy_project_order = next;
-                    crate::app::save_ui_state(self);
-                }
-            }
-        }
-        if dropped {
-            self.legacy_drag = None;
         }
     }
 
@@ -1438,11 +1365,80 @@ impl App {
                     );
                 }
 
-                let mut y = area.top() + 28.0;
-                for tree in &trees {
+                // Base slots, then the manual drag's layout (`SortableProjectItem`,
+                // dnd-kit's vertical list): the lifted entry follows the pointer
+                // at 80% opacity, the ones it passes slide aside over 200ms, and
+                // the entry under the pointer is ringed.
+                let heights: Vec<f32> = trees.iter().map(|t| ROW + panel_height(t)).collect();
+                let mut tops = Vec::with_capacity(trees.len());
+                let mut cursor = area.top() + 28.0;
+                for height in &heights {
+                    tops.push(cursor);
+                    cursor += height + GAP;
+                }
+                for (index, tree) in trees.iter().enumerate() {
+                    slots.push((
+                        tree.group.key.clone(),
+                        Rect::from_min_size(
+                            Pos2::new(left + 8.0, tops[index]),
+                            Vec2::new(239.0, heights[index]),
+                        ),
+                    ));
+                }
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let from = self
+                    .legacy_drag
+                    .as_ref()
+                    .and_then(|key| trees.iter().position(|t| &t.group.key == key));
+                let target = from.and(pointer).and_then(|p| {
+                    slots
+                        .iter()
+                        .position(|(_, r)| p.y < r.bottom() + GAP / 2.0)
+                        .or(slots.len().checked_sub(1))
+                });
+                let positions: Vec<f32> = (0..trees.len())
+                    .map(|index| {
+                        let shift = match (from, target) {
+                            (Some(f), Some(_)) if index == f => {
+                                let top = pointer.map_or(tops[f], |p| p.y - self.legacy_drag_grab);
+                                return top.clamp(area.top() + 28.0, cursor - GAP - heights[f]);
+                            }
+                            (Some(f), Some(t)) if f < t && index > f && index <= t => {
+                                -(heights[f] + GAP)
+                            }
+                            (Some(f), Some(t)) if t < f && index >= t && index < f => {
+                                heights[f] + GAP
+                            }
+                            _ => 0.0,
+                        };
+                        let animated = ui.ctx().animate_value_with_time(
+                            ui.id().with(("legacy-slide", &trees[index].group.key)),
+                            shift,
+                            0.2,
+                        );
+                        tops[index] + animated
+                    })
+                    .collect();
+                let mut order: Vec<usize> = (0..trees.len()).filter(|i| Some(*i) != from).collect();
+                order.extend(from);
+                for index in order {
+                    let tree = &trees[index];
+                    let mut y = positions[index];
                     let header =
                         Rect::from_min_size(Pos2::new(left + 8.0, y), Vec2::new(239.0, ROW));
-                    let dragging = self.legacy_drag.as_deref() == Some(tree.group.key.as_str());
+                    let dragging = from == Some(index);
+                    let opacity = ui.opacity();
+                    if dragging {
+                        ui.set_opacity(opacity * 0.8);
+                    }
+                    if target == Some(index) && !dragging {
+                        ui.painter().rect_stroke(
+                            Rect::from_min_size(header.min, Vec2::new(239.0, heights[index])),
+                            CornerRadius::same(6),
+                            Stroke::new(1.0, theme::alpha(theme::primary(), 0.4)),
+                            StrokeKind::Outside,
+                        );
+                    }
                     match self.legacy_project_header(
                         ui,
                         header,
@@ -1458,25 +1454,18 @@ impl App {
                             new_thread = Some((tree.group.key.clone(), at))
                         }
                         Some(HeaderAction::DragStart) => {
-                            self.legacy_drag = Some(tree.group.key.clone())
+                            self.legacy_drag = Some(tree.group.key.clone());
+                            // From where the press began, like dnd-kit's transform.
+                            self.legacy_drag_grab = ui
+                                .input(|i| i.pointer.press_origin())
+                                .or(pointer)
+                                .map_or(0.0, |p| p.y - header.top());
                         }
                         Some(HeaderAction::DragEnd) => dropped = true,
                         None => {}
                     }
-                    if dragging {
-                        // The lifted entry keeps a faint slot.
-                        ui.painter().rect_filled(
-                            header,
-                            CornerRadius::same(8),
-                            theme::alpha(theme::sidebar_foreground(), 0.04),
-                        );
-                    }
                     y += ROW;
                     let panel = panel_height(tree);
-                    slots.push((
-                        tree.group.key.clone(),
-                        Rect::from_min_max(header.min, Pos2::new(header.right(), y + panel)),
-                    ));
                     if panel > 0.0 {
                         // `border-l border-sidebar-border` along the sub list.
                         ui.painter().rect_filled(
@@ -1521,10 +1510,14 @@ impl App {
                             }
                         }
                     }
-                    y += panel + GAP;
+                    if dragging {
+                        ui.set_opacity(opacity);
+                    }
                 }
-                if let Some(drag) = self.legacy_drag.clone() {
-                    self.legacy_drag_feedback(ui, &trees, &slots, &drag, dropped);
+                if dropped {
+                    self.legacy_drop(&trees, from, target);
+                } else if from.is_some() {
+                    ui.ctx().request_repaint();
                 }
             });
         // `shouldClearThreadSelectionOnMouseDown` and Escape clear it.
