@@ -39,7 +39,7 @@ fn is_space(c: char) -> bool {
 }
 
 /// `\p{Sc}`: currency symbols.
-fn is_currency(c: char) -> bool {
+pub(crate) fn is_currency(c: char) -> bool {
     matches!(
         c,
         '$' | '¢'
@@ -226,10 +226,12 @@ fn skill_display_name(skill: &Value) -> String {
     {
         return name.to_owned();
     }
-    skill["name"]
-        .as_str()
-        .unwrap_or_default()
-        .split([' ', ':', '_', '-', '\t', '\n'])
+    title_case(skill["name"].as_str().unwrap_or_default())
+}
+
+/// `titleCaseWords`: words split on spaces, `:`, `_` and `-`, capitalized.
+pub(crate) fn title_case(name: &str) -> String {
+    name.split([' ', ':', '_', '-', '\t', '\n'])
         .filter(|w| !w.is_empty())
         .map(|w| {
             let mut chars = w.chars();
@@ -319,6 +321,8 @@ pub(crate) struct MenuState {
     dismissed: Option<String>,
     /// The trigger and items shown last frame, for the keys of this one.
     shown: Option<(Trigger, Vec<Item>, bool)>,
+    /// What the skill chips' names were built from.
+    skills_key: Option<(String, usize, Option<String>, Option<String>)>,
 }
 
 fn search_key(trigger: &Trigger) -> String {
@@ -355,12 +359,11 @@ pub(crate) fn file_link(path: &str) -> String {
 
 impl App {
     /// The selected provider's entry in the server config.
-    fn composer_provider(&self, draft: bool) -> Option<Value> {
+    fn composer_provider(&self, draft: bool) -> Option<&Value> {
         let instance = self.composer_model_selection(draft).instance_id;
         self.providers()
             .iter()
             .find(|p| p["instanceId"] == instance.as_str())
-            .cloned()
     }
 
     /// `resolveProviderSkillsForCwd` / `resolveProviderSlashCommandsForCwd`.
@@ -377,6 +380,42 @@ impl App {
             .as_array()
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Names the composer's skill chips after the selected provider's
+    /// skills, rebuilt when those change.
+    pub(crate) fn refresh_skill_metas(&mut self, draft: bool) {
+        let skills = self.provider_list(draft, "skills");
+        let key = (
+            self.composer_model_selection(draft).instance_id,
+            skills.len(),
+            skills.first().map(|s| s["name"].to_string()),
+            skills.last().map(|s| s["name"].to_string()),
+        );
+        if self.command_menu.skills_key.as_ref() == Some(&key) {
+            return;
+        }
+        let metas = skills
+            .iter()
+            .filter_map(|skill| {
+                let name = skill["name"].as_str()?.to_owned();
+                let text = |key: &str| {
+                    skill[key]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                };
+                let meta = cite::SkillMeta {
+                    label: skill_display_name(skill),
+                    description: text("shortDescription").or_else(|| text("description")),
+                    path: text("path"),
+                };
+                Some((name, meta))
+            })
+            .collect();
+        cite::set_skill_metas(metas);
+        self.command_menu.skills_key = Some(key);
     }
 
     /// The items for a trigger, and whether they are still loading.

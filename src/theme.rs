@@ -832,6 +832,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "pencil-ruler",
         "list-todo",
         "package",
+        "skill-chip",
         "circle",
         "globe",
         "pen-line",

@@ -137,9 +137,57 @@ pub(crate) fn collect(text: &str) -> Vec<(String, Range<usize>)> {
     out
 }
 
+/// `SKILL_TOKEN_REGEX`: `$name` (any currency sign) followed by whitespace,
+/// the name holding a letter; amounts like `$20`, `$20k` or `$1e6` stay
+/// prose. Each skill's name and byte range.
+pub(crate) fn collect_skills(text: &str) -> Vec<(String, Range<usize>)> {
+    let name_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-');
+    let mut out = Vec::new();
+    for (start, c) in text.char_indices() {
+        if !starts_token(text, start) || !crate::ui::command_menu::is_currency(c) {
+            continue;
+        }
+        let rest = &text[start + c.len_utf8()..];
+        let length = rest.find(|c: char| !name_char(c)).unwrap_or(rest.len());
+        let name = &rest[..length];
+        let end = start + c.len_utf8() + length;
+        // The amount guard: digits, an optional k/m/b/t or exponent.
+        let digits = name.trim_start_matches(|c: char| c.is_ascii_digit() || c == '_');
+        let amount = name.starts_with(|c: char| c.is_ascii_digit())
+            && (digits.is_empty()
+                || (digits.len() == 1 && "kKmMbBtT".contains(digits))
+                || (digits.len() > 1
+                    && digits.starts_with(['e', 'E'])
+                    && digits[1..].chars().all(|c| c.is_ascii_digit())));
+        if name.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && name.chars().any(|c| c.is_ascii_alphabetic())
+            && !amount
+            && followed_by_space(text, end)
+        {
+            out.push((name.to_owned(), start..end));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skills_leave_amounts_alone() {
+        let names = |text: &str| -> Vec<String> {
+            collect_skills(text).into_iter().map(|(n, _)| n).collect()
+        };
+        assert_eq!(
+            names("lance $code-review puis €deploy:prod "),
+            ["code-review", "deploy:prod"]
+        );
+        assert!(names("coûte $20 ou $20k ou $1e6 ").is_empty());
+        assert_eq!(names("$2fa "), ["2fa"]);
+        assert!(names("$review").is_empty());
+        assert!(names("a$b ").is_empty());
+    }
 
     #[test]
     fn mentions_follow_upstream() {

@@ -48,6 +48,8 @@ pub(crate) struct CiteState {
     /// The composer's editor and its chips' rects this frame.
     pub(crate) editor_id: Option<egui::Id>,
     chip_rects: Vec<Rect>,
+    /// The skill chip whose details are open (`ContextChipPopover`).
+    pub(crate) skill_popover: Option<(usize, String)>,
     /// Ctrl+Enter in the comment editor sends the prompt.
     pub(crate) send: bool,
 }
@@ -112,6 +114,39 @@ pub(crate) fn placeholder_index(c: char) -> Option<usize> {
 pub(crate) enum Chip {
     Citation(Citation),
     Mention(String),
+    Skill(String),
+}
+
+/// A skill's chip label, description and instructions file
+/// (`skillLabelFor`), from the selected provider's skills.
+#[derive(Clone, Default)]
+pub(crate) struct SkillMeta {
+    pub(crate) label: String,
+    pub(crate) description: Option<String>,
+    pub(crate) path: Option<String>,
+}
+
+fn skill_metas() -> &'static Mutex<std::collections::HashMap<String, SkillMeta>> {
+    static METAS: OnceLock<Mutex<std::collections::HashMap<String, SkillMeta>>> = OnceLock::new();
+    METAS.get_or_init(Default::default)
+}
+
+/// The skills the composer's chips are named after.
+pub(crate) fn set_skill_metas(metas: std::collections::HashMap<String, SkillMeta>) {
+    if let Ok(mut current) = skill_metas().lock() {
+        *current = metas;
+    }
+}
+
+/// A skill's meta, or its name title-cased (`formatProviderSkillDisplayName`).
+pub(crate) fn skill_meta(name: &str) -> SkillMeta {
+    if let Some(meta) = skill_metas().lock().ok().and_then(|m| m.get(name).cloned()) {
+        return meta;
+    }
+    SkillMeta {
+        label: crate::ui::command_menu::title_case(name),
+        ..Default::default()
+    }
 }
 
 impl Chip {
@@ -119,24 +154,37 @@ impl Chip {
     fn width(&self, ui: &Ui, size: f32) -> f32 {
         match self {
             Chip::Citation(citation) => citations::chip_width(ui, &citation.label(), size, true),
-            Chip::Mention(path) => mention_chip_width(ui, path, size),
+            Chip::Mention(path) => mention_chip_width(ui, basename(path), size),
+            Chip::Skill(name) => mention_chip_width(ui, &skill_meta(name).label, size),
         }
     }
 }
 
-/// The prompt's chips (citation links, then file mentions outside them),
-/// in order, with their byte ranges.
+/// The prompt's chips (citation links, then file mentions and skills
+/// outside them), in order, with their byte ranges.
 fn chips(prompt: &str) -> Vec<(Chip, std::ops::Range<usize>)> {
     let links = citations::collect(prompt);
+    let outside = |range: &std::ops::Range<usize>| {
+        !links
+            .iter()
+            .any(|(_, link)| range.start < link.end && range.end > link.start)
+    };
     let mut out: Vec<(Chip, std::ops::Range<usize>)> = crate::ui::mentions::collect(prompt)
         .into_iter()
-        .filter(|(_, range)| {
-            !links
-                .iter()
-                .any(|(_, link)| range.start < link.end && range.end > link.start)
-        })
+        .filter(|(_, range)| outside(range))
         .map(|(path, range)| (Chip::Mention(path), range))
         .collect();
+    let skills: Vec<(Chip, std::ops::Range<usize>)> = crate::ui::mentions::collect_skills(prompt)
+        .into_iter()
+        .filter(|(_, range)| {
+            outside(range)
+                && !out
+                    .iter()
+                    .any(|(_, m)| range.start < m.end && range.end > m.start)
+        })
+        .map(|(name, range)| (Chip::Skill(name), range))
+        .collect();
+    out.extend(skills);
     out.extend(
         links
             .into_iter()
@@ -299,31 +347,37 @@ fn basename(path: &str) -> &str {
     trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed)
 }
 
-/// A mention chip's width (`ContextChip`: `px-[0.5em]`, the entry icon,
-/// `gap-[0.33em]`, the basename at 0.86em, a 1px border).
-fn mention_chip_width(ui: &Ui, path: &str, size: f32) -> f32 {
+/// A context chip's width (`ContextChip`: `px-[0.5em]`, the icon,
+/// `gap-[0.33em]`, the label at 0.86em, a 1px border).
+fn mention_chip_width(ui: &Ui, label: &str, size: f32) -> f32 {
     let chip = size * 0.86;
-    let label = widgets::text_width(ui, basename(path), font(chip, Weight::Medium));
+    let label = widgets::text_width(ui, label, font(chip, Weight::Medium));
     2.0 + 2.0 * 0.5 * chip + 1.17 * chip + 0.33 * chip + label
 }
 
-/// A mention chip (`kind="mention"`, accent `oklch(0.62 0.11 215)`): the
-/// entry's icon and basename, the path as its tooltip.
-fn paint_mention_chip(
+/// A context chip of `kind`'s accent (`oklch(0.62 chroma hue)`): its icon
+/// (tinted when `icon_color` is None) and label.
+#[allow(clippy::too_many_arguments)]
+fn paint_context_chip(
     ui: &mut Ui,
     rect: Rect,
-    path: &str,
+    (chroma, hue): (f32, f32),
+    (icon_name, icon_color): (&str, Option<Color32>),
+    label: &str,
     size: f32,
     id: egui::Id,
+    tooltip: Option<&str>,
 ) -> egui::Response {
     let chip = size * 0.86;
     let [border, fill, text] =
-        crate::ui::md_links::chip_colors(0.11, 215.0, theme::border(), theme::foreground());
+        crate::ui::md_links::chip_colors(chroma, hue, theme::border(), theme::foreground());
     let radius = CornerRadius::same((0.5 * chip).round() as u8);
-    let response = ui
+    let mut response = ui
         .interact(rect, id, Sense::click())
-        .on_hover_text(path)
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if let Some(tooltip) = tooltip {
+        response = response.on_hover_text(tooltip);
+    }
     let painter = ui.painter();
     painter.rect_filled(rect, radius, fill);
     if response.hovered() {
@@ -339,16 +393,11 @@ fn paint_mention_chip(
         ),
         Vec2::splat(icon_size),
     );
-    let (name, color) = if path.ends_with(['/', '\\']) {
-        ("folder", theme::muted_foreground())
-    } else {
-        crate::ui::files::file_icon(path)
-    };
-    theme::paint_icon(ui, name, icon, icon_size, color);
+    theme::paint_icon(ui, icon_name, icon, icon_size, icon_color.unwrap_or(text));
     let label_left = icon.right() + 0.33 * chip;
     let galley = widgets::galley_truncated(
         ui,
-        basename(path),
+        label,
         font(chip, Weight::Medium),
         text,
         (1.2 * chip).round(),
@@ -360,6 +409,32 @@ fn paint_mention_chip(
         text,
     );
     response
+}
+
+/// A mention chip (`kind="mention"`, accent `oklch(0.62 0.11 215)`): the
+/// entry's icon and basename, the path as its tooltip.
+fn paint_mention_chip(
+    ui: &mut Ui,
+    rect: Rect,
+    path: &str,
+    size: f32,
+    id: egui::Id,
+) -> egui::Response {
+    let (icon, color) = if path.ends_with(['/', '\\']) {
+        ("folder", theme::muted_foreground())
+    } else {
+        crate::ui::files::file_icon(path)
+    };
+    paint_context_chip(
+        ui,
+        rect,
+        (0.11, 215.0),
+        (icon, Some(color)),
+        basename(path),
+        size,
+        id,
+        Some(path),
+    )
 }
 
 /// The ease-in-out pulse of a revealed citation: two pulses, a hold, a fade.
@@ -820,6 +895,7 @@ impl App {
         let mut open = None;
         let mut edit = None;
         let mut mention = None;
+        let mut skill = None;
         for placed in &galley.rows {
             for glyph in &placed.row.glyphs {
                 let Some(index) = placeholder_index(glyph.chr) else {
@@ -846,6 +922,26 @@ impl App {
                         let id = egui::Id::new(("composer-mention", index));
                         if paint_mention_chip(ui, rect, path, size, id).clicked() {
                             mention = Some(path.clone());
+                        }
+                        continue;
+                    }
+                    Chip::Skill(name) => {
+                        let meta = skill_meta(name);
+                        let id = egui::Id::new(("composer-skill", index));
+                        let icon = ("skill-chip", None);
+                        if paint_context_chip(
+                            ui,
+                            rect,
+                            (0.16, 322.0),
+                            icon,
+                            &meta.label,
+                            size,
+                            id,
+                            None,
+                        )
+                        .clicked()
+                        {
+                            skill = Some((index, name.clone()));
                         }
                         continue;
                     }
@@ -882,6 +978,15 @@ impl App {
         if let Some(path) = mention {
             self.open_markdown_file(&path);
         }
+        if let Some((index, name)) = skill {
+            let same = self
+                .cite
+                .skill_popover
+                .as_ref()
+                .is_some_and(|(i, _)| *i == index);
+            self.cite.skill_popover = (!same).then_some((index, name));
+        }
+        self.skill_popover(ui);
         if let Some((index, citation)) = edit {
             let toggled_off = self.cite.comment.as_ref().is_some_and(|c| c.index == index);
             self.cite.comment = (!toggled_off).then(|| CommentEditor {
@@ -892,6 +997,119 @@ impl App {
                 remove_on_cancel: false,
                 focused: false,
             });
+        }
+    }
+
+    /// A skill chip's details (`ComposerSkillNodeView`'s `PopoverPopup
+    /// side="top" width="lg" padding="compact"`): its name, description and
+    /// "View instructions"; Escape or a press outside closes it.
+    fn skill_popover(&mut self, ui: &mut Ui) {
+        let Some((index, name)) = self.cite.skill_popover.clone() else {
+            return;
+        };
+        let Some(chip) = self
+            .cite
+            .chip_rects
+            .get(index)
+            .copied()
+            .filter(|r| r.is_finite())
+        else {
+            self.cite.skill_popover = None;
+            return;
+        };
+        let meta = skill_meta(&name);
+        let width = 384.0;
+        let inner = width - 2.0 - 2.0 * (12.0 + 8.0);
+        let body = font(14.0, Weight::Regular);
+        let description = widgets::galley(
+            ui,
+            meta.description
+                .as_deref()
+                .unwrap_or("No description is available for this skill."),
+            body.clone(),
+            theme::foreground(),
+            20.0,
+            inner,
+        );
+        let button = if meta.path.is_some() {
+            12.0 + 28.0
+        } else {
+            0.0
+        };
+        let height =
+            1.0 + 8.0 + 8.0 + 20.0 + 12.0 + description.size().y + button + 8.0 + 8.0 + 1.0;
+        let screen = ui.ctx().content_rect();
+        let left =
+            (chip.center().x - width / 2.0).clamp(8.0, (screen.right() - width - 8.0).max(8.0));
+        let rect = Rect::from_min_size(
+            Pos2::new(left, chip.top() - 4.0 - height),
+            Vec2::new(width, height),
+        );
+        let mut open_path = None;
+        egui::Area::new(egui::Id::new("composer-skill-popover"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .show(ui.ctx(), |ui| {
+                ui.allocate_exact_size(rect.size(), Sense::click());
+                ui.painter().rect(
+                    rect,
+                    CornerRadius::same(10),
+                    Color32::from_rgb(17, 17, 17),
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(245, 245, 245, 26)),
+                    StrokeKind::Inside,
+                );
+                let x = rect.left() + 1.0 + 12.0 + 8.0;
+                let mut y = rect.top() + 1.0 + 8.0 + 8.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(x, y),
+                    &meta.label,
+                    font(14.0, Weight::Medium),
+                    theme::foreground(),
+                    20.0,
+                );
+                y += 20.0 + 12.0;
+                ui.painter()
+                    .galley(Pos2::new(x, y), description.clone(), theme::foreground());
+                y += description.size().y + 12.0;
+                if let Some(path) = &meta.path {
+                    let label = "View instructions";
+                    let label_font = font(14.0, Weight::Medium);
+                    let width = (widgets::text_width(ui, label, label_font.clone()) + 18.0).ceil();
+                    let button = Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, 28.0));
+                    let response = widgets::outline_button(
+                        ui,
+                        button,
+                        "skill-view-instructions",
+                        None,
+                        "",
+                        CornerRadius::same(8),
+                    );
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_max(
+                            Pos2::new(button.left() + 9.0, button.top()),
+                            button.max,
+                        ),
+                        label,
+                        label_font,
+                        theme::foreground(),
+                    );
+                    if response.clicked() {
+                        open_path = Some(path.clone());
+                    }
+                }
+            });
+        let outside = ui.input(|i| i.pointer.primary_pressed())
+            && ui
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| !rect.contains(p) && !chip.contains(p));
+        if outside || ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.cite.skill_popover = None;
+        }
+        if let Some(path) = open_path {
+            self.cite.skill_popover = None;
+            self.open_markdown_file(&path);
         }
     }
 

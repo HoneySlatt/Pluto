@@ -304,6 +304,7 @@ impl App {
         let focused = ui.memory(|m| m.has_focus(editor_id));
         // The suggestion menu takes its keys first.
         if normal {
+            self.refresh_skill_metas(draft);
             self.command_menu_keys(ui, editor_id, draft);
         }
         // Ctrl+Enter in a citation's comment editor sends too.
