@@ -46,6 +46,10 @@ pub struct App {
     /// The running turn's task drawer is open, for this thread.
     /// The composer's "/", "@" and "$" menu.
     pub(crate) command_menu: crate::ui::command_menu::MenuState,
+    /// The composer's context records (terminal excerpts), by context id.
+    pub(crate) composer_contexts: Vec<serde_json::Value>,
+    /// A sent terminal excerpt's popover: its chip's rect and record.
+    pub(crate) bubble_popover: Option<(eframe::egui::Rect, serde_json::Value)>,
     pub(crate) tasks_open: bool,
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
@@ -376,6 +380,8 @@ impl App {
             composer_runtime: Default::default(),
             composer_interaction: Default::default(),
             command_menu: Default::default(),
+            composer_contexts: Vec::new(),
+            bubble_popover: None,
             tasks_open: false,
             tasks_thread: None,
             picker_provider: None,
@@ -945,6 +951,7 @@ impl eframe::App for App {
                 self.plan_menu(ui);
                 self.plan_save_dialog(ui, rect);
                 self.publish_dialog(ui, rect);
+                self.bubble_context_popover(ui);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);

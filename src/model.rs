@@ -105,6 +105,8 @@ pub struct Message {
     pub text: String,
     /// `ChatAttachment`s (an open union, kept as sent).
     pub attachments: Vec<Value>,
+    /// `OrchestrationMessageContext` (`{version, records}`), kept as sent.
+    pub context: Value,
     pub turn_id: Option<String>,
     pub streaming: bool,
     pub created_at: String,
@@ -663,6 +665,9 @@ fn apply_message(thread: &mut Value, payload: &Value, occurred_at: Value) {
         if let Some(attachments) = payload.get("attachments") {
             entry["attachments"] = attachments.clone();
         }
+        if let Some(context) = payload.get("context") {
+            entry["context"] = context.clone();
+        }
     } else {
         messages.push(json!({
             "id": payload["messageId"],
@@ -671,6 +676,7 @@ fn apply_message(thread: &mut Value, payload: &Value, occurred_at: Value) {
             "turnId": payload.get("turnId").cloned().unwrap_or(Value::Null),
             "streaming": streaming,
             "attachments": payload.get("attachments").cloned().unwrap_or(json!([])),
+            "context": payload.get("context").cloned().unwrap_or(Value::Null),
             "createdAt": payload["createdAt"],
             "updatedAt": payload["updatedAt"],
         }));

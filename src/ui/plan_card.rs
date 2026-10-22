@@ -947,8 +947,15 @@ impl App {
         if mode == "default" {
             command["sourceProposedPlan"] = json!({"threadId": thread.id, "planId": plan.id});
         }
+        crate::ui::composer_context::apply(
+            &mut command,
+            &text,
+            &self.composer_contexts,
+            self.inline_message_context(),
+        );
         self.dispatch(command);
         self.composer.clear();
+        self.composer_contexts.clear();
         let key = self.composer_key(false);
         self.composer_interaction.insert(key, mode.into());
     }

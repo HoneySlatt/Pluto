@@ -973,6 +973,11 @@ impl App {
         ModelSelection::default()
     }
 
+    /// The server reads context records (`capabilities.inlineMessageContext`).
+    pub(crate) fn inline_message_context(&self) -> bool {
+        self.state.config["environment"]["capabilities"]["inlineMessageContext"] == true
+    }
+
     pub(crate) fn composer_runtime_mode(&self, draft: bool) -> String {
         if let Some(mode) = self.composer_runtime.get(&self.composer_key(draft)) {
             return mode.clone();
@@ -1123,12 +1128,19 @@ impl App {
             &runtime,
             &interaction,
         );
+        crate::ui::composer_context::apply(
+            &mut command,
+            &text,
+            &self.composer_contexts,
+            self.inline_message_context(),
+        );
         if let Some(bootstrap) = bootstrap {
             command["bootstrap"] = bootstrap;
         }
         self.dispatch(command);
         self.composer.clear();
         self.composer_images.clear();
+        self.composer_contexts.clear();
         if draft {
             self.select_thread(Some(thread_id));
         }

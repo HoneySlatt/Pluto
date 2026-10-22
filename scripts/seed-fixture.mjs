@@ -430,6 +430,26 @@ const taskSteps = ["Lire les jetons du thème", "Porter les couleurs", "Vérifie
 const tasksAnswer = message(tasksThread, "assistant", "Les couleurs sont portées.", 2297, tasksTurn);
 completeTurn(tasksThread, tasksTurn, 1, [], 2297, tasksAnswer);
 
+// A user message carrying a terminal excerpt (inline context) and a file mention.
+const contextThread = thread(rust, "Analyser l'erreur", 2400);
+{
+  const createdAt = at(2400);
+  const contextId = "terminal_0f6e3c2a-1b7d-4c55-9a0e-5d2f8c1b9e47";
+  emit("thread", contextThread, "thread.message-sent", createdAt, {
+    threadId: contextThread, messageId: randomUUID(), role: "user",
+    text: `Pourquoi [Terminal 1 lines 3-4](t3-context://v1/terminal/${contextId}) échoue dans [app.rs](src/app.rs) ?`,
+    attachments: [], turnId: null, streaming: false, createdAt, updatedAt: createdAt,
+    context: {
+      version: 1,
+      records: [{
+        version: 1, contextId, kind: "terminal", label: "Terminal 1 lines 3-4",
+        terminalId: "default", terminalLabel: "Terminal 1", lineStart: 3, lineEnd: 4,
+        text: "$ cargo build\nerror[E0425]: cannot find value `x` in this scope",
+      }],
+    },
+  }, "client");
+}
+
 // A plan-mode thread whose settled turn proposed a plan.
 const planThreadId = randomUUID();
 {

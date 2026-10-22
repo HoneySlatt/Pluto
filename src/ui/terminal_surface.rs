@@ -6,8 +6,8 @@
 //! over the app's foreground and background), typed into with
 //! `terminal.write` and resized with `terminal.resize`.
 //!
-//! Not ported: split panes, the bottom drawer, selection and copy, links,
-//! "Add to chat", font settings and cursor blinking.
+//! Selection offers "Add to chat" (a terminal excerpt for the composer),
+//! Copy and Paste. Not ported: font settings and cursor blinking.
 use std::collections::HashMap;
 
 use eframe::egui::{
@@ -175,7 +175,7 @@ pub struct Terminals {
 impl App {
     /// `terminalContextMenuItems` / `terminalSelectionMenuItems`: Copy
     /// (disabled without a selection) and Paste. "Add to chat" is not ported.
-    fn terminal_menu(&mut self, ui: &mut Ui, key: &str, _thread: &str, _id: &str) {
+    fn terminal_menu(&mut self, ui: &mut Ui, key: &str, thread: &str, id: &str) {
         let Some((menu_key, state)) = self.terminals.menu.take() else {
             return;
         };
@@ -188,19 +188,57 @@ impl App {
             .views
             .get(key)
             .and_then(TerminalView::selected_text);
-        let items = [
+        // `terminalSelectionLineRange`: buffer lines, 1-based.
+        let lines = self
+            .terminals
+            .views
+            .get(key)
+            .and_then(|view| view.selection)
+            .map(|(a, b)| {
+                let (start, end) = if a <= b { (a, b) } else { (b, a) };
+                (
+                    start.0 as u64 + 1,
+                    (end.0 as u64 + 1).max(start.0 as u64 + 1),
+                )
+            });
+        // A thread's composer takes the excerpt.
+        let can_add = self.selected.as_deref() == Some(thread);
+        let mut items = Vec::new();
+        if can_add {
+            items.push(crate::ui::context_menu::Item {
+                disabled: selection.is_none(),
+                ..crate::ui::context_menu::Item::new("add-to-chat", "Add to chat")
+            });
+        }
+        items.extend([
             crate::ui::context_menu::Item {
                 disabled: selection.is_none(),
                 ..crate::ui::context_menu::Item::new("copy", "Copy")
             },
             crate::ui::context_menu::Item::new("paste", "Paste"),
-        ];
+        ]);
         let mut open = Some(state);
         let clicked = crate::ui::context_menu::show(ui, &mut open, &items);
         if let Some(state) = open {
             self.terminals.menu = Some((key.to_owned(), state));
         }
         match clicked.as_deref() {
+            Some("add-to-chat") => {
+                if let (Some(text), Some((start, end))) = (selection, lines)
+                    && let Some(record) = crate::ui::composer_context::terminal_record(
+                        id,
+                        &terminal_label(id),
+                        start,
+                        end,
+                        &text,
+                    )
+                {
+                    self.add_composer_context(ui.ctx(), record);
+                }
+                if let Some(view) = self.terminals.views.get_mut(key) {
+                    view.selection = None;
+                }
+            }
             Some("copy") => {
                 if let Some(text) = selection {
                     ui.ctx().copy_text(text);

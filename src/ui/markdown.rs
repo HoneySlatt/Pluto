@@ -41,6 +41,12 @@ pub(crate) enum Inline {
     File(FileRef),
     /// An assistant citation link, drawn as its chip.
     Citation(Citation),
+    /// A context chip of a kind (a terminal excerpt, a skill…) and its label.
+    Context {
+        kind: String,
+        label: String,
+        id: String,
+    },
     Break,
 }
 
@@ -64,6 +70,11 @@ fn link_chip(href: &str) -> Option<Inline> {
 pub(crate) enum ChipRef {
     File(FileRef),
     Citation(Citation),
+    Context {
+        kind: String,
+        label: String,
+        id: String,
+    },
 }
 
 /// Skips a link's content up to and past its end.
@@ -602,6 +613,46 @@ fn build_inlines(
                 }
                 file_chip += 1;
             }
+            Inline::Context { kind, label, id } => {
+                // `ContextChip` of the kind: its icon and label, laid out
+                // like a file chip.
+                let chip_size = size * 0.86;
+                let chip_font = font(chip_size, Weight::Medium);
+                let label_text = label.replace(' ', "\u{a0}");
+                let (chroma, hue) = crate::ui::composer_context::kind_accent(kind);
+                let [_, _, text] =
+                    md_links::chip_colors(chroma, hue, theme::border(), theme::foreground());
+                break_before(
+                    &mut job,
+                    &mut chips,
+                    &mut files,
+                    &mut icons,
+                    &mut links,
+                    &mut inserted,
+                );
+                job.append(
+                    &label_text,
+                    chip_lead(chip_size),
+                    widgets::format(chip_font.clone(), text, line_height),
+                );
+                job.append(
+                    "\u{a0}",
+                    0.0,
+                    spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
+                );
+                let chip_ref = ChipRef::Context {
+                    kind: kind.clone(),
+                    label: label.clone(),
+                    id: id.clone(),
+                };
+                for _ in 0..2 {
+                    chips.push(None);
+                    files.push(Some((file_chip, chip_ref.clone())));
+                    icons.push(None);
+                    links.push(None);
+                }
+                file_chip += 1;
+            }
             Inline::Code(code) => {
                 // CSS: 12px mono, padding .1rem .35rem, 1px border.
                 let code_font = theme::mono(12.0);
@@ -896,9 +947,19 @@ fn paint_inlines(
                     Pos2::new((row_x + right).round(), top + height),
                 );
                 let radius = CornerRadius::same((0.5 * chip_size).round() as u8);
-                let (fill, border) = match chip {
+                let (fill, border) = match &chip {
                     ChipRef::File(_) => (chip_fill, chip_border),
                     ChipRef::Citation(_) => (citation_fill, citation_border),
+                    ChipRef::Context { kind, .. } => {
+                        let (chroma, hue) = crate::ui::composer_context::kind_accent(kind);
+                        let [border, fill, _] = md_links::chip_colors(
+                            chroma,
+                            hue,
+                            theme::border(),
+                            theme::foreground(),
+                        );
+                        (fill, border)
+                    }
                 };
                 painter.rect_filled(rect, radius, fill);
                 // A citation's source link tints on hover.
@@ -922,6 +983,16 @@ fn paint_inlines(
                     }
                     ChipRef::File(file) => crate::ui::files::file_icon(&file.path),
                     ChipRef::Citation(_) => ("quote", INFO_FOREGROUND),
+                    ChipRef::Context { kind, .. } => {
+                        let (chroma, hue) = crate::ui::composer_context::kind_accent(kind);
+                        let [_, _, text] = md_links::chip_colors(
+                            chroma,
+                            hue,
+                            theme::border(),
+                            theme::foreground(),
+                        );
+                        (crate::ui::composer_context::kind_icon(kind), text)
+                    }
                 };
                 theme::paint_icon(ui, name, icon, icon_size, tint);
                 file_rects.push((rect, chip));
@@ -1003,19 +1074,24 @@ fn paint_inlines(
     }
     let mut opened = None;
     if let Some(pointer) = response.hover_pos() {
-        if let Some((_, chip)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
+        if let Some((chip_rect, chip)) = file_rects.iter().find(|(r, _)| r.contains(pointer)) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let chip_rect = *chip_rect;
             let tooltip = match chip {
                 ChipRef::File(file) => match file.line {
                     Some(line) => format!("{}:{line}", file.path),
                     None => file.path.clone(),
                 },
                 ChipRef::Citation(_) => "View source".to_owned(),
+                ChipRef::Context { label, .. } => label.clone(),
             };
             let clicked = response.clicked();
             response.on_hover_text(tooltip);
             if clicked {
                 opened = Some(chip.clone());
+                // Where it sits, for a popover anchored on it.
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(egui::Id::new(CLICKED_CHIP), chip_rect));
             }
             return opened;
         }
@@ -1031,11 +1107,68 @@ fn paint_inlines(
     opened
 }
 
+/// The temp-data key of the last clicked chip's rect.
+pub(crate) const CLICKED_CHIP: &str = "markdown-clicked-chip";
+
 /// Plain text with its citation links drawn as chips (a user message,
 /// whose text this client does not render as markdown).
 pub(crate) struct PlainText(Inlines);
 
 impl PlainText {
+    /// The chips of a user message's text, in order: citations and context
+    /// references, then file mentions and known skills outside them.
+    pub(crate) fn chips(text: &str) -> Vec<(Inline, Range<usize>)> {
+        let mut out: Vec<(Inline, Range<usize>)> = citations::collect(text)
+            .into_iter()
+            .map(|(citation, range)| (Inline::Citation(citation), range))
+            .collect();
+        out.extend(
+            crate::ui::composer_context::collect(text)
+                .into_iter()
+                .map(|r| {
+                    (
+                        Inline::Context {
+                            kind: r.kind,
+                            label: r.label,
+                            id: r.context_id,
+                        },
+                        r.range,
+                    )
+                }),
+        );
+        let free = |out: &[(Inline, Range<usize>)], range: &Range<usize>| {
+            !out.iter()
+                .any(|(_, taken)| range.start < taken.end && range.end > taken.start)
+        };
+        for (path, range) in crate::ui::mentions::collect(text) {
+            if free(&out, &range) {
+                let file = FileRef {
+                    path,
+                    line: None,
+                    column: None,
+                };
+                out.push((Inline::File(file), range));
+            }
+        }
+        // `SkillInlineText`: only skills the provider knows become chips.
+        for (name, range) in crate::ui::mentions::collect_skills(text) {
+            if let Some(meta) = crate::ui::cite::known_skill(&name)
+                && free(&out, &range)
+            {
+                out.push((
+                    Inline::Context {
+                        kind: "skill".into(),
+                        label: meta.label,
+                        id: name,
+                    },
+                    range,
+                ));
+            }
+        }
+        out.sort_by_key(|(_, range)| range.start);
+        out
+    }
+
     pub(crate) fn layout(
         ui: &Ui,
         text: &str,
@@ -1056,9 +1189,9 @@ impl PlainText {
             }
         };
         let mut cursor = 0;
-        for (citation, range) in citations::collect(text) {
+        for (chip, range) in Self::chips(text) {
             push_text(&mut inlines, &text[cursor..range.start]);
-            inlines.push(Inline::Citation(citation));
+            inlines.push(chip);
             cursor = range.end;
         }
         push_text(&mut inlines, &text[cursor..]);
@@ -1078,19 +1211,16 @@ impl PlainText {
         self.0.galley.size()
     }
 
-    /// Paints the text; returns a citation chip that was clicked.
-    pub(crate) fn paint(&self, ui: &mut Ui, pos: Pos2, id: egui::Id) -> Option<Citation> {
-        match paint_inlines(
+    /// Paints the text; returns a chip that was clicked.
+    pub(crate) fn paint(&self, ui: &mut Ui, pos: Pos2, id: egui::Id) -> Option<ChipRef> {
+        paint_inlines(
             ui,
             pos,
             &self.0,
             id,
             None,
             Some((md_copy::Kind::Paragraph, Vec::new())),
-        ) {
-            Some(ChipRef::Citation(citation)) => Some(citation),
-            _ => None,
-        }
+        )
     }
 }
 
@@ -1146,6 +1276,7 @@ impl<'a> Markdown<'a> {
         match chip {
             ChipRef::File(file) => self.opened_file = Some(file),
             ChipRef::Citation(citation) => self.opened_citation = Some(citation),
+            ChipRef::Context { .. } => {}
         }
     }
 
@@ -1916,6 +2047,10 @@ pub(crate) fn inline_markdown(inlines: &[Inline]) -> String {
                 None => file.path.clone(),
             }),
             Inline::Citation(citation) => citation.serialize(),
+            Inline::Context { kind, id, .. } if kind == "skill" => format!("${id}"),
+            Inline::Context { kind, label, id } => {
+                crate::ui::composer_context::format_reference(kind, id, label)
+            }
             Inline::Break => "\n".to_owned(),
         })
         .collect()
@@ -1931,6 +2066,7 @@ fn plain(inlines: &[Inline]) -> String {
                 None => file.path.clone(),
             },
             Inline::Citation(citation) => citation.text.clone(),
+            Inline::Context { label, .. } => label.clone(),
             Inline::Break => " ".to_owned(),
         })
         .collect()

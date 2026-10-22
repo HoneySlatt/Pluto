@@ -32,6 +32,8 @@ pub(crate) struct Queued {
     pub(crate) model: Value,
     pub(crate) runtime: String,
     pub(crate) interaction: String,
+    /// The context records its text references.
+    pub(crate) contexts: Vec<Value>,
     /// The newest finished tool call at queue time.
     pub(crate) queued_after: Option<String>,
 }
@@ -79,9 +81,14 @@ impl App {
             model,
             runtime,
             interaction: self.composer_interaction_mode(false),
+            contexts: crate::ui::composer_context::referenced(
+                self.composer.trim(),
+                &self.composer_contexts,
+            ),
             queued_after: latest_tool_call(thread),
         };
         self.composer.clear();
+        self.composer_contexts.clear();
         self.queues
             .by_thread
             .entry(thread.id.clone())
@@ -156,13 +163,19 @@ impl App {
         if queue.is_empty() {
             self.queues.by_thread.remove(thread_id);
         }
-        let command = crate::ui::composer::turn_start_command(
+        let mut command = crate::ui::composer::turn_start_command(
             thread_id,
             &queued.text,
             &queued.images,
             &queued.model,
             &queued.runtime,
             &queued.interaction,
+        );
+        crate::ui::composer_context::apply(
+            &mut command,
+            &queued.text,
+            &queued.contexts,
+            self.inline_message_context(),
         );
         if let Some(message_id) = command["message"]["messageId"].as_str() {
             self.queues
@@ -183,6 +196,7 @@ impl App {
         self.composer = prompts.join("\n\n");
         for message in messages {
             self.composer_images.extend(message.images);
+            self.composer_contexts.extend(message.contexts);
         }
     }
 

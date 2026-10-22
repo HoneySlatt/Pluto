@@ -50,6 +50,8 @@ pub(crate) struct CiteState {
     chip_rects: Vec<Rect>,
     /// The skill chip whose details are open (`ContextChipPopover`).
     pub(crate) skill_popover: Option<(usize, String)>,
+    /// The context chip whose details are open, by chip index and context id.
+    pub(crate) context_popover: Option<(usize, String)>,
     /// Ctrl+Enter in the comment editor sends the prompt.
     pub(crate) send: bool,
 }
@@ -115,6 +117,12 @@ pub(crate) enum Chip {
     Citation(Citation),
     Mention(String),
     Skill(String),
+    /// A context reference (`t3-context://v1/<kind>/<id>`).
+    Context {
+        kind: String,
+        id: String,
+        label: String,
+    },
 }
 
 /// A skill's chip label, description and instructions file
@@ -138,6 +146,11 @@ pub(crate) fn set_skill_metas(metas: std::collections::HashMap<String, SkillMeta
     }
 }
 
+/// A skill the selected provider knows.
+pub(crate) fn known_skill(name: &str) -> Option<SkillMeta> {
+    skill_metas().lock().ok()?.get(name).cloned()
+}
+
 /// A skill's meta, or its name title-cased (`formatProviderSkillDisplayName`).
 pub(crate) fn skill_meta(name: &str) -> SkillMeta {
     if let Some(meta) = skill_metas().lock().ok().and_then(|m| m.get(name).cloned()) {
@@ -156,6 +169,7 @@ impl Chip {
             Chip::Citation(citation) => citations::chip_width(ui, &citation.label(), size, true),
             Chip::Mention(path) => mention_chip_width(ui, basename(path), size),
             Chip::Skill(name) => mention_chip_width(ui, &skill_meta(name).label, size),
+            Chip::Context { label, .. } => mention_chip_width(ui, label, size),
         }
     }
 }
@@ -164,10 +178,12 @@ impl Chip {
 /// outside them), in order, with their byte ranges.
 fn chips(prompt: &str) -> Vec<(Chip, std::ops::Range<usize>)> {
     let links = citations::collect(prompt);
+    let contexts = crate::ui::composer_context::collect(prompt);
     let outside = |range: &std::ops::Range<usize>| {
-        !links
-            .iter()
-            .any(|(_, link)| range.start < link.end && range.end > link.start)
+        let overlaps =
+            |link: &std::ops::Range<usize>| range.start < link.end && range.end > link.start;
+        !links.iter().any(|(_, link)| overlaps(link))
+            && !contexts.iter().any(|c| overlaps(&c.range))
     };
     let mut out: Vec<(Chip, std::ops::Range<usize>)> = crate::ui::mentions::collect(prompt)
         .into_iter()
@@ -185,6 +201,16 @@ fn chips(prompt: &str) -> Vec<(Chip, std::ops::Range<usize>)> {
         .map(|(name, range)| (Chip::Skill(name), range))
         .collect();
     out.extend(skills);
+    out.extend(contexts.into_iter().map(|c| {
+        (
+            Chip::Context {
+                kind: c.kind,
+                id: c.context_id,
+                label: c.label,
+            },
+            c.range,
+        )
+    }));
     out.extend(
         links
             .into_iter()
@@ -435,6 +461,140 @@ fn paint_mention_chip(
         id,
         Some(path),
     )
+}
+
+/// A `side="top"` popover's top: above `chip`, flipped below it when the
+/// window has no room (Base UI's collision avoidance).
+fn popover_top(chip: Rect, height: f32, screen: Rect) -> f32 {
+    let above = chip.top() - 4.0 - height;
+    if above >= screen.top() + 8.0 {
+        above
+    } else {
+        chip.bottom() + 4.0
+    }
+}
+
+/// The popover of a terminal excerpt above `chip` (`ContextChipPopover
+/// width="lg" padding="compact"`): a bordered box with the terminal's name
+/// and lines over the output (`max-h-80`, unwrapped). Returns its rect.
+pub(crate) fn terminal_excerpt_popover(
+    ui: &mut Ui,
+    chip: Rect,
+    record: &serde_json::Value,
+) -> Option<Rect> {
+    let width = 384.0;
+    let text = record["text"].as_str().unwrap_or_default();
+    let start = record["lineStart"].as_u64().unwrap_or(1);
+    let end = record["lineEnd"].as_u64().unwrap_or(start);
+    let lines = text.split('\n').count().max(1) as f32;
+    let line = 19.5; // text-xs leading-relaxed
+    let pre = (12.0 + lines * line + 12.0).min(320.0);
+    let header = 8.0 + 20.0 + 8.0;
+    let height = 1.0 + 8.0 + 1.0 + header + 1.0 + pre + 1.0 + 8.0 + 1.0;
+    let screen = ui.ctx().content_rect();
+    let left = (chip.center().x - width / 2.0).clamp(8.0, (screen.right() - width - 8.0).max(8.0));
+    let rect = Rect::from_min_size(
+        Pos2::new(left, popover_top(chip, height, screen)),
+        Vec2::new(width, height),
+    );
+    egui::Area::new(egui::Id::new("context-excerpt-popover"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ui.ctx(), |ui| {
+            ui.allocate_exact_size(rect.size(), Sense::click());
+            ui.painter().rect(
+                rect,
+                CornerRadius::same(10),
+                Color32::from_rgb(17, 17, 17),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(245, 245, 245, 26)),
+                StrokeKind::Inside,
+            );
+            let card = Rect::from_min_max(
+                rect.min + Vec2::new(1.0 + 12.0, 1.0 + 8.0),
+                rect.max - Vec2::new(1.0 + 12.0, 1.0 + 8.0),
+            );
+            ui.painter().rect(
+                card,
+                CornerRadius::same(8),
+                theme::alpha(theme::background(), 0.8),
+                Stroke::new(1.0, theme::alpha(theme::border(), 0.7)),
+                StrokeKind::Inside,
+            );
+            let top = card.top() + 1.0;
+            theme::paint_icon(
+                ui,
+                "terminal",
+                Rect::from_min_size(Pos2::new(card.left() + 13.0, top + 10.0), Vec2::splat(16.0)),
+                16.0,
+                Color32::from_rgb(0, 188, 125),
+            );
+            let range = if start == end {
+                format!("Line {start}")
+            } else {
+                format!("Lines {start}–{end}")
+            };
+            let range_width = widgets::text_width(ui, &range, font(12.0, Weight::Regular));
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(card.left() + 37.0, top + 8.0),
+                    Pos2::new(card.right() - 20.0 - range_width, top + 28.0),
+                ),
+                record["terminalLabel"].as_str().unwrap_or_default(),
+                font(14.0, Weight::Medium),
+                theme::foreground(),
+            );
+            widgets::text(
+                ui,
+                Pos2::new(card.right() - 13.0 - range_width, top + 10.0),
+                &range,
+                font(12.0, Weight::Regular),
+                theme::secondary_label(),
+                16.0,
+            );
+            let divider = top + header;
+            ui.painter().rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(card.left() + 1.0, divider),
+                    Vec2::new(card.width() - 2.0, 1.0),
+                ),
+                0.0,
+                theme::alpha(theme::border(), 0.7),
+            );
+            let body = Rect::from_min_max(
+                Pos2::new(card.left() + 1.0, divider + 1.0),
+                card.max - Vec2::splat(1.0),
+            );
+            ui.painter().rect_filled(
+                body,
+                CornerRadius {
+                    nw: 0,
+                    ne: 0,
+                    sw: 7,
+                    se: 7,
+                },
+                theme::muted(),
+            );
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink(12.0)));
+            child.set_clip_rect(body.shrink(1.0));
+            egui::ScrollArea::both()
+                .id_salt("context-excerpt-scroll")
+                .auto_shrink([false, false])
+                .show(&mut child, |ui| {
+                    let galley = widgets::galley(
+                        ui,
+                        text,
+                        theme::mono(12.0),
+                        theme::foreground(),
+                        line,
+                        f32::INFINITY,
+                    );
+                    let size = galley.size();
+                    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                    ui.painter().galley(rect.min, galley, theme::foreground());
+                });
+        });
+    Some(rect)
 }
 
 /// The ease-in-out pulse of a revealed citation: two pulses, a hold, a fade.
@@ -896,6 +1056,7 @@ impl App {
         let mut edit = None;
         let mut mention = None;
         let mut skill = None;
+        let mut context = None;
         for placed in &galley.rows {
             for glyph in &placed.row.glyphs {
                 let Some(index) = placeholder_index(glyph.chr) else {
@@ -945,6 +1106,17 @@ impl App {
                         }
                         continue;
                     }
+                    Chip::Context { kind, id, label } => {
+                        let chip_id = egui::Id::new(("composer-context", index));
+                        let icon = (crate::ui::composer_context::kind_icon(kind), None);
+                        let accent = crate::ui::composer_context::kind_accent(kind);
+                        if paint_context_chip(ui, rect, accent, icon, label, size, chip_id, None)
+                            .clicked()
+                        {
+                            context = Some((index, id.clone()));
+                        }
+                        continue;
+                    }
                 };
                 let label = citation.label();
                 let response = citations::paint_chip(
@@ -986,7 +1158,16 @@ impl App {
                 .is_some_and(|(i, _)| *i == index);
             self.cite.skill_popover = (!same).then_some((index, name));
         }
+        if let Some((index, id)) = context {
+            let same = self
+                .cite
+                .context_popover
+                .as_ref()
+                .is_some_and(|(i, _)| *i == index);
+            self.cite.context_popover = (!same).then_some((index, id));
+        }
         self.skill_popover(ui);
+        self.context_popover(ui);
         if let Some((index, citation)) = edit {
             let toggled_off = self.cite.comment.as_ref().is_some_and(|c| c.index == index);
             self.cite.comment = (!toggled_off).then(|| CommentEditor {
@@ -997,6 +1178,59 @@ impl App {
                 remove_on_cancel: false,
                 focused: false,
             });
+        }
+    }
+
+    /// A sent message's terminal excerpt, opened from its chip.
+    pub(crate) fn bubble_context_popover(&mut self, ui: &mut Ui) {
+        let Some((chip, record)) = self.bubble_popover.clone() else {
+            return;
+        };
+        if let Some(rect) = terminal_excerpt_popover(ui, chip, &record) {
+            let outside = ui.input(|i| i.pointer.primary_pressed())
+                && ui
+                    .input(|i| i.pointer.interact_pos())
+                    .is_some_and(|p| !rect.contains(p) && !chip.contains(p));
+            let scrolled = ui.input(|i| i.smooth_scroll_delta.y != 0.0)
+                && ui
+                    .input(|i| i.pointer.hover_pos())
+                    .is_some_and(|p| !rect.contains(p));
+            if outside || scrolled || ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+            {
+                self.bubble_popover = None;
+            }
+        }
+    }
+
+    /// A terminal excerpt's details (`TerminalContextInlineChip`'s popover):
+    /// the terminal, its lines and the captured output.
+    fn context_popover(&mut self, ui: &mut Ui) {
+        let Some((index, id)) = self.cite.context_popover.clone() else {
+            return;
+        };
+        let chip = self
+            .cite
+            .chip_rects
+            .get(index)
+            .copied()
+            .filter(|r| r.is_finite());
+        let record = self
+            .composer_contexts
+            .iter()
+            .find(|r| r["contextId"] == id.as_str() && r["kind"] == "terminal")
+            .cloned();
+        let (Some(chip), Some(record)) = (chip, record) else {
+            self.cite.context_popover = None;
+            return;
+        };
+        if let Some(rect) = terminal_excerpt_popover(ui, chip, &record) {
+            let outside = ui.input(|i| i.pointer.primary_pressed())
+                && ui
+                    .input(|i| i.pointer.interact_pos())
+                    .is_some_and(|p| !rect.contains(p) && !chip.contains(p));
+            if outside || ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+                self.cite.context_popover = None;
+            }
         }
     }
 
@@ -1042,7 +1276,7 @@ impl App {
         let left =
             (chip.center().x - width / 2.0).clamp(8.0, (screen.right() - width - 8.0).max(8.0));
         let rect = Rect::from_min_size(
-            Pos2::new(left, chip.top() - 4.0 - height),
+            Pos2::new(left, popover_top(chip, height, screen)),
             Vec2::new(width, height),
         );
         let mut open_path = None;
@@ -1397,6 +1631,42 @@ impl App {
 
     /// After an edit that changed the prompt's links (a pasted link turns
     /// into its chip), the caret keeps its place in the prompt.
+    /// Inserts a context record's reference at the composer's caret (else
+    /// at the end, `appendInlineContextReference`) and keeps the record.
+    pub(crate) fn add_composer_context(&mut self, ctx: &egui::Context, record: serde_json::Value) {
+        let kind = record["kind"].as_str().unwrap_or_default();
+        let reference = crate::ui::composer_context::format_reference(
+            kind,
+            record["contextId"].as_str().unwrap_or_default(),
+            record["label"].as_str().unwrap_or_default(),
+        );
+        let collapsed = collapse(&self.composer);
+        let caret = self.cite.editor_id.and_then(|id| {
+            let range = egui::TextEdit::load_state(ctx, id)?.cursor.char_range()?;
+            Some(display_to_prompt(
+                &collapsed.display,
+                &collapsed.tokens,
+                range.primary.index.0,
+            ))
+        });
+        let at = caret.unwrap_or(self.composer.len());
+        let (prompt, cursor) =
+            crate::ui::composer_context::insert_reference(&self.composer, at, &reference);
+        self.composer = prompt;
+        self.composer_contexts.push(record);
+        if let Some(id) = self.cite.editor_id {
+            let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+            let index = prompt_to_display(&self.composer, cursor);
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(index),
+                )));
+            state.store(ctx, id);
+            ctx.memory_mut(|m| m.request_focus(id));
+        }
+    }
+
     pub(crate) fn remap_composer_caret(
         &self,
         ctx: &egui::Context,

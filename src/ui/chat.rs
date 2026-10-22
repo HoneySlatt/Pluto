@@ -6,8 +6,7 @@ use crate::app::App;
 use crate::model::{Message, Project};
 use crate::theme::{self, Weight, font};
 use crate::timeline::{self, Row, WorkEntry};
-use crate::ui::citations;
-use crate::ui::markdown::{Markdown, PlainText};
+use crate::ui::markdown::{ChipRef, Markdown, PlainText};
 use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
@@ -890,8 +889,9 @@ impl App {
             MESSAGE_LINE,
             max_width - 24.0,
         );
-        // Citation links show as their chips.
-        let rich = (!citations::collect(text).is_empty()).then(|| {
+        // Citations, context references, file mentions and known skills
+        // show as their chips.
+        let rich = (!PlainText::chips(text).is_empty()).then(|| {
             PlainText::layout(
                 ui,
                 text,
@@ -952,8 +952,23 @@ impl App {
         let text_pos = bubble.min + Vec2::new(12.0, 12.0 + grid.y);
         let text_id = ui.id().with(("user-text", &message.id));
         if let Some(rich) = rich {
-            if let Some(citation) = rich.paint(ui, text_pos, text_id) {
-                self.open_citation_source(&citation);
+            match rich.paint(ui, text_pos, text_id) {
+                Some(ChipRef::Citation(citation)) => self.open_citation_source(&citation),
+                Some(ChipRef::File(file)) => self.open_markdown_file(&file.path),
+                Some(ChipRef::Context { id, .. }) => {
+                    let rect = ui.ctx().data(|d| {
+                        d.get_temp::<Rect>(egui::Id::new(crate::ui::markdown::CLICKED_CHIP))
+                    });
+                    let record = message.context["records"]
+                        .as_array()
+                        .and_then(|records| records.iter().find(|r| r["contextId"] == id.as_str()))
+                        .filter(|r| r["kind"] == "terminal")
+                        .cloned();
+                    if let (Some(rect), Some(record)) = (rect, record) {
+                        self.bubble_popover = Some((rect, record));
+                    }
+                }
+                None => {}
             }
         } else {
             widgets::selectable_galley(ui, text_id, text_pos, galley, theme::foreground());

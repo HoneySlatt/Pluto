@@ -9,6 +9,7 @@ pub mod citations;
 pub mod cite;
 pub mod command_menu;
 pub mod composer;
+pub mod composer_context;
 pub mod connect;
 pub mod content_search;
 pub mod context_menu;
