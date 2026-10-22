@@ -354,6 +354,24 @@ fn main() {
             bench.step(&mut file_scroll);
         }
         report("file scroll", &file_scroll);
+
+        // A long Markdown document, rendered.
+        bench.app.show_rendered_file("docs/long.md");
+        bench.settle(Duration::from_secs(2), |_| false);
+        let mut markdown_scroll = Samples::default();
+        for i in 0..240 {
+            bench
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(1100.0, 450.0)));
+            bench.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, if i < 120 { -40.0 } else { 40.0 }),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            bench.step(&mut markdown_scroll);
+        }
+        report("markdown scroll", &markdown_scroll);
     }
     let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     for line in status

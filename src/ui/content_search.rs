@@ -122,7 +122,7 @@ fn normalize_ranges(line: &str, ranges: &[(usize, usize)]) -> Vec<(usize, usize)
 }
 
 /// `toLocaleString` for counts (en-US grouping).
-fn grouped(count: usize) -> String {
+pub(crate) fn grouped(count: usize) -> String {
     let digits = count.to_string();
     let mut out = String::new();
     for (index, c) in digits.chars().enumerate() {

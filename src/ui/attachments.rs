@@ -131,9 +131,16 @@ pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
     });
 }
 
-/// Decodes image bytes into premultiplied RGBA.
+/// Decodes image bytes (or an SVG, rasterized at its own size) into
+/// premultiplied RGBA.
 pub(crate) fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
-    let mut image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let Ok(decoded) = image::load_from_memory(bytes) else {
+        let svg = egui_extras::image::load_svg_bytes(bytes, &Default::default()).ok()?;
+        let [width, height] = svg.size;
+        let pixels = svg.pixels.iter().flat_map(|p| p.to_array()).collect();
+        return image::RgbaImage::from_raw(width as u32, height as u32, pixels);
+    };
+    let mut image = decoded.to_rgba8();
     premultiply(&mut image);
     Some(image)
 }

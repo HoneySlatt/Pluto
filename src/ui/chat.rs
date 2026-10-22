@@ -808,7 +808,7 @@ impl App {
     /// its name while it loads.
     /// `openFileInPanel`: a markdown file reference opens in the right
     /// panel when it is inside the workspace.
-    fn open_markdown_file(&mut self, path: &str) {
+    pub(crate) fn open_markdown_file(&mut self, path: &str) {
         let root = self.workspace_cwd().unwrap_or_default();
         let relative =
             if let Some(rest) = path.strip_prefix(&format!("{}/", root.trim_end_matches('/'))) {
@@ -1028,23 +1028,7 @@ impl App {
             let media_menu = markdown.media_menu.take();
             // Images in the answer: their signed URLs, then a click expands
             // one and a right click opens its menu.
-            for (key, payload) in asset_requests {
-                self.send_request(format!("attachment:{key}"), "assets.createUrl", payload);
-            }
-            if let Some((source, image)) = opened_media {
-                self.open_lightbox(
-                    vec![crate::ui::lightbox::Item {
-                        name: source.name.clone(),
-                        key: source.key.clone(),
-                        image,
-                        source: Some(source),
-                    }],
-                    0,
-                );
-            }
-            if let Some((source, at)) = media_menu {
-                self.open_media_menu(source, at);
-            }
+            self.markdown_media(asset_requests, opened_media, media_menu);
             // `openFileInPanel`: a file chip opens in the right panel.
             if let Some(file) = opened_file {
                 self.open_markdown_file(&file.path);

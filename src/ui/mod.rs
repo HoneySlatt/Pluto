@@ -15,6 +15,7 @@ pub mod custom_model_editor;
 pub mod diff_panel;
 pub mod emoji;
 pub mod favicon;
+pub mod file_previews;
 pub mod files;
 pub mod git_actions;
 pub mod icon_picker;

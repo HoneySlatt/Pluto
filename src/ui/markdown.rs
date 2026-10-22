@@ -1112,6 +1112,9 @@ pub struct Markdown<'a> {
     /// The workspace and thread images resolve against.
     pub(crate) media_root: Option<String>,
     pub(crate) media_thread: Option<String>,
+    /// The folder relative images resolve against (`imageBaseDir`; the
+    /// workspace when unset).
+    pub(crate) image_base: Option<String>,
     /// Signed URLs to ask for: (cache key, `assets.createUrl` payload).
     pub(crate) asset_requests: Vec<(String, serde_json::Value)>,
     /// An image clicked (expanded preview) or right-clicked (its menu).
@@ -1132,6 +1135,7 @@ impl<'a> Markdown<'a> {
             quoted: false,
             media_root: None,
             media_thread: None,
+            image_base: None,
             asset_requests: Vec::new(),
             opened_media: None,
             media_menu: None,
@@ -1353,7 +1357,10 @@ impl<'a> Markdown<'a> {
         use crate::ui::attachments::{self, MediaState};
         use crate::ui::media::{self, ImageSource};
         const MAX: f32 = 480.0; // 30rem
-        let classified = media::classify(src, self.media_root.as_deref());
+        let classified = media::classify(
+            src,
+            self.image_base.as_deref().or(self.media_root.as_deref()),
+        );
         let (key, reference, framed) = match &classified {
             ImageSource::Direct(uri) => {
                 (format!("md-direct:{uri}"), media::url_reference(uri), false)

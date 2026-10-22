@@ -6,10 +6,10 @@
 //! (`projects.searchEntries`), refresh and expand/collapse all; opening a
 //! file in the tab (`projects.readFile`) with the breadcrumb, a read-only
 //! highlighted source view with line numbers, line wrapping and the tree
-//! toggle.
+//! toggle; the compact "Open in" picker; the image, Markdown and table
+//! previews (`file_previews`) and the rendered/source toggle.
 //!
-//! Not ported: editing and saving, the Markdown/image/table previews (the
-//! eye button), "Open in editor", comments and drag-to-mention. Files are
+//! Not ported: editing and saving, comments and drag-to-mention. Files are
 //! only read when the user opens them.
 use std::collections::{HashMap, HashSet};
 
@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use crate::app::{App, PanelTab};
 use crate::theme::{self, Weight, font};
-use crate::ui::widgets;
+use crate::ui::{file_previews, widgets};
 
 const SEARCH_HEADER: f32 = 36.0;
 const ROW: f32 = 24.0;
@@ -58,6 +58,12 @@ pub struct FilesState {
     reveal: Option<(String, usize, bool)>,
     /// The open file's lines laid out.
     rendered: Option<Rendered>,
+    /// Markdown and CSV/TSV files shown rendered (`t3code.renderMarkdown`,
+    /// `t3code.renderTable`).
+    pub render_markdown: bool,
+    pub render_table: bool,
+    /// The open CSV/TSV laid out as a table.
+    pub(crate) table: Option<crate::ui::file_previews::TableLayout>,
 }
 
 /// A read file laid out: one galley per line, where each starts and how
@@ -85,6 +91,9 @@ impl Default for FilesState {
             tree: true,
             reveal: None,
             rendered: None,
+            render_markdown: false,
+            render_table: true,
+            table: None,
         }
     }
 }
@@ -352,22 +361,56 @@ impl App {
             16.0,
         );
 
-        let mut right = toolbar.right() - 12.0;
-        for (id, icon, tip, active) in [
-            (
-                "files-tree",
-                "folder-tree",
-                "Toggle file tree",
-                self.files.tree,
-            ),
-            (
+        // What the file shows: an image, the rendered document or table
+        // (a revealed line wins until the toggle), else its source.
+        let image = file_previews::is_image_preview_path(&path);
+        let markdown = file_previews::is_markdown_preview_file(&path);
+        let delimiter = file_previews::preview_delimiter(&path);
+        let revealing = self
+            .files
+            .reveal
+            .as_ref()
+            .is_some_and(|(revealed, ..)| *revealed == path);
+        let rendered = if markdown {
+            self.files.render_markdown && !revealing
+        } else {
+            delimiter.is_some() && self.files.render_table && !revealing
+        };
+        let read = self.files.reads.get(&format!("{cwd}\0{path}"));
+        let raw_text = !image && !rendered && matches!(read, Some(Ok(_)));
+        let mut buttons = vec![(
+            "files-tree",
+            "folder-tree",
+            if self.files.tree {
+                "Hide file explorer"
+            } else {
+                "Show file explorer"
+            },
+            self.files.tree,
+        )];
+        if raw_text {
+            buttons.push((
                 "files-wrap",
                 "text-wrap",
-                "Toggle line wrapping",
+                if self.files.wrap {
+                    "Disable word wrap"
+                } else {
+                    "Enable word wrap"
+                },
                 self.files.wrap,
-            ),
-            ("files-preview", "eye", "Preview", false),
-        ] {
+            ));
+        }
+        if markdown || delimiter.is_some() {
+            let (icon, tip) = match (rendered, markdown) {
+                (true, true) => ("code-xml", "Show markdown source"),
+                (false, true) => ("eye", "Show rendered markdown"),
+                (true, false) => ("code-xml", "Show source"),
+                (false, false) => ("table-2", "Show table"),
+            };
+            buttons.push(("files-rendered", icon, tip, rendered));
+        }
+        let mut right = toolbar.right() - 12.0;
+        for (id, icon, tip, active) in buttons {
             let button =
                 Rect::from_min_size(Pos2::new(right - 28.0, toolbar.top()), Vec2::splat(28.0));
             right = button.left() - 8.0;
@@ -380,7 +423,18 @@ impl App {
                 match id {
                     "files-tree" => self.files.tree = !self.files.tree,
                     "files-wrap" => self.files.wrap = !self.files.wrap,
-                    _ => self.status = Some("File previews are not implemented yet".into()),
+                    _ => {
+                        if markdown {
+                            self.files.render_markdown = !rendered;
+                        } else {
+                            self.files.render_table = !rendered;
+                        }
+                        // Pressed, the toggle handles the reveal.
+                        if !rendered && revealing {
+                            self.files.reveal = None;
+                        }
+                        crate::app::save_ui_state(self);
+                    }
                 }
             }
         }
@@ -479,7 +533,19 @@ impl App {
         } else {
             content
         };
-        self.file_source(ui, source, &cwd, &path);
+        if image {
+            self.workspace_image(ui, source, &cwd, &path);
+            return;
+        }
+        // The read must be in before a rendered view takes over.
+        let key = format!("{cwd}\0{path}");
+        match (rendered, delimiter, self.files.reads.get(&key)) {
+            (true, None, Some(Ok(_))) => self.rendered_markdown(ui, source, &cwd, &path),
+            (true, Some(delimiter), Some(Ok(_))) => {
+                self.delimited_table(ui, source, &cwd, &path, delimiter);
+            }
+            _ => self.file_source(ui, source, &cwd, &path),
+        }
     }
 
     /// The read-only source view (pierre's file view): line numbers and
@@ -521,6 +587,8 @@ impl App {
             }
             Some(Ok(value)) => value,
         };
+        let mut rect = rect;
+        rect.min.y += file_previews::truncated_notice(ui, rect, value);
         let contents = value["contents"].as_str().unwrap_or_default();
         // The read's text stays put until the file is read again.
         let identity = (contents.as_ptr() as usize, contents.len());

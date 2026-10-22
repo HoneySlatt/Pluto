@@ -470,7 +470,13 @@ impl App {
             usage: Default::default(),
             pull_requests_open: false,
             prs: Default::default(),
-            files: Default::default(),
+            files: {
+                let saved = read_ui_state(options.client_settings_path.as_deref());
+                let mut files = crate::ui::files::FilesState::default();
+                files.render_markdown = saved["renderMarkdown"].as_bool().unwrap_or(false);
+                files.render_table = saved["renderTable"].as_bool().unwrap_or(true);
+                files
+            },
             content_search: Default::default(),
             terminals: Default::default(),
             client_settings: crate::ui::settings::load_client_settings(
@@ -995,6 +1001,12 @@ impl App {
         self.open_file(path.to_owned());
     }
 
+    /// Opens a workspace file with Markdown rendered (dev benches).
+    pub fn show_rendered_file(&mut self, path: &str) {
+        self.files.render_markdown = true;
+        self.open_file(path.to_owned());
+    }
+
     /// Shows a settings page, or closes settings (dev benches).
     pub fn show_settings(&mut self, page: Option<usize>) {
         match page {
@@ -1292,6 +1304,13 @@ fn ui_state_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBu
     Some(settings?.with_file_name("ui-state.json"))
 }
 
+fn read_ui_state(settings: Option<&std::path::Path>) -> serde_json::Value {
+    ui_state_path(settings)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .unwrap_or_default()
+}
+
 /// The persisted UI state (upstream's `uiStateStore`): project expansion
 /// and the manual project order.
 fn load_ui_state(
@@ -1301,10 +1320,7 @@ fn load_ui_state(
     Vec<String>,
     Option<String>,
 ) {
-    let value = ui_state_path(settings)
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .unwrap_or_default();
+    let value = read_ui_state(settings);
     (
         serde_json::from_value(value["projectExpandedById"].clone()).unwrap_or_default(),
         serde_json::from_value(value["projectOrder"].clone()).unwrap_or_default(),
@@ -1320,6 +1336,8 @@ pub(crate) fn save_ui_state(app: &App) {
         "projectExpandedById": app.legacy_project_expanded,
         "projectOrder": app.legacy_project_order,
         "lastEditor": app.last_editor,
+        "renderMarkdown": app.files.render_markdown,
+        "renderTable": app.files.render_table,
     });
     let temp = path.with_extension("json.tmp");
     if std::fs::write(&temp, value.to_string()).is_ok() {

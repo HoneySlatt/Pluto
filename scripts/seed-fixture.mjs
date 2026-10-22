@@ -409,5 +409,50 @@ completeTurn(bigDiff, bigTurn, 1, [
 // checkpoint of web-demo picks it up.
 fs.mkdirSync(path.join(workspaces, "web-demo", "docs"), { recursive: true });
 fs.writeFileSync(path.join(workspaces, "web-demo", "docs", "capture.png"), syntheticPng());
+// A document and a table for the Files surface's rendered previews.
+fs.writeFileSync(
+  path.join(workspaces, "web-demo", "docs", "guide.md"),
+  [
+    "# Guide de rendu",
+    "",
+    "Le rendu suit **trois étapes** et lit `src/render.ts`.",
+    "",
+    "- Préparer les données",
+    "- Dessiner les lignes",
+    "- Vérifier la capture",
+    "",
+    "![La capture](capture.png)",
+    "",
+  ].join("\n"),
+);
+fs.writeFileSync(
+  path.join(workspaces, "web-demo", "docs", "long.md"),
+  Array.from({ length: 120 }, (_, i) =>
+    [
+      `## Section ${i + 1}`,
+      "",
+      `Le paragraphe ${i + 1} décrit **le rendu** et cite \`src/render.ts\` avec un peu de texte pour remplir la ligne.`,
+      "",
+      "- Un point",
+      "- Un autre point",
+      "",
+      "```ts",
+      `export const value${i} = ${i};`,
+      "```",
+      "",
+    ].join("\n"),
+  ).join("\n"),
+);
+fs.writeFileSync(
+  path.join(workspaces, "web-demo", "docs", "ventes.csv"),
+  [
+    "Mois,Région,Ventes,Commentaire",
+    "Janvier,Nord,1200,Stable",
+    'Février,Sud,980,"Baisse, puis reprise"',
+    'Mars,Est,1430,"Une note ""citée"""',
+    "Avril,Ouest,1610,Record trimestriel après la campagne de printemps",
+    "",
+  ].join("\n"),
+);
 
 console.log("seeded fixture events");
