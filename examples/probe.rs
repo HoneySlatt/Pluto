@@ -40,10 +40,7 @@ fn main() {
                         .find(|t| t["title"].as_str().unwrap_or("").starts_with(&wanted))
                         .cloned();
                     if let Some(id) = thread.as_ref().and_then(|t| t["id"].as_str()) {
-                        connection
-                            .actions
-                            .send(Action::Select(Some(id.to_owned())))
-                            .unwrap();
+                        connection.send(Action::Select(Some(id.to_owned())));
                         selected = true;
                     }
                 }

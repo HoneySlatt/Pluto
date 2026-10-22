@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     net::{TcpStream, ToSocketAddrs},
-    sync::mpsc,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 use tungstenite::{Message, WebSocket, client::IntoClientRequest, stream::MaybeTlsStream};
@@ -49,8 +50,33 @@ pub enum Event {
 }
 
 pub struct Connection {
-    pub actions: mpsc::Sender<Action>,
+    actions: mpsc::Sender<Action>,
     pub events: mpsc::Receiver<Event>,
+    wake: Arc<Wake>,
+}
+
+/// Wakes the connection worker, which otherwise sleeps until the server
+/// writes: an action queued by the client goes out at once.
+struct Wake(OwnedFd);
+
+impl Wake {
+    fn new() -> Result<Self, String> {
+        let fd = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if fd < 0 {
+            return Err("Could not start the connection worker".into());
+        }
+        Ok(Self(unsafe { OwnedFd::from_raw_fd(fd) }))
+    }
+
+    fn notify(&self) {
+        let one = 1_u64;
+        unsafe { libc::write(self.0.as_raw_fd(), (&raw const one).cast(), 8) };
+    }
+
+    fn clear(&self) {
+        let mut count = 0_u64;
+        unsafe { libc::read(self.0.as_raw_fd(), (&raw mut count).cast(), 8) };
+    }
 }
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
@@ -64,6 +90,8 @@ impl Connection {
         let url = socket_url(server)?;
         let (actions, inbox) = mpsc::channel();
         let (outbox, events) = mpsc::sync_channel(128);
+        let wake = Arc::new(Wake::new()?);
+        let worker_wake = wake.clone();
         std::thread::Builder::new()
             .name("t3-connection".into())
             .spawn(move || {
@@ -72,12 +100,29 @@ impl Connection {
                     ctx.request_repaint();
                     sent
                 };
-                if let Err(error) = run(url, token, inbox, &emit) {
+                if let Err(error) = run(url, token, inbox, &worker_wake, &emit) {
                     emit(Event::Disconnected(error));
                 }
             })
             .map_err(|_| "Could not start the connection worker")?;
-        Ok(Self { actions, events })
+        Ok(Self {
+            actions,
+            events,
+            wake,
+        })
+    }
+
+    pub fn send(&self, action: Action) {
+        if self.actions.send(action).is_ok() {
+            self.wake.notify();
+        }
+    }
+}
+
+impl Drop for Connection {
+    /// The worker notices the closed channel and ends.
+    fn drop(&mut self) {
+        self.wake.notify();
     }
 }
 
@@ -121,10 +166,52 @@ pub fn frames(text: &str) -> Result<Vec<Value>, String> {
     })
 }
 
+/// Writes wait until sent; reads never wait (`wait` does instead).
 fn send(socket: &mut Socket, value: Value) -> Result<(), String> {
-    socket
-        .send(Message::Text(value.to_string().into()))
-        .map_err(|_| "Connection lost while writing to the server".into())
+    set_blocking(socket, true);
+    let sent = socket.send(Message::Text(value.to_string().into()));
+    set_blocking(socket, false);
+    sent.map_err(|_| "Connection lost while writing to the server".into())
+}
+
+fn tcp_of(socket: &Socket) -> Option<&TcpStream> {
+    match socket.get_ref() {
+        MaybeTlsStream::Plain(tcp) => Some(tcp),
+        MaybeTlsStream::Rustls(tls) => Some(tls.get_ref()),
+        _ => None,
+    }
+}
+
+fn set_blocking(socket: &Socket, blocking: bool) {
+    if let Some(tcp) = tcp_of(socket) {
+        let _ = tcp.set_nonblocking(!blocking);
+    }
+}
+
+/// Sleeps until the server writes, the client wakes the worker, or
+/// `timeout` passes.
+fn wait(socket: &Socket, wake: &Wake, timeout: Duration) {
+    let Some(tcp) = tcp_of(socket) else {
+        std::thread::sleep(timeout.min(Duration::from_millis(100)));
+        return;
+    };
+    let mut fds = [
+        libc::pollfd {
+            fd: tcp.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: wake.0.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
+    unsafe { libc::poll(fds.as_mut_ptr(), 2, millis) };
+    if fds[1].revents != 0 {
+        wake.clear();
+    }
 }
 
 fn connect(url: &url::Url, token: &str) -> Result<Socket, String> {
@@ -163,12 +250,10 @@ fn connect(url: &url::Url, token: &str) -> Result<Socket, String> {
         tungstenite::handshake::HandshakeError::Failure(tungstenite::Error::Http(response)) => format!("Server refused the connection (HTTP {}). Check authentication and server compatibility.",response.status().as_u16()),
         _ => "WebSocket connection failed. Check the server address and TLS certificate.".into(),
     })?;
-    let tcp = match socket.get_ref() {
-        MaybeTlsStream::Plain(tcp) => tcp,
-        MaybeTlsStream::Rustls(tls) => tls.get_ref(),
-        _ => return Err("Unsupported TLS transport".into()),
-    };
-    tcp.set_read_timeout(Some(Duration::from_millis(100)))
+    let tcp = tcp_of(&socket).ok_or("Unsupported TLS transport")?;
+    tcp.set_read_timeout(None)
+        .map_err(|_| "Could not configure the connection")?;
+    tcp.set_nonblocking(true)
         .map_err(|_| "Could not configure the connection")?;
     Ok(socket)
 }
@@ -177,6 +262,7 @@ fn run(
     url: url::Url,
     token: Zeroizing<String>,
     inbox: mpsc::Receiver<Action>,
+    wake: &Wake,
     emit: &impl Fn(Event) -> bool,
 ) -> Result<(), String> {
     let mut socket = connect(&url, &token)?;
@@ -348,7 +434,7 @@ fn run(
         }
         match socket.read() {
             Ok(Message::Text(text)) => {
-                for frame in frames(&text)? {
+                for mut frame in frames(&text)? {
                     if matches!(
                         frame["_tag"].as_str(),
                         Some("Defect" | "ClientProtocolError")
@@ -373,8 +459,13 @@ fn run(
                     };
                     match frame["_tag"].as_str() {
                         Some("Chunk") => {
-                            let values =
-                                frame["values"].as_array().ok_or("Invalid stream chunk")?;
+                            // Values move on to the client: a thread snapshot
+                            // can be large.
+                            let values = frame
+                                .get_mut("values")
+                                .and_then(Value::as_array_mut)
+                                .map(std::mem::take)
+                                .ok_or("Invalid stream chunk")?;
                             for value in values {
                                 if route == Route::Config
                                     && value["type"] == "snapshot"
@@ -396,7 +487,7 @@ fn run(
                                     )?;
                                     negotiated = true;
                                 }
-                                if !emit(Event::Data(route.clone(), value.clone())) {
+                                if !emit(Event::Data(route.clone(), value)) {
                                     return Ok(());
                                 }
                             }
@@ -428,11 +519,17 @@ fn run(
             }
             Ok(Message::Close(_)) => return Err("The server closed the connection".into()),
             Ok(_) => {}
+            // Nothing to read: sleep until there is, or until the next
+            // heartbeat or deadline check.
             Err(tungstenite::Error::Io(error))
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) => {}
+                ) =>
+            {
+                let heartbeat_due = Duration::from_secs(15).saturating_sub(heartbeat.elapsed());
+                wait(&socket, wake, heartbeat_due.min(Duration::from_secs(1)));
+            }
             Err(_) => {
                 return Err(
                     "Connection lost. Reconnect to reload authoritative server state.".into(),

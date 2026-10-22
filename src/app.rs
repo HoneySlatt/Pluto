@@ -705,7 +705,7 @@ impl App {
 
     pub(crate) fn send(&mut self, action: Action) {
         if let Some(connection) = &self.connection {
-            let _ = connection.actions.send(action);
+            connection.send(action);
         }
     }
 
