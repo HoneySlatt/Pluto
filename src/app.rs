@@ -93,6 +93,8 @@ pub struct App {
     pub(crate) last_editor: Option<String>,
     /// The "Open in" editor list and the path it opens.
     pub(crate) open_in_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// An image a file link opens once it has loaded.
+    pub(crate) media_pending: Option<crate::ui::media::Source>,
     /// An image's right-click menu, while open.
     pub(crate) media_menu: Option<(crate::ui::media::Source, crate::ui::context_menu::State)>,
     /// A Scratch project asked for, until it is in the shell.
@@ -388,6 +390,7 @@ impl App {
             hero_project_menu: None,
             scratch: None,
             media_menu: None,
+            media_pending: None,
             toasts: Default::default(),
             git: Default::default(),
             last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
@@ -911,6 +914,7 @@ impl eframe::App for App {
                 self.thread_menu(ui);
                 self.text_menu(ui);
                 self.cite_overlays(ui);
+                self.poll_media_open();
                 self.media_menu(ui);
                 self.open_in_menu(ui);
                 self.git_menu(ui);

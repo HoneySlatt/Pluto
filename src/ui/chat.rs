@@ -820,10 +820,15 @@ impl App {
             };
         match relative {
             Some(relative) => self.open_file(relative),
-            None => {
-                self.status =
-                    Some("Opening files outside the workspace is not implemented yet".into());
+            // Media outside the workspace opens in the expanded preview;
+            // other host files in the preferred editor.
+            None if crate::ui::media::is_image_path(path) && path.starts_with('/') => {
+                self.open_media_file(path);
             }
+            None => match self.preferred_editor() {
+                Some(editor) => self.open_in_editor(path, editor),
+                None => self.status = Some("No installed editors found".into()),
+            },
         }
     }
 

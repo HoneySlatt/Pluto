@@ -283,7 +283,69 @@ fn copy_png(bytes: &[u8]) -> Result<(), String> {
         .ok_or_else(|| "The clipboard did not accept the image.".to_owned())
 }
 
+/// `mediaMimeTypeFromExtension` for images.
+pub(crate) fn is_image_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico",
+    ]
+    .iter()
+    .any(|ext| lower.ends_with(ext))
+}
+
 impl App {
+    /// Opens a host image in the expanded preview once it has loaded
+    /// (`openMarkdownMedia`).
+    pub(crate) fn open_media_file(&mut self, path: &str) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let key = format!("md-file:{thread}:{path}");
+        if crate::ui::attachments::media_state(&key).is_none() {
+            crate::ui::attachments::mark_loading(&key);
+            self.send_request(
+                format!("attachment:{key}"),
+                "assets.createUrl",
+                serde_json::json!({"resource": {"_tag": "media-file", "threadId": thread, "path": path}}),
+            );
+        }
+        let name = path.rsplit('/').next().unwrap_or(path).to_owned();
+        let reference = file_reference(path, self.workspace_cwd().as_deref());
+        self.media_pending = Some(Source {
+            name,
+            reference: Some(reference),
+            key,
+            local_file: None,
+        });
+    }
+
+    /// The image a file link asked for, shown once it has loaded.
+    pub(crate) fn poll_media_open(&mut self) {
+        use crate::ui::attachments::MediaState;
+        let Some(source) = &self.media_pending else {
+            return;
+        };
+        match crate::ui::attachments::media_state(&source.key) {
+            Some(MediaState::Ready(image)) => {
+                let source = self.media_pending.take().expect("pending media");
+                self.open_lightbox(
+                    vec![crate::ui::lightbox::Item {
+                        name: source.name.clone(),
+                        key: source.key.clone(),
+                        image,
+                        source: Some(source),
+                    }],
+                    0,
+                );
+            }
+            Some(MediaState::Failed) => {
+                self.media_pending = None;
+                self.status = Some("Unable to open file".into());
+            }
+            _ => {}
+        }
+    }
+
     /// Opens an image's menu at `at`.
     pub(crate) fn open_media_menu(&mut self, source: Source, at: Pos2) {
         self.media_menu = Some((source, context_menu::State::new(at)));
