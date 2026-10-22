@@ -1108,8 +1108,13 @@ impl App {
                     }
                     Chip::Context { kind, id, label } => {
                         let chip_id = egui::Id::new(("composer-context", index));
-                        let icon = (crate::ui::composer_context::kind_icon(kind), None);
-                        let accent = crate::ui::composer_context::kind_accent(kind);
+                        let record = self
+                            .composer_contexts
+                            .iter()
+                            .find(|r| r["contextId"] == id.as_str());
+                        let shown = crate::ui::composer_context::display_kind(kind, record);
+                        let icon = (crate::ui::composer_context::kind_icon(&shown), None);
+                        let accent = crate::ui::composer_context::kind_accent(&shown);
                         if paint_context_chip(ui, rect, accent, icon, label, size, chip_id, None)
                             .clicked()
                         {

@@ -1195,6 +1195,34 @@ fn skill_chip_blocks(blocks: &mut [Block]) {
     }
 }
 
+/// Context chips take their display kind (a pull request by its state).
+fn context_display_kinds(blocks: &mut [Block], records: &[serde_json::Value]) {
+    fn inlines(list: &mut [Inline], records: &[serde_json::Value]) {
+        for inline in list {
+            if let Inline::Context { kind, id, .. } = inline {
+                let record = records.iter().find(|r| r["contextId"] == id.as_str());
+                *kind = crate::ui::composer_context::display_kind(kind, record);
+            }
+        }
+    }
+    for block in blocks {
+        match block {
+            Block::Paragraph(list) | Block::Heading(_, list) => inlines(list, records),
+            Block::List { items, .. } => items
+                .iter_mut()
+                .for_each(|item| context_display_kinds(item, records)),
+            Block::Quote(children) => context_display_kinds(children, records),
+            Block::Table { head, rows, .. } => {
+                head.iter_mut().for_each(|cell| inlines(cell, records));
+                rows.iter_mut()
+                    .flatten()
+                    .for_each(|cell| inlines(cell, records));
+            }
+            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+        }
+    }
+}
+
 pub struct Markdown<'a> {
     pub highlighter: &'a mut Highlighter,
     pub id: egui::Id,
@@ -1225,6 +1253,8 @@ pub struct Markdown<'a> {
     /// `$skills` as chips.
     /// A context chip clicked during `show` (its context id).
     pub(crate) opened_context: Option<String>,
+    /// The message's context records, for its chips' display kinds.
+    pub(crate) context_records: Vec<serde_json::Value>,
     pub(crate) line_breaks: bool,
     pub(crate) text_color: Option<Color32>,
     pub(crate) skill_chips: bool,
@@ -1252,6 +1282,7 @@ impl<'a> Markdown<'a> {
             opened_media: None,
             media_menu: None,
             opened_context: None,
+            context_records: Vec::new(),
             line_breaks: false,
             text_color: None,
             skill_chips: false,
@@ -1277,6 +1308,9 @@ impl<'a> Markdown<'a> {
         let mut blocks = parse_with(text, self.line_breaks);
         if self.skill_chips {
             skill_chip_blocks(&mut blocks);
+        }
+        if !self.context_records.is_empty() {
+            context_display_kinds(&mut blocks, &self.context_records);
         }
         self.origin_x = ui.cursor().left();
         self.used_width = 0.0;
@@ -2056,6 +2090,12 @@ pub(crate) fn inline_markdown(inlines: &[Inline]) -> String {
             Inline::Citation(citation) => citation.serialize(),
             Inline::Context { kind, id, .. } if kind == "skill" => format!("${id}"),
             Inline::Context { kind, label, id } => {
+                // A pull request shows by its state; its link names the context kind.
+                let kind = if kind.starts_with("pr-") {
+                    "review-comment"
+                } else {
+                    kind
+                };
                 crate::ui::composer_context::format_reference(kind, id, label)
             }
             Inline::Break => "\n".to_owned(),

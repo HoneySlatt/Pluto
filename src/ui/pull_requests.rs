@@ -306,7 +306,7 @@ fn sort_groups(groups: &mut [Group], sort: &str, searching: bool, involvement: &
 }
 
 /// The lifecycle glyph: icon and tone (`PULL_REQUEST_STATE_PRESENTATION`).
-fn state_glyph(entry: &Value) -> (&'static str, Color32) {
+pub(crate) fn state_glyph(entry: &Value) -> (&'static str, Color32) {
     match (str_field(entry, "state"), entry["isDraft"] == true) {
         ("merged", _) => ("git-merge", theme::alpha(VIOLET, 0.9)),
         ("closed", _) => ("git-pull-request-closed", theme::alpha(RED, 0.9)),

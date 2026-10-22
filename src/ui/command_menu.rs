@@ -8,10 +8,11 @@
 //! mode on), the provider's commands (at the prompt's start) and its skills;
 //! "@" searches the workspace's files and folders (`projects.searchEntries`)
 //! and inserts a file link; "$" lists the provider's skills. Arrows move the
-//! highlight, Enter or Tab picks, Escape closes. Not ported: "#" pull
-//! request references and `/usage-limits`.
+//! highlight, Enter or Tab picks, Escape closes. "#" lists the
+//! project's pull requests and inserts a reference to one. Not ported:
+//! `/usage-limits` and the exact-number pull request lookup.
 use eframe::egui::{self, CornerRadius, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
@@ -20,6 +21,7 @@ use crate::ui::{cite, widgets};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum TriggerKind {
     Path,
+    PullRequest,
     Slash,
     Skill,
 }
@@ -85,6 +87,21 @@ pub(crate) fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
         .rposition(|c| is_space(*c))
         .map_or(0, |i| i + 1);
     let token: String = chars[token_start..cursor].iter().collect();
+    // `#` then a letter or digit and letters, digits, `_` or `-`.
+    if let Some(rest) = token.strip_prefix('#')
+        && (rest.is_empty()
+            || (rest.starts_with(char::is_alphanumeric)
+                && rest
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')))
+    {
+        return Some(Trigger {
+            kind: TriggerKind::PullRequest,
+            query: rest.to_owned(),
+            start: token_start,
+            end: cursor,
+        });
+    }
     let first = token.chars().next()?;
     let kind = if is_currency(first) {
         TriggerKind::Skill
@@ -304,6 +321,7 @@ pub(crate) enum ItemKind {
     Builtin(&'static str),
     ProviderCommand(String),
     Skill { name: String, source: &'static str },
+    PullRequest(Box<Value>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -323,6 +341,9 @@ pub(crate) struct MenuState {
     shown: Option<(Trigger, Vec<Item>, bool)>,
     /// What the skill chips' names were built from.
     skills_key: Option<(String, usize, Option<String>, Option<String>)>,
+    /// `pullRequests.list` answers by (project, text query).
+    pr_lists: std::collections::HashMap<String, Result<Value, String>>,
+    pr_requested: std::collections::HashSet<String>,
 }
 
 fn search_key(trigger: &Trigger) -> String {
@@ -418,9 +439,187 @@ impl App {
         self.command_menu.skills_key = Some(key);
     }
 
+    /// The project and repository a `#` lists pull requests of, when the
+    /// environment offers them (`supportsPullRequests`, the project's
+    /// `sourceControlRepositorySelector`).
+    fn pull_request_scope(&self, draft: bool) -> Option<(String, String)> {
+        if self.state.config["environment"]["capabilities"]["pullRequests"] != true {
+            return None;
+        }
+        let project = if draft {
+            self.draft_project()
+        } else {
+            let thread = self.current_thread()?;
+            self.state.project(&thread.project_id).cloned()
+        }?;
+        let repository = repository_selector(project.repository_identity.as_ref()?)?;
+        Some((project.id, repository))
+    }
+
+    /// `#` items: the project's pull requests (`pullRequests.list`, all
+    /// states, 99), by number while the query is digits
+    /// (`filterComposerPullRequestMatches`), else searched and ranked
+    /// (`rankPullRequestMatches`); 12 at most.
+    fn pull_request_items(&mut self, trigger: &Trigger, draft: bool) -> (Vec<Item>, bool) {
+        let Some((project, repository)) = self.pull_request_scope(draft) else {
+            return (Vec::new(), false);
+        };
+        let query = trigger.query.trim().to_owned();
+        let numeric = query.chars().all(|c| c.is_ascii_digit());
+        let text_query = if numeric {
+            String::new()
+        } else {
+            query.clone()
+        };
+        let key = format!("{project}\0{text_query}");
+        if !self.command_menu.pr_requested.contains(&key) {
+            self.command_menu.pr_requested.insert(key.clone());
+            let mut input = json!({"state": "all", "projectId": project, "limit": 99});
+            if !text_query.is_empty() {
+                input["query"] = json!(text_query);
+            }
+            self.send_request(format!("composer-prs:{key}"), "pullRequests.list", input);
+        }
+        let Some(Ok(list)) = self.command_menu.pr_lists.get(&key) else {
+            return (Vec::new(), !self.command_menu.pr_lists.contains_key(&key));
+        };
+        let repository = repository.trim().to_lowercase();
+        let ours = |entry: &&Value| {
+            entry["projectId"] == project.as_str()
+                && entry["repository"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_lowercase()
+                    == repository
+        };
+        let entries: Vec<&Value> = list["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(ours)
+            .collect();
+        let updated = |e: &Value| e["updatedAt"].as_str().unwrap_or_default().to_owned();
+        let mut matches: Vec<&Value> = if numeric {
+            let mut seen = std::collections::HashSet::new();
+            let mut found: Vec<&Value> = entries
+                .into_iter()
+                .filter(|e| {
+                    e["number"]
+                        .as_u64()
+                        .is_some_and(|n| n.to_string().contains(&query))
+                })
+                .filter(|e| seen.insert(e["number"].as_u64()))
+                .collect();
+            let exact =
+                |e: &Value| e["number"].as_u64().map(|n| n.to_string()) == Some(query.clone());
+            found.sort_by(|a, b| {
+                exact(b)
+                    .cmp(&exact(a))
+                    .then_with(|| updated(b).cmp(&updated(a)))
+            });
+            found
+        } else {
+            let searches_on_host = |e: &Value| {
+                list["providers"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|p| p["host"] == e["host"] && p["searchesOnHost"] == true)
+            };
+            let mut found: Vec<&Value> = entries
+                .into_iter()
+                .filter(|e| searches_on_host(e) || matches_pull_request(e, &query))
+                .collect();
+            found.sort_by(|a, b| {
+                score_pull_request(b, &query)
+                    .cmp(&score_pull_request(a, &query))
+                    .then_with(|| updated(b).cmp(&updated(a)))
+            });
+            found
+        };
+        matches.truncate(12);
+        let items = matches
+            .into_iter()
+            .map(|entry| Item {
+                id: format!(
+                    "pull-request:{project}:{}:{}",
+                    entry["repository"].as_str().unwrap_or_default(),
+                    entry["number"]
+                ),
+                kind: ItemKind::PullRequest(Box::new(entry.clone())),
+                label: format!("#{}", entry["number"]),
+                description: entry["title"].as_str().unwrap_or_default().to_owned(),
+            })
+            .collect();
+        (items, false)
+    }
+
+    /// A `pullRequests.list` answer for the `#` menu; `false` for other keys.
+    pub(crate) fn command_menu_result(
+        &mut self,
+        key: &str,
+        result: &Result<Value, String>,
+    ) -> bool {
+        let Some(list_key) = key.strip_prefix("composer-prs:") else {
+            return false;
+        };
+        self.command_menu
+            .pr_lists
+            .insert(list_key.to_owned(), result.clone());
+        true
+    }
+
+    /// The menu's text without items (`composerMenuEmptyState`).
+    fn menu_empty_text(&self, trigger: &Trigger, loading: bool, draft: bool) -> String {
+        if loading {
+            return match trigger.kind {
+                TriggerKind::Skill => "Searching workspace skills...",
+                TriggerKind::PullRequest => "Finding pull request...",
+                _ => "Searching workspace files...",
+            }
+            .to_owned();
+        }
+        match trigger.kind {
+            TriggerKind::Skill => "No skills found. Try / to browse provider commands.".into(),
+            TriggerKind::Path => "No matching files or folders.".into(),
+            TriggerKind::Slash => "No matching command.".into(),
+            TriggerKind::PullRequest => {
+                let Some((project, _)) = self.pull_request_scope(draft) else {
+                    return "Pull requests are not available for this project.".into();
+                };
+                let query = trigger.query.trim();
+                let text_query = if query.chars().all(|c| c.is_ascii_digit()) {
+                    ""
+                } else {
+                    query
+                };
+                let failed = match self
+                    .command_menu
+                    .pr_lists
+                    .get(&format!("{project}\0{text_query}"))
+                {
+                    Some(Err(_)) => true,
+                    Some(Ok(list)) => list["errors"].as_array().is_some_and(|errors| {
+                        errors.iter().any(|e| e["projectId"] == project.as_str())
+                    }),
+                    None => false,
+                };
+                if failed {
+                    "Pull requests could not be read for this project.".into()
+                } else if trigger.query.is_empty() {
+                    "No pull requests found in this repository.".into()
+                } else {
+                    format!("No pull request matches {}.", trigger.query)
+                }
+            }
+        }
+    }
+
     /// The items for a trigger, and whether they are still loading.
     fn menu_items(&mut self, trigger: &Trigger, draft: bool) -> (Vec<Item>, bool) {
         match trigger.kind {
+            TriggerKind::PullRequest => self.pull_request_items(trigger, draft),
             TriggerKind::Path => {
                 let query = trigger.query.trim();
                 let Some(cwd) = self.workspace_cwd().filter(|_| !query.is_empty()) else {
@@ -571,7 +770,7 @@ impl App {
                         command_score(command, &item.description, &query)?,
                         format!("1\0{command}"),
                     ),
-                    ItemKind::Path { .. } => return None,
+                    ItemKind::Path { .. } | ItemKind::PullRequest(_) => return None,
                 };
                 Some((score, tie, item))
             })
@@ -678,6 +877,17 @@ impl App {
             ItemKind::Path { path, .. } => format!("{} ", file_link(path)),
             ItemKind::ProviderCommand(name) => format!("/{name} "),
             ItemKind::Skill { name, .. } => format!("${name} "),
+            ItemKind::PullRequest(entry) => {
+                // `buildPullRequestReferenceContext` as an inline reference.
+                let record = crate::ui::composer_context::pull_request_record(entry);
+                let reference = crate::ui::composer_context::format_reference(
+                    "review-comment",
+                    record["contextId"].as_str().unwrap_or_default(),
+                    record["label"].as_str().unwrap_or_default(),
+                );
+                self.composer_contexts.push(record);
+                format!("{reference} ")
+            }
             ItemKind::Builtin(command) => {
                 match *command {
                     "model" => self.open_menu = Some("model-picker".into()),
@@ -747,6 +957,7 @@ impl App {
             ),
             Pos2::new(surface.right() - 22.0, surface.top() + OVERLAP),
         );
+        let empty_text = self.menu_empty_text(&trigger, loading, draft);
         let active = self.active_item(&trigger, &items).map(|i| i.id.clone());
         let mut picked = None;
         let mut hovered = None;
@@ -759,24 +970,10 @@ impl App {
                 let body =
                     Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - OVERLAP));
                 if items.is_empty() {
-                    let text = if loading {
-                        match trigger.kind {
-                            TriggerKind::Skill => "Searching workspace skills...",
-                            _ => "Searching workspace files...",
-                        }
-                    } else {
-                        match trigger.kind {
-                            TriggerKind::Skill => {
-                                "No skills found. Try / to browse provider commands."
-                            }
-                            TriggerKind::Path => "No matching files or folders.",
-                            TriggerKind::Slash => "No matching command.",
-                        }
-                    };
                     widgets::text(
                         ui,
                         Pos2::new(body.left() + 20.0, body.top() + 14.0),
-                        text,
+                        &empty_text,
                         font(12.0, Weight::Regular),
                         theme::secondary_label(),
                         16.0,
@@ -869,6 +1066,84 @@ fn command_score(command: &str, description: &str, query: &str) -> Option<i64> {
     primary.into_iter().chain(description).min()
 }
 
+/// `sourceControlRepositorySelector`.
+fn repository_selector(identity: &Value) -> Option<String> {
+    let text = |key: &str| identity[key].as_str().filter(|s| !s.is_empty());
+    if identity["provider"] == "azure-devops" {
+        let last = text("displayName")
+            .unwrap_or_default()
+            .split('/')
+            .rfind(|part| *part != "_git")
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned);
+        return text("name").map(str::to_owned).or(last);
+    }
+    if let Some(name) = text("displayName") {
+        return Some(name.to_owned());
+    }
+    Some(format!("{}/{}", text("owner")?, text("name")?))
+}
+
+/// `matchesPullRequestQuery`.
+fn matches_pull_request(entry: &Value, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    let field = |key: &str| entry[key].as_str().unwrap_or_default();
+    format!(
+        "#{} {} {} {} {}",
+        entry["number"],
+        field("title"),
+        field("repository"),
+        field("headBranch"),
+        entry["author"]["login"].as_str().unwrap_or_default()
+    )
+    .to_lowercase()
+    .contains(&query)
+}
+
+/// `scorePullRequestMatch`.
+fn score_pull_request(entry: &Value, query: &str) -> u32 {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return 0;
+    }
+    let number = needle.trim_start_matches('#');
+    if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) {
+        return if entry["number"].as_u64().map(|n| n.to_string()).as_deref() == Some(number) {
+            100
+        } else {
+            0
+        };
+    }
+    let lower = |key: &str| entry[key].as_str().unwrap_or_default().to_lowercase();
+    let title = lower("title");
+    let terms: Vec<&str> = needle.split_whitespace().collect();
+    if title == needle {
+        90
+    } else if title.contains(&needle) {
+        80
+    } else if terms.len() > 1 && terms.iter().all(|t| title.contains(t)) {
+        70
+    } else if lower("headBranch").contains(&needle) {
+        60
+    } else if entry["author"]["login"]
+        .as_str()
+        .unwrap_or_default()
+        .to_lowercase()
+        .contains(&needle)
+    {
+        50
+    } else if lower("repository").contains(&needle) {
+        40
+    } else if terms.iter().any(|t| title.contains(t)) {
+        30
+    } else {
+        10
+    }
+}
+
 fn skill_item(skill: &Value, label: String, fallback: &str) -> Item {
     let name = skill["name"].as_str().unwrap_or_default().to_owned();
     let description = skill["shortDescription"]
@@ -892,6 +1167,17 @@ fn skill_item(skill: &Value, label: String, fallback: &str) -> Item {
 /// description, and a skill's source badge.
 fn command_row(ui: &Ui, row: Rect, item: &Item, trigger: TriggerKind) {
     let mut x = row.left() + 8.0;
+    if let ItemKind::PullRequest(entry) = &item.kind {
+        let (icon, color) = crate::ui::pull_requests::state_glyph(entry);
+        theme::paint_icon(
+            ui,
+            icon,
+            Rect::from_min_size(Pos2::new(x, row.center().y - 8.0), Vec2::splat(16.0)),
+            16.0,
+            color,
+        );
+        x += 16.0 + 8.0;
+    }
     if let ItemKind::Path { path, directory } = &item.kind {
         let (icon, color) = if *directory {
             ("folder", theme::muted_foreground())

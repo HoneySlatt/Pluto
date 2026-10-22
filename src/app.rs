@@ -1198,6 +1198,7 @@ impl App {
             || self.git_result(&key, &result)
             || self.plan_result(&key, &result)
             || self.publish_result(&key, &result)
+            || self.command_menu_result(&key, &result)
         {
             return;
         }

@@ -998,6 +998,10 @@ impl App {
             markdown.skill_chips = true;
             markdown.text_color = Some(theme::foreground());
             markdown.media_root = workspace;
+            markdown.context_records = message.context["records"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             markdown.show(&mut child, text, measured.x.max(1.0) + 1.0);
             let opened_file = markdown.opened_file.take();
             let opened_citation = markdown.opened_citation.take();
