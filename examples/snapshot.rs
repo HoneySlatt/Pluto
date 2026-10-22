@@ -91,6 +91,14 @@ fn main() {
             if args.iter().any(|a| a == "--diff") {
                 app.open_last_diff();
             }
+            // `--file PATH` opens a workspace file in the right panel.
+            if let Some(path) = args
+                .iter()
+                .position(|a| a == "--file")
+                .and_then(|i| args.get(i + 1))
+            {
+                app.show_file(path);
+            }
             break;
         }
     }
@@ -110,7 +118,7 @@ fn main() {
             | "--drag-hold" | "--scroll" | "--type" | "--key" | "--drop" | "--hold" | "--wait" => {
                 ops.next().cloned().unwrap_or_default()
             }
-            "--size" => {
+            "--size" | "--file" => {
                 ops.next();
                 continue;
             }

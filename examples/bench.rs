@@ -297,6 +297,29 @@ fn main() {
             bench.step(&mut diff_scroll);
         }
         report("diff scroll", &diff_scroll);
+
+        // The same file, 800 lines, in the Files surface.
+        bench.app.show_file("src/render.ts");
+        bench.settle(Duration::from_secs(2), |_| false);
+        let mut file = Samples::default();
+        for _ in 0..120 {
+            bench.step(&mut file);
+        }
+        report("file idle", &file);
+        let mut file_scroll = Samples::default();
+        for i in 0..240 {
+            bench
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(1100.0, 450.0)));
+            bench.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, if i < 120 { -40.0 } else { 40.0 }),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            bench.step(&mut file_scroll);
+        }
+        report("file scroll", &file_scroll);
     }
     let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     for line in status

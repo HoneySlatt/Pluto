@@ -1048,6 +1048,11 @@ impl App {
         }
     }
 
+    /// Opens a workspace file in the right panel (dev benches).
+    pub fn show_file(&mut self, path: &str) {
+        self.open_file(path.to_owned());
+    }
+
     /// Shows a settings page, or closes settings (dev benches).
     pub fn show_settings(&mut self, page: Option<usize>) {
         match page {
