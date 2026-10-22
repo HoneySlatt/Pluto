@@ -861,6 +861,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        theme::set_blue_orange_diffs(self.client_setting("diffColorScheme") == "blue-orange");
         // The text menu's Copy lands as a copy event for this pass.
         if std::mem::take(&mut self.pending_copy) {
             ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));

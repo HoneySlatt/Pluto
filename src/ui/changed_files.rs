@@ -2,15 +2,12 @@
 //! `lib/turnDiffTree.ts`, `DiffStatLabel.tsx`).
 use std::collections::BTreeMap;
 
-use eframe::egui::{Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
+use eframe::egui::{CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::app::App;
 use crate::model::CheckpointFile;
 use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
-
-const ADDITION: Color32 = Color32::from_rgb(0, 188, 125); // --diff-addition
-const DELETION: Color32 = Color32::from_rgb(251, 65, 74); // --diff-deletion
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
@@ -223,14 +220,14 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, header.top()), header.max),
                 &format!("+{}", compact_count(additions)),
                 mono.clone(),
-                ADDITION,
+                theme::diff_addition(),
             ) + 4.0;
             widgets::text_in(
                 ui,
                 Rect::from_min_max(Pos2::new(x, header.top()), header.max),
                 &format!("-{}", compact_count(deletions)),
                 mono,
-                DELETION,
+                theme::diff_deletion(),
             );
         }
         let open = Rect::from_min_size(
@@ -407,7 +404,7 @@ impl App {
                     ),
                     &deletions,
                     mono.clone(),
-                    DELETION,
+                    theme::diff_deletion(),
                 );
                 let column = widgets::text_width(ui, "0000", mono.clone());
                 let add_right = right - column - 8.0;
@@ -420,7 +417,7 @@ impl App {
                     ),
                     &additions,
                     mono,
-                    ADDITION,
+                    theme::diff_addition(),
                 );
             }
             if response.clicked() {

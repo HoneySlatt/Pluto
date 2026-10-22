@@ -781,7 +781,7 @@ impl App {
                 Pos2::new(inner_right - removed_width, line1 + 3.0),
                 &removed,
                 mono.clone(),
-                theme::DIFF_DELETION,
+                theme::diff_deletion_foreground(),
                 16.0,
             );
             widgets::text(
@@ -789,7 +789,7 @@ impl App {
                 Pos2::new(inner_right - removed_width - 4.0 - added_width, line1 + 3.0),
                 &added,
                 mono,
-                theme::DIFF_ADDITION,
+                theme::diff_addition_foreground(),
                 16.0,
             );
             status_left = inner_right - removed_width - 4.0 - added_width - 6.0;

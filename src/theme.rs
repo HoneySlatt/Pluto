@@ -11,6 +11,55 @@ use eframe::egui::{
 // palette below is the default and stays pixel-exact.
 pub const DIFF_ADDITION: Color32 = Color32::from_rgb(0, 212, 146); // --diff-addition-foreground
 pub const DIFF_DELETION: Color32 = Color32::from_rgb(255, 100, 103); // --diff-deletion-foreground
+const BLUE_400_DIFF: Color32 = Color32::from_rgb(81, 162, 255);
+const ORANGE_400: Color32 = Color32::from_rgb(255, 137, 4);
+
+static BLUE_ORANGE_DIFFS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The Diff colors setting (`:root[data-diff-color-scheme="blue-orange"]`).
+pub fn set_blue_orange_diffs(on: bool) {
+    BLUE_ORANGE_DIFFS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn blue_orange_diffs() -> bool {
+    BLUE_ORANGE_DIFFS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `--diff-addition`: change counts and stats.
+pub fn diff_addition() -> Color32 {
+    if blue_orange_diffs() {
+        BLUE_400_DIFF
+    } else {
+        Color32::from_rgb(0, 188, 125)
+    }
+}
+
+/// `--diff-deletion`.
+pub fn diff_deletion() -> Color32 {
+    if blue_orange_diffs() {
+        ORANGE_400
+    } else {
+        Color32::from_rgb(251, 65, 74)
+    }
+}
+
+/// `--diff-addition-foreground`.
+pub fn diff_addition_foreground() -> Color32 {
+    if blue_orange_diffs() {
+        BLUE_400_DIFF
+    } else {
+        DIFF_ADDITION
+    }
+}
+
+/// `--diff-deletion-foreground`.
+pub fn diff_deletion_foreground() -> Color32 {
+    if blue_orange_diffs() {
+        ORANGE_400
+    } else {
+        DIFF_DELETION
+    }
+}
 pub const SKY_400: Color32 = Color32::from_rgb(0, 188, 255);
 pub const INDIGO_300: Color32 = Color32::from_rgb(163, 179, 255);
 pub const RED_300: Color32 = Color32::from_rgb(255, 162, 162);

@@ -1137,9 +1137,15 @@ impl App {
                                     vec![("Excluded".to_owned(), theme::muted_foreground())]
                                 } else {
                                     vec![
-                                        (format!("+{insertions}"), theme::DIFF_ADDITION),
+                                        (
+                                            format!("+{insertions}"),
+                                            theme::diff_addition_foreground(),
+                                        ),
                                         (" / ".to_owned(), theme::muted_foreground()),
-                                        (format!("-{deletions}"), theme::DIFF_DELETION),
+                                        (
+                                            format!("-{deletions}"),
+                                            theme::diff_deletion_foreground(),
+                                        ),
                                     ]
                                 };
                                 let mono = theme::mono(13.0);
@@ -1189,9 +1195,9 @@ impl App {
                     let added: u64 = selected.iter().map(|(_, i, _)| i).sum();
                     let removed: u64 = selected.iter().map(|(_, _, d)| d).sum();
                     let parts = [
-                        (format!("+{added}"), theme::DIFF_ADDITION),
+                        (format!("+{added}"), theme::diff_addition_foreground()),
                         (" / ".to_owned(), theme::muted_foreground()),
-                        (format!("-{removed}"), theme::DIFF_DELETION),
+                        (format!("-{removed}"), theme::diff_deletion_foreground()),
                     ];
                     let total: f32 = parts
                         .iter()

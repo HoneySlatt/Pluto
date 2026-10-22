@@ -11,7 +11,8 @@
 //! The interface size zooms the whole client (upstream scales every rem);
 //! prompt, code and terminal sizes stay absolute. Chosen families are loaded
 //! through fontconfig by weight and put in front of Geist, which keeps
-//! covering missing glyphs. The other Appearance sections are not ported,
+//! covering missing glyphs. The Interface rows are in `settings.rs`; the
+//! theme library, contrast, glass and motion rows are not ported,
 //! the family list draws every name in the interface font (upstream draws
 //! each in its own face), the prompt preview is not editable, and the
 //! Advanced switch lives in memory (upstream: local storage).

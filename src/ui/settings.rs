@@ -48,6 +48,8 @@ pub fn default_client_settings() -> Value {
         "composerCollapseOnScroll": true,
         "sendShortcut": "enter",
         "followUpBehavior": "queue",
+        "chatWidth": "comfortable",
+        "diffColorScheme": "red-green",
         "confirmThreadUnpin": false,
         "confirmThreadArchive": false,
         "confirmThreadDelete": true,
@@ -1106,6 +1108,8 @@ impl App {
             "diff-layout" => Some("diffLayout"),
             "send-shortcut" => Some("sendShortcut"),
             "follow-up-behavior" => Some("followUpBehavior"),
+            "chat-width" => Some("chatWidth"),
+            "diff-color-scheme" => Some("diffColorScheme"),
             _ => None,
         };
         let server_key = match id {
@@ -1780,6 +1784,66 @@ impl App {
         card.bottom()
     }
 
+    /// `AppearanceSettingsPanel`'s Interface section: diff colors and chat
+    /// width (the contrast, glass opacity and environment identification
+    /// rows are not ported).
+    fn appearance_sections(&self) -> Vec<Section> {
+        let select = |key: &str, list: &[(&str, &str)]| Control::Select {
+            value: self
+                .client_setting(key)
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            options: list
+                .iter()
+                .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
+                .collect(),
+            width: 160.0,
+            icon: None,
+        };
+        let changed = |key: &str| self.client_setting(key) != default_client_settings()[key];
+        vec![Section {
+            title: "Interface".into(),
+            project: None,
+            unavailable: None,
+            rows: vec![
+                Row {
+                    id: "diff-color-scheme".into(),
+                    title: "Diff colors".into(),
+                    description:
+                        "Choose colors for additions and deletions, including change counts.".into(),
+                    status: None,
+                    layers: false,
+                    reset: changed("diffColorScheme"),
+                    control: select(
+                        "diffColorScheme",
+                        &[
+                            ("red-green", "Red & green"),
+                            ("blue-orange", "Blue & orange"),
+                        ],
+                    ),
+                },
+                Row {
+                    id: "chat-width".into(),
+                    title: "Chat width".into(),
+                    description:
+                        "Set how wide messages and the composer can grow on large screens.".into(),
+                    status: None,
+                    layers: false,
+                    reset: changed("chatWidth"),
+                    control: select(
+                        "chatWidth",
+                        &[
+                            ("comfortable", "Comfortable"),
+                            ("wide", "Wide"),
+                            ("full", "Full"),
+                        ],
+                    ),
+                },
+            ],
+        }]
+    }
+
     /// `SnapShotSettings` without the desktop bridge: the capture switch,
     /// unavailable outside the desktop app.
     fn snap_shot_sections(&self) -> Vec<Section> {
@@ -2257,6 +2321,7 @@ impl App {
             CONNECTIONS_PAGE => connections_sections(),
             SOURCE_CONTROL_PAGE => self.source_control_sections(),
             INTEGRATIONS_PAGE => self.integrations_sections(),
+            crate::ui::typography::APPEARANCE_PAGE => self.appearance_sections(),
             _ => self.general_sections(),
         };
         let mut actions: Vec<(String, RowAction)> = Vec::new();
@@ -2297,17 +2362,6 @@ impl App {
                 if page == PROJECT_PAGE {
                     // `SettingsPageContainer className="gap-6"`.
                     y = self.projects_page(ui, left, y - 8.0);
-                    ui.allocate_rect(
-                        Rect::from_min_max(
-                            Pos2::new(left, top),
-                            Pos2::new(left + card_width, y + 48.0),
-                        ),
-                        Sense::hover(),
-                    );
-                    return;
-                }
-                if page == crate::ui::typography::APPEARANCE_PAGE {
-                    y = self.appearance_page(ui, left, y);
                     ui.allocate_rect(
                         Rect::from_min_max(
                             Pos2::new(left, top),
@@ -2491,6 +2545,10 @@ impl App {
                 }
                 if page == CONNECTIONS_PAGE {
                     bottom = self.remote_environments(ui, left, y);
+                }
+                // Typography closes the Appearance page.
+                if page == crate::ui::typography::APPEARANCE_PAGE {
+                    bottom = self.appearance_page(ui, left, y);
                 }
                 ui.allocate_rect(
                     Rect::from_min_max(

@@ -131,33 +131,45 @@ fn code_line_height() -> f32 {
 }
 const SEPARATOR: f32 = 24.0;
 const MODIFIED: Color32 = Color32::from_rgb(0, 159, 255); // --diffs-modified-base
-const ADDED: Color32 = Color32::from_rgb(7, 196, 128);
-const DELETED: Color32 = Color32::from_rgb(255, 45, 62);
+/// Pierre's addition and deletion bases, or the Diff colors override
+/// (`--diffs-addition-color-override`).
+fn added() -> Color32 {
+    if theme::blue_orange_diffs() {
+        theme::diff_addition()
+    } else {
+        Color32::from_rgb(7, 196, 128)
+    }
+}
+fn deleted() -> Color32 {
+    if theme::blue_orange_diffs() {
+        theme::diff_deletion()
+    } else {
+        Color32::from_rgb(255, 45, 62)
+    }
+}
+/// A row tint: measured on the stock theme, else the base over the canvas.
+fn tint(stock: Color32, base: Color32, amount: f32) -> Color32 {
+    if theme::blue_orange_diffs() {
+        theme::mix(theme::background(), base, amount)
+    } else {
+        theme::stock_or(stock, |p| theme::mix(p.background, base, amount))
+    }
+}
 fn deletion_row() -> Color32 {
-    theme::stock_or(Color32::from_rgb(28, 16, 15), |p| {
-        theme::mix(p.background, DELETED, 0.08)
-    })
+    tint(Color32::from_rgb(28, 16, 15), deleted(), 0.08)
 }
 fn addition_row() -> Color32 {
-    theme::stock_or(Color32::from_rgb(12, 23, 19), |p| {
-        theme::mix(p.background, ADDED, 0.08)
-    })
+    tint(Color32::from_rgb(12, 23, 19), added(), 0.08)
 }
 fn deletion_emphasis() -> Color32 {
-    theme::stock_or(Color32::from_rgb(73, 22, 25), |p| {
-        theme::mix(p.background, DELETED, 0.25)
-    })
+    tint(Color32::from_rgb(73, 22, 25), deleted(), 0.25)
 }
 fn addition_emphasis() -> Color32 {
-    theme::stock_or(Color32::from_rgb(9, 56, 40), |p| {
-        theme::mix(p.background, ADDED, 0.25)
-    })
+    tint(Color32::from_rgb(9, 56, 40), added(), 0.25)
 }
 fn context_number() -> Color32 {
     theme::stock_or(Color32::from_rgb(122, 122, 122), |p| p.muted_foreground)
 }
-const STAT_ADDITION: Color32 = Color32::from_rgb(0, 188, 125);
-const STAT_DELETION: Color32 = Color32::from_rgb(251, 65, 74);
 
 impl App {
     /// Turn counts with checkpoints, newest first.
@@ -512,7 +524,7 @@ impl App {
                 Rect::from_min_max(Pos2::new(del_x, bar.top()), Pos2::new(x, bar.bottom())),
                 &deletions_text,
                 mono.clone(),
-                STAT_DELETION,
+                theme::diff_deletion(),
             );
             let additions_text = format!("+{additions}");
             let add_width = widgets::text_width(ui, &additions_text, mono.clone());
@@ -525,7 +537,7 @@ impl App {
                 ),
                 &additions_text,
                 mono,
-                STAT_ADDITION,
+                theme::diff_addition(),
             );
         }
 
@@ -637,7 +649,7 @@ impl App {
                     Pos2::new(inner.left() + 12.0, bar.bottom() + 12.0),
                     &message,
                     font(11.0, Weight::Regular),
-                    STAT_DELETION,
+                    theme::diff_deletion(),
                     16.0,
                 );
                 centered_note(ui, body, "No patch available for this selection.");
@@ -1061,8 +1073,8 @@ impl App {
             MODIFIED,
         );
         let (status_icon, status_color) = match file.status {
-            FileStatus::Added => ("diffs-symbol-added", ADDED),
-            FileStatus::Deleted => ("diffs-symbol-deleted", DELETED),
+            FileStatus::Added => ("diffs-symbol-added", added()),
+            FileStatus::Deleted => ("diffs-symbol-deleted", deleted()),
             FileStatus::Renamed => ("diffs-symbol-moved", MODIFIED),
             FileStatus::Modified => ("diffs-symbol-modified", MODIFIED),
         };
@@ -1108,8 +1120,8 @@ impl App {
         let mono = egui::FontId::monospace(12.0);
         let mut right = row.right() - 12.0;
         for (count, sign, color) in [
-            (file.additions, "+", STAT_ADDITION),
-            (file.deletions, "-", STAT_DELETION),
+            (file.additions, "+", theme::diff_addition()),
+            (file.deletions, "-", theme::diff_deletion()),
         ] {
             if count == 0 {
                 continue;
@@ -1948,14 +1960,14 @@ fn paint_diff_cell(
     let (tint, bar, number_color, emphasis) = match line.kind {
         LineKind::Deletion => (
             Some(deletion_row()),
-            Some(DELETED),
-            DELETED,
+            Some(deleted()),
+            deleted(),
             deletion_emphasis(),
         ),
         LineKind::Addition => (
             Some(addition_row()),
-            Some(ADDED),
-            ADDED,
+            Some(added()),
+            added(),
             addition_emphasis(),
         ),
         LineKind::Context => (None, None, context_number(), Color32::TRANSPARENT),
@@ -2065,8 +2077,8 @@ fn paint_filler(ui: &Ui, column: Rect, gap: f32, shift: f32) {
 /// `--trees-git-*-color` for a file status.
 fn status_color(status: FileStatus) -> Color32 {
     match status {
-        FileStatus::Added => ADDED,
-        FileStatus::Deleted => DELETED,
+        FileStatus::Added => added(),
+        FileStatus::Deleted => deleted(),
         FileStatus::Renamed | FileStatus::Modified => TREE_MODIFIED,
     }
 }

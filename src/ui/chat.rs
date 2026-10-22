@@ -33,7 +33,13 @@ impl App {
             draft_project.as_ref(),
         );
 
-        let column = theme::CHAT_WIDTH.min(body.width() - 2.0 * theme::WORKSPACE_GUTTER);
+        // `--chat-max-width` from the Chat width setting.
+        let max_width = match self.client_setting("chatWidth").as_str() {
+            Some("wide") => 1152.0, // 72rem
+            Some("full") => f32::INFINITY,
+            _ => theme::CHAT_WIDTH,
+        };
+        let column = max_width.min(body.width() - 2.0 * theme::WORKSPACE_GUTTER);
         let column_left = (body.center().x - column / 2.0).round();
         if thread.is_some() {
             let mode = self.composer_mode(false);
@@ -41,7 +47,7 @@ impl App {
             // The timeline scrolls under the composer, padded so its end clears it.
             let overlay = self.composer_overlay(ui, body, column, &mode);
             // The timeline keeps 26px gutters (the composer 20px) on narrow columns.
-            let timeline_width = theme::CHAT_WIDTH.min(body.width() - 52.0);
+            let timeline_width = max_width.min(body.width() - 52.0);
             let timeline_left = (body.center().x - timeline_width / 2.0).round();
             self.timeline(ui, body, timeline_left, timeline_width, overlay);
             self.cite_selection(ui, body);

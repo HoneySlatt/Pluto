@@ -101,6 +101,15 @@ fn main() {
                     app.override_setting(key, serde_json::from_str(value).expect("setting json"));
                 }
             }
+            // `--page N` opens a settings page.
+            if let Some(page) = args
+                .iter()
+                .position(|a| a == "--page")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|p| p.parse().ok())
+            {
+                app.show_settings(Some(page));
+            }
             // `--file PATH` opens a workspace file in the right panel.
             if let Some(path) = args
                 .iter()
@@ -128,7 +137,7 @@ fn main() {
             | "--drag-hold" | "--scroll" | "--type" | "--key" | "--drop" | "--hold" | "--wait" => {
                 ops.next().cloned().unwrap_or_default()
             }
-            "--size" | "--file" => {
+            "--size" | "--file" | "--page" => {
                 ops.next();
                 continue;
             }
