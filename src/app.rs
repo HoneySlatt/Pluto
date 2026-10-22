@@ -85,6 +85,10 @@ pub struct App {
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The draft hero's project picker, while open.
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
+    /// Toasts, newest last.
+    pub(crate) toasts: crate::ui::toasts::Toasts,
+    /// The header's git actions: what runs, its menu and dialogs.
+    pub(crate) git: crate::ui::git_actions::GitActions,
     /// The editor last opened with (`t3code:last-editor`), persisted.
     pub(crate) last_editor: Option<String>,
     /// The "Open in" editor list and the path it opens.
@@ -231,7 +235,7 @@ pub struct App {
     pub(crate) settings_edits: std::collections::HashMap<String, String>,
     pub(crate) highlighter: Highlighter,
     pub(crate) now: chrono::DateTime<chrono::Utc>,
-    vcs: Option<(String, Value)>,
+    pub(crate) vcs: Option<(String, Value)>,
     watched_vcs: Option<String>,
     /// Workspace whose `vcs.init` is in flight.
     pub(crate) vcs_init: Option<String>,
@@ -384,6 +388,8 @@ impl App {
             hero_project_menu: None,
             scratch: None,
             media_menu: None,
+            toasts: Default::default(),
+            git: Default::default(),
             last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
             open_in_menu: None,
             legacy_grouping: None,
@@ -779,79 +785,6 @@ impl App {
         self.draft_project().map(|p| p.workspace_root)
     }
 
-    /// Header git action (`resolveQuickAction`): label and icon.
-    pub(crate) fn git_action_label(&self) -> Option<(String, &'static str)> {
-        let cwd = self.workspace_cwd()?;
-        let status = self.vcs.as_ref().filter(|(c, _)| *c == cwd).map(|(_, s)| s);
-        let Some(status) = status.filter(|s| s["isRepo"] == true) else {
-            return Some(("Commit".into(), "git-commit-horizontal"));
-        };
-        let short = "PR";
-        let has_branch = !status["refName"].is_null();
-        let has_changes = status["hasWorkingTreeChanges"] == true;
-        let has_upstream = status["hasUpstream"] == true;
-        let has_remote = status["hasPrimaryRemote"] == true;
-        let open_pr = status["pr"]["state"] == "open";
-        let is_default = status["isDefaultRef"] == true;
-        let ahead = status["aheadCount"].as_u64().unwrap_or(0) > 0;
-        let behind = status["behindCount"].as_u64().unwrap_or(0) > 0;
-        let default_delta = status["aheadOfDefaultCount"]
-            .as_u64()
-            .or(status["aheadCount"].as_u64())
-            .unwrap_or(0)
-            > 0;
-        let action = |label: &str, icon: &'static str| Some((label.to_owned(), icon));
-        if !has_branch {
-            return action("Commit", "git-commit-horizontal");
-        }
-        if has_changes {
-            if !has_upstream && !has_remote {
-                return action("Commit", "git-commit-horizontal");
-            }
-            if open_pr || is_default {
-                return action("Commit & push", "cloud-upload");
-            }
-            return action(&format!("Commit, push & {short}"), "git-pull-request-arrow");
-        }
-        if !has_upstream {
-            if !has_remote {
-                if open_pr && !ahead {
-                    return action(&format!("View {short}"), "git-pull-request-arrow");
-                }
-                return action("Publish repository", "cloud-upload");
-            }
-            if !ahead {
-                if open_pr {
-                    return action(&format!("View {short}"), "git-pull-request-arrow");
-                }
-                return action("Push", "cloud-upload");
-            }
-            if open_pr || is_default {
-                return action("Push", "cloud-upload");
-            }
-            return action(&format!("Push & create {short}"), "git-pull-request-arrow");
-        }
-        if ahead && behind {
-            return action("Sync ref", "info");
-        }
-        if behind {
-            return action("Pull", "cloud-download");
-        }
-        if ahead {
-            if open_pr || is_default {
-                return action("Push", "cloud-upload");
-            }
-            return action(&format!("Push & create {short}"), "git-pull-request-arrow");
-        }
-        if open_pr && has_upstream {
-            return action(&format!("View {short}"), "git-pull-request-arrow");
-        }
-        if default_delta && !is_default {
-            return action(&format!("Create {short}"), "git-pull-request-arrow");
-        }
-        action("Commit", "git-commit-horizontal")
-    }
-
     pub(crate) fn connect_now(&mut self, ctx: &egui::Context) {
         self.connect.error = None;
         self.connect.busy = true;
@@ -873,49 +806,23 @@ impl App {
         }
     }
 
+    /// Status messages join the toasts, which draw at the top right.
     fn status_toast(&mut self, ui: &mut egui::Ui, rect: Rect) {
-        let Some(message) = self.status.clone() else {
-            return;
-        };
-        let font = theme::font(13.0, theme::Weight::Regular);
-        let width = crate::ui::widgets::text_width(ui, &message, font.clone()).min(420.0) + 48.0;
-        let toast = Rect::from_min_size(
-            Pos2::new(rect.right() - width - 16.0, 64.0),
-            Vec2::new(width, 40.0),
-        );
-        ui.painter().rect(
-            toast,
-            egui::CornerRadius::same(10),
-            theme::card(),
-            egui::Stroke::new(1.0, theme::border()),
-            egui::StrokeKind::Inside,
-        );
-        crate::ui::widgets::text_in(
-            ui,
-            Rect::from_min_max(
-                toast.min + Vec2::new(14.0, 0.0),
-                toast.max - Vec2::new(34.0, 0.0),
-            ),
-            &message,
-            font,
-            theme::foreground(),
-        );
-        let close = Rect::from_min_size(
-            Pos2::new(toast.right() - 30.0, toast.top() + 8.0),
-            Vec2::splat(24.0),
-        );
-        if crate::ui::widgets::icon_button(
-            ui,
-            close,
-            "toast-close",
-            "x",
-            14.0,
-            theme::muted_foreground(),
-            "Dismiss",
-        )
-        .clicked()
-        {
-            self.status = None;
+        if let Some(message) = self.status.take() {
+            self.toasts.status(message);
+        }
+        self.tick_git_toast(ui.ctx());
+        match self.toasts.show(ui, rect) {
+            Some(crate::ui::toasts::Action::GitAction(action)) => {
+                self.run_git_action(crate::ui::git_actions::Run {
+                    action,
+                    ..Default::default()
+                });
+            }
+            Some(crate::ui::toasts::Action::OpenUrl(url)) => {
+                crate::ui::widgets::open_external(&url)
+            }
+            None => {}
         }
     }
 }
@@ -1006,6 +913,8 @@ impl eframe::App for App {
                 self.cite_overlays(ui);
                 self.media_menu(ui);
                 self.open_in_menu(ui);
+                self.git_menu(ui);
+                self.git_dialogs(ui, rect);
                 self.preview_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
@@ -1229,7 +1138,10 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
-        if self.scratch_result(&key, &result) || self.open_in_result(&key, &result) {
+        if self.scratch_result(&key, &result)
+            || self.open_in_result(&key, &result)
+            || self.git_result(&key, &result)
+        {
             return;
         }
         if let Some(project) = key.strip_prefix("favicon:") {

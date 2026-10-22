@@ -619,7 +619,7 @@ fn paint_centered(ui: &Ui, rect: Rect, message: &str) {
 }
 
 /// `Spinner`: lucide's loader-circle (a 3/4 arc), turning once a second.
-fn paint_spinner(ui: &Ui, center: Pos2, size: f32) {
+pub(crate) fn paint_spinner(ui: &Ui, center: Pos2, size: f32) {
     let time = ui.input(|i| i.time);
     ui.ctx().request_repaint();
     let radius = size * 9.0 / 24.0;

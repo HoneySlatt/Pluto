@@ -124,11 +124,16 @@ impl App {
                     self.initialize_git();
                 }
                 right = rect_button.left() - gap;
-            } else if let Some(action) = self.git_action_label() {
+            } else {
+                // `GitActionsControl`: the suggested action and the menu.
+                let (action, icon) = self.git_quick_action();
                 let split =
-                    self.split_button(ui, right, &action.0, Some(action.1), "git-action", compact);
-                if split.main || split.menu {
-                    self.status = Some(format!("{} is not implemented yet", action.0));
+                    self.split_button(ui, right, &action.label, Some(icon), "git-action", compact);
+                if split.main {
+                    self.run_quick_git_action();
+                }
+                if split.menu {
+                    self.toggle_git_menu(split.chevron.right_bottom() + Vec2::new(0.0, 4.0));
                 }
                 right = split.left - gap;
             }
