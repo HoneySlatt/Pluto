@@ -43,6 +43,9 @@ pub struct App {
     pub(crate) composer_runtime: std::collections::HashMap<String, String>,
     /// The composer's interaction mode (plan or default) by composer key.
     pub(crate) composer_interaction: std::collections::HashMap<String, String>,
+    /// The running turn's task drawer is open, for this thread.
+    pub(crate) tasks_open: bool,
+    pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
     pub(crate) picker_legacy_open: bool,
@@ -368,6 +371,8 @@ impl App {
             composer_selection: Default::default(),
             composer_runtime: Default::default(),
             composer_interaction: Default::default(),
+            tasks_open: false,
+            tasks_thread: None,
             picker_provider: None,
             picker_query: String::new(),
             picker_legacy_open: false,

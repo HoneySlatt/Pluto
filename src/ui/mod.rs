@@ -55,6 +55,7 @@ pub mod sidebar;
 pub mod snooze_dialog;
 pub mod source_control;
 pub mod surfaces;
+pub mod tasks;
 pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod text_menu;

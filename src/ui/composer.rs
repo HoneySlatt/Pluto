@@ -102,6 +102,11 @@ impl App {
         else {
             return Mode::Normal;
         };
+        // The task drawer closes on another thread.
+        if self.tasks_thread.as_deref() != Some(thread.id.as_str()) {
+            self.tasks_thread = Some(thread.id.clone());
+            self.tasks_open = false;
+        }
         let pending = crate::requests::derive(&thread.activities);
         // Requests that are no longer pending stop counting as in flight.
         let open: std::collections::HashSet<&str> = pending
@@ -111,6 +116,9 @@ impl App {
             .chain(pending.user_inputs.iter().map(|i| i.request_id.as_str()))
             .collect();
         self.responding.retain(|id| open.contains(id.as_str()));
+        if !pending.approvals.is_empty() || !pending.user_inputs.is_empty() {
+            self.tasks_open = false;
+        }
         if let Some(approval) = pending.approvals.first() {
             return Mode::Approval(approval.clone(), pending.approvals.len());
         }
@@ -164,7 +172,9 @@ impl App {
 
     fn banner_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         match mode {
-            Mode::Normal => 0.0,
+            Mode::Normal => self
+                .composer_tasks()
+                .map_or(0.0, |plan| self.tasks_banner_height(ui, &plan, width)),
             Mode::Plan(_) => crate::ui::plan_card::PLAN_BANNER,
             Mode::Approval(approval, _) => self.approval_banner_height(approval),
             Mode::Question(input) => self.question_banner_height(ui, input, width),
@@ -206,7 +216,10 @@ impl App {
             }
             Mode::Question(input) => self.question_banner(ui, surface, input, &thread_id),
             Mode::Plan(plan) => self.plan_banner(ui, surface, plan),
-            Mode::Normal => {}
+            Mode::Normal => match self.composer_tasks().filter(|_| !draft) {
+                Some(plan) => self.tasks_banner(ui, surface, &plan),
+                None => self.tasks_open = false,
+            },
         }
 
         // Checkout strip, tucked 16px under the surface (`-mt-4`); only for a

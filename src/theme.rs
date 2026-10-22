@@ -830,6 +830,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "code-xml",
         "table-2",
         "pencil-ruler",
+        "list-todo",
+        "circle",
         "globe",
         "pen-line",
         "sparkles",

@@ -405,6 +405,31 @@ completeTurn(bigDiff, bigTurn, 1, [
   { path: "src/render.ts", kind: "modified", additions: 1400, deletions: 600 },
 ], 2098, bigAnswer);
 
+// A turn that kept a task list (`turn.plan.updated`), shown while it runs.
+const tasksThread = thread(rust, "Porter le thème", 2300);
+const tasksTurn = randomUUID();
+message(tasksThread, "user", "Porte le thème sombre dans le client.", 2300);
+const taskSteps = ["Lire les jetons du thème", "Porter les couleurs", "Vérifier les captures", "Mettre à jour le README"];
+[[1, 0], [2, 1], [2, 2]].forEach(([done, minute]) => {
+  const createdAt = at(2299 - minute);
+  emit("thread", tasksThread, "thread.activity-appended", createdAt, {
+    threadId: tasksThread,
+    activity: {
+      id: randomUUID(), tone: "info", kind: "turn.plan.updated", summary: "Plan updated",
+      payload: {
+        explanation: null,
+        plan: taskSteps.map((step, index) => ({
+          step,
+          status: index < done ? "completed" : index === done ? "inProgress" : "pending",
+        })),
+      },
+      turnId: tasksTurn, createdAt,
+    },
+  }, "provider");
+});
+const tasksAnswer = message(tasksThread, "assistant", "Les couleurs sont portées.", 2297, tasksTurn);
+completeTurn(tasksThread, tasksTurn, 1, [], 2297, tasksAnswer);
+
 // A plan-mode thread whose settled turn proposed a plan.
 const planThreadId = randomUUID();
 {
