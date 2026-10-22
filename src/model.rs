@@ -23,6 +23,9 @@ pub struct Project {
     pub workspace_root: String,
     pub project_icon: Option<Value>,
     pub favicon_path: Option<String>,
+    /// The legacy per-project default model, read until the server folds it
+    /// into `projectSettingsOverrides`.
+    pub default_model_selection: Option<Value>,
     /// `RepositoryIdentity` (canonical key, root path, names), kept as sent.
     pub repository_identity: Option<Value>,
     pub created_at: String,

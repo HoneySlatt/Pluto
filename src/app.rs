@@ -85,6 +85,8 @@ pub struct App {
     pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The draft hero's project picker, while open.
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
+    /// A Scratch project asked for, until it is in the shell.
+    pub(crate) scratch: Option<crate::ui::scratch::Pending>,
     /// The "Project grouping" dialog: member project id and the selection.
     pub(crate) legacy_grouping: Option<(String, String)>,
     pub(crate) legacy_grouping_select: Option<crate::ui::context_menu::State>,
@@ -374,6 +376,7 @@ impl App {
             legacy_drag_grab: 0.0,
             legacy_new_thread_menu: None,
             hero_project_menu: None,
+            scratch: None,
             legacy_grouping: None,
             legacy_grouping_select: None,
             legacy_selection: Default::default(),
@@ -534,6 +537,7 @@ impl App {
         if let Err(error) = self.state.refresh_detail() {
             self.status = Some(error);
         }
+        self.poll_scratch();
         if let Some(message) = disconnected {
             self.connection = None;
             self.connect.error = Some(message);
@@ -1054,6 +1058,14 @@ impl App {
         }
     }
 
+    /// Starts a draft in a project and returns its composer model as
+    /// "instance/model" (tests).
+    pub fn draft_model_in(&mut self, project_id: &str) -> String {
+        self.start_draft(Some(project_id.to_owned()));
+        let selection = self.composer_model_selection(true);
+        format!("{}/{}", selection.instance_id, selection.model)
+    }
+
     /// Opens a workspace file in the right panel (dev benches).
     pub fn show_file(&mut self, path: &str) {
         self.open_file(path.to_owned());
@@ -1206,6 +1218,9 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
+        if self.scratch_result(&key, &result) {
+            return;
+        }
         if let Some(project) = key.strip_prefix("favicon:") {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.favicon_url(project, result, &ctx);

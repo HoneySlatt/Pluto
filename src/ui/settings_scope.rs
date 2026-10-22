@@ -182,6 +182,23 @@ impl App {
                 .is_some_and(|file| file.get(field).is_some())
     }
 
+    /// `resolveProjectSettings(settings, project.id, project).settings
+    /// .defaultModelSelection`: the project's override (else its legacy
+    /// field, until the server folds it in), unless on a disabled provider;
+    /// else the environment's.
+    pub(crate) fn project_default_model(&self, project: &Project) -> Value {
+        let settings = &self.state.config["settings"];
+        let stored = settings["projectSettingsOverrides"][&project.id].get("defaultModelSelection");
+        let legacy = (settings["projectSettingsFolded"] != true)
+            .then_some(project.default_model_selection.as_ref())
+            .flatten()
+            .filter(|value| !value.is_null());
+        match stored.or(legacy) {
+            Some(value) if value.is_null() || self.model_provider_enabled(value) => value.clone(),
+            _ => settings["defaultModelSelection"].clone(),
+        }
+    }
+
     /// `isModelSelectionProviderEnabled`.
     fn model_provider_enabled(&self, selection: &Value) -> bool {
         let id = selection["instanceId"].as_str().unwrap_or_default();

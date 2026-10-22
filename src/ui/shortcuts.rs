@@ -191,6 +191,9 @@ impl App {
             // With several projects the new-thread shortcut asks where.
             "chat.new" if self.state.projects.len() > 1 => self.toggle_palette(View::NewThreadIn),
             "chat.new" | "chat.newLocal" => self.start_draft(None),
+            "chat.newWithoutProject" if self.scratch_root().is_some() => {
+                self.start_scratch_thread()
+            }
             "terminal.toggle" if thread.is_some() => self.toggle_terminal_drawer(),
             "rightPanel.toggle" if thread.is_some() => {
                 if let Some(panel) = self.panel_mut() {

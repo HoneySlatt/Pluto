@@ -139,3 +139,40 @@ fn project_scope_filters_the_thread_list() {
     click(&mut harness, egui::pos2(60.0, 140.0));
     assert_eq!(harness.state().selected_thread_id(), Some("a"));
 }
+
+#[test]
+fn drafts_start_on_their_project_default_model() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+    let model = |slug: &str| json!({"instanceId": "codex", "model": slug});
+    let config = json!({"type": "snapshot", "config": {
+    "providers": [{"instanceId": "codex", "driver": "codex", "enabled": true, "status": "ready"}],
+    "settings": {
+        "defaultModelSelection": model("environment"),
+        "projectSettingsOverrides": {"overridden": {"defaultModelSelection": model("override")}},
+    }}});
+    let projects = json!([
+        {"id": "plain", "title": "Plain", "workspaceRoot": "/fixture/plain"},
+        {"id": "overridden", "title": "Overridden", "workspaceRoot": "/fixture/overridden"},
+        {"id": "legacy", "title": "Legacy", "workspaceRoot": "/fixture/legacy",
+         "defaultModelSelection": model("legacy")},
+    ]);
+    let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
+        "projects": projects, "threads": []}});
+    let app = harness.state_mut();
+    app.load_offline(&config, &shell).unwrap();
+    assert_eq!(app.draft_model_in("plain"), "codex/environment");
+    assert_eq!(app.draft_model_in("overridden"), "codex/override");
+    assert_eq!(app.draft_model_in("legacy"), "codex/legacy");
+}

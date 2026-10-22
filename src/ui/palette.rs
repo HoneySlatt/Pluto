@@ -67,7 +67,7 @@ impl PaletteState {
 #[derive(Clone)]
 enum Icon {
     Lucide(&'static str),
-    Project(Project),
+    Project(Box<Project>),
     Brand(&'static str, Color32),
     /// A pierre file-type icon for the path.
     File(String),
@@ -305,13 +305,15 @@ impl App {
                 );
                 submenu.submenu = true;
                 actions.push(submenu);
-                let mut scratch = Item::new(
-                    "message-square-dashed",
-                    "New thread without a project",
-                    Action::Missing("Threads without a project"),
-                );
-                scratch.shortcut = Some("Ctrl+Alt+N");
-                actions.push(scratch);
+                if self.scratch_root().is_some() {
+                    let mut scratch = Item::new(
+                        "message-square-dashed",
+                        "New thread without a project",
+                        Action::Call(App::start_scratch_thread),
+                    );
+                    scratch.shortcut = Some("Ctrl+Alt+N");
+                    actions.push(scratch);
+                }
                 let mut file = Item::new("file-search", "Go to file", Action::Push(View::Files));
                 file.shortcut = Some("Ctrl+P");
                 actions.push(file);
@@ -398,7 +400,7 @@ impl App {
                         .map(|p| {
                             let mut item =
                                 Item::new("folder", &p.title, Action::NewThreadIn(p.id.clone()));
-                            item.icon = Icon::Project(p.clone());
+                            item.icon = Icon::Project(Box::new(p.clone()));
                             item.subtitle = Some(format!("Local · {}", p.workspace_root));
                             item.terms.push(normalize(&p.workspace_root));
                             item
@@ -443,18 +445,29 @@ impl App {
             }
             View::NewThreadIn => {
                 searchable = true;
-                let items = self
+                // The Scratch project shows once, as "No project" at the end.
+                let mut items: Vec<Item> = self
                     .state
                     .projects
                     .iter()
+                    .filter(|p| !self.is_scratch(p))
                     .map(|p| {
                         let mut item =
                             Item::new("folder", &p.title, Action::NewThreadIn(p.id.clone()));
-                        item.icon = Icon::Project(p.clone());
+                        item.icon = Icon::Project(Box::new(p.clone()));
                         item.subtitle = Some(format!("Local · {}", p.workspace_root));
                         item
                     })
                     .collect();
+                if self.scratch_root().is_some() {
+                    let mut scratch = Item::new(
+                        "message-square-dashed",
+                        "No project",
+                        Action::Call(App::start_scratch_thread),
+                    );
+                    scratch.shortcut = Some("Ctrl+Alt+N");
+                    items.push(scratch);
+                }
                 vec![Group {
                     label: "Projects".into(),
                     items,

@@ -55,7 +55,10 @@ impl App {
             );
         } else if let Some(project) = draft_project {
             // Hero + composer, vertically centered as one group.
-            let composer_top = (body.center().y - 98.0).round();
+            // Centered as one group; without the checkout strip it is 32px
+            // shorter.
+            let strip = if self.workspace_is_repo() { 0.0 } else { 16.0 };
+            let composer_top = (body.center().y - 98.0 + strip).round();
             self.draft_hero(ui, &project, column_left, column, composer_top);
             self.composer(
                 ui,
@@ -257,32 +260,59 @@ impl App {
         width: f32,
         composer_top: f32,
     ) {
+        let offers_scratch = self.scratch_root().is_some();
+        let scratch_draft = self.is_scratch(project);
         let regular = font(30.0, Weight::Regular);
         let medium = font(30.0, Weight::Medium);
         let mut job = egui::text::LayoutJob::default();
         let mut format = widgets::format(regular, theme::foreground(), 36.0);
         format.extra_letter_spacing = -0.75;
-        job.append("What should we build in ", 0.0, format.clone());
-        let mut name = widgets::format(medium, theme::foreground(), 36.0);
-        name.extra_letter_spacing = -0.75;
-        job.append(&project.title, 0.0, name);
-        job.append("?", 0.0, format);
+        // Without a project the question loses its picker, which moves to the
+        // line below.
+        if scratch_draft {
+            job.append("What should we work on?", 0.0, format);
+        } else {
+            job.append("What should we build in ", 0.0, format.clone());
+            let mut name = widgets::format(medium, theme::foreground(), 36.0);
+            name.extra_letter_spacing = -0.75;
+            job.append(&project.title, 0.0, name);
+            job.append("?", 0.0, format);
+        }
         let galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
         let top = composer_top - 100.0;
         let pos = Pos2::new(left + (width - galley.size().x) / 2.0, top);
-        // Dotted underline under the project name.
-        let prefix =
-            widgets::text_width(ui, "What should we build in ", font(30.0, Weight::Regular))
-                - 0.75 * 24.0;
-        let name_width = widgets::text_width(ui, &project.title, font(30.0, Weight::Medium))
-            - 0.75 * project.title.chars().count() as f32;
-        let underline_y = top + 33.0;
-        // The project name opens the project picker (`InlineButton
-        // tone="picker"`).
-        let trigger = Rect::from_min_max(
-            Pos2::new(pos.x + prefix, top),
-            Pos2::new(pos.x + prefix + name_width, top + 36.0),
-        );
+        ui.painter().galley(pos, galley, theme::foreground());
+        // The project picker (`InlineButton tone="picker"`): in the question,
+        // or alone on the second line for a draft without a project.
+        let trigger = if scratch_draft {
+            let label_width = widgets::text_width(ui, "No project", font(14.0, Weight::Medium));
+            let rect = Rect::from_min_size(
+                Pos2::new(left + (width - label_width) / 2.0, top + 46.0),
+                Vec2::new(label_width, 20.0),
+            );
+            widgets::text_in(
+                ui,
+                rect,
+                "No project",
+                font(14.0, Weight::Medium),
+                theme::foreground(),
+            );
+            (rect, rect.bottom() - 1.0)
+        } else {
+            let prefix =
+                widgets::text_width(ui, "What should we build in ", font(30.0, Weight::Regular))
+                    - 0.75 * 24.0;
+            let name_width = widgets::text_width(ui, &project.title, font(30.0, Weight::Medium))
+                - 0.75 * project.title.chars().count() as f32;
+            (
+                Rect::from_min_max(
+                    Pos2::new(pos.x + prefix, top),
+                    Pos2::new(pos.x + prefix + name_width, top + 36.0),
+                ),
+                top + 33.0,
+            )
+        };
+        let (trigger, underline_y) = trigger;
         let picker = ui.interact(
             trigger,
             ui.id().with("draft-project-trigger"),
@@ -296,15 +326,15 @@ impl App {
         if picker.hovered() || open {
             ui.painter().rect_filled(
                 Rect::from_min_size(
-                    Pos2::new(pos.x + prefix, underline_y),
-                    Vec2::new(name_width, 1.5),
+                    Pos2::new(trigger.left(), underline_y),
+                    Vec2::new(trigger.width(), 1.5),
                 ),
                 0.0,
                 theme::foreground(),
             );
         } else {
-            let mut dot_x = pos.x + prefix;
-            while dot_x < pos.x + prefix + name_width {
+            let mut dot_x = trigger.left();
+            while dot_x < trigger.right() {
                 ui.painter().rect_filled(
                     Rect::from_min_size(Pos2::new(dot_x, underline_y), Vec2::new(1.5, 1.5)),
                     0.0,
@@ -326,45 +356,64 @@ impl App {
                 )
             };
         }
-        self.draft_project_menu(ui, project);
-        ui.painter().galley(pos, galley, theme::foreground());
-        let sub = "or start without a project";
-        let sub_width = widgets::text_width(ui, sub, font(14.0, Weight::Medium));
-        let sub_rect = Rect::from_min_size(
-            Pos2::new(left + (width - sub_width) / 2.0, top + 46.0),
-            Vec2::new(sub_width, 20.0),
-        );
-        let response = ui.interact(
-            sub_rect,
-            ui.id().with("start-without-project"),
-            Sense::click(),
-        );
-        widgets::text_in(
-            ui,
-            sub_rect,
-            sub,
-            font(14.0, Weight::Medium),
-            if response.hovered() {
+        // "or start without a project", where the environment offers it.
+        if offers_scratch && !scratch_draft {
+            let sub = "or start without a project";
+            let sub_width = widgets::text_width(ui, sub, font(14.0, Weight::Medium));
+            let sub_rect = Rect::from_min_size(
+                Pos2::new(left + (width - sub_width) / 2.0, top + 46.0),
+                Vec2::new(sub_width, 20.0),
+            );
+            let bindings = self.state.config["keybindings"].clone();
+            let shortcut = crate::ui::shortcuts::effective_shortcut_label(
+                &bindings,
+                "chat.newWithoutProject",
+                &[("isDesktop", true)],
+            );
+            let mut response = ui.interact(
+                sub_rect,
+                ui.id().with("start-without-project"),
+                Sense::click(),
+            );
+            if let Some(shortcut) = shortcut {
+                response = response.on_hover_text(shortcut);
+            }
+            let color = if response.hovered() {
                 theme::foreground()
             } else {
                 theme::muted_foreground()
-            },
-        );
-        if response.clicked() {
-            self.status = Some("Scratch threads are not implemented yet".into());
+            };
+            widgets::text_in(ui, sub_rect, sub, font(14.0, Weight::Medium), color);
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                // `hover:underline underline-offset-2`.
+                ui.painter().rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(sub_rect.left(), sub_rect.bottom() - 2.0),
+                        Vec2::new(sub_width, 1.0),
+                    ),
+                    0.0,
+                    color,
+                );
+            }
+            if response.clicked() {
+                self.open_scratch(crate::ui::scratch::Then::Retarget);
+            }
         }
+        self.draft_project_menu(ui, project);
     }
 
-    /// The draft hero's project picker (`DraftHeroHeadline`): the logical
-    /// projects, the draft's first, then Add project. A choice retargets the
-    /// open draft. "No project" needs scratch threads, not ported.
+    /// The draft hero's project picker (`DraftHeroHeadline`): "No project"
+    /// where the environment offers it, the logical projects (the draft's
+    /// first), then Add project. A choice retargets the open draft.
     fn draft_project_menu(&mut self, ui: &mut Ui, project: &Project) {
         use crate::ui::context_menu::{self, Item};
         if self.hero_project_menu.is_none() {
             return;
         }
         // `buildSidebarProjectPickerEntries`: each group's target project,
-        // the draft's own when it is a member, and that group first.
+        // the draft's own when it is a member, and that group first. The
+        // Scratch project shows once, as "No project".
         let mut entries: Vec<(String, String, Project, bool)> = self
             .sorted_project_groups()
             .into_iter()
@@ -375,6 +424,7 @@ impl App {
                     .unwrap_or_else(|| group.representative.clone());
                 (group.key, group.label, target, own.is_some())
             })
+            .filter(|(_, _, target, _)| !self.is_scratch(target))
             .collect();
         if let Some(index) = entries.iter().position(|e| e.3)
             && index > 0
@@ -382,14 +432,17 @@ impl App {
             let preferred = entries.remove(index);
             entries.insert(0, preferred);
         }
-        let mut items: Vec<Item> = entries
-            .iter()
-            .map(|(key, label, target, own)| {
-                let mut item = Item::new(key.clone(), label.clone()).project(target.clone());
-                item.selected = *own;
-                item
-            })
-            .collect();
+        let mut items = Vec::new();
+        if self.scratch_root().is_some() {
+            let mut item = Item::new("no-project", "No project").icon("message-square-dashed");
+            item.selected = self.is_scratch(project);
+            items.push(item);
+        }
+        items.extend(entries.iter().map(|(key, label, target, own)| {
+            let mut item = Item::new(key.clone(), label.clone()).project(target.clone());
+            item.selected = *own;
+            item
+        }));
         items.push(
             Item::new("add-project", "Add project")
                 .icon("folder-plus")
@@ -399,6 +452,11 @@ impl App {
         match clicked.as_deref() {
             Some("add-project") => {
                 self.toggle_palette(crate::ui::palette::View::AddProject);
+            }
+            Some("no-project") => {
+                if !self.is_scratch(project) {
+                    self.open_scratch(crate::ui::scratch::Then::Retarget);
+                }
             }
             Some(key) => {
                 if let Some((_, _, target, own)) = entries.iter().find(|e| e.0 == key)

@@ -202,29 +202,32 @@ impl App {
             Mode::Normal => {}
         }
 
-        // Checkout strip, tucked 16px under the surface (`-mt-4`).
-        let strip = Rect::from_min_max(
-            Pos2::new(surface.left() + 22.0, surface.bottom() - 16.0),
-            Pos2::new(surface.right() - 22.0, surface.bottom() + 32.0),
-        );
-        let strip_corners = CornerRadius {
-            nw: 0,
-            ne: 0,
-            sw: 16,
-            se: 16,
-        };
-        ui.painter().rect(
-            strip,
-            strip_corners,
-            theme::shade(19),
-            Stroke::new(1.0, theme::overlay(0.07)),
-            StrokeKind::Inside,
-        );
-        self.checkout_strip(
-            ui,
-            Rect::from_min_max(Pos2::new(strip.left(), surface.bottom()), strip.max),
-            draft,
-        );
+        // Checkout strip, tucked 16px under the surface (`-mt-4`); only for a
+        // repository (`shouldShowComposerContextStrip`, one environment).
+        if self.workspace_is_repo() {
+            let strip = Rect::from_min_max(
+                Pos2::new(surface.left() + 22.0, surface.bottom() - 16.0),
+                Pos2::new(surface.right() - 22.0, surface.bottom() + 32.0),
+            );
+            let strip_corners = CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: 16,
+                se: 16,
+            };
+            ui.painter().rect(
+                strip,
+                strip_corners,
+                theme::shade(19),
+                Stroke::new(1.0, theme::overlay(0.07)),
+                StrokeKind::Inside,
+            );
+            self.checkout_strip(
+                ui,
+                Rect::from_min_max(Pos2::new(strip.left(), surface.bottom()), strip.max),
+                draft,
+            );
+        }
 
         ui.painter().rect(
             surface,
@@ -900,8 +903,12 @@ impl App {
         if !draft && let Some(thread) = self.current_thread() {
             return thread.model_selection.clone();
         }
-        let settings = &self.state.config["settings"]["defaultModelSelection"];
-        if let Ok(selection) = serde_json::from_value::<ModelSelection>(settings.clone())
+        // A draft starts on its project's default model.
+        let settings = match self.draft_project().filter(|_| draft) {
+            Some(project) => self.project_default_model(&project),
+            None => self.state.config["settings"]["defaultModelSelection"].clone(),
+        };
+        if let Ok(selection) = serde_json::from_value::<ModelSelection>(settings)
             && !selection.model.is_empty()
         {
             return selection;
