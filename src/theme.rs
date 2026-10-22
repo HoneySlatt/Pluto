@@ -157,8 +157,53 @@ pub fn set_palette(palette: Palette) -> bool {
 }
 
 /// `#rrggbb` or `#rrggbbaa`.
+/// `oklch(L C H)` (L as a fraction or a percentage) in sRGB, clamped to
+/// the gamut.
+fn parse_oklch(value: &str) -> Option<Color32> {
+    let inner = value.trim().strip_prefix("oklch(")?.strip_suffix(')')?;
+    let parts: Vec<&str> = inner.split_whitespace().collect();
+    let [l, c, h] = parts.get(..3)? else {
+        return None;
+    };
+    let l: f32 = match l.strip_suffix('%') {
+        Some(percent) => percent.parse::<f32>().ok()? / 100.0,
+        None => l.parse().ok()?,
+    };
+    let c: f32 = c.parse().ok()?;
+    let h: f32 = h.trim_end_matches("deg").parse().ok()?;
+    let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
+    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
+    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
+    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
+    let (l3, m3, s3) = (l_.powi(3), m_.powi(3), s_.powi(3));
+    let linear = [
+        4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3,
+        -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3,
+        -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3,
+    ];
+    let encode = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let srgb = if v <= 0.003_130_8 {
+            12.92 * v
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (srgb * 255.0).round() as u8
+    };
+    Some(Color32::from_rgb(
+        encode(linear[0]),
+        encode(linear[1]),
+        encode(linear[2]),
+    ))
+}
+
+/// A theme color: `#rrggbb[aa]` or `oklch(…)`.
 fn parse_hex(value: &serde_json::Value) -> Option<Color32> {
-    let hex = value.as_str()?.strip_prefix('#')?;
+    let text = value.as_str()?;
+    if text.trim_start().starts_with("oklch(") {
+        return parse_oklch(text);
+    }
+    let hex = text.strip_prefix('#')?;
     let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
     match hex.len() {
         6 => Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?)),
@@ -170,6 +215,20 @@ fn parse_hex(value: &serde_json::Value) -> Option<Color32> {
         )),
         _ => None,
     }
+}
+
+/// The built-in themes' dark variants (`BUILT_IN_THEMES` of
+/// `packages/shared/src/themePalettes.ts`, `getThemeColorsForAppearance`).
+pub fn built_in_theme(id: &str) -> Option<serde_json::Value> {
+    static THEMES: std::sync::OnceLock<Vec<serde_json::Value>> = std::sync::OnceLock::new();
+    THEMES
+        .get_or_init(|| {
+            serde_json::from_str(include_str!("../assets/themes/built-in-dark.json"))
+                .unwrap_or_default()
+        })
+        .iter()
+        .find(|theme| theme["id"] == id)
+        .cloned()
 }
 
 impl Palette {
@@ -1074,5 +1133,32 @@ mod palette_tests {
         // Missing roles fall back: the sidebar text takes the text color.
         assert_eq!(palette.sidebar_foreground, palette.foreground);
         assert!(Palette::from_theme(&serde_json::json!({"colors": {}})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn oklch_colors_convert_to_srgb() {
+        let rgb = |v: &str| parse_hex(&json!(v)).map(|c| (c.r(), c.g(), c.b()));
+        assert_eq!(rgb("oklch(1 0 0)"), Some((255, 255, 255)));
+        assert_eq!(rgb("oklch(0 0 0)"), Some((0, 0, 0)));
+        assert_eq!(rgb("oklch(0.627955 0.257683 29.2339)"), Some((255, 0, 0)));
+        assert_eq!(rgb("oklch(62.7955% 0.257683 29.2339)"), Some((255, 0, 0)));
+        assert_eq!(rgb("#0a0b0c"), Some((10, 11, 12)));
+        assert!(rgb("oklch(bad)").is_none());
+    }
+
+    #[test]
+    fn built_in_themes_have_dark_palettes() {
+        for id in ["t3-chat", "grove", "ocean", "ember", "iris"] {
+            let theme = built_in_theme(id).expect(id);
+            let palette = Palette::from_theme(&theme).expect(id);
+            assert!(palette.dark, "{id} dark variant");
+        }
+        assert!(built_in_theme("t3-code").is_none());
     }
 }

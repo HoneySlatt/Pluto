@@ -91,6 +91,19 @@ fn main() {
             if args.iter().any(|a| a == "--diff") {
                 app.open_last_diff();
             }
+            // `--server-setting key=json` overrides a server setting in this client.
+            for pair in args
+                .windows(2)
+                .filter(|w| w[0] == "--server-setting")
+                .map(|w| w[1].clone())
+            {
+                if let Some((key, value)) = pair.split_once('=') {
+                    app.override_server_setting(
+                        key,
+                        serde_json::from_str(value).expect("setting json"),
+                    );
+                }
+            }
             // `--setting key=json` overrides a client setting in memory.
             for pair in args
                 .windows(2)

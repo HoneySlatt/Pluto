@@ -979,16 +979,21 @@ impl eframe::App for App {
 impl App {
     /// Follows the environment's theme (`useDefaultThemeAdoption`): the
     /// published theme named by the `defaultTheme` server setting replaces
-    /// the stock dark palette; built-in theme ids, which this client does not
-    /// render, keep the stock palette.
+    /// the stock dark palette; a built-in theme id takes that theme's dark
+    /// variant (this client renders dark appearances only).
     fn sync_theme(&self, ctx: &egui::Context) {
         let id = self.state.config["settings"]["defaultTheme"]
             .as_str()
             .unwrap_or_default();
-        let palette = (!id.is_empty())
-            .then(|| self.state.config["environmentThemes"].as_array())
-            .flatten()
-            .and_then(|themes| themes.iter().find(|t| t["id"] == id))
+        // `getThemeDefinition`: a built-in first, then the published themes.
+        let palette = crate::theme::built_in_theme(id)
+            .or_else(|| {
+                (!id.is_empty())
+                    .then(|| self.state.config["environmentThemes"].as_array())
+                    .flatten()
+                    .and_then(|themes| themes.iter().find(|t| t["id"] == id).cloned())
+            })
+            .as_ref()
             .and_then(crate::theme::Palette::from_theme)
             .unwrap_or(crate::theme::DARK);
         if crate::theme::set_palette(palette) {
@@ -1033,6 +1038,11 @@ impl App {
     /// Opens a workspace file in the right panel (dev benches).
     pub fn show_file(&mut self, path: &str) {
         self.open_file(path.to_owned());
+    }
+
+    /// Overrides a server setting in this client only (snapshots).
+    pub fn override_server_setting(&mut self, key: &str, value: serde_json::Value) {
+        self.state.config["settings"][key] = value;
     }
 
     /// Overrides a client setting in memory (snapshots).

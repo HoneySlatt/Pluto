@@ -72,8 +72,10 @@ Not ported yet (buttons for these show a "not implemented" notice):
 Environment themes map their colors onto the app tokens like the web client's
 `html[data-theme-id]` rule. Surfaces measured as white tints of the stock dark
 palette become tints of the theme's text color over its canvas, which
-approximates the upstream mixes. Built-in theme ids keep the stock palette, and
-clearing the environment theme returns to it (upstream keeps the last theme).
+approximates the upstream mixes. A built-in theme id (T3 Chat, Grove, Ocean,
+Ember, Iris) takes that theme's dark variant from `themePalettes.ts` (its
+OKLCH tokens converted to sRGB; this client renders dark appearances only), and
+clearing the environment theme returns to the stock palette (upstream keeps the last theme).
 
 The Usage page's metric and period live in memory (upstream: local storage).
 Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`
