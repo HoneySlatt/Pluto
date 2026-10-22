@@ -99,7 +99,7 @@ fn placeholder(index: usize) -> char {
     char::from_u32(PLACEHOLDER_BASE + index as u32).unwrap_or('\u{FFFD}')
 }
 
-fn placeholder_index(c: char) -> Option<usize> {
+pub(crate) fn placeholder_index(c: char) -> Option<usize> {
     let value = c as u32;
     (PLACEHOLDER_BASE..PLACEHOLDER_BASE + 0xFFFE)
         .contains(&value)

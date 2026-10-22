@@ -44,6 +44,8 @@ pub struct App {
     /// The composer's interaction mode (plan or default) by composer key.
     pub(crate) composer_interaction: std::collections::HashMap<String, String>,
     /// The running turn's task drawer is open, for this thread.
+    /// The composer's "/", "@" and "$" menu.
+    pub(crate) command_menu: crate::ui::command_menu::MenuState,
     pub(crate) tasks_open: bool,
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
@@ -371,6 +373,7 @@ impl App {
             composer_selection: Default::default(),
             composer_runtime: Default::default(),
             composer_interaction: Default::default(),
+            command_menu: Default::default(),
             tasks_open: false,
             tasks_thread: None,
             picker_provider: None,

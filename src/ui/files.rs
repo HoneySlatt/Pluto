@@ -222,6 +222,33 @@ impl App {
         )
     }
 
+    /// The composer's "@" search (`useComposerPathSearch`: files and
+    /// folders, 80 at most): each entry's path and whether it is a folder.
+    pub(crate) fn composer_path_search(
+        &mut self,
+        cwd: &str,
+        query: &str,
+    ) -> Option<Result<Vec<(String, bool)>, String>> {
+        let key = format!("{cwd}\0composer\0{query}");
+        self.files_request(
+            format!("files-search:{key}"),
+            "projects.searchEntries",
+            json!({"cwd": cwd, "query": query, "limit": 80}),
+        );
+        let found = self.files.searches.get(&key)?;
+        Some(
+            found
+                .as_ref()
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .map(|e| (e.path.clone(), e.directory))
+                        .collect()
+                })
+                .map_err(Clone::clone),
+        )
+    }
+
     /// `rightPanelStore.openFile`: the file's tab replaces the standalone
     /// explorer, reusing an open tab of the same file.
     pub(crate) fn open_file(&mut self, path: String) {

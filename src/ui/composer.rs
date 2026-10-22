@@ -302,6 +302,10 @@ impl App {
         let editor_id = ui.id().with("composer-editor");
         self.cite.editor_id = Some(editor_id);
         let focused = ui.memory(|m| m.has_focus(editor_id));
+        // The suggestion menu takes its keys first.
+        if normal {
+            self.command_menu_keys(ui, editor_id, draft);
+        }
         // Ctrl+Enter in a citation's comment editor sends too.
         let submit = (focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
             || std::mem::take(&mut self.cite.send);
@@ -360,6 +364,10 @@ impl App {
             .is_none_or(|pos| surface.contains(pos));
         if normal && !dropped.is_empty() && over {
             crate::ui::attachments::add_dropped_files(&self.incoming_images, ui.ctx(), dropped);
+        }
+
+        if normal {
+            self.composer_command_menu(ui, surface, editor_id, draft);
         }
 
         // Toolbar.

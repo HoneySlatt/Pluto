@@ -7,6 +7,7 @@ pub mod changed_files;
 pub mod chat;
 pub mod citations;
 pub mod cite;
+pub mod command_menu;
 pub mod composer;
 pub mod connect;
 pub mod content_search;
