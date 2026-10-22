@@ -82,6 +82,10 @@ pub struct Thread {
     pub background_liveness: Option<String>,
     /// `ThreadPullRequestLink`s, kept as sent.
     pub pull_requests: Vec<Value>,
+    /// `ThreadLinkedPullRequest` (servers before thread links) and the
+    /// pull request the server found for the thread's branch.
+    pub linked_pull_request: Option<Value>,
+    pub branch_pull_request: Option<Value>,
     pub messages: Vec<Message>,
     pub activities: Vec<Activity>,
     pub checkpoints: Vec<Checkpoint>,

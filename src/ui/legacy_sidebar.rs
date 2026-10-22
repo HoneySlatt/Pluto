@@ -4,8 +4,7 @@
 //! `threadSort.ts`), with the status pills of `resolveThreadStatusPill` and
 //! the "Sidebar options" sort menu.
 //!
-//! Not ported: the legacy pull request lookup for unsynced links and the
-//! preview panel the port globe opens upstream.
+//! Not ported: the preview panel the port globe opens upstream.
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -346,6 +345,52 @@ impl App {
         self.legacy_project_menu(ui);
         self.legacy_new_thread_menu(ui);
         self.legacy_multi_menu(ui);
+    }
+
+    /// `useLinkedThreadPullRequest`'s fallback: the legacy linked pull request
+    /// (servers without thread links) or the branch's, read with
+    /// `pullRequests.summary` every minute and shaped like a synced link.
+    fn legacy_fallback_pull_request(&mut self, thread: &Thread) -> Option<Value> {
+        let links = self.capability("threadPullRequests");
+        let reference = (!links)
+            .then(|| thread.linked_pull_request.clone())
+            .flatten()
+            .or_else(|| thread.branch_pull_request.clone())?;
+        let url = reference["url"].as_str()?.to_owned();
+        let stale = self
+            .pr_summaries
+            .get(&url)
+            .is_none_or(|(_, asked)| asked.elapsed() > std::time::Duration::from_secs(60));
+        if stale {
+            let mut input = json!({
+                "projectId": reference["projectId"],
+                "repository": reference["repository"],
+                "number": reference["number"],
+            });
+            // `parseChangeRequestUrl`'s host.
+            if let Some(host) = url
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next())
+                .filter(|h| !h.is_empty())
+            {
+                input["host"] = json!(host);
+            }
+            let previous = self.pr_summaries.get(&url).and_then(|(s, _)| s.clone());
+            self.pr_summaries
+                .insert(url.clone(), (previous, std::time::Instant::now()));
+            self.send_request(format!("pr-summary:{url}"), "pullRequests.summary", input);
+        }
+        let summary = self.pr_summaries.get(&url)?.0.clone()?;
+        Some(json!({
+            "number": summary["number"],
+            "url": summary["url"],
+            "snapshot": {
+                "state": summary["state"],
+                "isDraft": summary["isDraft"] == true,
+                "title": summary["title"],
+            },
+        }))
     }
 
     /// `terminalMetadata` stream events: the snapshot, then upserts and removals.
@@ -1739,8 +1784,18 @@ impl App {
                 .rect_filled(rect, CornerRadius::same(6), sidebar_row_hover());
         }
         let mut x = rect.left() + 8.0;
-        // The current pull request's state glyph, a link to it.
-        if let Some(link) = crate::ui::thread_pull_requests::current_link(&thread.pull_requests) {
+        // The current pull request's state glyph, a link to it; without a
+        // thread link, the legacy or branch pull request's summary.
+        let fallback = crate::ui::thread_pull_requests::current_link(&thread.pull_requests)
+            .is_none()
+            .then(|| self.legacy_fallback_pull_request(thread))
+            .flatten();
+        if let Some(link) = fallback
+            .as_ref()
+            .or(crate::ui::thread_pull_requests::current_link(
+                &thread.pull_requests,
+            ))
+        {
             let (icon, tone, tooltip) = crate::ui::thread_pull_requests::status(link).unwrap_or((
                 "git-pull-request-arrow",
                 theme::muted_foreground(),

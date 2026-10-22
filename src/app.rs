@@ -90,6 +90,8 @@ pub struct App {
     pub(crate) discovered_servers: Vec<Value>,
     /// Whether the legacy sidebar's metadata streams are open.
     pub(crate) legacy_streams: bool,
+    /// `pullRequests.summary` by PR URL, with when it was asked for.
+    pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
@@ -349,6 +351,7 @@ impl App {
             terminal_metadata: Default::default(),
             discovered_servers: Vec::new(),
             legacy_streams: false,
+            pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
             legacy_project_menu: None,
@@ -1179,6 +1182,13 @@ impl App {
             self.prs.results.insert(key, result);
         } else if key == "providers-refresh" {
             self.providers_refreshing = false;
+        } else if let Some(url) = key.strip_prefix("pr-summary:") {
+            if let Some(entry) = self.pr_summaries.get_mut(url) {
+                // A failed refresh keeps the last summary.
+                if let Ok(summary) = result {
+                    entry.0 = Some(summary);
+                }
+            }
         } else if key == "sidebar-terminal-metadata" {
             if let Ok(event) = result {
                 self.terminal_metadata_event(&event);
