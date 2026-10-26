@@ -303,7 +303,7 @@ pub(crate) enum Control {
         icon: &'static str,
     },
     /// The project icon row: the icon, "Choose icon" and "Choose file".
-    ProjectIcon(crate::model::Project),
+    ProjectIcon(Box<crate::model::Project>),
     /// `Button variant="destructive-outline" size="sm"` with a leading icon.
     Destructive {
         label: &'static str,

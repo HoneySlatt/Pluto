@@ -1,6 +1,6 @@
-//! The Agents surface (`AgentsPanel.tsx`): the thread's subagents folded
-//! from its activities (`subagents`), workflows with their phases, direct
-//! spawns and the totals footer.
+//! The Agents surface (`AgentsPanel.tsx`): the thread's projected subagents
+//! (`subagents`), workflows with their phases, direct spawns and the totals
+//! footer.
 //!
 //! Not ported: the workflow script viewer.
 use std::collections::HashMap;
@@ -244,14 +244,11 @@ fn phase_color(state: PhaseState) -> Color32 {
 impl App {
     /// The surface in `body`.
     pub(crate) fn agents_panel(&mut self, ui: &mut Ui, body: Rect) {
-        let Some(thread) = self.current_thread() else {
+        let Some(detail) = self.current_detail() else {
+            empty_state(ui, body);
             return;
         };
-        let live = thread
-            .session
-            .as_ref()
-            .is_some_and(|s| !matches!(s.status.as_str(), "stopped" | "interrupted" | "error"));
-        let model = subagents::panel_model(subagents::fold(&thread.activities, live));
+        let model = subagents::panel_model(subagents::from_projection(&detail.subagents));
         if !model.has_agents {
             empty_state(ui, body);
             return;

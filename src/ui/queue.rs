@@ -1,220 +1,129 @@
-//! Messages queued while a turn runs (`queuedMessageStore.ts`,
-//! `QueuedMessageSender.tsx`, `QueuedMessageTimelineRow` in
-//! `chat/MessagesTimeline.tsx`): with the "Queue" follow-up behavior, a
-//! message sent during a turn waits in memory and goes out once a tool call
-//! finishes after it was queued, or when the turn is over; approvals and
-//! questions hold the queue, and each send waits for the server to take the
-//! previous one. The rows are dashed user bubbles at the end of the timeline
-//! with "Send now" and "Cancel and return to the composer"; Stop returns every
-//! queued message to the composer.
-//!
-//! Off-screen threads go out when their turn ends (their tool calls are not
-//! followed). Rendered from the upstream source; not compared with the
-//! reference, which cannot show a running turn on the fixture.
-
-use std::collections::HashMap;
+//! Messages queued behind the running turn. Protocol 2 queues them on the
+//! server as `queued` runs (`client-runtime/state/threadWorkflows.ts`,
+//! `deriveThreadQueueWorkflowState`); "Steer" sends one into the running
+//! turn (`queued-message.promote-to-steer`) and "Remove from queue" cancels
+//! it (`queued-run.cancel`). They still show as v0.0.45's dashed user
+//! bubbles at the end of the timeline (`QueuedMessageTimelineRow`); v0.1.0's
+//! banner above the composer (`QueuedRunsControl.tsx`), with drag reorder and
+//! editing in the composer, is not ported.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::app::App;
-use crate::model::Thread;
+use crate::model::{Detail, Run};
 use crate::theme::{self, Weight, font};
-use crate::ui::attachments::ComposerImage;
 use crate::ui::widgets;
 
-/// A message waiting for the running turn (`QueuedComposerMessage`).
-pub(crate) struct Queued {
-    pub(crate) id: String,
+/// `QueuedThreadRun`.
+pub(crate) struct QueuedRun {
+    pub(crate) run_id: String,
     pub(crate) text: String,
-    pub(crate) images: Vec<ComposerImage>,
-    /// The composer's send settings when it was queued.
-    pub(crate) model: Value,
-    pub(crate) runtime: String,
-    pub(crate) interaction: String,
-    /// The context records its text references.
-    pub(crate) contexts: Vec<Value>,
-    /// The newest finished tool call at queue time.
-    pub(crate) queued_after: Option<String>,
+    pub(crate) attachments: usize,
 }
 
-/// Queues by thread id, and per thread the user message of the last queued
-/// send the server has not shown yet.
-#[derive(Default)]
-pub(crate) struct Queues {
-    pub(crate) by_thread: HashMap<String, Vec<Queued>>,
-    waiting: HashMap<String, String>,
+/// `resolveActiveThreadRun`.
+pub(crate) fn active_run(detail: &Detail) -> Option<&Run> {
+    detail.runs.iter().rev().find(|run| {
+        matches!(
+            run.status.as_str(),
+            "preparing" | "starting" | "running" | "waiting"
+        )
+    })
 }
 
-/// `latestCompletedToolActivityId`: the newest finished tool call.
-pub(crate) fn latest_tool_call(thread: &Thread) -> Option<String> {
-    thread
-        .activities
-        .iter()
-        .filter(|a| a.kind == "tool.completed")
-        .max_by(|a, b| {
-            a.sequence
-                .unwrap_or(0)
-                .cmp(&b.sequence.unwrap_or(0))
-                .then_with(|| a.created_at.cmp(&b.created_at))
+/// `resolveThreadProviderSession`.
+fn provider_session(detail: &Detail) -> Option<&Value> {
+    let provider_thread = active_run(detail)
+        .and_then(|run| run.provider_thread_id.clone())
+        .or_else(|| {
+            detail.thread["activeProviderThreadId"]
+                .as_str()
+                .map(str::to_owned)
+        });
+    let attached = provider_thread
+        .and_then(|id| {
+            detail
+                .provider_threads
+                .iter()
+                .find(|t| t["id"] == id.as_str())
         })
-        .map(|a| a.id.clone())
+        .or_else(|| {
+            detail.provider_threads.iter().find(|t| {
+                t["appThreadId"] == detail.thread["id"] && !t["providerSessionId"].is_null()
+            })
+        });
+    match attached.and_then(|t| t["providerSessionId"].as_str()) {
+        Some(id) => detail.provider_sessions.iter().find(|s| s["id"] == id),
+        None => detail
+            .provider_sessions
+            .iter()
+            .rev()
+            .find(|s| s["status"] != "stopped" && s["status"] != "error"),
+    }
 }
 
-/// `isQueuedMessageDue`: mid-turn once a tool call finished after it was
-/// queued; at once when the turn is over; never while connecting.
-fn is_due(status: Option<&str>, latest_tool: Option<&str>, queued_after: Option<&str>) -> bool {
-    match status {
-        Some("starting") => false,
-        Some("running") => latest_tool != queued_after,
-        _ => true,
-    }
+/// `deriveThreadQueueWorkflowState`: the user's queued runs in queue order
+/// (automatic completion and notification runs are not messages), and
+/// whether one can steer the running turn instead.
+pub(crate) fn queued_runs(detail: &Detail) -> (Vec<QueuedRun>, bool) {
+    let automatic: Vec<&str> = detail
+        .messages
+        .iter()
+        .filter(|m| m.get("delegatedCompletion").is_some() || m.get("notification").is_some())
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    let mut runs: Vec<&Run> = detail
+        .runs
+        .iter()
+        .filter(|run| run.status == "queued" && !automatic.contains(&run.user_message_id.as_str()))
+        .collect();
+    runs.sort_by_key(|run| (run.queue_position.unwrap_or(run.ordinal), run.ordinal));
+    let queued = runs
+        .into_iter()
+        .map(|run| {
+            let message = detail
+                .messages
+                .iter()
+                .find(|m| m["id"] == run.user_message_id.as_str());
+            QueuedRun {
+                run_id: run.id.clone(),
+                text: message
+                    .and_then(|m| m["text"].as_str())
+                    .unwrap_or("Queued message")
+                    .to_owned(),
+                attachments: message
+                    .and_then(|m| m["attachments"].as_array())
+                    .map_or(0, Vec::len),
+            }
+        })
+        .collect();
+    let active = active_run(detail);
+    let steerable_turn = active.is_some_and(|run| {
+        run.status == "running"
+            && run.active_attempt_id.as_deref().is_some_and(|attempt| {
+                detail
+                    .provider_turns
+                    .iter()
+                    .any(|t| t["runAttemptId"] == attempt && t["status"] == "running")
+            })
+    });
+    let turns = provider_session(detail).map(|s| &s["capabilities"]["turns"]);
+    let can_steer = steerable_turn
+        && turns.is_some_and(|t| {
+            t["supportsActiveSteering"] == true || t["supportsSteeringByInterruptRestart"] == true
+        });
+    (queued, can_steer)
 }
 
 impl App {
-    /// Queues the composer's content for the open thread.
-    pub(crate) fn enqueue_composer(&mut self, thread: &Thread, model: Value, runtime: String) {
-        let queued = Queued {
-            id: uuid::Uuid::new_v4().to_string(),
-            text: self.composer.trim().to_owned(),
-            images: std::mem::take(&mut self.composer_images),
-            model,
-            runtime,
-            interaction: self.composer_interaction_mode(false),
-            contexts: crate::ui::composer_context::referenced(
-                self.composer.trim(),
-                &self.composer_contexts,
-            ),
-            queued_after: latest_tool_call(thread),
-        };
-        self.composer.clear();
-        self.composer_contexts.clear();
-        self.queues
-            .by_thread
-            .entry(thread.id.clone())
-            .or_default()
-            .push(queued);
-    }
-
-    /// Sends each thread's next queued message once it is due.
-    pub(crate) fn send_due_queued(&mut self) {
-        let threads: Vec<String> = self.queues.by_thread.keys().cloned().collect();
-        for thread_id in threads {
-            let detail = self.state.detail.clone().filter(|t| t.id == thread_id);
-            let Some(thread) = detail.clone().or_else(|| {
-                self.state
-                    .threads
-                    .iter()
-                    .find(|t| t.id == thread_id)
-                    .cloned()
-            }) else {
-                continue;
-            };
-            // The previous send has not reached the thread yet.
-            if let Some(message_id) = self.queues.waiting.get(&thread_id) {
-                let arrived = detail
-                    .as_ref()
-                    .is_some_and(|t| t.messages.iter().any(|m| &m.id == message_id))
-                    || detail.is_none() && thread.is_running();
-                if !arrived {
-                    continue;
-                }
-                self.queues.waiting.remove(&thread_id);
-            }
-            if thread.has_pending_approvals || thread.has_pending_user_input || !self.connected() {
-                continue;
-            }
-            let latest = detail.as_deref().and_then(latest_tool_call);
-            let status = thread.session.as_ref().map(|s| s.status.as_str());
-            let Some(next) = self
-                .queues
-                .by_thread
-                .get(&thread_id)
-                .and_then(|q| q.first())
-            else {
-                continue;
-            };
-            // Off-screen threads only go out once their turn is over.
-            let due = if detail.is_some() {
-                is_due(status, latest.as_deref(), next.queued_after.as_deref())
-            } else {
-                !thread.is_running()
-            };
-            if due {
-                let id = next.id.clone();
-                self.send_queued(&thread_id, &id, latest);
-            }
-        }
-    }
-
-    /// `sendQueuedMessage`: dispatches one queued message; the rest of the
-    /// queue waits for the next tool boundary after it.
-    pub(crate) fn send_queued(&mut self, thread_id: &str, id: &str, latest: Option<String>) {
-        let Some(queue) = self.queues.by_thread.get_mut(thread_id) else {
-            return;
-        };
-        let Some(index) = queue.iter().position(|q| q.id == id) else {
-            return;
-        };
-        let queued = queue.remove(index);
-        for other in queue.iter_mut() {
-            other.queued_after = latest.clone();
-        }
-        if queue.is_empty() {
-            self.queues.by_thread.remove(thread_id);
-        }
-        let mut command = crate::ui::composer::turn_start_command(
-            thread_id,
-            &queued.text,
-            &queued.images,
-            &queued.model,
-            &queued.runtime,
-            &queued.interaction,
-        );
-        crate::ui::composer_context::apply(
-            &mut command,
-            &queued.text,
-            &queued.contexts,
-            self.inline_message_context(),
-        );
-        if let Some(message_id) = command["message"]["messageId"].as_str() {
-            self.queues
-                .waiting
-                .insert(thread_id.to_owned(), message_id.to_owned());
-        }
-        self.dispatch(command);
-    }
-
-    /// `restoreQueuedMessagesToComposer`: the texts join the draft (blank
-    /// lines between), the images follow.
-    pub(crate) fn restore_queued(&mut self, messages: Vec<Queued>) {
-        let prompts: Vec<String> = std::iter::once(self.composer.clone())
-            .chain(messages.iter().map(|m| m.text.clone()))
-            .map(|p| p.trim().to_owned())
-            .filter(|p| !p.is_empty())
-            .collect();
-        self.composer = prompts.join("\n\n");
-        for message in messages {
-            self.composer_images.extend(message.images);
-            self.composer_contexts.extend(message.contexts);
-        }
-    }
-
-    /// Stop also cancels the queue: its messages return to the composer.
-    pub(crate) fn drain_queue(&mut self, thread_id: &str) {
-        if let Some(messages) = self.queues.by_thread.remove(thread_id) {
-            self.restore_queued(messages);
-        }
-    }
-
     /// The open thread's queued rows (`QueuedMessageTimelineRow`).
-    pub(crate) fn queued_rows(&mut self, ui: &mut Ui, thread: &Thread, width: f32) {
-        let Some(queue) = self.queues.by_thread.get(&thread.id) else {
-            return;
-        };
-        let rows: Vec<(String, String, usize)> = queue
-            .iter()
-            .map(|q| (q.id.clone(), q.text.clone(), q.images.len()))
+    pub(crate) fn queued_rows(&mut self, ui: &mut Ui, detail: &Detail, width: f32) {
+        let (queued, can_steer) = queued_runs(detail);
+        let thread_id = detail.id().to_owned();
+        let rows: Vec<(String, String, usize)> = queued
+            .into_iter()
+            .map(|q| (q.run_id, q.text, q.attachments))
             .collect();
         let mut send_now = None;
         let mut cancel = None;
@@ -295,7 +204,7 @@ impl App {
                 muted,
             );
             let status = if index == 0 {
-                "Sends after the next tool call or when the turn ends"
+                "Sends when the running turn ends"
             } else {
                 "Sends after the messages above it"
             };
@@ -318,16 +227,22 @@ impl App {
                 Pos2::new(cancel_rect.left() - 2.0 - 24.0, footer_top),
                 Vec2::splat(24.0),
             );
+            let steer_tip = if can_steer {
+                "Send as a steer instead"
+            } else {
+                "There is no active run to steer"
+            };
             if widgets::icon_button(
                 ui,
                 send_rect,
                 ("queued-send", id),
-                "arrow-up",
+                "corner-up-right",
                 14.0,
                 theme::muted_foreground(),
-                "Send now",
+                steer_tip,
             )
             .clicked()
+                && can_steer
             {
                 send_now = Some(id.clone());
             }
@@ -338,29 +253,25 @@ impl App {
                 "x",
                 14.0,
                 theme::muted_foreground(),
-                "Cancel and return to the composer",
+                "Remove from queue",
             )
             .clicked()
             {
                 cancel = Some(id.clone());
             }
         }
-        // Send now holds while a request blocks the agent.
         if let Some(id) = send_now
-            && !thread.has_pending_approvals
-            && !thread.has_pending_user_input
+            && let Some(active) = active_run(detail)
         {
-            self.send_queued(&thread.id, &id, latest_tool_call(thread));
+            let mut command = crate::model::command("queued-message.promote-to-steer", &thread_id);
+            command["queuedRunId"] = json!(id);
+            command["targetRunId"] = json!(active.id);
+            self.dispatch(command);
         }
-        if let Some(id) = cancel
-            && let Some(queue) = self.queues.by_thread.get_mut(&thread.id)
-            && let Some(index) = queue.iter().position(|q| q.id == id)
-        {
-            let message = queue.remove(index);
-            if queue.is_empty() {
-                self.queues.by_thread.remove(&thread.id);
-            }
-            self.restore_queued(vec![message]);
+        if let Some(id) = cancel {
+            let mut command = crate::model::command("queued-run.cancel", &thread_id);
+            command["runId"] = json!(id);
+            self.dispatch(command);
         }
     }
 }
@@ -397,12 +308,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn queued_messages_wait_for_a_tool_boundary() {
-        assert!(!is_due(Some("running"), Some("a"), Some("a")));
-        assert!(is_due(Some("running"), Some("b"), Some("a")));
-        assert!(is_due(Some("running"), Some("a"), None));
-        assert!(!is_due(Some("starting"), None, None));
-        assert!(is_due(Some("ready"), Some("a"), Some("a")));
-        assert!(is_due(None, None, None));
+    fn queued_runs_follow_the_queue_order() {
+        let run = |id: &str, ordinal: u64, position: Option<u64>, message: &str| {
+            json!({"id":id,"threadId":"t","ordinal":ordinal,"status":"queued",
+                "queuePosition":position,"userMessageId":message,"requestedAt":"1"})
+        };
+        let detail: Detail = serde_json::from_value(json!({
+            "thread": {"id": "t"},
+            "runs": [run("a", 2, Some(2), "m1"), run("b", 3, Some(1), "m2"), run("w", 4, None, "m3")],
+            "messages": [
+                {"id": "m1", "text": "first", "attachments": []},
+                {"id": "m2", "text": "second", "attachments": [{"type": "image"}]},
+                {"id": "m3", "text": "wake", "attachments": [], "notification": {}},
+            ],
+        }))
+        .unwrap();
+        let (queued, can_steer) = queued_runs(&detail);
+        let texts: Vec<&str> = queued.iter().map(|q| q.text.as_str()).collect();
+        assert_eq!(texts, ["second", "first"]);
+        assert_eq!(queued[0].attachments, 1);
+        assert!(!can_steer);
     }
 }

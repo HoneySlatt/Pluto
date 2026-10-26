@@ -1,11 +1,16 @@
-//! Client state: the shell projection (projects and thread summaries) and the
-//! selected thread detail. Events are applied to raw JSON exactly like the
-//! upstream reducer (`client-runtime/state/threadReducer.ts`), then decoded
-//! into typed views for rendering.
+//! Client state for orchestration protocol 2: the shell (projects and thread
+//! summaries) and the selected thread's projection.
+//!
+//! Shell rows are presented like upstream `client-runtime/state/models.ts`
+//! (`presentThreadShell`) and kept like `state/shellReducer.ts`; the open
+//! thread's projection takes events like `state/orchestrationV2Projection.ts`,
+//! with the turn item visibility of `shared/orchestrationV2Timeline.ts`.
+//! Bounded (progressive history) snapshots are not requested, so the timeline
+//! is always complete.
 use std::sync::Arc;
 
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde::{Deserialize, Deserializer};
+use serde_json::{Map, Value, json};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -15,6 +20,7 @@ pub struct ModelSelection {
     pub options: Option<Value>,
 }
 
+/// `OrchestrationProjectShell`.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Project {
@@ -23,50 +29,148 @@ pub struct Project {
     pub workspace_root: String,
     pub project_icon: Option<Value>,
     pub favicon_path: Option<String>,
-    /// The legacy per-project default model, read until the server folds it
-    /// into `projectSettingsOverrides`.
     pub default_model_selection: Option<Value>,
+    /// Where new threads start (`ThreadEnvMode`); `None` defers to t3.json,
+    /// then the global setting.
+    pub default_thread_env_mode: Option<String>,
+    pub auto_pull: Option<bool>,
     /// `RepositoryIdentity` (canonical key, root path, names), kept as sent.
     pub repository_identity: Option<Value>,
+    pub scripts: Vec<Value>,
     pub created_at: String,
     pub updated_at: String,
 }
 
+/// `OrchestrationV2AppThreadLineage`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
-pub struct LatestTurn {
-    pub turn_id: String,
-    pub state: String,
-    pub requested_at: String,
+pub struct Lineage {
+    pub parent_thread_id: Option<String>,
+    /// `fork` or `subagent`.
+    pub relationship_to_parent: Option<String>,
+    pub root_thread_id: String,
+}
+
+/// `OrchestrationV2PendingRuntimeRequestSummary`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PendingRequestSummary {
+    pub id: String,
+    pub kind: String,
+    pub created_at: String,
+}
+
+/// `OrchestrationV2LatestVisibleMessageSummary`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LatestVisibleMessage {
+    pub id: String,
+    pub role: String,
+    pub text: String,
+    pub updated_at: String,
+}
+
+/// `ThreadRunSummary`: the thread's latest run.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RunSummary {
+    pub run_id: String,
+    pub status: String,
+    pub requested_at: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub assistant_message_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Session {
+/// `ThreadRuntimeSummary`: what the thread's provider is doing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuntimeSummary {
+    /// `idle` or a run status.
     pub status: String,
-    pub provider_name: Option<String>,
-    pub provider_instance_id: Option<String>,
-    pub active_turn_id: Option<String>,
+    pub active_run_id: Option<String>,
+    /// The activity-owning run's work start; `None` when the server predates it.
+    pub activity_started_at: Option<Option<String>>,
+    pub provider_instance_id: String,
     pub last_error: Option<String>,
+    pub last_error_class: Option<String>,
+    pub usage_limit_reset_at: Option<String>,
     pub updated_at: String,
 }
 
-/// Thread shell summary, or the shell part of a thread detail.
+impl RuntimeSummary {
+    /// `threadRuntimeIsActive`.
+    pub fn is_active(&self) -> bool {
+        run_status_is_active(&self.status)
+    }
+
+    /// `threadRuntimeCanArchive`: queued work may go, a working provider stays.
+    pub fn can_archive(&self) -> bool {
+        if self.status == "queued" {
+            return self.active_run_id.is_none();
+        }
+        !matches!(self.status.as_str(), "preparing" | "starting" | "running")
+    }
+}
+
+/// `threadRunStatusIsActive`.
+pub fn run_status_is_active(status: &str) -> bool {
+    matches!(
+        status,
+        "preparing" | "queued" | "starting" | "running" | "waiting"
+    )
+}
+
+fn terminal_run_status(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "interrupted" | "failed" | "cancelled" | "rolled_back"
+    )
+}
+
+/// Distinguishes an absent field (`None`) from a null one (`Some(None)`).
+fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+/// A shell thread (`EnvironmentThreadShell`), presented from the server's
+/// `OrchestrationV2ThreadShell` by [`Thread::from_shell`].
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Thread {
     pub id: String,
     pub project_id: String,
     pub title: String,
+    pub created_by: String,
+    pub creation_source: String,
+    pub provider_instance_id: String,
     pub model_selection: ModelSelection,
     pub runtime_mode: String,
     pub interaction_mode: String,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
-    pub latest_turn: Option<LatestTurn>,
+    pub lineage: Lineage,
+    pub forked_from: Option<Value>,
+    pub active_provider_thread_id: Option<String>,
+    /// `idle` or the latest run's status.
+    pub status: String,
+    pub latest_run_id: Option<String>,
+    pub active_run_id: Option<String>,
+    #[serde(deserialize_with = "present")]
+    pub activity_run_started_at: Option<Option<String>>,
+    #[serde(deserialize_with = "present")]
+    pub activity_run_status: Option<Option<String>>,
+    pub pending_runtime_request: Option<PendingRequestSummary>,
+    pub latest_visible_message: Option<LatestVisibleMessage>,
+    pub latest_user_message_at: Option<String>,
+    /// The last message the user wrote; `None` when the server predates it.
+    #[serde(deserialize_with = "present")]
+    pub latest_user_authored_message_at: Option<Option<String>>,
+    pub has_actionable_proposed_plan: bool,
+    /// `OrchestrationV2PendingBackgroundTask`s, kept as sent.
+    pub pending_background_tasks: Vec<Value>,
+    pub provider_instance_history: Vec<String>,
+    pub goal: Option<Value>,
+    pub item_count: u64,
+    pub visible_item_count: u64,
     pub created_at: String,
     pub updated_at: String,
     pub archived_at: Option<String>,
@@ -75,55 +179,334 @@ pub struct Thread {
     pub unsettled_at: Option<String>,
     pub snoozed_until: Option<String>,
     pub snoozed_at: Option<String>,
-    pub auto_settle_disabled_at: Option<String>,
+    pub limit_recovery: Option<Value>,
     pub pinned_at: Option<String>,
+    pub auto_settle_disabled_at: Option<String>,
     pub pin_order_key: Option<String>,
     pub active_order_key: Option<String>,
-    pub session: Option<Session>,
-    pub latest_user_message_at: Option<String>,
-    pub has_pending_approvals: bool,
-    pub has_pending_user_input: bool,
-    pub has_actionable_proposed_plan: bool,
-    pub background_liveness: Option<String>,
-    /// `ThreadPullRequestLink`s, kept as sent.
+    /// `ThreadPullRequestLink`s (`threadPullRequestsOf`).
     pub pull_requests: Vec<Value>,
-    /// `ThreadLinkedPullRequest` (servers before thread links) and the
-    /// pull request the server found for the thread's branch.
+    /// `ThreadLinkedPullRequest` the user linked, and the one the server
+    /// found for the thread's branch.
     pub linked_pull_request: Option<Value>,
     pub branch_pull_request: Option<Value>,
-    pub messages: Vec<Message>,
-    pub activities: Vec<Activity>,
-    pub checkpoints: Vec<Checkpoint>,
-    pub proposed_plans: Vec<ProposedPlan>,
+    /// Server-tracked visited watermark; `None` when the server predates it.
+    #[serde(deserialize_with = "present")]
+    pub last_visited_at: Option<Option<String>>,
+    pub title_regeneration: Option<Value>,
+    pub deleted_at: Option<String>,
+    #[serde(skip)]
+    pub latest_run: Option<RunSummary>,
+    #[serde(skip)]
+    pub runtime: Option<RuntimeSummary>,
+    #[serde(skip)]
+    pub has_pending_approvals: bool,
+    #[serde(skip)]
+    pub has_pending_user_input: bool,
+    /// What a live subagent below this thread waits on the user for
+    /// (`approval` or `user_input`): subagent rows are hidden, so the threads
+    /// above them carry it.
+    #[serde(skip)]
+    pub pending_subagent_request: Option<String>,
 }
 
+impl Thread {
+    /// `presentThreadShell`.
+    pub fn from_shell(raw: &Value) -> Result<Self, String> {
+        let mut thread: Thread = decode(raw)?;
+        let pull_requests_sent = raw.get("pullRequests").is_some_and(|v| !v.is_null());
+        if !pull_requests_sent && let Some(linked) = thread.linked_pull_request.clone() {
+            thread.pull_requests = vec![legacy_link(&linked)];
+        }
+        if thread.lineage.relationship_to_parent.as_deref() == Some("subagent") {
+            thread.title = subagent_display_title(&thread.title);
+        }
+        thread.latest_run = thread.latest_run_id.clone().map(|run_id| {
+            let status = if thread.status == "idle" {
+                "completed".to_owned()
+            } else {
+                thread.status.clone()
+            };
+            let completed_at = match raw.get("latestRunCompletedAt") {
+                None => (thread.status == "idle" || terminal_run_status(&thread.status))
+                    .then(|| thread.updated_at.clone()),
+                Some(value) => value.as_str().map(str::to_owned),
+            };
+            RunSummary {
+                run_id,
+                status,
+                requested_at: raw["latestRunRequestedAt"].as_str().map(str::to_owned),
+                started_at: raw["latestRunStartedAt"].as_str().map(str::to_owned),
+                completed_at,
+                assistant_message_id: None,
+            }
+        });
+        thread.runtime = thread.shell_runtime(raw);
+        let kind = thread
+            .pending_runtime_request
+            .as_ref()
+            .map(|r| r.kind.as_str());
+        thread.has_pending_approvals =
+            kind.is_some_and(|k| k != "user_input" && k != "auth_refresh");
+        thread.has_pending_user_input = kind == Some("user_input");
+        Ok(thread)
+    }
+
+    /// `shellRuntime`: a post-settlement background roster that wakes the
+    /// agent parks the runtime at idle, unless the latest run failed.
+    fn shell_runtime(&self, raw: &Value) -> Option<RuntimeSummary> {
+        let park_at_idle = self
+            .pending_background_tasks
+            .iter()
+            .any(|task| task["kind"] != "command")
+            && self.status != "failed";
+        if self.latest_run_id.is_none() && self.active_provider_thread_id.is_none() && !park_at_idle
+        {
+            return None;
+        }
+        let status = if park_at_idle {
+            "idle".to_owned()
+        } else {
+            self.activity_run_status
+                .clone()
+                .flatten()
+                .unwrap_or_else(|| self.status.clone())
+        };
+        Some(RuntimeSummary {
+            status,
+            active_run_id: self.active_run_id.clone(),
+            activity_started_at: self.activity_run_started_at.clone(),
+            provider_instance_id: self.provider_instance_id.clone(),
+            last_error: raw["lastError"].as_str().map(str::to_owned),
+            last_error_class: raw["lastErrorClass"].as_str().map(str::to_owned),
+            usage_limit_reset_at: raw["usageLimitResetAt"].as_str().map(str::to_owned),
+            updated_at: self.updated_at.clone(),
+        })
+    }
+
+    /// Whether a provider turn is under way (`threadRuntimeIsActive`).
+    pub fn is_running(&self) -> bool {
+        self.runtime.as_ref().is_some_and(RuntimeSummary::is_active)
+    }
+
+    /// `isLatestRunSettled`.
+    pub fn latest_run_settled(&self) -> bool {
+        let Some(run) = &self.latest_run else {
+            return false;
+        };
+        !run_status_is_active(&run.status)
+            && self.runtime.as_ref().and_then(|r| r.active_run_id.as_ref()) != Some(&run.run_id)
+    }
+
+    pub fn is_subagent(&self) -> bool {
+        self.lineage.relationship_to_parent.as_deref() == Some("subagent")
+    }
+
+    /// `isProviderNativeSubagentThread`: the provider owns its conversation.
+    pub fn is_provider_native_subagent(&self) -> bool {
+        self.is_subagent() && self.creation_source == "provider"
+    }
+
+    /// `isChildRunLive` in `threadShell.ts`.
+    fn child_run_live(&self) -> bool {
+        match &self.activity_run_status {
+            Some(status) => status.is_some(),
+            None => matches!(
+                self.status.as_str(),
+                "preparing" | "starting" | "running" | "waiting"
+            ),
+        }
+    }
+
+    /// `resolveThreadWorkingStartedAt`: shell and detail timers count from
+    /// the activity-owning run's work start.
+    pub fn working_started_at(&self) -> Option<String> {
+        let valid = |value: Option<&String>| value.filter(|v| parse_iso(v)).cloned();
+        let runtime = self.runtime.as_ref();
+        if let Some(started) = runtime.and_then(|r| r.activity_started_at.as_ref()) {
+            return valid(started.as_ref());
+        }
+        let run = self.latest_run.as_ref()?;
+        let owns = run.completed_at.is_none()
+            && runtime.and_then(|r| r.active_run_id.as_deref()) == Some(run.run_id.as_str());
+        if owns {
+            valid(run.started_at.as_ref()).or_else(|| valid(run.requested_at.as_ref()))
+        } else {
+            None
+        }
+    }
+}
+
+fn parse_iso(value: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(value).is_ok()
+}
+
+/// `formatSubagentDisplayTitle`: Codex task paths read as names.
+pub fn subagent_display_title(title: &str) -> String {
+    let lower = title.to_lowercase();
+    let display = if lower.starts_with("subagent:") {
+        title["subagent:".len()..].trim_start()
+    } else {
+        title
+    };
+    let Some(path) = display.strip_prefix("/root/") else {
+        return display.to_owned();
+    };
+    let path = path.strip_suffix('/').unwrap_or(path);
+    let Some(name) = path.rsplit('/').next().filter(|n| !n.is_empty()) else {
+        return display.to_owned();
+    };
+    let words: Vec<String> = name
+        .split(|c: char| c == '_' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut chars = w.chars();
+            chars
+                .next()
+                .map(|c| c.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    if words.is_empty() {
+        display.to_owned()
+    } else {
+        words.join(" ")
+    }
+}
+
+/// The link `threadPullRequestsOf` builds from a pre-links server's
+/// `linkedPullRequest`.
+fn legacy_link(linked: &Value) -> Value {
+    let mut link = linked.clone();
+    link["source"] = json!("manual");
+    link["linkedAt"] = json!("1970-01-01T00:00:00.000Z");
+    link["snapshot"] = Value::Null;
+    link["stack"] = Value::Null;
+    link
+}
+
+/// `OrchestrationV2Run`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Message {
+pub struct Run {
     pub id: String,
-    pub role: String,
-    pub text: String,
-    /// `ChatAttachment`s (an open union, kept as sent).
-    pub attachments: Vec<Value>,
-    /// `OrchestrationMessageContext` (`{version, records}`), kept as sent.
-    pub context: Value,
-    pub turn_id: Option<String>,
-    pub streaming: bool,
-    pub created_at: String,
+    pub thread_id: String,
+    pub ordinal: u64,
+    pub provider_instance_id: String,
+    pub model_selection: ModelSelection,
+    pub provider_thread_id: Option<String>,
+    pub user_message_id: String,
+    pub root_node_id: Option<String>,
+    pub active_attempt_id: Option<String>,
+    pub status: String,
+    pub queue_position: Option<u64>,
+    pub queue_held: Option<bool>,
+    pub requested_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub checkpoint_id: Option<String>,
+    pub work_started_at: Option<String>,
+    pub source_plan_ref: Option<Value>,
+    pub restart_cancelled_background_work: Option<Value>,
+}
+
+/// `OrchestrationV2RunAttempt`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RunAttempt {
+    pub id: String,
+    pub run_id: String,
+    pub attempt_ordinal: u64,
+    pub root_node_id: String,
+    pub provider_instance_id: String,
+    pub provider_thread_id: String,
+    pub provider_turn_id: Option<String>,
+    pub reason: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// `OrchestrationV2ExecutionNode`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Node {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub parent_node_id: Option<String>,
+    pub root_node_id: String,
+    pub kind: String,
+    pub status: String,
+    pub runtime_request_id: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// `OrchestrationV2Subagent`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Subagent {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub parent_node_id: String,
+    pub origin: String,
+    pub driver: String,
+    pub provider_instance_id: String,
+    pub child_thread_id: Option<String>,
+    pub prompt: String,
+    pub title: Option<String>,
+    pub model: Option<String>,
+    pub status: String,
+    pub progress: Option<String>,
+    /// `OrchestrationV2SubagentWorkflow`, kept as sent.
+    pub workflow: Option<Value>,
+    pub result: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
     pub updated_at: String,
 }
 
+/// `OrchestrationV2RuntimeRequest`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Activity {
+pub struct RuntimeRequest {
     pub id: String,
-    pub tone: String,
+    pub node_id: String,
+    pub provider_turn_id: Option<String>,
     pub kind: String,
-    pub summary: String,
-    pub payload: Value,
-    pub turn_id: Option<String>,
-    pub sequence: Option<u64>,
+    pub status: String,
+    pub response_capability: Value,
     pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub decision: Option<Value>,
+    pub answers: Option<Value>,
+}
+
+/// `OrchestrationV2PlanArtifact`: a proposed plan or a todo list.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Plan {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub node_id: String,
+    /// `draft`, `active`, `completed` or `superseded`.
+    pub status: String,
+    /// `proposed_plan` or `todo_list`.
+    pub kind: String,
+    pub markdown: String,
+    pub steps: Vec<PlanStep>,
+    pub explanation: Option<String>,
+}
+
+/// `OrchestrationV2PlanStep`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlanStep {
+    pub id: String,
+    pub text: String,
+    /// `pending`, `running` or `completed`.
+    pub status: String,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -135,58 +518,444 @@ pub struct CheckpointFile {
     pub deletions: u64,
 }
 
-/// `OrchestrationProposedPlan`: a plan a plan-mode turn proposed.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ProposedPlan {
-    pub id: String,
-    pub turn_id: Option<String>,
-    pub plan_markdown: String,
-    pub implemented_at: Option<String>,
-    pub implementation_thread_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
+/// `OrchestrationV2Checkpoint`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Checkpoint {
-    pub turn_id: String,
-    pub checkpoint_turn_count: u64,
+    pub id: String,
+    pub scope_id: String,
+    pub run_id: Option<String>,
+    pub node_id: String,
+    pub ordinal_within_scope: u64,
+    pub app_run_ordinal: Option<u64>,
+    /// `ready`, `missing`, `error` or `stale`.
     pub status: String,
     pub files: Vec<CheckpointFile>,
-    pub assistant_message_id: Option<String>,
-    pub completed_at: String,
+    pub captured_at: String,
 }
 
-impl Thread {
-    pub fn is_running(&self) -> bool {
-        self.session
-            .as_ref()
-            .is_some_and(|s| s.status == "running" || s.status == "starting")
+/// The turn item types this client knows; others are dropped like upstream's
+/// forward-compatible decoding does.
+const TURN_ITEM_TYPES: &[&str] = &[
+    "notification",
+    "user_message",
+    "assistant_message",
+    "reasoning",
+    "proposed_plan",
+    "todo_list",
+    "user_input_request",
+    "file_change",
+    "command_execution",
+    "file_search",
+    "web_search",
+    "approval_request",
+    "checkpoint",
+    "run_interrupt_request",
+    "run_interrupt_result",
+    "system_notice",
+    "error",
+    "compaction",
+    "handoff",
+    "fork",
+    "thread_created",
+    "secret_request",
+    "subagent",
+    "dynamic_tool",
+];
+
+/// `OrchestrationV2TurnItem`: the fields every item has, and its
+/// type-specific ones kept as sent (`data`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TurnItem {
+    pub id: String,
+    pub thread_id: String,
+    pub run_id: Option<String>,
+    pub node_id: Option<String>,
+    pub provider_thread_id: Option<String>,
+    pub provider_turn_id: Option<String>,
+    pub parent_item_id: Option<String>,
+    pub ordinal: u64,
+    pub status: String,
+    pub title: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(flatten)]
+    pub data: Map<String, Value>,
+}
+
+static NULL: Value = Value::Null;
+
+impl TurnItem {
+    pub fn get(&self, key: &str) -> &Value {
+        self.data.get(key).unwrap_or(&NULL)
+    }
+
+    pub fn str(&self, key: &str) -> Option<&str> {
+        self.get(key).as_str()
+    }
+
+    pub fn text(&self) -> &str {
+        self.str("text").unwrap_or_default()
+    }
+
+    pub fn flag(&self, key: &str) -> bool {
+        self.get(key).as_bool().unwrap_or(false)
+    }
+
+    pub fn is_known(&self) -> bool {
+        TURN_ITEM_TYPES.contains(&self.kind.as_str())
+    }
+}
+
+/// `OrchestrationV2ProjectedTurnItem`: a row of the thread's timeline.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VisibleItem {
+    pub position: u64,
+    /// `local`, `inherited` (a fork's source rows) or `synthetic`.
+    pub visibility: String,
+    pub source_thread_id: String,
+    pub source_item_id: String,
+    pub item: Arc<TurnItem>,
+}
+
+/// The open thread: `OrchestrationV2ThreadProjection`. Entities the client
+/// does not read field by field are kept as sent.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Detail {
+    /// `OrchestrationV2AppThread`, kept as sent.
+    pub thread: Value,
+    pub runs: Vec<Run>,
+    pub attempts: Vec<RunAttempt>,
+    pub nodes: Vec<Node>,
+    pub subagents: Vec<Subagent>,
+    pub provider_sessions: Vec<Value>,
+    pub provider_threads: Vec<Value>,
+    pub provider_turns: Vec<Value>,
+    pub runtime_requests: Vec<RuntimeRequest>,
+    pub messages: Vec<Value>,
+    pub plans: Vec<Plan>,
+    pub turn_items: Vec<Arc<TurnItem>>,
+    pub checkpoint_scopes: Vec<Value>,
+    pub checkpoints: Vec<Checkpoint>,
+    pub context_handoffs: Vec<Value>,
+    pub context_transfers: Vec<Value>,
+    #[serde(rename = "visibleTurnItems")]
+    pub visible: Vec<VisibleItem>,
+    pub updated_at: String,
+}
+
+impl Detail {
+    pub fn id(&self) -> &str {
+        self.thread["id"].as_str().unwrap_or_default()
+    }
+
+    fn decode(projection: &Value) -> Result<Self, String> {
+        let mut detail: Detail = decode(projection)?;
+        detail.turn_items.retain(|item| item.is_known());
+        detail.visible.retain(|row| row.item.is_known());
+        Ok(detail)
+    }
+
+    pub fn run(&self, id: &str) -> Option<&Run> {
+        self.runs.iter().find(|run| run.id == id)
+    }
+
+    /// The thread as a shell row, for a thread the shell does not list (an
+    /// archived one): its runtime comes from its runs.
+    pub fn shell_thread(&self) -> Option<Thread> {
+        let mut thread = Thread::from_shell(&self.thread).ok()?;
+        let latest = self.runs.iter().max_by_key(|run| run.ordinal);
+        let active = self
+            .runs
+            .iter()
+            .filter(|run| run_status_is_active(&run.status))
+            .max_by_key(|run| run.ordinal);
+        thread.latest_run = latest.map(|run| RunSummary {
+            run_id: run.id.clone(),
+            status: run.status.clone(),
+            requested_at: Some(run.requested_at.clone()),
+            started_at: run.started_at.clone(),
+            completed_at: run.completed_at.clone(),
+            assistant_message_id: None,
+        });
+        thread.runtime = latest.map(|run| RuntimeSummary {
+            status: active.map_or("idle", |run| run.status.as_str()).to_owned(),
+            active_run_id: active.map(|run| run.id.clone()),
+            activity_started_at: None,
+            provider_instance_id: run.provider_instance_id.clone(),
+            updated_at: thread.updated_at.clone(),
+            ..Default::default()
+        });
+        Some(thread)
+    }
+
+    /// `applyOrchestrationV2ProjectionEvent` for one event of this thread.
+    fn apply(&mut self, event: &Value) -> Result<(), String> {
+        let payload = &event["payload"];
+        let kind = event["type"].as_str().unwrap_or_default();
+        let occurred_at = event["occurredAt"].as_str().unwrap_or_default().to_owned();
+        match kind {
+            "thread.pull-request-link-updated" => {
+                let links = if self.thread["pullRequests"].is_array() {
+                    self.thread["pullRequests"].clone()
+                } else {
+                    match self
+                        .thread
+                        .get("linkedPullRequest")
+                        .filter(|v| !v.is_null())
+                    {
+                        Some(linked) => json!([legacy_link(linked)]),
+                        None => json!([]),
+                    }
+                };
+                let key = |link: &Value| {
+                    (
+                        link["host"].as_str().unwrap_or_default().to_lowercase(),
+                        link["repository"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_lowercase(),
+                        link["number"].as_u64(),
+                    )
+                };
+                let links: Vec<Value> = links
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|link| {
+                        if key(link) == key(payload) {
+                            payload.clone()
+                        } else {
+                            link.clone()
+                        }
+                    })
+                    .collect();
+                self.thread["pullRequests"] = json!(links);
+            }
+            "thread.visited" | "thread.marked-unread" => {
+                self.thread = payload.clone();
+                return Ok(());
+            }
+            "thread.created"
+            | "thread.archived"
+            | "thread.unarchived"
+            | "thread.deleted"
+            | "thread.settled"
+            | "thread.unsettled"
+            | "thread.snoozed"
+            | "thread.unsnoozed"
+            | "thread.auto-settle-set"
+            | "thread.pinned"
+            | "thread.unpinned"
+            | "thread.pin-reordered"
+            | "thread.active-reordered"
+            | "thread.metadata-updated"
+            | "thread.pull-request-synced"
+            | "thread.runtime-mode-updated"
+            | "thread.interaction-mode-updated"
+            | "thread.model-selection-updated"
+            | "thread.provider-switched" => self.thread = payload.clone(),
+            "run.created" | "run.updated" => {
+                upsert(&mut self.runs, decode(payload)?, |r| &r.id);
+                self.reconcile_visible();
+            }
+            "run.background-work-cancelled" => {
+                if let Some(run) = self.runs.iter_mut().find(|r| r.id == payload["runId"]) {
+                    run.restart_cancelled_background_work =
+                        Some(payload["restartCancelledBackgroundWork"].clone());
+                }
+            }
+            "run-attempt.created" | "run-attempt.updated" => {
+                upsert(&mut self.attempts, decode(payload)?, |a| &a.id);
+                self.reconcile_visible();
+            }
+            "node.updated" => upsert(&mut self.nodes, decode(payload)?, |n| &n.id),
+            "subagent.updated" => upsert(&mut self.subagents, decode(payload)?, |s| &s.id),
+            "provider-session.attached" | "provider-session.updated" => {
+                upsert_value(&mut self.provider_sessions, payload.clone());
+            }
+            "provider-session.detached" => self
+                .provider_sessions
+                .retain(|s| s["id"] != payload["providerSessionId"]),
+            "provider-thread.updated" => upsert_value(&mut self.provider_threads, payload.clone()),
+            "provider-turn.updated" => {
+                let mut turn = payload.clone();
+                // Token usage stays until a later update carries its own.
+                if turn.get("tokenUsage").is_none_or(Value::is_null)
+                    && let Some(usage) = self
+                        .provider_turns
+                        .iter()
+                        .find(|t| t["id"] == payload["id"])
+                        .and_then(|t| t.get("tokenUsage"))
+                        .filter(|u| !u.is_null())
+                {
+                    turn["tokenUsage"] = usage.clone();
+                }
+                upsert_value(&mut self.provider_turns, turn);
+            }
+            "runtime-request.updated" => {
+                upsert(&mut self.runtime_requests, decode(payload)?, |r| &r.id);
+            }
+            "message.updated" => upsert_value(&mut self.messages, payload.clone()),
+            "plan.updated" => upsert(&mut self.plans, decode(payload)?, |p| &p.id),
+            "turn-item.updated" => {
+                let item: TurnItem = decode(payload)?;
+                if !item.is_known() {
+                    return Ok(());
+                }
+                let item = Arc::new(item);
+                let was_interrupt = self
+                    .turn_items
+                    .iter()
+                    .find(|i| i.id == item.id)
+                    .is_some_and(|i| i.kind == "run_interrupt_request");
+                upsert(&mut self.turn_items, item.clone(), |i| &i.id);
+                // Only interrupt requests change another item's visibility.
+                if item.kind == "run_interrupt_request" || was_interrupt {
+                    self.reconcile_visible();
+                }
+                if self.item_visible(&item) {
+                    self.upsert_visible(item);
+                } else if let Some(index) = self
+                    .visible
+                    .iter()
+                    .position(|row| row.source_item_id == item.id)
+                {
+                    self.visible.remove(index);
+                    renumber(&mut self.visible);
+                }
+            }
+            "checkpoint-scope.created" => {
+                upsert_value(&mut self.checkpoint_scopes, payload.clone());
+            }
+            "checkpoint.captured" => upsert(&mut self.checkpoints, decode(payload)?, |c| &c.id),
+            "context-handoff.updated" => upsert_value(&mut self.context_handoffs, payload.clone()),
+            "context-transfer.created" | "context-transfer.updated" => {
+                upsert_value(&mut self.context_transfers, payload.clone());
+            }
+            // `checkpoint.rollback-requested` and event types this client
+            // does not know change nothing but the projection's time.
+            _ => {}
+        }
+        self.updated_at = occurred_at;
+        Ok(())
+    }
+
+    /// `isOrchestrationV2TurnItemVisible`.
+    fn item_visible(&self, item: &TurnItem) -> bool {
+        let status = item
+            .run_id
+            .as_deref()
+            .and_then(|id| self.run(id))
+            .map(|run| run.status.as_str());
+        if status == Some("rolled_back") {
+            return false;
+        }
+        // A queued message whose run was cancelled never reached the provider.
+        if status == Some("cancelled")
+            && item.kind == "user_message"
+            && item.str("inputIntent") == Some("queued_turn")
+        {
+            return false;
+        }
+        !self.superseded_interrupt(item)
+    }
+
+    /// `isOrchestrationV2SupersededInterrupt`: a plain steer's interrupt
+    /// result stays hidden; a stop-then-steer pair stays visible.
+    fn superseded_interrupt(&self, item: &TurnItem) -> bool {
+        let (Some(run_id), Some(node_id)) = (&item.run_id, &item.node_id) else {
+            return false;
+        };
+        if item.kind != "run_interrupt_result" {
+            return false;
+        }
+        let superseded = self
+            .attempts
+            .iter()
+            .any(|a| &a.run_id == run_id && &a.root_node_id == node_id && a.status == "superseded");
+        superseded
+            && !self.turn_items.iter().any(|candidate| {
+                candidate.kind == "run_interrupt_request"
+                    && candidate.run_id.as_ref() == Some(run_id)
+            })
+    }
+
+    /// `activeVisibleTurnItems`: drops local rows that run or attempt state
+    /// now hides.
+    fn reconcile_visible(&mut self) {
+        let before = self.visible.len();
+        let rows = std::mem::take(&mut self.visible);
+        self.visible = rows
+            .into_iter()
+            .filter(|row| row.visibility != "local" || self.item_visible(&row.item))
+            .collect();
+        if self.visible.len() != before {
+            renumber(&mut self.visible);
+        }
+    }
+
+    /// `upsertVisibleTurnItem`: a local row by ordinal, then id.
+    fn upsert_visible(&mut self, item: Arc<TurnItem>) {
+        if let Some(index) = self
+            .visible
+            .iter()
+            .position(|r| r.source_item_id == item.id)
+        {
+            self.visible.remove(index);
+        }
+        let at = self
+            .visible
+            .iter()
+            .position(|row| {
+                row.visibility == "local"
+                    && (row.item.ordinal > item.ordinal
+                        || (row.item.ordinal == item.ordinal && row.item.id > item.id))
+            })
+            .unwrap_or(self.visible.len());
+        self.visible.insert(
+            at,
+            VisibleItem {
+                position: 0,
+                visibility: "local".into(),
+                source_thread_id: item.thread_id.clone(),
+                source_item_id: item.id.clone(),
+                item,
+            },
+        );
+        renumber(&mut self.visible);
+    }
+}
+
+fn renumber(rows: &mut [VisibleItem]) {
+    for (position, row) in rows.iter_mut().enumerate() {
+        row.position = position as u64;
     }
 }
 
 #[derive(Default)]
 pub struct State {
     pub projects: Vec<Project>,
-    /// Shared so views can hold the list without copying it.
+    /// Active shell threads. Shared so views can hold the list without
+    /// copying it.
     pub threads: Vec<Arc<Thread>>,
-    /// Shared so a frame can hold the open thread without copying it.
-    pub detail: Option<Arc<Thread>>,
+    /// The open thread's projection. Shared so a frame can hold it without
+    /// copying it.
+    pub detail: Option<Arc<Detail>>,
     pub config: Value,
     /// Counts changes to `threads` and `detail`, for views that cache what
     /// they derive from them.
     pub revision: u64,
-    shell_raw: Vec<Value>,
-    detail_raw: Option<Value>,
-    /// `detail_raw` changed since `detail` was decoded: a pass of events
-    /// decodes the thread once (`refresh_detail`).
-    detail_stale: bool,
-    /// Threads left in the last five minutes (decoded, raw, sequence, when
+    /// Threads left in the last five minutes (projection, sequence, when
     /// left): one opened again shows at once while its new subscription
     /// catches up (`threadRetention.ts` `THREAD_SNAPSHOT_IDLE_TTL_MS`).
-    recent: Vec<(Arc<Thread>, Value, Option<u64>, std::time::Instant)>,
+    recent: Vec<(Arc<Detail>, Option<u64>, std::time::Instant)>,
     shell_sequence: Option<u64>,
     thread_sequence: Option<u64>,
 }
@@ -222,25 +991,56 @@ impl State {
         }
     }
 
+    /// Applies an `OrchestrationV2ShellStreamItem` (`shellReducer.ts`).
     pub fn shell(&mut self, item: &Value) -> Result<(), String> {
-        self.revision += 1;
-        if item["kind"] == "snapshot" {
-            let snapshot = &item["snapshot"];
-            // Decode both collections before replacing visible state.
-            let projects = decode(&snapshot["projects"])?;
-            let raw: Vec<Value> = snapshot["threads"].as_array().cloned().unwrap_or_default();
-            let threads = raw
-                .iter()
-                .map(|raw| decode(raw).map(Arc::new))
-                .collect::<Result<Vec<_>, _>>()?;
-            self.projects = projects;
-            self.shell_raw = raw;
-            self.threads = threads;
-            self.shell_sequence = snapshot["snapshotSequence"].as_u64();
-            return Ok(());
-        }
-        if item["kind"] == "synchronized" {
-            return Ok(());
+        match item["kind"].as_str() {
+            Some("synchronized") => return Ok(()),
+            Some("snapshot") => {
+                let snapshot = &item["snapshot"];
+                // An enrichment refresh only patches repository identities.
+                if let Some(roots) = item.get("resolvedRepositoryIdentityRoots") {
+                    let roots: Vec<&str> = roots
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect();
+                    let next: Vec<Project> = decode(&snapshot["projects"])?;
+                    for project in &mut self.projects {
+                        let Some(candidate) = next.iter().find(|c| {
+                            c.id == project.id && c.workspace_root == project.workspace_root
+                        }) else {
+                            continue;
+                        };
+                        if roots.contains(&project.workspace_root.as_str())
+                            || (project.repository_identity.is_none()
+                                && candidate.repository_identity.is_some())
+                        {
+                            project.repository_identity = candidate.repository_identity.clone();
+                        }
+                    }
+                    self.revision += 1;
+                    return Ok(());
+                }
+                // Decode both collections before replacing visible state.
+                let mut projects: Vec<Project> = decode(&snapshot["projects"])?;
+                for project in &mut projects {
+                    retain_identity(&self.projects, project);
+                }
+                let threads = snapshot["threads"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(Thread::from_shell)
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.projects = projects;
+                self.threads = threads.into_iter().map(Arc::new).collect();
+                self.shell_sequence = snapshot["snapshotSequence"].as_u64();
+                self.refresh_subagent_requests();
+                self.revision += 1;
+                return Ok(());
+            }
+            _ => {}
         }
         let sequence = item["sequence"]
             .as_u64()
@@ -249,39 +1049,86 @@ impl State {
             return Ok(());
         }
         match item["kind"].as_str() {
-            Some("project-upserted") => {
-                let project: Project = decode(&item["project"])?;
+            Some("project.updated") => {
+                let mut project: Project = decode(&item["project"])?;
+                retain_identity(&self.projects, &mut project);
                 upsert(&mut self.projects, project, |p| &p.id);
             }
-            Some("project-removed") => self.projects.retain(|p| p.id != item["projectId"]),
-            Some("thread-upserted") => {
-                let thread: Arc<Thread> = Arc::new(decode(&item["thread"])?);
-                if let Some(index) = self.threads.iter().position(|t| t.id == thread.id) {
-                    self.shell_raw[index] = item["thread"].clone();
-                    self.threads[index] = thread;
+            Some("project.removed") => self.projects.retain(|p| p.id != item["projectId"]),
+            Some("thread.updated") => {
+                let id = item["thread"]["id"].as_str().unwrap_or_default();
+                if item["location"] == "active" {
+                    upsert(
+                        &mut self.threads,
+                        Arc::new(Thread::from_shell(&item["thread"])?),
+                        |t| &t.id,
+                    );
                 } else {
-                    self.shell_raw.push(item["thread"].clone());
-                    self.threads.push(thread);
+                    // The archive has its own subscription.
+                    self.threads.retain(|t| t.id != id);
                 }
+                self.refresh_subagent_requests();
             }
-            Some("thread-removed") => {
+            Some("thread.removed") => {
                 self.recent
-                    .retain(|(thread, ..)| thread.id != item["threadId"]);
-                if let Some(index) = self.threads.iter().position(|t| t.id == item["threadId"]) {
-                    self.threads.remove(index);
-                    self.shell_raw.remove(index);
-                }
+                    .retain(|(detail, ..)| detail.id() != item["threadId"]);
+                self.threads.retain(|t| t.id != item["threadId"]);
+                self.refresh_subagent_requests();
             }
-            _ => return Err("Unsupported shell event; reconnect with a compatible server".into()),
+            _ => {}
         }
         self.shell_sequence = Some(sequence);
+        self.revision += 1;
         Ok(())
+    }
+
+    /// `pendingSubagentRequestsByThread`: every thread above a subagent that
+    /// waits on the user carries what it waits on; an approval outranks a
+    /// question.
+    fn refresh_subagent_requests(&mut self) {
+        let mut requests: std::collections::HashMap<String, &'static str> = Default::default();
+        for child in &self.threads {
+            let kind = child
+                .pending_runtime_request
+                .as_ref()
+                .map(|r| r.kind.as_str());
+            let request = match kind {
+                None | Some("auth_refresh") => continue,
+                Some("user_input") => "user_input",
+                Some(_) => "approval",
+            };
+            if !child.is_subagent()
+                || child.is_provider_native_subagent()
+                || !child.child_run_live()
+            {
+                continue;
+            }
+            let mut seen = vec![child.id.clone()];
+            let mut current = Some(child.clone());
+            while let Some(thread) = current.filter(|t| t.is_subagent()) {
+                let Some(parent) = thread.lineage.parent_thread_id.clone() else {
+                    break;
+                };
+                if seen.contains(&parent) {
+                    break;
+                }
+                seen.push(parent.clone());
+                if requests.get(&parent) != Some(&"approval") {
+                    requests.insert(parent.clone(), request);
+                }
+                current = self.threads.iter().find(|t| t.id == parent).cloned();
+            }
+        }
+        for thread in &mut self.threads {
+            let request = requests.get(&thread.id).map(|r| (*r).to_owned());
+            if thread.pending_subagent_request != request {
+                Arc::make_mut(thread).pending_subagent_request = request;
+            }
+        }
     }
 
     pub fn clear_detail(&mut self) {
         self.detail = None;
-        self.detail_raw = None;
-        self.detail_stale = false;
         self.thread_sequence = None;
         self.revision += 1;
     }
@@ -290,440 +1137,66 @@ impl State {
     /// recent threads and showing `id` from them if it is there.
     pub fn switch_detail(&mut self, id: Option<&str>) {
         const IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-        let _ = self.refresh_detail();
         self.recent.retain(|(.., left)| left.elapsed() < IDLE_TTL);
-        if let (Some(detail), Some(raw)) = (self.detail.take(), self.detail_raw.take()) {
-            self.recent.retain(|(thread, ..)| thread.id != detail.id);
+        if let Some(detail) = self.detail.take() {
+            self.recent.retain(|(kept, ..)| kept.id() != detail.id());
             let left = std::time::Instant::now();
-            self.recent.push((detail, raw, self.thread_sequence, left));
+            self.recent.push((detail, self.thread_sequence, left));
         }
         self.clear_detail();
-        let found = id.and_then(|id| self.recent.iter().position(|(thread, ..)| thread.id == id));
+        let found = id.and_then(|id| self.recent.iter().position(|(kept, ..)| kept.id() == id));
         if let Some(index) = found {
-            let (detail, raw, sequence, _) = self.recent.remove(index);
+            let (detail, sequence, _) = self.recent.remove(index);
             self.detail = Some(detail);
-            self.detail_raw = Some(raw);
             self.thread_sequence = sequence;
         }
     }
 
-    /// Decodes the selected thread after the events applied to it.
-    pub fn refresh_detail(&mut self) -> Result<(), String> {
-        if !std::mem::take(&mut self.detail_stale) {
-            return Ok(());
-        }
-        if let Some(raw) = &self.detail_raw {
-            self.detail = Some(Arc::new(decode(raw)?));
-            self.revision += 1;
-        }
-        Ok(())
-    }
-
+    /// Applies an `OrchestrationV2ThreadStreamItem` of the selected thread.
     pub fn thread(&mut self, selected: &str, item: &Value) -> Result<(), String> {
-        if item["kind"] == "snapshot" {
-            let raw = item["snapshot"]["thread"].clone();
-            if raw["id"] == selected {
-                self.detail = Some(Arc::new(decode(&raw)?));
-                self.detail_raw = Some(raw);
-                self.detail_stale = false;
-                self.revision += 1;
-                self.thread_sequence = item["snapshot"]["snapshotSequence"].as_u64();
+        match item["kind"].as_str() {
+            Some("synchronized") => return Ok(()),
+            Some("snapshot") => {
+                let projection = &item["projection"];
+                if projection["thread"]["id"] == selected {
+                    self.detail = Some(Arc::new(Detail::decode(projection)?));
+                    self.revision += 1;
+                    self.thread_sequence = item["snapshotSequence"].as_u64();
+                }
+                return Ok(());
             }
-            return Ok(());
+            _ => {}
         }
-        if item["kind"] == "synchronized" {
-            return Ok(());
-        }
-        let event = &item["event"];
-        let sequence = event["sequence"]
+        let sequence = item["sequence"]
             .as_u64()
             .ok_or("Missing thread event sequence")?;
         if self.thread_sequence.is_some_and(|s| sequence <= s) {
             return Ok(());
         }
         self.thread_sequence = Some(sequence);
-        let Some(raw) = self.detail_raw.as_mut().filter(|t| t["id"] == selected) else {
+        let event = &item["event"];
+        let Some(detail) = self.detail.as_mut().filter(|d| d.id() == selected) else {
             return Ok(());
         };
-        if event["payload"]["threadId"] != selected {
+        if event["threadId"] != selected {
             return Ok(());
         }
-        match apply_thread_event(raw, event) {
-            Applied::Deleted => self.clear_detail(),
-            Applied::Updated => self.detail_stale = true,
-            Applied::Unchanged => {}
-        }
+        Arc::make_mut(detail).apply(event)?;
+        self.revision += 1;
         Ok(())
     }
 }
 
-enum Applied {
-    Updated,
-    Deleted,
-    Unchanged,
-}
-
-fn set_present(thread: &mut Value, payload: &Value, keys: &[&str]) {
-    for key in keys {
-        if let Some(value) = payload.get(*key) {
-            thread[*key] = value.clone();
-        }
-    }
-}
-
-fn settled_turn_state(status: &str) -> Option<&'static str> {
-    match status {
-        "idle" | "ready" => Some("completed"),
-        "error" => Some("error"),
-        "interrupted" | "stopped" => Some("interrupted"),
-        _ => None,
-    }
-}
-
-fn checkpoint_turn_state(status: &str) -> &'static str {
-    if status == "error" {
-        "error"
-    } else {
-        "completed"
-    }
-}
-
-/// Port of `applyThreadDetailEvent` for the events that change what the chat renders.
-fn apply_thread_event(thread: &mut Value, event: &Value) -> Applied {
-    let payload = &event["payload"];
-    let occurred_at = event["occurredAt"].clone();
-    let updated_at = payload
-        .get("updatedAt")
-        .cloned()
-        .unwrap_or(occurred_at.clone());
-    match event["type"].as_str().unwrap_or_default() {
-        "thread.deleted" => return Applied::Deleted,
-        "thread.archived" => {
-            thread["archivedAt"] = payload["archivedAt"].clone();
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.unarchived" => {
-            thread["archivedAt"] = Value::Null;
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.settled" => {
-            thread["settledOverride"] = json!("settled");
-            thread["settledAt"] = payload["settledAt"].clone();
-            thread["unsettledAt"] = Value::Null;
-            thread["activeOrderKey"] = Value::Null;
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.unsettled" => {
-            let pinned_active = thread["settledOverride"] == "active";
-            thread["settledOverride"] = if payload["reason"] == "user" {
-                json!("active")
-            } else {
-                Value::Null
-            };
-            thread["settledAt"] = Value::Null;
-            if !pinned_active {
-                thread["unsettledAt"] = updated_at.clone();
-            }
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.snoozed" => {
-            set_present(thread, payload, &["snoozedUntil", "snoozedAt"]);
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.unsnoozed" => {
-            thread["snoozedUntil"] = Value::Null;
-            thread["snoozedAt"] = Value::Null;
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.auto-settle-set" => {
-            thread["autoSettleDisabledAt"] = payload["autoSettleDisabledAt"].clone();
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.pinned" => {
-            set_present(thread, payload, &["pinnedAt", "pinOrderKey"]);
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.unpinned" => {
-            thread["pinnedAt"] = Value::Null;
-            thread["pinOrderKey"] = Value::Null;
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.meta-updated" => {
-            set_present(
-                thread,
-                payload,
-                &[
-                    "title",
-                    "titleState",
-                    "titleRegeneration",
-                    "modelSelection",
-                    "branch",
-                    "worktreePath",
-                    "linkedPullRequest",
-                    "branchPullRequest",
-                    "activeOrderKey",
-                ],
-            );
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.runtime-mode-set" => {
-            thread["runtimeMode"] = payload["runtimeMode"].clone();
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.interaction-mode-set" => {
-            thread["interactionMode"] = payload["interactionMode"].clone();
-            thread["updatedAt"] = updated_at;
-        }
-        "thread.turn-start-requested" => {
-            set_present(thread, payload, &["modelSelection"]);
-            thread["runtimeMode"] = payload["runtimeMode"].clone();
-            thread["interactionMode"] = payload["interactionMode"].clone();
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.turn-interrupt-requested" => {
-            let turn_id = &payload["turnId"];
-            if turn_id.is_null() || thread["latestTurn"]["turnId"] != *turn_id {
-                return Applied::Unchanged;
-            }
-            let latest = &mut thread["latestTurn"];
-            latest["state"] = json!("interrupted");
-            if latest["startedAt"].is_null() {
-                latest["startedAt"] = payload["createdAt"].clone();
-            }
-            if latest["completedAt"].is_null() {
-                latest["completedAt"] = payload["createdAt"].clone();
-            }
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.message-sent" => apply_message(thread, payload, occurred_at),
-        "thread.session-set" => {
-            let session = &payload["session"];
-            let status = session["status"].as_str().unwrap_or_default();
-            let latest = thread["latestTurn"].clone();
-            if status == "running" && !session["activeTurnId"].is_null() {
-                let same = latest["turnId"] == session["activeTurnId"];
-                thread["latestTurn"] = json!({
-                    "turnId": session["activeTurnId"],
-                    "state": "running",
-                    "requestedAt": if same { latest["requestedAt"].clone() } else { session["updatedAt"].clone() },
-                    "startedAt": if same && !latest["startedAt"].is_null() { latest["startedAt"].clone() } else { session["updatedAt"].clone() },
-                    "completedAt": null,
-                    "assistantMessageId": if same { latest["assistantMessageId"].clone() } else { Value::Null },
-                });
-            } else if latest["state"] == "running"
-                && let Some(state) = settled_turn_state(status)
-            {
-                thread["latestTurn"]["state"] = json!(state);
-                thread["latestTurn"]["completedAt"] = session["updatedAt"].clone();
-            }
-            thread["session"] = session.clone();
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.session-stop-requested" => {
-            if thread["session"].is_null() {
-                return Applied::Unchanged;
-            }
-            thread["session"]["status"] = json!("stopped");
-            thread["session"]["activeTurnId"] = Value::Null;
-            thread["session"]["updatedAt"] = payload["createdAt"].clone();
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.turn-diff-completed" => {
-            let checkpoint = json!({
-                "turnId": payload["turnId"],
-                "checkpointTurnCount": payload["checkpointTurnCount"],
-                "checkpointRef": payload["checkpointRef"],
-                "status": payload["status"],
-                "files": payload["files"],
-                "assistantMessageId": payload["assistantMessageId"],
-                "completedAt": payload["completedAt"],
-            });
-            let checkpoints = array_mut(thread, "checkpoints");
-            if checkpoints
-                .iter()
-                .any(|c| c["turnId"] == payload["turnId"] && c["status"] != "missing")
-                && payload["status"] == "missing"
-            {
-                return Applied::Unchanged;
-            }
-            checkpoints.retain(|c| c["turnId"] != payload["turnId"]);
-            checkpoints.push(checkpoint);
-            checkpoints.sort_by_key(|c| c["checkpointTurnCount"].as_u64().unwrap_or(u64::MAX));
-            let running = thread["session"]["status"] == "running"
-                && thread["session"]["activeTurnId"] == payload["turnId"];
-            let latest = thread["latestTurn"].clone();
-            if !running && (latest.is_null() || latest["turnId"] == payload["turnId"]) {
-                let state = if latest["state"] == "interrupted" {
-                    "interrupted"
-                } else {
-                    checkpoint_turn_state(payload["status"].as_str().unwrap_or_default())
-                };
-                let or_completed = |v: &Value| {
-                    if v.is_null() {
-                        payload["completedAt"].clone()
-                    } else {
-                        v.clone()
-                    }
-                };
-                thread["latestTurn"] = json!({
-                    "turnId": payload["turnId"],
-                    "state": state,
-                    "requestedAt": or_completed(&latest["requestedAt"]),
-                    "startedAt": or_completed(&latest["startedAt"]),
-                    "completedAt": payload["completedAt"],
-                    "assistantMessageId": payload["assistantMessageId"],
-                });
-            }
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.reverted" => {
-            let turn_count = payload["turnCount"].as_u64().unwrap_or(0);
-            let checkpoints = array_mut(thread, "checkpoints");
-            checkpoints.retain(|c| {
-                c["checkpointTurnCount"]
-                    .as_u64()
-                    .is_some_and(|n| n <= turn_count)
-            });
-            let retained: Vec<Value> = checkpoints.iter().map(|c| c["turnId"].clone()).collect();
-            let latest = checkpoints.last().cloned();
-            array_mut(thread, "messages").retain(|m| {
-                m["role"] == "system" || (!m["turnId"].is_null() && retained.contains(&m["turnId"]))
-            });
-            array_mut(thread, "activities")
-                .retain(|a| a["turnId"].is_null() || retained.contains(&a["turnId"]));
-            array_mut(thread, "proposedPlans")
-                .retain(|p| p["turnId"].is_null() || retained.contains(&p["turnId"]));
-            thread["latestTurn"] = match latest {
-                None => Value::Null,
-                Some(c) => json!({
-                    "turnId": c["turnId"],
-                    "state": checkpoint_turn_state(c["status"].as_str().unwrap_or_default()),
-                    "requestedAt": c["completedAt"],
-                    "startedAt": c["completedAt"],
-                    "completedAt": c["completedAt"],
-                    "assistantMessageId": c["assistantMessageId"],
-                }),
-            };
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.proposed-plan-upserted" => {
-            let plan = payload["proposedPlan"].clone();
-            let plans = array_mut(thread, "proposedPlans");
-            plans.retain(|p| p["id"] != plan["id"]);
-            plans.push(plan);
-            // `proposedPlanOrder`: by creation time, then id.
-            plans.sort_by(|a, b| {
-                a["createdAt"]
-                    .as_str()
-                    .cmp(&b["createdAt"].as_str())
-                    .then_with(|| a["id"].as_str().cmp(&b["id"].as_str()))
-            });
-            thread["updatedAt"] = occurred_at;
-        }
-        "thread.activity-appended" => {
-            let activity = payload["activity"].clone();
-            let activities = array_mut(thread, "activities");
-            activities.retain(|a| a["id"] != activity["id"]);
-            activities.push(activity);
-            activities.sort_by(|a, b| {
-                let seq = |v: &Value| v["sequence"].as_u64().unwrap_or(u64::MAX);
-                seq(a)
-                    .cmp(&seq(b))
-                    .then_with(|| a["createdAt"].as_str().cmp(&b["createdAt"].as_str()))
-                    .then_with(|| a["id"].as_str().cmp(&b["id"].as_str()))
-            });
-            thread["updatedAt"] = occurred_at;
-        }
-        _ => return Applied::Unchanged,
-    }
-    Applied::Updated
-}
-
-fn apply_message(thread: &mut Value, payload: &Value, occurred_at: Value) {
-    let streaming = payload["streaming"].as_bool().unwrap_or(false);
-    let text = payload["text"].as_str().unwrap_or_default();
-    let messages = array_mut(thread, "messages");
-    if let Some(entry) = messages
-        .iter_mut()
-        .find(|m| m["id"] == payload["messageId"])
+/// `retainRepositoryIdentity`: enrichment is asynchronous, so a project
+/// update without an identity keeps the one already resolved for its root.
+fn retain_identity(previous: &[Project], next: &mut Project) {
+    if next.repository_identity.is_none()
+        && let Some(prior) = previous.iter().find(|p| p.id == next.id)
+        && prior.repository_identity.is_some()
+        && prior.workspace_root == next.workspace_root
     {
-        let previous = entry["text"].as_str().unwrap_or_default().to_owned();
-        entry["text"] = if streaming {
-            json!(format!("{previous}{text}"))
-        } else if text.is_empty() {
-            json!(previous)
-        } else {
-            json!(text)
-        };
-        entry["streaming"] = json!(streaming);
-        if let Some(turn) = payload.get("turnId") {
-            entry["turnId"] = turn.clone();
-        }
-        if !streaming {
-            entry["updatedAt"] = payload["updatedAt"].clone();
-        }
-        if let Some(attachments) = payload.get("attachments") {
-            entry["attachments"] = attachments.clone();
-        }
-        if let Some(context) = payload.get("context") {
-            entry["context"] = context.clone();
-        }
-    } else {
-        messages.push(json!({
-            "id": payload["messageId"],
-            "role": payload["role"],
-            "text": text,
-            "turnId": payload.get("turnId").cloned().unwrap_or(Value::Null),
-            "streaming": streaming,
-            "attachments": payload.get("attachments").cloned().unwrap_or(json!([])),
-            "context": payload.get("context").cloned().unwrap_or(Value::Null),
-            "createdAt": payload["createdAt"],
-            "updatedAt": payload["updatedAt"],
-        }));
+        next.repository_identity = prior.repository_identity.clone();
     }
-    let turn_id = payload.get("turnId").cloned().unwrap_or(Value::Null);
-    let latest = thread["latestTurn"].clone();
-    if payload["role"] == "assistant"
-        && !turn_id.is_null()
-        && (latest.is_null() || latest["turnId"] == turn_id)
-    {
-        let still_running = thread["session"]["status"] == "running"
-            && thread["session"]["activeTurnId"] == turn_id;
-        let settles = !streaming && !still_running;
-        let same = latest["turnId"] == turn_id;
-        let state = if !settles {
-            "running"
-        } else if latest["state"] == "interrupted" {
-            "interrupted"
-        } else if latest["state"] == "error" {
-            "error"
-        } else {
-            "completed"
-        };
-        thread["latestTurn"] = json!({
-            "turnId": turn_id,
-            "state": state,
-            "requestedAt": if same { latest["requestedAt"].clone() } else { payload["createdAt"].clone() },
-            "startedAt": if same && !latest["startedAt"].is_null() { latest["startedAt"].clone() } else { payload["createdAt"].clone() },
-            "completedAt": if settles { payload["updatedAt"].clone() } else if same { latest["completedAt"].clone() } else { Value::Null },
-            "assistantMessageId": payload["messageId"],
-        });
-    }
-    if payload["role"] == "assistant" && !turn_id.is_null() {
-        for checkpoint in array_mut(thread, "checkpoints") {
-            if checkpoint["turnId"] == turn_id {
-                checkpoint["assistantMessageId"] = payload["messageId"].clone();
-            }
-        }
-    }
-    thread["updatedAt"] = occurred_at;
-}
-
-fn array_mut<'a>(thread: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
-    if !thread[key].is_array() {
-        thread[key] = json!([]);
-    }
-    thread[key].as_array_mut().expect("array")
 }
 
 fn upsert<T>(items: &mut Vec<T>, value: T, id: impl Fn(&T) -> &str) {
@@ -734,60 +1207,161 @@ fn upsert<T>(items: &mut Vec<T>, value: T, id: impl Fn(&T) -> &str) {
     }
 }
 
+fn upsert_value(items: &mut Vec<Value>, value: Value) {
+    if let Some(index) = items.iter().position(|old| old["id"] == value["id"]) {
+        items[index] = value;
+    } else {
+        items.push(value);
+    }
+}
+
 pub fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+/// A V2 command for `thread_id` (`OrchestrationV2Command`).
 pub fn command(kind: &str, thread_id: &str) -> Value {
-    json!({"type":kind,"commandId":uuid::Uuid::new_v4().to_string(),"threadId":thread_id,"createdAt":now_iso()})
+    json!({"type":kind,"commandId":uuid::Uuid::new_v4().to_string(),"threadId":thread_id})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const AT: &str = "2026-01-01T00:00:00.000Z";
+
+    fn item(id: &str, kind: &str, ordinal: u64, run: Option<&str>, extra: Value) -> Value {
+        let mut item = json!({"id":id,"threadId":"t","runId":run,"nodeId":null,
+            "providerThreadId":null,"providerTurnId":null,"nativeItemRef":null,
+            "parentItemId":null,"ordinal":ordinal,"status":"completed","title":null,
+            "startedAt":AT,"completedAt":AT,"updatedAt":AT,"type":kind});
+        for (key, value) in extra.as_object().unwrap() {
+            item[key] = value.clone();
+        }
+        item
+    }
+
+    fn run(id: &str, status: &str) -> Value {
+        json!({"id":id,"threadId":"t","ordinal":1,"providerInstanceId":"codex",
+            "modelSelection":{"instanceId":"codex","model":"gpt"},"providerThreadId":null,
+            "userMessageId":"m","rootNodeId":null,"activeAttemptId":null,"status":status,
+            "requestedAt":AT,"startedAt":null,"completedAt":null,"checkpointId":null,
+            "contextHandoffId":null})
+    }
+
     fn detail() -> State {
         let mut state = State::default();
-        let snapshot = json!({"kind":"snapshot","snapshot":{"snapshotSequence":1,"thread":{
-            "id":"t","projectId":"p","title":"T","messages":[],"activities":[],"checkpoints":[],
-            "latestTurn":null,"session":null}}});
+        let snapshot = json!({"kind":"snapshot","snapshotSequence":1,"projection":{
+            "thread":{"id":"t","projectId":"p","title":"T"},"runs":[],"attempts":[],"nodes":[],
+            "subagents":[],"providerSessions":[],"providerThreads":[],"providerTurns":[],
+            "runtimeRequests":[],"messages":[],"plans":[],"turnItems":[],"checkpointScopes":[],
+            "checkpoints":[],"contextHandoffs":[],"contextTransfers":[],"visibleTurnItems":[],
+            "updatedAt":AT}});
         state.thread("t", &snapshot).unwrap();
         state
     }
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
-        json!({"kind":"event","event":{"sequence":sequence,"type":kind,"occurredAt":"2026-01-01T00:00:00.000Z","payload":payload}})
+        json!({"kind":"event","sequence":sequence,"event":{"id":format!("e{sequence}"),
+            "threadId":"t","type":kind,"occurredAt":AT,"payload":payload}})
+    }
+
+    fn visible(state: &State) -> Vec<String> {
+        let detail = state.detail.as_ref().unwrap();
+        detail.visible.iter().map(|r| r.item.id.clone()).collect()
     }
 
     #[test]
-    fn proposed_plans_upsert_in_order() {
+    fn turn_items_take_their_ordinal_place() {
         let mut state = detail();
-        let plan = |id: &str, at: &str, text: &str| {
-            json!({"threadId":"t","proposedPlan":{"id":id,"turnId":null,"planMarkdown":text,
-                "implementedAt":null,"implementationThreadId":null,"createdAt":at,"updatedAt":at}})
-        };
-        let b = event(
-            2,
-            "thread.proposed-plan-upserted",
-            plan("b", "2026-01-02T00:00:00Z", "B"),
-        );
-        state.thread("t", &b).unwrap();
-        let a = event(
-            3,
-            "thread.proposed-plan-upserted",
-            plan("a", "2026-01-01T00:00:00Z", "A"),
-        );
-        state.thread("t", &a).unwrap();
-        let a2 = event(
-            4,
-            "thread.proposed-plan-upserted",
-            plan("a", "2026-01-01T00:00:00Z", "A2"),
-        );
-        state.thread("t", &a2).unwrap();
-        state.refresh_detail().unwrap();
-        let plans = &state.detail.as_ref().unwrap().proposed_plans;
-        let texts: Vec<&str> = plans.iter().map(|p| p.plan_markdown.as_str()).collect();
-        assert_eq!(texts, ["A2", "B"]);
+        let text = json!({"messageId":"m","text":"hi","streaming":false});
+        state
+            .thread(
+                "t",
+                &event(
+                    2,
+                    "turn-item.updated",
+                    item("b", "assistant_message", 2, None, text.clone()),
+                ),
+            )
+            .unwrap();
+        state
+            .thread(
+                "t",
+                &event(
+                    3,
+                    "turn-item.updated",
+                    item("a", "assistant_message", 1, None, text.clone()),
+                ),
+            )
+            .unwrap();
+        // A streamed update replaces the row in place.
+        let more = json!({"messageId":"m","text":"hello","streaming":true});
+        state
+            .thread(
+                "t",
+                &event(
+                    4,
+                    "turn-item.updated",
+                    item("b", "assistant_message", 2, None, more),
+                ),
+            )
+            .unwrap();
+        assert_eq!(visible(&state), ["a", "b"]);
+        let detail = state.detail.as_ref().unwrap();
+        assert_eq!(detail.visible[1].item.text(), "hello");
+        assert_eq!(detail.visible[1].position, 1);
+    }
+
+    #[test]
+    fn rolled_back_runs_hide_their_items() {
+        let mut state = detail();
+        state
+            .thread("t", &event(2, "run.created", run("r", "running")))
+            .unwrap();
+        let text = json!({"messageId":"m","text":"hi","streaming":false});
+        state
+            .thread(
+                "t",
+                &event(
+                    3,
+                    "turn-item.updated",
+                    item("a", "assistant_message", 1, Some("r"), text),
+                ),
+            )
+            .unwrap();
+        assert_eq!(visible(&state), ["a"]);
+        state
+            .thread("t", &event(4, "run.updated", run("r", "rolled_back")))
+            .unwrap();
+        assert!(visible(&state).is_empty());
+    }
+
+    #[test]
+    fn unknown_items_and_stale_sequences_are_skipped() {
+        let mut state = detail();
+        state
+            .thread(
+                "t",
+                &event(
+                    3,
+                    "turn-item.updated",
+                    item("x", "hologram", 1, None, json!({})),
+                ),
+            )
+            .unwrap();
+        let text = json!({"messageId":"m","text":"late","streaming":false});
+        state
+            .thread(
+                "t",
+                &event(
+                    2,
+                    "turn-item.updated",
+                    item("a", "assistant_message", 1, None, text),
+                ),
+            )
+            .unwrap();
+        assert!(visible(&state).is_empty());
     }
 
     #[test]
@@ -796,56 +1370,85 @@ mod tests {
         state.switch_detail(Some("other"));
         assert!(state.detail.is_none());
         state.switch_detail(Some("t"));
-        assert_eq!(state.detail.as_ref().unwrap().title, "T");
+        assert_eq!(state.detail.as_ref().unwrap().id(), "t");
         // Its events still apply after the kept sequence.
-        let rename = event(
-            2,
-            "thread.meta-updated",
-            json!({"threadId":"t","title":"New","updatedAt":"2026-01-01T00:00:00.000Z"}),
+        let renamed = json!({"id":"t","projectId":"p","title":"New"});
+        state
+            .thread("t", &event(2, "thread.metadata-updated", renamed))
+            .unwrap();
+        assert_eq!(state.detail.as_ref().unwrap().thread["title"], "New");
+    }
+
+    fn shell_thread(id: &str, extra: Value) -> Value {
+        let mut thread = json!({"id":id,"projectId":"p","title":"T","providerInstanceId":"codex",
+            "modelSelection":{"instanceId":"codex","model":"gpt"},"runtimeMode":"full-access",
+            "interactionMode":"default","branch":null,"worktreePath":null,
+            "lineage":{"parentThreadId":null,"relationshipToParent":null,"rootThreadId":id},
+            "forkedFrom":null,"activeProviderThreadId":null,"latestRunId":null,"activeRunId":null,
+            "status":"idle","pendingRuntimeRequest":null,"latestVisibleMessage":null,
+            "latestUserMessageAt":null,"hasActionableProposedPlan":false,"itemCount":0,
+            "visibleItemCount":0,"createdAt":AT,"updatedAt":AT,"archivedAt":null,
+            "settledOverride":null,"settledAt":null,"deletedAt":null});
+        for (key, value) in extra.as_object().unwrap() {
+            thread[key] = value.clone();
+        }
+        thread
+    }
+
+    #[test]
+    fn shell_rows_present_runs_and_requests() {
+        let running = shell_thread(
+            "a",
+            json!({"latestRunId":"r","activeRunId":"r","status":"running",
+                "activeProviderThreadId":"pt","latestRunStartedAt":AT,
+                "pendingRuntimeRequest":{"id":"q","kind":"command","createdAt":AT}}),
         );
-        state.thread("t", &rename).unwrap();
-        state.refresh_detail().unwrap();
-        assert_eq!(state.detail.as_ref().unwrap().title, "New");
+        let thread = Thread::from_shell(&running).unwrap();
+        assert!(thread.is_running());
+        assert!(thread.has_pending_approvals);
+        assert_eq!(thread.latest_run.as_ref().unwrap().completed_at, None);
+        assert_eq!(thread.working_started_at().as_deref(), Some(AT));
+
+        let idle = shell_thread("b", json!({"latestRunId":"r","status":"idle"}));
+        let thread = Thread::from_shell(&idle).unwrap();
+        assert!(!thread.is_running());
+        let run = thread.latest_run.unwrap();
+        assert_eq!(run.status, "completed");
+        assert_eq!(run.completed_at.as_deref(), Some(AT));
     }
 
     #[test]
-    fn streaming_deltas_append_and_settle_the_turn() {
-        let mut state = detail();
-        let delta = |seq, text: &str, streaming| {
-            event(
-                seq,
-                "thread.message-sent",
-                json!({"threadId":"t","messageId":"m","role":"assistant",
-                "text":text,"turnId":"u","streaming":streaming,
-                "createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:05.000Z"}),
-            )
-        };
-        state.thread("t", &delta(2, "Hel", true)).unwrap();
-        state.thread("t", &delta(3, "lo", true)).unwrap();
-        state.refresh_detail().unwrap();
-        let thread = state.detail.as_ref().unwrap();
-        assert_eq!(thread.messages[0].text, "Hello");
-        assert_eq!(thread.latest_turn.as_ref().unwrap().state, "running");
-        state.thread("t", &delta(4, "", false)).unwrap();
-        state.refresh_detail().unwrap();
-        let thread = state.detail.as_ref().unwrap();
-        assert_eq!(thread.messages[0].text, "Hello");
-        assert_eq!(thread.latest_turn.as_ref().unwrap().state, "completed");
+    fn subagent_requests_reach_their_ancestors() {
+        let mut state = State::default();
+        let child = shell_thread(
+            "c",
+            json!({"status":"running","creationSource":"mcp",
+                "lineage":{"parentThreadId":"p1","relationshipToParent":"subagent","rootThreadId":"p1"},
+                "pendingRuntimeRequest":{"id":"q","kind":"user_input","createdAt":AT}}),
+        );
+        let shell = json!({"kind":"snapshot","snapshot":{"snapshotSequence":1,"projects":[],
+            "threads":[shell_thread("p1", json!({})), child],"archivedThreads":[]}});
+        state.shell(&shell).unwrap();
+        assert_eq!(
+            state.threads[0].pending_subagent_request.as_deref(),
+            Some("user_input")
+        );
+        // Archiving moves a row out of the shell.
+        let archived = json!({"kind":"thread.updated","sequence":2,"location":"archive",
+            "thread":shell_thread("p1", json!({}))});
+        state.shell(&archived).unwrap();
+        assert_eq!(state.threads.len(), 1);
     }
 
     #[test]
-    fn stale_sequences_are_ignored() {
-        let mut state = detail();
-        let rename = |seq, title: &str| {
-            event(
-                seq,
-                "thread.meta-updated",
-                json!({"threadId":"t","title":title,"updatedAt":"2026-01-01T00:00:00.000Z"}),
-            )
-        };
-        state.thread("t", &rename(3, "New")).unwrap();
-        state.thread("t", &rename(2, "Old")).unwrap();
-        state.refresh_detail().unwrap();
-        assert_eq!(state.detail.as_ref().unwrap().title, "New");
+    fn subagent_titles_read_as_names() {
+        assert_eq!(
+            subagent_display_title("Subagent: /root/code_review/"),
+            "Code Review"
+        );
+        assert_eq!(
+            subagent_display_title("Explore the repo"),
+            "Explore the repo"
+        );
     }
 }

@@ -128,7 +128,7 @@ impl App {
                 status: None,
                 layers: false,
                 reset: project.project_icon.is_some() || project.favicon_path.is_some(),
-                control: Control::ProjectIcon(project.clone()),
+                control: Control::ProjectIcon(Box::new(project.clone())),
             },
         ];
         y = self.project_card(ui, left, y, None, &overview, &mut actions) + 24.0;
@@ -430,7 +430,7 @@ impl App {
                     self.status = Some("Project title cannot be empty".into());
                 } else if title != project.title {
                     self.dispatch(json!({
-                        "type": "project.meta.update",
+                        "type": "project.update",
                         "commandId": uuid::Uuid::new_v4().to_string(),
                         "projectId": project.id,
                         "title": title,
@@ -438,7 +438,7 @@ impl App {
                 }
             }
             ("project-icon", RowAction::Reset) => self.dispatch(json!({
-                "type": "project.meta.update",
+                "type": "project.update",
                 "commandId": uuid::Uuid::new_v4().to_string(),
                 "projectId": project.id,
                 "faviconPath": null,

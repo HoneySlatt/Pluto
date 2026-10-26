@@ -1,10 +1,10 @@
 //! Pending provider requests, ported from upstream
-//! `client-runtime/pendingRequests.ts` and `pendingUserInput.ts`.
-use std::collections::{BTreeMap, HashSet};
+//! `client-runtime/state/threadRequests.ts` and `pendingUserInput.ts`.
+use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::model::Activity;
+use crate::model::Detail;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApprovalOption {
@@ -87,17 +87,6 @@ pub struct Pending {
     pub user_inputs: Vec<PendingUserInput>,
 }
 
-fn request_kind_from_type(request_type: &str) -> Option<&'static str> {
-    Some(match request_type {
-        "command_execution_approval" | "exec_command_approval" | "dynamic_tool_call" => "command",
-        "file_read_approval" => "file-read",
-        "file_change_approval" | "apply_patch_approval" => "file-change",
-        "mcp_elicitation_approval" => "mcp-elicitation",
-        "permission_approval" => "permission",
-        _ => return None,
-    })
-}
-
 fn text(value: &Value) -> Option<String> {
     value.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
 }
@@ -139,120 +128,65 @@ fn parse_questions(value: &Value) -> Vec<Question> {
         .collect()
 }
 
-const STALE_APPROVAL: [&str; 4] = [
-    "stale pending approval request",
-    "unknown pending approval request",
-    "unknown pending permission request",
-    "unknown pending codex approval request",
-];
-const STALE_USER_INPUT: [&str; 4] = [
-    "stale pending user-input request",
-    "unknown pending user-input request",
-    "unknown pending user input request",
-    "unknown pending codex user input request",
-];
-
-fn is_stale(payload: &Value, fragments: &[&str]) -> bool {
-    let detail = payload["detail"]
-        .as_str()
-        .unwrap_or_default()
-        .to_lowercase();
-    fragments.iter().any(|f| detail.contains(f))
-}
-
-/// Port of `derivePendingRequests`: terminal events stay final regardless of order.
-pub fn derive(activities: &[Activity]) -> Pending {
-    let mut approvals: BTreeMap<String, PendingApproval> = BTreeMap::new();
-    let mut inputs: BTreeMap<String, PendingUserInput> = BTreeMap::new();
-    let mut closed_approvals = HashSet::new();
-    let mut closed_inputs = HashSet::new();
-    for activity in activities {
-        let payload = &activity.payload;
-        let Some(request_id) = payload["requestId"].as_str().filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        let request_id = request_id.to_owned();
-        match activity.kind.as_str() {
-            "approval.requested" => {
-                let request_type = payload["requestType"].as_str().unwrap_or_default();
-                if closed_approvals.contains(&request_id)
-                    || request_type == "tool_user_input"
-                    || request_type == "auth_tokens_refresh"
-                {
-                    continue;
-                }
-                let kind = payload["requestKind"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| request_kind_from_type(request_type).map(str::to_owned))
-                    .unwrap_or_else(|| "command".into());
-                let options = payload["options"]
-                    .as_array()
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|o| {
-                                Some(ApprovalOption {
-                                    decision: o["decision"].as_str()?.to_owned(),
-                                    label: o["label"].as_str()?.to_owned(),
-                                    warning: text(&o["warning"]),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                approvals.insert(
-                    request_id.clone(),
-                    PendingApproval {
-                        request_id,
-                        request_kind: kind,
-                        created_at: activity.created_at.clone(),
-                        detail: text(&payload["detail"]),
-                        app_name: text(&payload["appName"]),
-                        options,
-                    },
-                );
-            }
-            "user-input.requested" => {
-                if closed_inputs.contains(&request_id) {
-                    continue;
-                }
-                let questions = parse_questions(&payload["questions"]);
-                if questions.is_empty() {
-                    continue;
-                }
-                inputs.insert(
-                    request_id.clone(),
-                    PendingUserInput {
-                        request_id,
-                        created_at: activity.created_at.clone(),
-                        questions,
-                        dismissible: payload["responseMode"] == "message",
-                    },
-                );
-            }
-            "approval.resolved" => {
-                approvals.remove(&request_id);
-                closed_approvals.insert(request_id);
-            }
-            "provider.approval.respond.failed" if is_stale(payload, &STALE_APPROVAL) => {
-                approvals.remove(&request_id);
-                closed_approvals.insert(request_id);
-            }
-            "user-input.resolved" => {
-                inputs.remove(&request_id);
-                closed_inputs.insert(request_id);
-            }
-            "provider.user-input.respond.failed" if is_stale(payload, &STALE_USER_INPUT) => {
-                inputs.remove(&request_id);
-                closed_inputs.insert(request_id);
-            }
-            _ => {}
-        }
-    }
-    let mut pending = Pending {
-        approvals: approvals.into_values().collect(),
-        user_inputs: inputs.into_values().collect(),
+/// Port of `derivePendingThreadRequests`: pending runtime requests, joined
+/// to the request items that carry what they show.
+pub fn derive(detail: &Detail) -> Pending {
+    let mut pending = Pending::default();
+    let item = |kind: &str, id: &str| {
+        detail
+            .turn_items
+            .iter()
+            .rev()
+            .find(|i| i.kind == kind && i.str("requestId") == Some(id))
+            .cloned()
     };
+    for request in &detail.runtime_requests {
+        if request.status != "pending" {
+            continue;
+        }
+        let capability = request.response_capability["type"]
+            .as_str()
+            .unwrap_or_default();
+        if request.kind == "user_input" {
+            let Some(item) = item("user_input_request", &request.id) else {
+                continue;
+            };
+            let questions = parse_questions(item.get("questions"));
+            pending.user_inputs.push(PendingUserInput {
+                request_id: request.id.clone(),
+                created_at: request.created_at.clone(),
+                questions,
+                dismissible: item.str("responseMode") == Some("message") || capability == "message",
+            });
+            continue;
+        }
+        if request.kind == "auth_refresh" || request.kind == "dynamic_tool_call" {
+            continue;
+        }
+        let item = item("approval_request", &request.id);
+        let field = |key: &str| item.as_ref().and_then(|i| text(i.get(key)));
+        let options = item
+            .as_ref()
+            .and_then(|i| i.get("options").as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|o| {
+                Some(ApprovalOption {
+                    decision: o["decision"].as_str()?.to_owned(),
+                    label: o["label"].as_str()?.to_owned(),
+                    warning: text(&o["warning"]),
+                })
+            })
+            .collect();
+        pending.approvals.push(PendingApproval {
+            request_id: request.id.clone(),
+            request_kind: request.kind.clone(),
+            created_at: request.created_at.clone(),
+            detail: field("prompt"),
+            app_name: field("appName"),
+            options,
+        });
+    }
     pending
         .approvals
         .sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -323,34 +257,45 @@ pub fn build_answers(
 mod tests {
     use super::*;
 
-    fn activity(kind: &str, payload: Value, at: &str) -> Activity {
-        Activity {
-            id: format!("{kind}-{at}"),
-            kind: kind.into(),
-            payload,
-            created_at: at.into(),
-            ..Default::default()
-        }
+    fn detail() -> Detail {
+        let request = |id: &str, kind: &str, status: &str, at: &str| {
+            json!({"id":id,"nodeId":"n","providerTurnId":null,"nativeRequestRef":null,
+                "kind":kind,"status":status,"responseCapability":{"type":"live",
+                "providerSessionId":"s"},"createdAt":at,"resolvedAt":null})
+        };
+        let item = |id: &str, kind: &str, request: &str, extra: Value| {
+            let mut item = json!({"id":id,"threadId":"t","type":kind,"requestId":request,
+                "ordinal":0,"status":"waiting","updatedAt":"1"});
+            for (key, value) in extra.as_object().unwrap() {
+                item[key] = value.clone();
+            }
+            item
+        };
+        serde_json::from_value(json!({
+            "thread": {"id": "t"},
+            "runtimeRequests": [
+                request("a", "command", "resolved", "1"),
+                request("b", "file-change", "pending", "3"),
+                request("c", "user_input", "pending", "2"),
+                request("d", "auth_refresh", "pending", "4"),
+            ],
+            "turnItems": [
+                item("i1", "approval_request", "b", json!({"requestKind":"file-change","prompt":"Edit app.rs"})),
+                item("i2", "user_input_request", "c", json!({"questions":[{"id":"q","header":"H",
+                    "question":"Which?","options":[{"label":"A","description":"a"}]}]})),
+            ],
+        }))
+        .unwrap()
     }
 
     #[test]
-    fn resolved_requests_stay_closed_even_out_of_order() {
-        let activities = vec![
-            activity("approval.resolved", json!({"requestId": "a"}), "1"),
-            activity(
-                "approval.requested",
-                json!({"requestId": "a", "requestType": "exec_command_approval", "detail": "ls"}),
-                "2",
-            ),
-            activity(
-                "approval.requested",
-                json!({"requestId": "b", "requestKind": "file-change"}),
-                "3",
-            ),
-        ];
-        let pending = derive(&activities);
+    fn pending_requests_join_their_items() {
+        let pending = derive(&detail());
         assert_eq!(pending.approvals.len(), 1);
         assert_eq!(pending.approvals[0].label(), "File change approval");
+        assert_eq!(pending.approvals[0].detail.as_deref(), Some("Edit app.rs"));
+        assert_eq!(pending.user_inputs.len(), 1);
+        assert_eq!(pending.user_inputs[0].questions[0].question, "Which?");
     }
 
     #[test]

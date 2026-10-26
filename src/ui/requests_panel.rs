@@ -334,7 +334,7 @@ impl App {
             .galley(clip.min, detail_galley, theme::foreground());
 
         if let Some(decision) = decision {
-            let mut command = crate::model::command("thread.approval.respond", thread_id);
+            let mut command = crate::model::command("runtime-request.respond", thread_id);
             command["requestId"] = json!(approval.request_id);
             command["decision"] = json!(decision);
             self.dispatch_reply(command, &approval.request_id);
@@ -657,7 +657,7 @@ impl App {
         let Some(answers) = requests::build_answers(&input.questions, &self.question_drafts) else {
             return;
         };
-        let mut command = crate::model::command("thread.user-input.respond", thread_id);
+        let mut command = crate::model::command("runtime-request.respond", thread_id);
         command["requestId"] = json!(input.request_id);
         command["answers"] = serde_json::Value::Object(answers);
         self.dispatch_reply(command, &input.request_id);

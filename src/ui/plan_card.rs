@@ -12,8 +12,8 @@ use eframe::egui::{
 use serde_json::json;
 
 use crate::app::App;
-use crate::model::ProposedPlan;
 use crate::theme::{self, Weight, font};
+use crate::timeline::ProposedPlan;
 use crate::ui::context_menu::{self, Item};
 use crate::ui::markdown::Markdown;
 use crate::ui::toasts::{Kind, Toast};
@@ -680,40 +680,22 @@ impl App {
         }
     }
 
-    /// `shouldShowPlanFollowUpPrompt` with `findLatestProposedPlan`.
-    pub(crate) fn plan_follow_up(&self, thread: &crate::model::Thread) -> Option<ProposedPlan> {
-        let settled = thread.latest_turn.as_ref().is_some_and(|turn| {
-            turn.started_at.is_some()
-                && turn.completed_at.is_some()
-                && thread
-                    .session
-                    .as_ref()
-                    .is_none_or(|s| s.status != "running")
-        });
-        if !settled
+    /// `shouldShowPlanFollowUpPrompt` with `findLatestProposedPlan`: an
+    /// active plan of the settled latest run, in plan mode.
+    pub(crate) fn plan_follow_up(
+        &self,
+        thread: &crate::model::Thread,
+        detail: &crate::model::Detail,
+    ) -> Option<ProposedPlan> {
+        if !thread.latest_run_settled()
             || !self.composer_images.is_empty()
             || self.composer_interaction_mode(false) != "plan"
         {
             return None;
         }
-        let latest_turn = thread.latest_turn.as_ref().map(|t| t.turn_id.as_str());
-        let newest = |plans: &mut dyn Iterator<Item = &ProposedPlan>| {
-            plans
-                .max_by(|a, b| {
-                    a.updated_at
-                        .cmp(&b.updated_at)
-                        .then_with(|| a.id.cmp(&b.id))
-                })
-                .cloned()
-        };
-        let plan = newest(
-            &mut thread
-                .proposed_plans
-                .iter()
-                .filter(|p| p.turn_id.is_some() && p.turn_id.as_deref() == latest_turn),
-        )
-        .or_else(|| newest(&mut thread.proposed_plans.iter()))?;
-        plan.implemented_at.is_none().then_some(plan)
+        let latest = thread.latest_run.as_ref().map(|r| r.run_id.as_str());
+        let plan = crate::timeline::latest_proposed_plan(detail, latest)?;
+        (plan.status == "active").then_some(plan)
     }
 
     /// The Plan/Build toggle after the runtime picker; returns its right edge.
@@ -941,11 +923,10 @@ impl App {
         };
         let model = self.composer_model_json(false);
         let runtime = self.composer_runtime_mode(false);
-        let mut command =
-            crate::ui::composer::turn_start_command(&thread.id, &text, &[], &model, &runtime, mode);
+        let mut command = crate::ui::composer::message_dispatch(&thread.id, &text, &model, "auto");
         command["titleSeed"] = json!(thread.title);
         if mode == "default" {
-            command["sourceProposedPlan"] = json!({"threadId": thread.id, "planId": plan.id});
+            command["sourcePlanRef"] = json!({"threadId": thread.id, "planId": plan.id});
         }
         crate::ui::composer_context::apply(
             &mut command,
@@ -953,7 +934,14 @@ impl App {
             &self.composer_contexts,
             self.inline_message_context(),
         );
-        self.dispatch(command);
+        let before = self.mode_commands(&thread, &runtime, mode);
+        self.start_turn(crate::ui::composer::TurnSend {
+            thread_id: thread.id.clone(),
+            before,
+            message: command,
+            launch: false,
+            uploads: Vec::new(),
+        });
         self.composer.clear();
         self.composer_contexts.clear();
         let key = self.composer_key(false);
@@ -981,29 +969,29 @@ impl App {
             .unwrap_or("full-access")
             .to_owned();
         let thread_id = uuid::Uuid::new_v4().to_string();
-        let now = crate::model::now_iso();
         let prompt = implementation_prompt(&plan.plan_markdown);
-        let mut command = crate::ui::composer::turn_start_command(
-            &thread_id,
-            &prompt,
-            &[],
-            &model,
-            &runtime,
-            "default",
-        );
+        // `createThread`, then `startThreadTurn` with the plan as its source.
+        let mut create = crate::model::command("thread.create", &thread_id);
+        create["createdBy"] = json!("user");
+        create["creationSource"] = json!("web");
+        create["projectId"] = json!(thread.project_id);
+        create["title"] = json!(title);
+        create["modelSelection"] = model.clone();
+        create["runtimeMode"] = json!(runtime);
+        create["interactionMode"] = json!("default");
+        create["branch"] = json!(thread.branch);
+        create["worktreePath"] = json!(thread.worktree_path);
+        let mut command =
+            crate::ui::composer::message_dispatch(&thread_id, &prompt, &model, "auto");
         command["titleSeed"] = json!(title);
-        command["sourceProposedPlan"] = json!({"threadId": thread.id, "planId": plan.id});
-        command["bootstrap"] = json!({"createThread": {
-            "projectId": thread.project_id,
-            "title": title,
-            "modelSelection": model,
-            "runtimeMode": runtime,
-            "interactionMode": "default",
-            "branch": thread.branch,
-            "worktreePath": thread.worktree_path,
-            "createdAt": now,
-        }});
-        self.dispatch(command);
+        command["sourcePlanRef"] = json!({"threadId": thread.id, "planId": plan.id});
+        self.start_turn(crate::ui::composer::TurnSend {
+            thread_id: thread_id.clone(),
+            before: vec![create],
+            message: command,
+            launch: false,
+            uploads: Vec::new(),
+        });
         self.select_thread(Some(thread_id));
     }
 }

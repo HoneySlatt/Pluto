@@ -1096,6 +1096,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "play",
         "flask-conical",
         "bug",
+        "corner-up-right",
+        "circle-dot-dashed",
     )
 }
 

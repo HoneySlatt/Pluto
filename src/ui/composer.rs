@@ -7,7 +7,7 @@ use eframe::egui::{
 use serde_json::{Value, json};
 
 use crate::app::App;
-use crate::model::{ModelSelection, now_iso};
+use crate::model::ModelSelection;
 use crate::requests::{PendingApproval, PendingUserInput};
 use crate::theme::{self, Weight, font};
 use crate::ui::requests_panel::OVERLAP;
@@ -41,7 +41,7 @@ pub fn runtime_label(mode: &str) -> (&'static str, &'static str) {
 pub(crate) enum Mode {
     Normal,
     /// After a settled plan-mode turn proposed a plan (`showPlanFollowUpPrompt`).
-    Plan(Box<crate::model::ProposedPlan>),
+    Plan(Box<crate::timeline::ProposedPlan>),
     Approval(PendingApproval, usize),
     Question(PendingUserInput),
 }
@@ -61,32 +61,90 @@ fn title_seed(text: &str, images: &[crate::ui::attachments::ComposerImage]) -> S
     }
 }
 
-/// A `thread.turn.start` for an existing thread (the caller adds a
-/// bootstrap for a draft).
-pub(crate) fn turn_start_command(
+/// `startThreadTurn`'s `message.dispatch` for an existing thread. The
+/// server resolves how a follow-up reaches a running turn
+/// (`serverResolvedCommandContext`): `mode` is `auto`, `steer`, `queue`
+/// (`queue_after_active`) or `start` (`start_immediately`, no intent).
+pub(crate) fn message_dispatch(thread_id: &str, text: &str, model: &Value, mode: &str) -> Value {
+    let mut command = json!({
+        "type": "message.dispatch",
+        "commandId": uuid::Uuid::new_v4().to_string(),
+        "createdBy": "user",
+        "creationSource": "web",
+        "threadId": thread_id,
+        "messageId": uuid::Uuid::new_v4().to_string(),
+        "text": text,
+        "attachments": [],
+        "modelSelection": model,
+        "dispatchMode": {"type": if mode == "queue" { "queue_after_active" } else { "start_immediately" }},
+    });
+    if mode != "queue" && mode != "start" {
+        command["deliveryIntent"] = json!(mode);
+    }
+    command
+}
+
+/// `orchestration.launchThread`'s input: a new thread with its first
+/// message, in the project's root checkout.
+pub(crate) fn launch_input(
     thread_id: &str,
+    project_id: &str,
+    title: &str,
     text: &str,
-    images: &[crate::ui::attachments::ComposerImage],
-    model: &serde_json::Value,
+    model: &Value,
     runtime: &str,
     interaction: &str,
-) -> serde_json::Value {
+) -> Value {
     json!({
-        "type": "thread.turn.start",
         "commandId": uuid::Uuid::new_v4().to_string(),
+        "creationSource": "web",
         "threadId": thread_id,
-        "message": {
-            "messageId": uuid::Uuid::new_v4().to_string(),
-            "role": "user",
-            "text": text,
-            "attachments": crate::ui::attachments::upload_payload(images),
-        },
+        "projectId": project_id,
+        "title": title,
+        "generateTitle": true,
         "modelSelection": model,
-        "titleSeed": title_seed(text, images),
         "runtimeMode": runtime,
         "interactionMode": if interaction.is_empty() { "default" } else { interaction },
-        "createdAt": now_iso(),
+        "workspaceStrategy": {"type": "root"},
+        "initialMessage": {
+            "messageId": uuid::Uuid::new_v4().to_string(),
+            "text": text,
+            "attachments": [],
+        },
     })
+}
+
+/// A message on its way (`startThreadTurn`): its images are persisted
+/// first (`assets.persistChatAttachments`), then the commands it waits on
+/// go one after another, each after the last one's receipt
+/// (`persistThreadSettingsForNextTurn`), then the message itself.
+pub(crate) struct TurnSend {
+    pub(crate) thread_id: String,
+    pub(crate) before: Vec<Value>,
+    /// A `message.dispatch`, or an `orchestration.launchThread` input.
+    pub(crate) message: Value,
+    pub(crate) launch: bool,
+    /// `UploadChatImageAttachment`s still to persist.
+    pub(crate) uploads: Vec<Value>,
+}
+
+impl TurnSend {
+    fn message_id(&self) -> String {
+        let message = if self.launch {
+            &self.message["initialMessage"]
+        } else {
+            &self.message
+        };
+        message["messageId"].as_str().unwrap_or_default().to_owned()
+    }
+
+    fn set_attachments(&mut self, attachments: Value) {
+        if self.launch {
+            self.message["initialMessage"]["attachments"] = attachments;
+        } else {
+            self.message["attachments"] = attachments;
+        }
+    }
 }
 
 impl App {
@@ -94,12 +152,15 @@ impl App {
         if draft {
             return Mode::Normal;
         }
-        let Some(thread) = self
+        let Some(detail) = self
             .state
             .detail
-            .as_ref()
-            .filter(|t| Some(&t.id) == self.selected.as_ref())
+            .clone()
+            .filter(|d| Some(d.id()) == self.selected.as_deref())
         else {
+            return Mode::Normal;
+        };
+        let Some(thread) = self.current_thread() else {
             return Mode::Normal;
         };
         // The task drawer closes on another thread.
@@ -107,7 +168,7 @@ impl App {
             self.tasks_thread = Some(thread.id.clone());
             self.tasks_open = false;
         }
-        let pending = crate::requests::derive(&thread.activities);
+        let pending = crate::requests::derive(&detail);
         // Requests that are no longer pending stop counting as in flight.
         let open: std::collections::HashSet<&str> = pending
             .approvals
@@ -135,7 +196,7 @@ impl App {
             return Mode::Question(input.clone());
         }
         self.question_request = None;
-        match self.plan_follow_up(thread) {
+        match self.plan_follow_up(&thread, &detail) {
             Some(plan) => Mode::Plan(Box::new(plan)),
             None => Mode::Normal,
         }
@@ -308,7 +369,12 @@ impl App {
             self.command_menu_keys(ui, editor_id, draft);
         }
         // Ctrl+Enter in a citation's comment editor sends too.
-        let submit = (focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
+        // Ctrl or Cmd+Enter sends the other way during a turn.
+        let submit = (focused
+            && ui.input_mut(|i| {
+                i.consume_key(Modifiers::NONE, Key::Enter)
+                    || i.consume_key(Modifiers::COMMAND, Key::Enter)
+            }))
             || std::mem::take(&mut self.cite.send);
         if focused && normal && self.composer_images.is_empty() {
             self.recall_prompt(ui, editor_id, text_rect.width());
@@ -572,9 +638,6 @@ impl App {
             ui.painter().circle_filled(stop.center(), 16.0, fill);
             theme::paint_icon(ui, "stop-square", stop, 12.0, Color32::WHITE);
             if response.on_hover_text("Stop generation").clicked() {
-                if let Some(thread) = self.selected.clone() {
-                    self.drain_queue(&thread);
-                }
                 self.interrupt();
             }
             if !has_content {
@@ -612,7 +675,8 @@ impl App {
             response
         };
         if (response.clicked() || submit) && can_send {
-            self.submit_message(draft);
+            let alternate = ui.input(|i| i.modifiers.command);
+            self.submit_message(draft, alternate);
         }
         if running {
             send.left() - 8.0 - 32.0
@@ -692,18 +756,31 @@ impl App {
         left
     }
 
+    /// `interruptThreadTurn`: stops the active run and holds the queue
+    /// behind it. Settled runs' background work and pull request watches
+    /// are not stopped from here yet.
     fn interrupt(&mut self) {
         let Some(thread) = self.current_thread() else {
             return;
         };
-        let mut command = crate::model::command("thread.turn.interrupt", &thread.id);
-        if let Some(turn) = thread
-            .session
+        let run = self
+            .state
+            .detail
             .as_ref()
-            .and_then(|s| s.active_turn_id.clone())
-        {
-            command["turnId"] = json!(turn);
-        }
+            .filter(|d| d.id() == thread.id)
+            .and_then(|d| crate::ui::queue::active_run(d).map(|r| r.id.clone()))
+            .or_else(|| {
+                thread
+                    .runtime
+                    .as_ref()
+                    .and_then(|r| r.active_run_id.clone())
+            });
+        let Some(run) = run else {
+            return;
+        };
+        let mut command = crate::model::command("run.interrupt", &thread.id);
+        command["runId"] = json!(run);
+        command["holdQueue"] = json!(true);
         self.dispatch(command);
     }
 
@@ -1046,11 +1123,19 @@ impl App {
         if !on_edge {
             return;
         }
+        let detail = self.current_detail().unwrap_or_default();
         let entries = prompt_history::entries(
-            thread
-                .messages
+            detail
+                .visible
                 .iter()
-                .map(|m| (m.id.as_str(), m.role.as_str(), m.text.as_str())),
+                .filter(|row| row.item.kind == "user_message")
+                .map(|row| {
+                    (
+                        row.item.str("messageId").unwrap_or_default(),
+                        "user",
+                        row.item.text(),
+                    )
+                }),
         );
         let Some(step) =
             prompt_history::step(direction, &entries, position.as_ref(), &self.composer)
@@ -1070,27 +1155,25 @@ impl App {
         state.store(ui.ctx(), editor_id);
     }
 
-    fn submit_message(&mut self, draft: bool) {
-        if !draft
-            && self.running()
-            && self.client_setting("followUpBehavior") != "steer"
-            && let Some(thread) = self.current_thread()
-        {
-            let model = self.composer_model_json(false);
-            let runtime = self.composer_runtime_mode(false);
-            self.enqueue_composer(&thread, model, runtime);
-            return;
-        }
-        self.send_message(draft);
+    /// `resolveComposerDispatchMode`: during a turn the follow-up behavior
+    /// decides between queueing and steering; Ctrl or Cmd flips it.
+    fn submit_message(&mut self, draft: bool, alternate: bool) {
+        let mode = if draft || !self.running() {
+            "auto"
+        } else {
+            let default = self.client_setting("followUpBehavior");
+            let queue = default.as_str() != Some("steer");
+            if queue != alternate { "queue" } else { "steer" }
+        };
+        self.send_message(draft, mode);
     }
 
-    fn send_message(&mut self, draft: bool) {
+    fn send_message(&mut self, draft: bool, mode: &str) {
         let text = self.composer.trim().to_owned();
         if text.is_empty() && self.composer_images.is_empty() {
             return;
         }
         let runtime = self.composer_runtime_mode(draft);
-        let now = now_iso();
         // `assistantCitationsToPlainText`: titles read quotes, not links.
         let title = title_seed(
             crate::ui::citations::to_plain_text(&text).trim(),
@@ -1098,51 +1181,156 @@ impl App {
         );
         let model = self.composer_model_json(draft);
         let interaction = self.composer_interaction_mode(draft);
-        let (thread_id, bootstrap) = if draft {
+        let uploads = crate::ui::attachments::upload_payload(&self.composer_images);
+        let inline = self.inline_message_context();
+        let send = if draft {
             let Some(project) = self.draft_project() else {
                 return;
             };
             let thread_id = uuid::Uuid::new_v4().to_string();
-            let bootstrap = json!({"createThread": {
-                "projectId": project.id,
-                "title": title,
-                "modelSelection": model,
-                "runtimeMode": runtime,
-                "interactionMode": interaction,
-                "branch": null,
-                "worktreePath": null,
-                "createdAt": now,
-            }});
-            (thread_id, Some(bootstrap))
+            let mut input = launch_input(
+                &thread_id,
+                &project.id,
+                &title,
+                &text,
+                &model,
+                &runtime,
+                &interaction,
+            );
+            crate::ui::composer_context::apply(
+                &mut input["initialMessage"],
+                &text,
+                &self.composer_contexts,
+                inline,
+            );
+            TurnSend {
+                thread_id,
+                before: Vec::new(),
+                message: input,
+                launch: true,
+                uploads,
+            }
         } else {
             let Some(thread) = self.current_thread() else {
                 return;
             };
-            (thread.id.clone(), None)
+            let mut command = message_dispatch(&thread.id, &text, &model, mode);
+            command["titleSeed"] = json!(title);
+            crate::ui::composer_context::apply(
+                &mut command,
+                &text,
+                &self.composer_contexts,
+                inline,
+            );
+            TurnSend {
+                thread_id: thread.id.clone(),
+                before: self.mode_commands(&thread, &runtime, &interaction),
+                message: command,
+                launch: false,
+                uploads,
+            }
         };
-        let mut command = turn_start_command(
-            &thread_id,
-            &text,
-            &self.composer_images,
-            &model,
-            &runtime,
-            &interaction,
-        );
-        crate::ui::composer_context::apply(
-            &mut command,
-            &text,
-            &self.composer_contexts,
-            self.inline_message_context(),
-        );
-        if let Some(bootstrap) = bootstrap {
-            command["bootstrap"] = bootstrap;
-        }
-        self.dispatch(command);
+        let thread_id = send.thread_id.clone();
+        self.start_turn(send);
         self.composer.clear();
         self.composer_images.clear();
         self.composer_contexts.clear();
         if draft {
             self.select_thread(Some(thread_id));
+        }
+    }
+
+    /// `persistThreadSettingsForNextTurn`: the thread takes the composer's
+    /// runtime and interaction modes before the message goes.
+    pub(crate) fn mode_commands(
+        &self,
+        thread: &crate::model::Thread,
+        runtime: &str,
+        interaction: &str,
+    ) -> Vec<Value> {
+        let mut commands = Vec::new();
+        if runtime != thread.runtime_mode {
+            let mut command = crate::model::command("thread.runtime-mode.set", &thread.id);
+            command["runtimeMode"] = json!(runtime);
+            commands.push(command);
+        }
+        let interaction = if interaction.is_empty() {
+            "default"
+        } else {
+            interaction
+        };
+        if interaction != thread.interaction_mode {
+            let mut command = crate::model::command("thread.interaction-mode.set", &thread.id);
+            command["interactionMode"] = json!(interaction);
+            commands.push(command);
+        }
+        commands
+    }
+
+    /// Sends a message: persists its images, then each command it waits on,
+    /// then the message (`startThreadTurn`).
+    pub(crate) fn start_turn(&mut self, mut send: TurnSend) {
+        if self.blocks_turn_starts() {
+            self.status = Some("Turn starts are blocked in this run".into());
+            return;
+        }
+        if !send.uploads.is_empty() {
+            let key = format!("persist:{}", send.message_id());
+            let payload = json!({
+                "threadId": send.thread_id,
+                "messageId": send.message_id(),
+                "attachments": std::mem::take(&mut send.uploads),
+            });
+            self.turn_sends.insert(key.clone(), send);
+            self.send_request(key, "assets.persistChatAttachments", payload);
+            return;
+        }
+        if !send.before.is_empty() {
+            let command = send.before.remove(0);
+            let id = command["commandId"].as_str().unwrap_or_default().to_owned();
+            self.turn_sends.insert(format!("after:{id}"), send);
+            self.dispatch(command);
+            return;
+        }
+        if send.launch {
+            let key = format!("launch:{}", send.thread_id);
+            self.send_request(key, "orchestration.launchThread", send.message);
+        } else {
+            self.dispatch(send.message);
+        }
+    }
+
+    /// The persisted images of a message on its way, or a launch's outcome.
+    pub(crate) fn turn_send_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
+        if key.starts_with("launch:") {
+            if let Err(error) = result {
+                self.status = Some(format!("Could not start the thread: {error}"));
+            }
+            return true;
+        }
+        if !key.starts_with("persist:") {
+            return false;
+        }
+        let Some(mut send) = self.turn_sends.remove(key) else {
+            return true;
+        };
+        match result {
+            Ok(value) => {
+                send.set_attachments(value["attachments"].clone());
+                self.start_turn(send);
+            }
+            Err(error) => self.status = Some(format!("Could not upload the images: {error}")),
+        }
+        true
+    }
+
+    /// A command a message waited on was received: the message goes on, or
+    /// stops with the command's failure.
+    pub(crate) fn turn_command_done(&mut self, command_id: &str, ok: bool) {
+        if let Some(send) = self.turn_sends.remove(&format!("after:{command_id}"))
+            && ok
+        {
+            self.start_turn(send);
         }
     }
 }

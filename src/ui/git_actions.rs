@@ -758,7 +758,7 @@ impl App {
             && let (Some(name), Some(thread)) =
                 (result["branch"]["name"].as_str(), self.selected.clone())
         {
-            let mut command = crate::model::command("thread.meta.update", &thread);
+            let mut command = crate::model::command("thread.metadata.update", &thread);
             command["branch"] = json!(name);
             self.dispatch(command);
         }

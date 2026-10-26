@@ -1125,7 +1125,7 @@ impl App {
             Action::SetFavicon(project_id, path) => {
                 self.palette = PaletteState::default();
                 self.dispatch(json!({
-                    "type": "project.meta.update",
+                    "type": "project.update",
                     "commandId": uuid::Uuid::new_v4().to_string(),
                     "projectId": project_id,
                     "faviconPath": path,
@@ -1179,7 +1179,6 @@ impl App {
             "workspaceRoot": path,
             "createWorkspaceRootIfMissing": true,
             "defaultModelSelection": null,
-            "createdAt": crate::model::now_iso(),
         }));
         self.select_thread(None);
         self.draft_project_id = Some(project_id);

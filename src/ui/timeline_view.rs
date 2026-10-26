@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use eframe::egui::Id;
 
-use crate::model::Thread;
+use crate::model::{Detail, Thread};
 use crate::timeline::{self, Expansion, Row};
 
 #[derive(Default)]
@@ -44,7 +44,13 @@ struct RowsCache {
 
 impl TimelineView {
     /// The thread's rows, rebuilt only when the thread or the folds change.
-    pub fn rows(&mut self, thread: &Thread, expansion: &Expansion, revision: u64) -> Arc<Vec<Row>> {
+    pub fn rows(
+        &mut self,
+        thread: &Thread,
+        detail: &Detail,
+        expansion: &Expansion,
+        revision: u64,
+    ) -> Arc<Vec<Row>> {
         if let Some(cache) = &self.rows
             && cache.thread_id == thread.id
             && cache.revision == revision
@@ -52,7 +58,7 @@ impl TimelineView {
         {
             return cache.rows.clone();
         }
-        let rows = Arc::new(timeline::rows(thread, expansion));
+        let rows = Arc::new(timeline::rows(thread, detail, expansion));
         self.rows = Some(RowsCache {
             thread_id: thread.id.clone(),
             revision,
@@ -95,7 +101,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
     match row {
         Row::User(message) => Id::new(("user", &message.id)),
         Row::Assistant { message, .. } => Id::new(("assistant", &message.id)),
-        Row::TurnFold { turn_id, .. } => Id::new(("fold", turn_id)),
+        Row::TurnFold { run_id, .. } => Id::new(("fold", run_id)),
         Row::Work { id, .. } => Id::new(("work", id)),
         Row::WorkToggle { group_id, .. } => Id::new(("toggle", group_id)),
         Row::WorkDetails { group_id, .. } => Id::new(("details", group_id)),

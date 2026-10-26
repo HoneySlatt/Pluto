@@ -1,14 +1,14 @@
 //! The running turn's task list (`chat/ComposerTasksBadge.tsx`, with
 //! `deriveActivePlanState` from `session-logic.ts` and
-//! `activeComposerTasksProgress` from `ChatView.tsx`): while a turn runs and
-//! its provider keeps a plan (`turn.plan.updated`, Codex's `update_plan` or
-//! Claude's todo list), a "Tasks" tab above the composer shows the current
-//! step, the count and the step segments; a click opens the drawer listing
-//! every step with its status and how long it took.
+//! `activeComposerTasksProgress` from `ChatView.tsx`): while a run keeps a
+//! todo list (the provider's plan, Codex's `update_plan` or Claude's todo
+//! list), a "Tasks" tab above the composer shows the current step, the count
+//! and the step segments; a click opens the drawer listing every step with
+//! its status and how long it took.
 use eframe::egui::{Color32, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::app::App;
-use crate::model::{Activity, Thread};
+use crate::model::{Detail, Thread};
 use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
 
@@ -28,157 +28,59 @@ pub(crate) struct Step {
     pub duration_ms: Option<i64>,
 }
 
-/// `ActivePlanState`: the plan a turn last reported.
+/// `ActivePlanState`: the todo list a run last reported.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ActivePlan {
-    pub turn_id: Option<String>,
+    pub run_id: Option<String>,
     pub steps: Vec<Step>,
 }
 
-/// `planStateFromActivity`: the activity's steps, or None when it carries
-/// no plan (which clears the timings before it).
-fn plan_steps(activity: &Activity) -> Option<Vec<Step>> {
-    let steps: Vec<Step> = activity.payload["plan"]
-        .as_array()?
+/// `deriveActivePlanState`: the run's latest todo list, else the thread's.
+pub(crate) fn active_plan(detail: &Detail, run: Option<&str>) -> Option<ActivePlan> {
+    let plans: Vec<_> = detail
+        .plans
         .iter()
-        .filter_map(|entry| {
-            let step = entry["step"].as_str()?.to_owned();
-            let status = match entry["status"].as_str() {
-                Some("completed") => Status::Completed,
-                Some("inProgress") => Status::InProgress,
-                _ => Status::Pending,
-            };
-            Some(Step {
-                step,
-                status,
-                duration_ms: None,
-            })
-        })
+        .filter(|p| p.kind == "todo_list")
         .collect();
-    (!steps.is_empty()).then_some(steps)
-}
-
-/// Steps keyed by their text and occurrence (`keyedSteps`).
-fn step_keys(steps: &[Step]) -> Vec<String> {
-    let mut seen: std::collections::HashMap<&str, usize> = Default::default();
-    steps
-        .iter()
-        .map(|step| {
-            let count = seen.entry(step.step.as_str()).or_default();
-            let key = format!("{}:{count}", step.step);
-            *count += 1;
-            key
-        })
-        .collect()
-}
-
-fn millis(iso: &str) -> Option<i64> {
-    crate::timeline::parse_time(iso).map(|t| t.timestamp_millis())
-}
-
-/// `deriveActivePlanState` with `addPlanStepDurations`.
-pub(crate) fn active_plan(
-    activities: &[Activity],
-    latest_turn: Option<&str>,
-) -> Option<ActivePlan> {
-    let mut plans: Vec<&Activity> = activities
-        .iter()
-        .filter(|a| a.kind == "turn.plan.updated")
-        .collect();
-    // `compareActivitiesByOrder`: by sequence when both have one, else by time.
-    plans.sort_by(|a, b| match (a.sequence, b.sequence) {
-        (Some(x), Some(y)) => x.cmp(&y),
-        (Some(_), None) => std::cmp::Ordering::Greater,
-        (None, Some(_)) => std::cmp::Ordering::Less,
-        (None, None) => a
-            .created_at
-            .cmp(&b.created_at)
-            .then_with(|| a.id.cmp(&b.id)),
-    });
-    let latest = latest_turn
-        .and_then(|turn| {
+    let plan = run
+        .and_then(|run| {
             plans
                 .iter()
                 .rev()
-                .find(|a| a.turn_id.as_deref() == Some(turn))
+                .find(|p| p.run_id.as_deref() == Some(run))
         })
         .or(plans.last())?;
-    let mut steps = plan_steps(latest)?;
-    let same_turn: Vec<&&Activity> = plans
+    if plan.steps.is_empty() {
+        return None;
+    }
+    let steps = plan
+        .steps
         .iter()
-        .filter(|a| a.turn_id == latest.turn_id)
+        .map(|step| Step {
+            step: step.text.clone(),
+            status: match step.status.as_str() {
+                "completed" => Status::Completed,
+                "running" => Status::InProgress,
+                _ => Status::Pending,
+            },
+            duration_ms: step.duration_ms.map(|ms| ms as i64),
+        })
         .collect();
-    let clear = same_turn
-        .iter()
-        .rposition(|a| plan_steps(a).is_none())
-        .map_or(0, |i| i + 1);
-    // When each step started (first seen running) and completed.
-    let mut timings: Vec<(String, Option<i64>, Option<i64>)> = Vec::new();
-    let mut plan_started = None;
-    for activity in &same_turn[clear..] {
-        let (Some(snapshot), Some(at)) = (plan_steps(activity), millis(&activity.created_at))
-        else {
-            continue;
-        };
-        plan_started.get_or_insert(at);
-        for (key, step) in step_keys(&snapshot).into_iter().zip(&snapshot) {
-            let index = match timings.iter().position(|(k, ..)| *k == key) {
-                Some(index) => index,
-                None => {
-                    timings.push((key, None, None));
-                    timings.len() - 1
-                }
-            };
-            let timing = &mut timings[index];
-            if step.status == Status::InProgress && timing.1.is_none() {
-                timing.1 = Some(at);
-            }
-            if step.status == Status::Completed && timing.2.is_none() {
-                timing.2 = Some(at);
-            }
-        }
-    }
-    timings.sort_by_key(|(_, _, completed)| completed.unwrap_or(i64::MAX));
-    let mut durations: std::collections::HashMap<String, i64> = Default::default();
-    let mut previous = plan_started;
-    for (key, started, completed) in timings {
-        let Some(completed) = completed else {
-            continue;
-        };
-        if let Some(started) = started.or(previous)
-            && completed > started
-        {
-            durations.insert(key, completed - started);
-        }
-        previous = Some(completed);
-    }
-    for (key, step) in step_keys(&steps).into_iter().zip(steps.iter_mut()) {
-        if step.status == Status::Completed {
-            step.duration_ms = durations.get(&key).copied();
-        }
-    }
     Some(ActivePlan {
-        turn_id: latest.turn_id.clone(),
+        run_id: plan.run_id.clone(),
         steps,
     })
 }
 
-/// `activeComposerTasksProgress`: the running turn's own plan, while a
-/// step is left.
-pub(crate) fn active_tasks(thread: &Thread) -> Option<ActivePlan> {
-    let latest = thread.latest_turn.as_ref()?;
-    let settled = latest.started_at.is_some()
-        && latest.completed_at.is_some()
-        && thread
-            .session
-            .as_ref()
-            .is_none_or(|s| s.status != "running");
-    if settled {
+/// `activeComposerTasksProgress`: the running run's own todo list (older
+/// runs' plans must not label fresh work).
+pub(crate) fn active_tasks(thread: &Thread, detail: &Detail) -> Option<ActivePlan> {
+    if thread.latest_run_settled() {
         return None;
     }
-    let plan = active_plan(&thread.activities, Some(&latest.turn_id))?;
-    let left = plan.steps.iter().any(|s| s.status != Status::Completed);
-    (plan.turn_id.as_deref() == Some(latest.turn_id.as_str()) && left).then_some(plan)
+    let run = thread.latest_run.as_ref()?;
+    let plan = active_plan(detail, Some(&run.run_id))?;
+    (plan.run_id.as_deref() == Some(run.run_id.as_str())).then_some(plan)
 }
 
 /// The current step: the running one, else the first pending.
@@ -218,7 +120,7 @@ fn list_height(ui: &Ui, plan: &ActivePlan, width: f32) -> f32 {
 impl App {
     /// The open thread's running task list.
     pub(crate) fn composer_tasks(&self) -> Option<ActivePlan> {
-        active_tasks(&*self.current_thread()?)
+        active_tasks(&*self.current_thread()?, &*self.current_detail()?)
     }
 
     /// The tab's (or open drawer's) height, its overlap included.
@@ -421,57 +323,31 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn update(id: &str, at: &str, statuses: &[&str]) -> Activity {
-        let steps = ["Read", "Port", "Check"];
-        Activity {
-            id: id.into(),
-            kind: "turn.plan.updated".into(),
-            payload: json!({"plan": steps.iter().zip(statuses).map(|(step, status)| {
-                json!({"step": step, "status": status})
-            }).collect::<Vec<_>>()}),
-            turn_id: Some("t1".into()),
-            created_at: at.into(),
-            ..Default::default()
-        }
-    }
-
     #[test]
-    fn plans_keep_their_latest_steps_and_durations() {
-        let activities = vec![
-            update(
-                "a",
-                "2026-01-01T00:00:00Z",
-                &["inProgress", "pending", "pending"],
-            ),
-            update(
-                "b",
-                "2026-01-01T00:00:30Z",
-                &["completed", "inProgress", "pending"],
-            ),
-            update(
-                "c",
-                "2026-01-01T00:01:30Z",
-                &["completed", "completed", "inProgress"],
-            ),
-        ];
-        let plan = active_plan(&activities, Some("t1")).unwrap();
-        let durations: Vec<Option<i64>> = plan.steps.iter().map(|s| s.duration_ms).collect();
-        assert_eq!(durations, [Some(30_000), Some(60_000), None]);
-        assert_eq!(current_step(&plan), "Check");
-        // An update without a plan clears the timings before it.
-        let mut cleared = activities.clone();
-        cleared.insert(
-            2,
-            Activity {
-                id: "x".into(),
-                kind: "turn.plan.updated".into(),
-                payload: json!({}),
-                turn_id: Some("t1".into()),
-                created_at: "2026-01-01T00:01:00Z".into(),
-                ..Default::default()
-            },
+    fn todo_lists_follow_the_run() {
+        let plan = |id: &str, run: &str, statuses: &[&str]| {
+            let steps: Vec<_> = ["Read", "Port", "Check"]
+                .iter()
+                .zip(statuses)
+                .map(|(text, status)| json!({"id": text, "text": text, "status": status, "durationMs": 1000}))
+                .collect();
+            json!({"id": id, "runId": run, "nodeId": "n", "status": "active", "kind": "todo_list", "steps": steps})
+        };
+        let detail: Detail = serde_json::from_value(json!({
+            "thread": {"id": "t"},
+            "plans": [
+                plan("a", "r1", &["completed", "running", "pending"]),
+                plan("b", "r2", &["running", "pending", "pending"]),
+            ],
+        }))
+        .unwrap();
+        let first = active_plan(&detail, Some("r1")).unwrap();
+        assert_eq!(current_step(&first), "Port");
+        assert_eq!(first.steps[0].duration_ms, Some(1000));
+        // Without a plan of its own, a run falls back to the latest.
+        assert_eq!(
+            active_plan(&detail, Some("r3")).unwrap().run_id.as_deref(),
+            Some("r2")
         );
-        let plan = active_plan(&cleared, Some("t1")).unwrap();
-        assert!(plan.steps.iter().all(|s| s.duration_ms.is_none()));
     }
 }

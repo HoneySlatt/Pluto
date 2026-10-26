@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eframe::egui::{self, Pos2, Rect, Vec2};
-use serde_json::Value;
+use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::highlight::Highlighter;
@@ -29,8 +29,9 @@ pub struct App {
     pub(crate) typography: crate::ui::typography::Typography,
     /// The expanded image preview.
     pub(crate) lightbox: Option<crate::ui::lightbox::Lightbox>,
-    /// Messages queued while a turn runs.
-    pub(crate) queues: crate::ui::queue::Queues,
+    /// Messages on their way: waiting for their images to persist
+    /// (`persist:<message id>`) or for a command's receipt (`after:<command id>`).
+    pub(crate) turn_sends: std::collections::HashMap<String, crate::ui::composer::TurnSend>,
     block_turn_starts: bool,
     pub(crate) status: Option<String>,
     pub(crate) expansion: Expansion,
@@ -369,7 +370,7 @@ impl App {
             composer_images: Vec::new(),
             prompt_recall: None,
             incoming_images: Default::default(),
-            queues: Default::default(),
+            turn_sends: Default::default(),
             lightbox: None,
             typography: Default::default(),
             block_turn_starts: options.block_turn_starts,
@@ -574,21 +575,22 @@ impl App {
                         }
                     }
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
-                    Route::Command(id) => self.finish_reply(&id),
+                    Route::Command(id) => {
+                        self.finish_reply(&id);
+                        self.turn_command_done(&id, true);
+                    }
                     Route::Rpc(key) => self.rpc_result(key, Ok(value)),
                 },
                 Event::Failed(Route::Vcs(_), _) => self.vcs = None,
                 Event::Failed(Route::Rpc(key), message) => self.rpc_result(key, Err(message)),
                 Event::Failed(Route::Command(id), message) => {
                     self.finish_reply(&id);
+                    self.turn_command_done(&id, false);
                     self.status = Some(message);
                 }
                 Event::Failed(_, message) => self.status = Some(message),
                 Event::Disconnected(message) => disconnected = Some(message),
             }
-        }
-        if let Err(error) = self.state.refresh_detail() {
-            self.status = Some(error);
         }
         self.poll_scratch();
         if let Some(message) = disconnected {
@@ -642,16 +644,29 @@ impl App {
         self.send(Action::Select(id));
     }
 
-    /// Reading a finished thread clears its Done badge: the visit is stamped
-    /// at the turn's completion time, once per completion (`ChatView.tsx`).
+    /// Reading a thread clears its Done badge. A server that tracks visits
+    /// takes the thread's time as the watermark (`thread.visit`, once per
+    /// time, not while a turn streams); otherwise the visit is stamped
+    /// locally at the run's completion time (`ChatView.tsx`).
     fn mark_open_thread_visited(&mut self) {
         let Some(thread) = self.current_thread() else {
             return;
         };
+        if thread.last_visited_at.is_some() {
+            let key = (thread.id.clone(), thread.updated_at.clone());
+            if thread.is_running() || self.visited_turn.as_ref() == Some(&key) {
+                return;
+            }
+            self.visited_turn = Some(key);
+            let mut command = crate::model::command("thread.visit", &thread.id);
+            command["visitedAt"] = json!(thread.updated_at);
+            self.dispatch(command);
+            return;
+        }
         let Some(completed_at) = thread
-            .latest_turn
+            .latest_run
             .as_ref()
-            .and_then(|t| t.completed_at.clone())
+            .and_then(|r| r.completed_at.clone())
         else {
             return;
         };
@@ -661,6 +676,15 @@ impl App {
         }
         self.visited_turn = Some(key);
         self.mark_visited(&thread.id, &completed_at);
+    }
+
+    /// `resolveThreadLastVisitedAt`: the server's watermark when it tracks
+    /// visits, else the local one.
+    pub(crate) fn last_visited(&self, thread: &crate::model::Thread) -> Option<String> {
+        match &thread.last_visited_at {
+            Some(server) => server.clone(),
+            None => self.last_visited.get(&thread.id).cloned(),
+        }
     }
 
     /// `markThreadVisited`: never moves a visit backwards.
@@ -707,12 +731,17 @@ impl App {
         (!seen && thread.settled_override.as_deref() != Some("settled")).then_some(woke)
     }
 
-    /// `markThreadUnread`: the visit moves to just before the latest completion.
+    /// `markThreadUnread`: the visit moves to just before the latest
+    /// completion, on the server when it tracks visits.
     pub(crate) fn mark_unread(&mut self, thread: &crate::model::Thread) {
+        if thread.last_visited_at.is_some() {
+            self.dispatch(crate::model::command("thread.mark-unread", &thread.id));
+            return;
+        }
         let Some(completed) = thread
-            .latest_turn
+            .latest_run
             .as_ref()
-            .and_then(|t| t.completed_at.as_deref())
+            .and_then(|r| r.completed_at.as_deref())
             .and_then(crate::timeline::parse_time)
         else {
             return;
@@ -726,16 +755,16 @@ impl App {
     /// `hasUnseenCompletion`: never-visited threads count as read.
     pub(crate) fn is_unread(&self, thread: &crate::model::Thread) -> bool {
         let Some(completed) = thread
-            .latest_turn
+            .latest_run
             .as_ref()
-            .and_then(|t| t.completed_at.as_deref())
+            .and_then(|r| r.completed_at.as_deref())
             .and_then(crate::timeline::parse_time)
         else {
             return false;
         };
-        match self.last_visited.get(&thread.id) {
+        match self.last_visited(thread) {
             None => false,
-            Some(at) => crate::timeline::parse_time(at).is_none_or(|visited| completed > visited),
+            Some(at) => crate::timeline::parse_time(&at).is_none_or(|visited| completed > visited),
         }
     }
 
@@ -758,9 +787,22 @@ impl App {
         self.dispatch(command);
     }
 
+    /// Sends a command: project mutations go to `projects.mutate`, thread
+    /// commands to `orchestration.dispatchCommand`.
     pub(crate) fn dispatch(&mut self, command: Value) {
-        if self.block_turn_starts && command["type"] == "thread.turn.start" {
+        if self.block_turn_starts && command["type"] == "message.dispatch" {
             self.status = Some("Turn starts are blocked in this run".into());
+            return;
+        }
+        if command["type"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("project."))
+        {
+            let key = format!(
+                "project-mutation:{}",
+                command["commandId"].as_str().unwrap_or_default()
+            );
+            self.send_request(key, "projects.mutate", command);
             return;
         }
         self.send(Action::Dispatch(command));
@@ -772,19 +814,30 @@ impl App {
         }
     }
 
+    /// The open thread's shell row, or for a thread the shell does not
+    /// list (an archived one) the row its projection gives.
     pub(crate) fn current_thread(&self) -> Option<Arc<Thread>> {
         let selected = self.selected.as_deref()?;
         self.state
-            .detail
-            .clone()
-            .filter(|t| t.id == selected)
+            .threads
+            .iter()
+            .find(|t| t.id == selected)
+            .cloned()
             .or_else(|| {
-                self.state
-                    .threads
-                    .iter()
-                    .find(|t| t.id == selected)
-                    .cloned()
+                self.current_detail()
+                    .and_then(|d| d.shell_thread())
+                    .map(Arc::new)
             })
+    }
+
+    /// The open thread's projection, once its subscription has delivered it.
+    pub(crate) fn current_detail(&self) -> Option<Arc<crate::model::Detail>> {
+        let selected = self.selected.as_deref()?;
+        self.state.detail.clone().filter(|d| d.id() == selected)
+    }
+
+    pub(crate) fn blocks_turn_starts(&self) -> bool {
+        self.block_turn_starts
     }
 
     /// The project a new thread starts in: the explicit draft project, else
@@ -878,7 +931,6 @@ impl eframe::App for App {
         self.apply_typography(ui.ctx());
         if self.connected() {
             self.request_favicons();
-            self.send_due_queued();
         }
         self.sync_theme(ui.ctx());
         let rect = ui.max_rect();
@@ -1017,13 +1069,13 @@ impl App {
         found
     }
 
-    /// Opens the diff panel on the open thread's last turn (dev benches).
+    /// Opens the diff panel on the open thread's last run (dev benches).
     pub fn open_last_diff(&mut self) {
-        let turn = self
-            .current_thread()
-            .and_then(|t| t.checkpoints.last().map(|c| c.turn_id.clone()));
-        if let Some(turn) = turn {
-            self.open_diff(&turn, None);
+        let run = self
+            .current_detail()
+            .and_then(|d| d.checkpoints.iter().rev().find_map(|c| c.run_id.clone()));
+        if let Some(run) = run {
+            self.open_diff(&run, None);
         }
     }
 
@@ -1071,16 +1123,23 @@ impl App {
             && self
                 .selected
                 .as_ref()
-                .is_none_or(|id| self.state.detail.as_ref().is_some_and(|d| &d.id == id))
+                .is_none_or(|id| self.state.detail.as_ref().is_some_and(|d| d.id() == id))
     }
 
-    /// Expands every settled-turn fold (dev snapshots).
+    /// Expands every settled-run fold (dev snapshots).
     pub fn expand_turns(&mut self) {
         self.keep_scroll = true;
-        if let Some(thread) = self.current_thread() {
-            for message in &thread.messages {
-                if let Some(turn) = &message.turn_id {
-                    self.expansion.turns.insert(turn.clone());
+        if let Some(detail) = self.current_detail() {
+            for run in &detail.runs {
+                self.expansion.turns.insert(run.id.clone());
+            }
+            // Responses imported without a run fold under their prompt.
+            for row in &detail.visible {
+                if row.item.kind == "user_message" && row.item.run_id.is_none() {
+                    self.expansion.turns.insert(format!(
+                        "runless:{}",
+                        row.item.str("messageId").unwrap_or_default()
+                    ));
                 }
             }
         }
@@ -1092,17 +1151,17 @@ impl App {
         let Some(id) = self.selected.clone() else {
             return;
         };
-        let running = |thread: &mut crate::model::Thread| {
-            let session = thread.session.get_or_insert_with(Default::default);
-            session.status = "running".into();
-            session.active_turn_id = Some("snapshot-turn".into());
-        };
-        if let Some(detail) = self.state.detail.as_mut().filter(|t| t.id == id) {
-            running(Arc::make_mut(detail));
-        }
         self.state.revision += 1;
         if let Some(thread) = self.state.threads.iter_mut().find(|t| t.id == id) {
-            running(Arc::make_mut(thread));
+            let thread = Arc::make_mut(thread);
+            let runtime = thread.runtime.get_or_insert_with(Default::default);
+            runtime.status = "running".into();
+            runtime.active_run_id = Some("snapshot-run".into());
+            thread.latest_run = Some(crate::model::RunSummary {
+                run_id: "snapshot-run".into(),
+                status: "running".into(),
+                ..Default::default()
+            });
         }
     }
 }
@@ -1119,8 +1178,7 @@ impl App {
     /// Applies a thread stream item for the selected thread without a server.
     pub fn load_offline_thread(&mut self, item: &Value) -> Result<(), String> {
         let selected = self.selected.clone().unwrap_or_default();
-        self.state.thread(&selected, item)?;
-        self.state.refresh_detail()
+        self.state.thread(&selected, item)
     }
 
     pub fn selected_thread_id(&self) -> Option<&str> {
@@ -1141,13 +1199,13 @@ impl App {
 }
 
 impl App {
-    /// Opens the diff panel on a turn, revealing (expanding) `file`.
-    pub(crate) fn open_diff(&mut self, turn_id: &str, file: Option<String>) {
-        let count = self.current_thread().and_then(|t| {
-            t.checkpoints
+    /// Opens the diff panel on a run's changes, revealing (expanding) `file`.
+    pub(crate) fn open_diff(&mut self, run_id: &str, file: Option<String>) {
+        let count = self.current_detail().and_then(|d| {
+            d.checkpoints
                 .iter()
-                .find(|c| c.turn_id == turn_id)
-                .map(|c| c.checkpoint_turn_count)
+                .find(|c| c.run_id.as_deref() == Some(run_id))
+                .and_then(|c| c.app_run_ordinal)
         });
         if let (Some(count), Some(thread)) = (count, self.selected.clone()) {
             self.diff_scopes
@@ -1203,7 +1261,8 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
-        if self.scratch_result(&key, &result)
+        if self.turn_send_result(&key, &result)
+            || self.scratch_result(&key, &result)
             || self.open_in_result(&key, &result)
             || self.git_result(&key, &result)
             || self.plan_result(&key, &result)
@@ -1255,6 +1314,10 @@ impl App {
             let window = self.usage.window.clone().unwrap_or_default();
             if summary == crate::ui::usage_summary::summary_key(&window) {
                 self.send_request(summary.to_owned(), "server.getUsageSummary", window);
+            }
+        } else if key.starts_with("project-mutation:") {
+            if let Err(error) = result {
+                self.status = Some(error);
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();

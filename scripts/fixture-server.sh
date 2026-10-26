@@ -4,6 +4,11 @@
 #
 # usage: scripts/fixture-server.sh [root] [port]
 # Prints the bearer token file and the server URL once ready.
+#
+# The seed writes protocol 1 events, which only a v0.0.45 server projects:
+# that server builds the fixture, then the installed v0.1.0 server imports it
+# (as it imports any v0.0.45 data directory) and serves it. T3_V1 names the
+# v0.0.45 `t3`; by default it is looked up in the Nix store.
 set -euo pipefail
 
 root=${1:-/tmp/t3-egui-fixture}
@@ -31,8 +36,14 @@ echo "# ui" > "$root/web-demo/packages/ui/README.md"
 git -C "$root/web-demo" add .
 git -C "$root/web-demo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm ui
 
+v1=${T3_V1:-$(ls -d /nix/store/*-t3code-0.0.45/bin/t3 2>/dev/null | head -1)}
+if [ ! -x "$v1" ]; then
+  echo "no v0.0.45 t3 found; set T3_V1 to its t3 binary" >&2
+  exit 1
+fi
+
 serve() {
-  t3 serve --base-dir "$root/home" --port "$port" --host 127.0.0.1 "$root/demo-project" \
+  "$1" serve --base-dir "$root/home" --port "$port" --host 127.0.0.1 "$root/demo-project" \
     > "$root/serve.log" 2>&1 &
   for _ in $(seq 60); do
     grep -q "server is ready" "$root/serve.log" 2>/dev/null && return 0
@@ -42,12 +53,16 @@ serve() {
   return 1
 }
 
-# First start runs the migrations; seeding needs the schema.
-serve
+# First start runs the migrations; seeding needs the schema. The second
+# projects the seeded events; the third imports them into protocol 2.
+serve "$v1"
 pkill -f "serve --base-dir $root/home"
 sleep 1
 node "$here/seed-fixture.mjs" "$root/home" "$root"
-serve
+serve "$v1"
+pkill -f "serve --base-dir $root/home"
+sleep 1
+serve t3
 
 t3 auth session issue --base-dir "$root/home" --ttl 30d --label egui-fixture --token-only \
   > "$root/bearer" 2>/dev/null

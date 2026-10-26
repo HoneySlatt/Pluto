@@ -96,56 +96,70 @@ fn ms(iso: Option<&str>) -> Option<i64> {
     iso.and_then(parse_time).map(|d| d.timestamp_millis())
 }
 
-/// `hasQueuedTurnStart`: a user message no turn has adopted yet.
+/// `hasQueuedTurnStart`: a run being prepared or queued, or a user message
+/// no run has adopted yet (within the adoption grace window).
 fn has_queued_turn_start(thread: &Thread, now: DateTime<Utc>) -> bool {
+    let runtime = thread.runtime.as_ref().map(|r| r.status.as_str());
+    if matches!(runtime, Some("preparing" | "queued" | "starting")) {
+        return true;
+    }
     let Some(message_at) = ms(thread.latest_user_message_at.as_deref()) else {
         return false;
     };
-    if thread.session.as_ref().is_some_and(|s| s.status == "error") {
-        return false;
-    }
     if (now.timestamp_millis() - message_at).abs() > QUEUED_TURN_START_GRACE_MS {
         return false;
     }
-    let Some(turn) = &thread.latest_turn else {
+    let Some(run) = &thread.latest_run else {
         return true;
     };
     [
-        Some(turn.requested_at.as_str()),
-        turn.started_at.as_deref(),
-        turn.completed_at.as_deref(),
+        run.requested_at.as_deref(),
+        run.started_at.as_deref(),
+        run.completed_at.as_deref(),
     ]
     .into_iter()
     .all(|at| ms(at).is_none_or(|at| at < message_at))
 }
 
-/// `canSnooze`: never while the agent waits on the user.
+/// `canSnooze`: never while the agent or one of its subagents waits on the
+/// user, or a message waits for its run.
 pub fn can_snooze(thread: &Thread, now: DateTime<Utc>) -> bool {
     !thread.has_pending_approvals
         && !thread.has_pending_user_input
+        && thread.pending_subagent_request.is_none()
         && !has_queued_turn_start(thread, now)
+}
+
+/// The latest run's completion, when it completed after the snooze.
+fn completed_after_snooze(thread: &Thread) -> Option<&str> {
+    let snoozed_at = ms(thread.snoozed_at.as_deref())?;
+    let run = thread
+        .latest_run
+        .as_ref()
+        .filter(|r| r.status == "completed")?;
+    let done = run.completed_at.as_deref()?;
+    ms(Some(done))
+        .is_some_and(|d| d > snoozed_at)
+        .then_some(done)
 }
 
 /// `threadRaisedHandWhileSnoozed`: blocked on the user, a fresh failure or a
 /// run completed after the snooze.
 fn raised_hand(thread: &Thread) -> bool {
-    if thread.has_pending_approvals || thread.has_pending_user_input {
+    if thread.has_pending_approvals
+        || thread.has_pending_user_input
+        || thread.pending_subagent_request.is_some()
+    {
         return true;
     }
     let snoozed_at = ms(thread.snoozed_at.as_deref());
-    if let Some(session) = &thread.session
-        && session.status == "error"
-        && snoozed_at.is_none_or(|at| ms(Some(&session.updated_at)).is_some_and(|u| u > at))
+    if let Some(runtime) = &thread.runtime
+        && matches!(runtime.status.as_str(), "error" | "failed")
+        && snoozed_at.is_none_or(|at| ms(Some(&runtime.updated_at)).is_some_and(|u| u > at))
     {
         return true;
     }
-    if let (Some(at), Some(turn)) = (snoozed_at, &thread.latest_turn)
-        && turn.state == "completed"
-        && ms(turn.completed_at.as_deref()).is_some_and(|done| done > at)
-    {
-        return true;
-    }
-    false
+    completed_after_snooze(thread).is_some()
 }
 
 /// `effectiveSnoozed`: hidden while the wake time is ahead and nothing
@@ -163,18 +177,13 @@ pub fn woke_at(thread: &Thread, now: DateTime<Utc>) -> Option<String> {
     let until = thread.snoozed_until.as_deref()?;
     let wake = ms(Some(until))?;
     if raised_hand(thread) {
-        let snoozed_at = ms(thread.snoozed_at.as_deref());
-        if let (Some(at), Some(turn)) = (snoozed_at, &thread.latest_turn)
-            && turn.state == "completed"
-            && let Some(done) = turn.completed_at.as_deref()
-            && ms(Some(done)).is_some_and(|done| done > at)
-        {
+        if let Some(done) = completed_after_snooze(thread) {
             return Some(done.to_owned());
         }
         return thread
-            .session
+            .runtime
             .as_ref()
-            .map(|s| s.updated_at.clone())
+            .map(|r| r.updated_at.clone())
             .or_else(|| thread.snoozed_at.clone());
     }
     (wake <= now.timestamp_millis()).then(|| until.to_owned())

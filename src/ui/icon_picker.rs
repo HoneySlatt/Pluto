@@ -1,7 +1,7 @@
 //! "Choose project icon" (`components/settings/ProjectIconPickerDialog.tsx`,
 //! `projectIconOptions.ts`, `projectIconColors.ts`): a Lucide icon in a color,
 //! an emoji, or a monogram. Saving sets the project's `projectIcon` (and clears
-//! its favicon path) with `project.meta.update`; a monogram travels as the
+//! its favicon path) with `project.update`; a monogram travels as the
 //! lucide wire shape with `monogramText` (`ProjectIconOverride`).
 
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -466,7 +466,7 @@ impl App {
         if save {
             // \`setProjectIcon({ faviconPath: null, projectIcon })\`.
             self.dispatch(json!({
-                "type": "project.meta.update",
+                "type": "project.update",
                 "commandId": uuid::Uuid::new_v4().to_string(),
                 "projectId": picker.project_id,
                 "faviconPath": null,

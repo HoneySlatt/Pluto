@@ -59,9 +59,9 @@ fn settled_timestamp(thread: &Thread) -> Option<&str> {
         .settled_at
         .as_deref()
         .or(thread
-            .latest_turn
+            .latest_run
             .as_ref()
-            .and_then(|t| t.completed_at.as_deref()))
+            .and_then(|r| r.completed_at.as_deref()))
         .or(Some(thread.updated_at.as_str()))
 }
 
@@ -82,7 +82,12 @@ pub fn sections<'a>(
         snoozed: Vec::new(),
         settled: Vec::new(),
     };
-    for thread in threads.into_iter().filter(|t| t.archived_at.is_none()) {
+    // `filterSidebarV2VisibleThreads`: subagent rows stay hidden; their
+    // requests show on the threads above them.
+    for thread in threads
+        .into_iter()
+        .filter(|t| t.archived_at.is_none() && !t.is_subagent())
+    {
         // Snooze outranks settlement and pinning until the thread wakes.
         if crate::snooze::effective_snoozed(thread, now) {
             sections.snoozed.push(thread);
@@ -114,19 +119,32 @@ enum Status {
     Approval,
     Input,
     Working,
+    /// Stopped, with background work that will wake it (runtime `idle`).
+    Waiting,
     Failed,
+    /// Failed on a usage limit.
+    Limited,
     Ready,
 }
 
+/// `resolveSidebarThreadStatus`.
 fn status(thread: &Thread) -> Status {
-    if thread.has_pending_approvals {
+    let subagent = thread.pending_subagent_request.as_deref();
+    let runtime = thread.runtime.as_ref();
+    if thread.has_pending_approvals || subagent == Some("approval") {
         Status::Approval
-    } else if thread.has_pending_user_input {
+    } else if thread.has_pending_user_input || subagent == Some("user_input") {
         Status::Input
-    } else if thread.is_running() || thread.background_liveness.is_some() {
+    } else if runtime.is_some_and(|r| r.is_active()) {
         Status::Working
-    } else if thread.session.as_ref().is_some_and(|s| s.status == "error") {
-        Status::Failed
+    } else if runtime.is_some_and(|r| r.status == "idle") {
+        Status::Waiting
+    } else if let Some(runtime) = runtime.filter(|r| r.status == "failed") {
+        if runtime.last_error_class.as_deref() == Some("usage_limit") {
+            Status::Limited
+        } else {
+            Status::Failed
+        }
     } else {
         Status::Ready
     }
@@ -682,7 +700,18 @@ impl App {
                 theme::warning_foreground(),
             )),
             Status::Input => Some(("Input", "message-circle-question-mark", theme::INDIGO_300)),
+            // A native /goal keeps the agent going across turns.
+            Status::Working
+                if thread
+                    .goal
+                    .as_ref()
+                    .is_some_and(|g| g["status"] == "active") =>
+            {
+                Some(("Goal", "circle-dashed", theme::SKY_400))
+            }
             Status::Working => Some(("Working", "circle-dashed", theme::SKY_400)),
+            Status::Waiting => Some(("Waiting", "circle-dot-dashed", theme::muted_foreground())),
+            Status::Limited => Some(("Limited", "circle-alert", theme::warning())),
             Status::Failed => Some(("Failed", "circle-alert", theme::RED_300)),
             Status::Ready if woke.is_some() => {
                 Some(("Woke", "alarm-clock", theme::warning_foreground()))
@@ -837,7 +866,7 @@ impl App {
             theme::secondary_label()
         } else if unread || woke.is_some() || status == Status::Input {
             theme::sidebar_foreground()
-        } else if status == Status::Failed {
+        } else if matches!(status, Status::Failed | Status::Limited) {
             theme::alpha(theme::sidebar_foreground(), 0.95)
         } else {
             theme::alpha(theme::sidebar_foreground(), 0.9)
@@ -941,11 +970,11 @@ impl App {
             return false;
         }
         match status(thread) {
-            Status::Working => true,
+            Status::Working | Status::Waiting => true,
             Status::Ready | Status::Approval => {
                 !self.is_unread(thread) && self.woke_at(thread).is_none()
             }
-            Status::Input | Status::Failed => false,
+            Status::Input | Status::Failed | Status::Limited => false,
         }
     }
 

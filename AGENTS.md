@@ -4,7 +4,8 @@ Build a native Rust/egui client for the existing T3 Code server. Visual and
 behavioral parity with the pinned upstream version is the goal. Do not redesign
 the interface, replace egui with a webview, or port the server to Rust.
 
-Reference: T3 Code v0.0.45, orchestration protocol 1. The installed package
+Reference: T3 Code v0.1.0, orchestration protocol 2. The interface was ported
+from v0.0.45; port v0.1.0's changes from its source. The installed package
 ships source maps with the original client sources; extract them for reading
 (never vendor them into this repository).
 

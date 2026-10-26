@@ -4,8 +4,10 @@
 
 A native [egui](https://github.com/emilk/egui) client for the
 [T3 Code](https://t3.codes) server, reproducing the interface of the upstream
-web/Electron client (v0.0.45). The server stays upstream's: this client speaks
-its WebSocket protocol (Effect RPC envelopes, orchestration protocol 1).
+web/Electron client. The server stays upstream's: this client speaks its
+WebSocket protocol (Effect RPC envelopes, orchestration protocol 2, T3 Code
+v0.1.0). The interface was ported from v0.0.45; v0.1.0's interface changes are
+being ported (see "Protocol 2" below).
 
 ## Running
 
@@ -39,7 +41,38 @@ reads it from a file at startup instead; it is kept in memory only.
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`); segment popovers (account with its redacted email, plan, environment, share left, reset time and the share it restores); the environments breadcrumb menu and the Model prices dialog (`usagePriceOverrides` edited per cell, reset to automatic, saved as a settings patch) |
 | Pull requests | The page with search, sort, filters (state, involvement, draft, review, checks, project) and provider menus; `pullRequests.list` grouped by involvement and sorted like upstream; rows with state, conflict, checks and review glyphs, line counts, author, repository, labels and update time; loading, empty and error states |
 | Provider instances | Display names and the account badge like `providerInstanceDisplay.ts` (accent color, or several instances of one driver) on the sidebar thread rows, the composer and settings model triggers, the model picker rail and the usage account popover |
-| State | Shell and thread subscriptions; thread events applied like upstream `threadReducer.ts`, the open thread decoded once per pass of events; threads left in the last five minutes reopen at once from their kept snapshot while the new subscription catches up (`threadRetention.ts`; upstream's thread cache persisted across restarts is not ported) |
+| State | Protocol 2 shell and thread subscriptions: shell rows presented like `presentThreadShell` (latest run, runtime, pending requests, subagent requests carried by their parents) and kept like `shellReducer.ts` (archived rows leave the shell); the open thread's projection takes events like `orchestrationV2Projection.ts` (full snapshots, not bounded ones); threads left in the last five minutes reopen at once from their kept projection while the new subscription catches up (`threadRetention.ts`; upstream's thread cache persisted across restarts is not ported) |
+
+## Protocol 2
+
+The client speaks v0.1.0's orchestration protocol: threads are runs, attempts
+and turn items, messages go out as `message.dispatch` (or
+`orchestration.launchThread` for a new thread, after `assets.persistChatAttachments`
+for its images), the server resolves steering and queueing
+(`serverResolvedCommandContext`), requests are answered with
+`runtime-request.respond`, Stop sends `run.interrupt`, projects change through
+`projects.mutate`, and visits are tracked on the server when it does.
+
+Not ported from v0.1.0 yet:
+
+- timeline rows: the live activity row, superseded attempt folds, context
+  compaction rows, HTML renders and MCP apps; lifecycle cards (interrupts,
+  forks, handoffs, subagents, secret requests) show as standalone work rows
+  with their upstream labels; Codex's generated images are not found from
+  turn items;
+- the queue: server-queued messages show as v0.0.45's dashed bubbles with
+  Steer and Remove; v0.1.0's banner above the composer (reorder, edit in the
+  composer, held queue and resume) is not ported;
+- Stop does not end a settled run's background work or pull request watches;
+- new threads start in the project's root checkout;
+- the sidebar's working duration and v0.1.0's status colors (Waiting and
+  Limited are shown with v0.0.45's styling);
+- v0.1.0's new features: scheduled tasks, MCP apps, the ACP registry,
+  workflows (stop, scripts), forks and merge back, provider handoff,
+  workspace preparation retry, storage cleanup, thread search.
+
+The fixture (`scripts/fixture-server.sh`) seeds protocol 1 events through a
+v0.0.45 server and lets v0.1.0 import them, so its threads hold messages only.
 
 Not ported yet (buttons for these show a "not implemented" notice):
 

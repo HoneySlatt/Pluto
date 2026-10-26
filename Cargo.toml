@@ -15,7 +15,7 @@ pulldown-cmark = { version = "0.13", default-features = false }
 rfd = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 base64 = "0.22"
 skrifa = "0.44"

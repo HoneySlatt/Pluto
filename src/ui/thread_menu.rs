@@ -230,7 +230,7 @@ impl App {
             }
             "rename" => self.start_rename(&thread),
             "regenerate-title" => {
-                let mut cmd = command("thread.meta.update", id);
+                let mut cmd = command("thread.metadata.update", id);
                 cmd["regenerateTitle"] = json!(true);
                 self.dispatch(cmd);
             }
@@ -337,7 +337,7 @@ impl App {
                 .unwrap_or_default();
             let trimmed = title.trim();
             if !trimmed.is_empty() && trimmed != original {
-                let mut cmd = command("thread.meta.update", thread_id);
+                let mut cmd = command("thread.metadata.update", thread_id);
                 cmd["title"] = json!(trimmed);
                 self.dispatch(cmd);
             }

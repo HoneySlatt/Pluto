@@ -1,4 +1,5 @@
-//! T3 v0.0.45 uses Effect RPC JSON envelopes, not JSON-RPC 2.0.
+//! T3 v0.1.0 uses Effect RPC JSON envelopes, not JSON-RPC 2.0, and
+//! orchestration protocol 2 (`ORCHESTRATION_PROTOCOL_QUERY_PARAM`).
 use eframe::egui;
 use serde_json::{Value, json};
 use std::{
@@ -150,7 +151,7 @@ pub fn socket_url(server: &str) -> Result<url::Url, String> {
         return Err("Use the server origin without a path".into());
     }
     url.set_path("/ws");
-    url.set_query(Some("orchestrationProtocol=1"));
+    url.set_query(Some("orchestrationProtocol=2"));
     Ok(url)
 }
 
@@ -314,7 +315,7 @@ fn run(
                                 &mut pending,
                                 Route::Thread(id.clone()),
                                 "orchestration.subscribeThread",
-                                json!({"threadId":id,"reasoningMessages":true}),
+                                json!({"threadId":id}),
                                 true,
                             )?;
                         }
@@ -472,9 +473,9 @@ fn run(
                                     && !negotiated
                                 {
                                     let version = value["config"]["environment"]["orchestrationProtocolVersion"].as_u64().unwrap_or(1);
-                                    if version != 1 {
+                                    if version != 2 {
                                         return Err(format!(
-                                            "Unsupported orchestration protocol {version}; this client requires protocol 1"
+                                            "Unsupported orchestration protocol {version}; this client requires protocol 2"
                                         ));
                                     }
                                     subscribe(

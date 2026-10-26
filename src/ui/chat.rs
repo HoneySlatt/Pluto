@@ -3,8 +3,9 @@
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::app::App;
-use crate::model::{Message, Project};
+use crate::model::Project;
 use crate::theme::{self, Weight, font};
+use crate::timeline::Message;
 use crate::timeline::{self, Row, WorkEntry};
 use crate::ui::markdown::Markdown;
 use crate::ui::{attachments, project_icon, timeline_view, widgets};
@@ -523,8 +524,12 @@ impl App {
         let Some(thread) = self.current_thread() else {
             return;
         };
+        // Until its projection arrives the thread shows no rows.
+        let detail = self.current_detail().unwrap_or_default();
         let revision = self.state.revision;
-        let mut rows = self.timeline_view.rows(&thread, &self.expansion, revision);
+        let mut rows = self
+            .timeline_view
+            .rows(&thread, &detail, &self.expansion, revision);
         // A revealed citation's message: its folded turn opens, and the
         // timeline stops following its end until it is in view.
         let reveal = self.citation_scroll_target(&thread.id);
@@ -532,14 +537,12 @@ impl App {
             let shown = rows
                 .iter()
                 .any(|r| matches!(r, Row::Assistant { message, .. } if &message.id == message_id));
-            let turn = thread
-                .messages
-                .iter()
-                .find(|m| &m.id == message_id)
-                .and_then(|m| m.turn_id.clone());
-            if !shown && let Some(turn) = turn {
-                self.expansion.turns.insert(turn);
-                rows = self.timeline_view.rows(&thread, &self.expansion, revision);
+            let fold = timeline::fold_containing(&thread, &detail, message_id);
+            if !shown && let Some(fold) = fold {
+                self.expansion.turns.insert(fold);
+                rows = self
+                    .timeline_view
+                    .rows(&thread, &detail, &self.expansion, revision);
             }
             self.keep_scroll = true;
         }
@@ -633,7 +636,7 @@ impl App {
                     }
                     // Queued follow-ups close the timeline.
                     let before = ui.cursor().top();
-                    self.queued_rows(ui, &thread, column);
+                    self.queued_rows(ui, &detail, column);
                     view.tail = ui.cursor().top() - before;
                 });
                 ui.add_space(bottom_padding);
@@ -681,14 +684,14 @@ impl App {
                 ui.add_space(if *show_meta { 16.0 } else { 8.0 });
             }
             Row::TurnFold {
-                turn_id,
+                run_id,
                 label,
                 expanded,
                 ..
             } => {
                 if self.fold_row(ui, label, *expanded, width).clicked() {
-                    if !self.expansion.turns.remove(turn_id) {
-                        self.expansion.turns.insert(turn_id.clone());
+                    if !self.expansion.turns.remove(run_id) {
+                        self.expansion.turns.insert(run_id.clone());
                     }
                     self.keep_scroll = true;
                 }

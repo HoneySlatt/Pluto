@@ -494,12 +494,13 @@ pub(crate) fn kind_icon(kind: &str) -> &'static str {
     }
 }
 
-/// Sets a `thread.turn.start`'s message text and context records.
-pub(crate) fn apply(command: &mut Value, text: &str, records: &[Value], inline: bool) {
+/// Sets a message's text and context records: a `message.dispatch`, or a
+/// launch's `initialMessage`.
+pub(crate) fn apply(message: &mut Value, text: &str, records: &[Value], inline: bool) {
     let (text, context) = message_payload(text, records, inline);
-    command["message"]["text"] = json!(text);
+    message["text"] = json!(text);
     if let Some(context) = context {
-        command["message"]["context"] = context;
+        message["context"] = context;
     }
 }
 

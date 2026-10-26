@@ -61,14 +61,6 @@ fn thread_timestamp(thread: &Thread, order: &str) -> i64 {
             .unwrap_or(i64::MIN);
     }
     millis(thread.latest_user_message_at.as_deref())
-        .or_else(|| {
-            thread
-                .messages
-                .iter()
-                .filter(|m| m.role == "user")
-                .filter_map(|m| millis(Some(&m.created_at)))
-                .max()
-        })
         .or(millis(Some(&thread.updated_at)))
         .or(millis(Some(&thread.created_at)))
         .unwrap_or(i64::MIN)
@@ -165,19 +157,6 @@ fn grouping_description(mode: &str) -> &'static str {
     }
 }
 
-/// `isLatestTurnSettled`: the latest turn started and completed, and the
-/// session is not running.
-fn turn_settled(thread: &Thread) -> bool {
-    thread.latest_turn.as_ref().is_some_and(|turn| {
-        turn.started_at.is_some()
-            && turn.completed_at.is_some()
-            && thread
-                .session
-                .as_ref()
-                .is_none_or(|s| s.status != "running")
-    })
-}
-
 /// The status pulse (`animate-status-pulse`): 2s, full then half opacity,
 /// each change in six steps.
 fn pulse_alpha(time: f64) -> f32 {
@@ -200,28 +179,31 @@ impl App {
             pulse,
             priority,
         };
-        let session = thread.session.as_ref().map(|s| s.status.as_str());
-        let liveness = thread.background_liveness.as_deref();
-        if thread.has_pending_approvals {
-            Some(pill("Pending Approval", AMBER_300, 0.9, false, 6))
-        } else if thread.has_pending_user_input {
-            Some(pill("Awaiting Input", theme::INDIGO_300, 0.9, false, 5))
-        } else if session == Some("running") {
-            Some(pill("Working", SKY_300, 0.8, true, 4))
-        } else if session == Some("starting") {
-            Some(pill("Connecting", SKY_300, 0.8, true, 4))
-        } else if thread.interaction_mode == "plan"
-            && turn_settled(thread)
+        let runtime = thread.runtime.as_ref().map(|r| r.status.as_str());
+        let subagent = thread.pending_subagent_request.as_deref();
+        // `THREAD_STATUS_PRIORITY`, doubled to stay whole.
+        if thread.has_pending_approvals || subagent == Some("approval") {
+            Some(pill("Pending Approval", AMBER_300, 0.9, false, 10))
+        } else if thread.has_pending_user_input || subagent == Some("user_input") {
+            Some(pill("Awaiting Input", theme::INDIGO_300, 0.9, false, 8))
+        } else if matches!(runtime, Some("running" | "waiting")) {
+            Some(pill("Working", SKY_300, 0.8, true, 6))
+        } else if matches!(runtime, Some("preparing" | "starting" | "queued")) {
+            Some(pill("Connecting", SKY_300, 0.8, true, 6))
+        } else if thread
+            .pending_background_tasks
+            .iter()
+            .any(|task| task["kind"] != "command")
+        {
+            Some(pill("Waiting", theme::sidebar_muted(), 1.0, false, 5))
+        } else if !thread.has_pending_user_input
+            && thread.interaction_mode == "plan"
+            && thread.latest_run_settled()
             && thread.has_actionable_proposed_plan
         {
-            // An actionable plan outranks lingering background work.
-            Some(pill("Plan Ready", VIOLET_300, 0.9, false, 3))
-        } else if liveness == Some("working") {
-            Some(pill("Working", SKY_300, 0.8, true, 4))
-        } else if liveness == Some("monitoring") {
-            Some(pill("Monitoring", SKY_300, 0.8, false, 2))
+            Some(pill("Plan Ready", VIOLET_300, 0.9, false, 4))
         } else if self.is_unread(thread) {
-            Some(pill("Completed", theme::EMERALD_300, 0.9, false, 1))
+            Some(pill("Completed", theme::EMERALD_300, 0.9, false, 2))
         } else {
             None
         }
@@ -278,7 +260,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none())
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent())
             .map(std::sync::Arc::as_ref)
             .collect();
         let mut groups = self.legacy_groups();
@@ -1191,7 +1173,7 @@ impl App {
                 }
                 if trimmed != project.title {
                     self.dispatch(json!({
-                        "type": "project.meta.update",
+                        "type": "project.update",
                         "commandId": uuid::Uuid::new_v4().to_string(),
                         "projectId": project.id,
                         "title": trimmed,
@@ -1220,7 +1202,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none())
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent())
             .map(std::sync::Arc::as_ref)
             .collect();
         let mut groups = self.legacy_groups();

@@ -172,15 +172,16 @@ fn context_number() -> Color32 {
 }
 
 impl App {
-    /// Turn counts with checkpoints, newest first.
+    /// Turn counts with checkpoints, newest first: the runs' checkpoints by
+    /// their app run ordinal (`deriveThreadCheckpointSummaries`).
     fn diff_turns(&self) -> Vec<(u64, String)> {
         let mut turns: Vec<(u64, String)> = self
-            .current_thread()
-            .map(|t| {
-                t.checkpoints
+            .current_detail()
+            .map(|d| {
+                d.checkpoints
                     .iter()
-                    .filter(|c| !c.files.is_empty() || c.checkpoint_turn_count > 0)
-                    .map(|c| (c.checkpoint_turn_count, c.completed_at.clone()))
+                    .filter(|c| c.run_id.is_some())
+                    .filter_map(|c| Some((c.app_run_ordinal?, c.captured_at.clone())))
                     .collect()
             })
             .unwrap_or_default();

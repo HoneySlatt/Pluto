@@ -77,14 +77,26 @@ fn clicking_a_sidebar_card_opens_its_thread() {
 fn worked_for_row_toggles_the_turn_fold() {
     let mut harness = harness();
     click(&mut harness, egui::pos2(60.0, 140.0));
-    let detail = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2, "thread": {
-        "id": "a", "projectId": "p", "title": "Newest thread", "createdAt": at(10), "updatedAt": at(5),
-        "messages": [
-            {"id": "u", "role": "user", "text": "Hi", "turnId": null, "streaming": false, "createdAt": at(10), "updatedAt": at(10)},
-            {"id": "m", "role": "assistant", "text": "Done", "turnId": "t", "streaming": false, "createdAt": at(6), "updatedAt": at(6)}],
-        "activities": [{"id": "x", "tone": "tool", "kind": "tool.completed", "summary": "Ran command",
-            "payload": {"itemType": "command_execution", "detail": "ls"}, "turnId": "t", "createdAt": at(8)}],
-        "checkpoints": [], "latestTurn": null, "session": null}}});
+    let item = |id: &str, kind: &str, minutes_ago: i64, extra: Value| {
+        let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": 0,
+            "status": "completed", "startedAt": at(minutes_ago), "updatedAt": at(minutes_ago),
+            "type": kind});
+        for (key, value) in extra.as_object().unwrap() {
+            item[key] = value.clone();
+        }
+        json!({"position": 0, "visibility": "local", "sourceThreadId": "a",
+            "sourceItemId": id, "item": item})
+    };
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "visibleTurnItems": [
+            item("u", "user_message", 10, json!({"messageId": "u", "text": "Hi",
+                "inputIntent": "turn_start", "attachments": []})),
+            item("x", "command_execution", 8, json!({"input": "ls"})),
+            item("m", "assistant_message", 6, json!({"messageId": "m", "text": "Done",
+                "streaming": false})),
+        ],
+        "updatedAt": at(5)}});
     harness.state_mut().load_offline_thread(&detail).unwrap();
     harness.run_steps(3);
     // The fold row sits under the user bubble (y ≈ 74..149) at y ≈ 165..201.
