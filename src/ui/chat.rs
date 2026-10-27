@@ -1043,7 +1043,18 @@ impl App {
         } else {
             Vec2::new(2.0 * cell.x + 8.0, grid_height + 8.0)
         };
-        let bubble_size = Vec2::new(text_size.x.max(grid.x) + 24.0, grid.y + text_size.y + 24.0);
+        // Pluto: file attachments as chips under the images.
+        let files = attachments::files(&message.attachments);
+        let (files_per_row, files_block) = attachments::file_grid(files.len(), max_width - 24.0);
+        let files_size = if files.is_empty() {
+            Vec2::ZERO
+        } else {
+            files_block + Vec2::new(0.0, 8.0)
+        };
+        let bubble_size = Vec2::new(
+            text_size.x.max(grid.x).max(files_size.x) + 24.0,
+            grid.y + files_size.y + text_size.y + 24.0,
+        );
         let (row_rect, response) =
             ui.allocate_exact_size(Vec2::new(width, bubble_size.y + 4.0 + 24.0), Sense::hover());
         let bubble = Rect::from_min_size(
@@ -1082,7 +1093,25 @@ impl App {
                 self.open_lightbox(items, start);
             }
         }
-        let text_pos = bubble.min + Vec2::new(12.0, 12.0 + grid.y);
+        for (index, file) in files.iter().enumerate() {
+            let chip = Rect::from_min_size(
+                bubble.min
+                    + Vec2::new(12.0, 12.0 + grid.y)
+                    + Vec2::new(
+                        (index % files_per_row) as f32 * (attachments::FILE_CHIP.x + 8.0),
+                        (index / files_per_row) as f32 * (attachments::FILE_CHIP.y + 8.0),
+                    ),
+                attachments::FILE_CHIP,
+            );
+            let name = file["name"].as_str().unwrap_or("File");
+            let detail = format!(
+                "{} · {}",
+                attachments::file_kind(name),
+                attachments::format_size(file["sizeBytes"].as_u64().unwrap_or_default())
+            );
+            attachments::paint_file_chip(ui, chip, name, &detail, theme::muted_foreground());
+        }
+        let text_pos = bubble.min + Vec2::new(12.0, 12.0 + grid.y + files_size.y);
         if !text.is_empty() {
             let body = Rect::from_min_size(text_pos, Vec2::new(measured.x.max(1.0), body_height));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(

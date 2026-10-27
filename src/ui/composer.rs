@@ -56,9 +56,15 @@ pub(crate) enum Mode {
 
 /// The title of a message's thread: its text, or its first image's name
 /// (`truncate(titleSeed)`, 50 characters).
-fn title_seed(text: &str, images: &[crate::ui::attachments::ComposerImage]) -> String {
-    let seed = match images.first() {
-        Some(image) if text.is_empty() => format!("Image: {}", image.name),
+fn title_seed(
+    text: &str,
+    images: &[crate::ui::attachments::ComposerImage],
+    files: &[crate::ui::attachments::ComposerFile],
+) -> String {
+    let seed = match (images.first(), files.first()) {
+        (Some(image), _) if text.is_empty() => format!("Image: {}", image.name),
+        // Pluto: a message of files alone.
+        (None, Some(file)) if text.is_empty() => format!("File: {}", file.name),
         _ => text.to_owned(),
     };
     let chars: Vec<char> = seed.chars().collect();
@@ -200,12 +206,17 @@ impl TurnSend {
         message["messageId"].as_str().unwrap_or_default().to_owned()
     }
 
+    /// Adds attachments to the message (its files, then its persisted
+    /// images).
     fn set_attachments(&mut self, attachments: Value) {
-        if self.launch {
-            self.message["initialMessage"]["attachments"] = attachments;
+        let slot = if self.launch {
+            &mut self.message["initialMessage"]["attachments"]
         } else {
-            self.message["attachments"] = attachments;
-        }
+            &mut self.message["attachments"]
+        };
+        let mut all = slot.as_array().cloned().unwrap_or_default();
+        all.extend(attachments.as_array().cloned().unwrap_or_default());
+        *slot = Value::Array(all);
     }
 }
 
@@ -274,12 +285,28 @@ impl App {
     /// The attached images' row above the prompt (`mb-3 flex flex-wrap
     /// gap-2` of 64px thumbnails), wrapping to the editor width.
     fn image_strip_height(&self, width: f32) -> f32 {
+        let images = self.images_block_height(width - 34.0);
+        // Pluto: file chips follow the images.
+        let (_, files) = crate::ui::attachments::file_grid(self.composer_files.len(), width - 34.0);
+        if images == 0.0 && files.y == 0.0 {
+            return 0.0;
+        }
+        let gap = if images > 0.0 && files.y > 0.0 {
+            8.0
+        } else {
+            0.0
+        };
+        images + gap + files.y + 12.0
+    }
+
+    /// The image thumbnails' rows within `width`.
+    fn images_block_height(&self, width: f32) -> f32 {
         if self.composer_images.is_empty() {
             return 0.0;
         }
-        let per_row = (((width - 34.0 + 8.0) / 72.0).floor() as usize).max(1);
+        let per_row = (((width + 8.0) / 72.0).floor() as usize).max(1);
         let rows = self.composer_images.len().div_ceil(per_row) as f32;
-        rows * 64.0 + (rows - 1.0) * 8.0 + 12.0
+        rows * 64.0 + (rows - 1.0) * 8.0
     }
 
     fn surface_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
@@ -406,7 +433,9 @@ impl App {
             Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
         };
         // Attached images count as context, which hides the placeholder.
-        if (self.composer.is_empty() && self.composer_images.is_empty())
+        if (self.composer.is_empty()
+            && self.composer_images.is_empty()
+            && self.composer_files.is_empty())
             || matches!(mode, Mode::Approval(..))
         {
             // Painted here so it shares the editor's 22.75px line box.
@@ -440,7 +469,7 @@ impl App {
                     || i.consume_key(Modifiers::COMMAND, Key::Enter)
             }))
             || std::mem::take(&mut self.cite.send);
-        if focused && normal && self.composer_images.is_empty() {
+        if focused && normal && self.composer_images.is_empty() && self.composer_files.is_empty() {
             self.recall_prompt(ui, editor_id, text_rect.width());
         }
         // Citation links are edited as chips, one character each.
@@ -722,6 +751,15 @@ impl App {
                 remove = Some(index);
             }
         }
+        // Pluto: file chips under the images.
+        let files_top = origin.y
+            + self.images_block_height(width)
+            + if self.composer_images.is_empty() {
+                0.0
+            } else {
+                8.0
+            };
+        self.composer_file_chips(ui, Pos2::new(origin.x, files_top), width);
         if let Some(index) = remove {
             self.composer_images.remove(index);
         } else if let Some(index) = preview {
@@ -742,6 +780,66 @@ impl App {
         }
     }
 
+    /// Pluto: the attached files as chips, each with its upload state and
+    /// a remove button.
+    fn composer_file_chips(&mut self, ui: &mut Ui, origin: Pos2, width: f32) {
+        use crate::ui::attachments::{
+            FILE_CHIP, file_grid, file_kind, format_size, paint_file_chip,
+        };
+        let (per_row, _) = file_grid(self.composer_files.len(), width);
+        let mut remove = None;
+        for (index, file) in self.composer_files.iter().enumerate() {
+            let chip = Rect::from_min_size(
+                origin
+                    + Vec2::new(
+                        (index % per_row) as f32 * (FILE_CHIP.x + 8.0),
+                        (index / per_row) as f32 * (FILE_CHIP.y + 8.0),
+                    ),
+                FILE_CHIP,
+            );
+            let (detail, color) = match &file.upload {
+                None => ("Uploading…".to_owned(), theme::muted_foreground()),
+                Some(Err(_)) => ("Upload failed".to_owned(), theme::error_foreground()),
+                Some(Ok(_)) => (
+                    format!("{} · {}", file_kind(&file.name), format_size(file.size)),
+                    theme::muted_foreground(),
+                ),
+            };
+            paint_file_chip(ui, chip, &file.name, &detail, color);
+            if let Some(Err(error)) = &file.upload {
+                ui.interact(
+                    chip,
+                    ui.id().with(("composer-file", &file.id)),
+                    Sense::hover(),
+                )
+                .on_hover_text(error);
+            }
+            let close = Rect::from_min_size(
+                Pos2::new(chip.right() - 4.0 - 22.0, chip.top() + 4.0),
+                Vec2::splat(22.0),
+            );
+            if widgets::icon_button(
+                ui,
+                close,
+                ("composer-file-remove", &file.id),
+                "x",
+                14.0,
+                theme::muted_foreground(),
+                &format!("Remove {}", file.name),
+            )
+            .clicked()
+            {
+                remove = Some(index);
+            }
+        }
+        if let Some(index) = remove {
+            let file = self.composer_files.remove(index);
+            if let Some(Ok(attachment)) = file.upload {
+                self.delete_upload(&attachment);
+            }
+        }
+    }
+
     pub(crate) fn running(&self) -> bool {
         self.current_thread().is_some_and(|t| t.is_running())
     }
@@ -756,7 +854,9 @@ impl App {
         submit: bool,
     ) -> f32 {
         let send = Rect::from_min_size(Pos2::new(right - 32.0, bar_top - 2.0), Vec2::splat(32.0));
-        let has_content = !self.composer.trim().is_empty() || !self.composer_images.is_empty();
+        let has_content = !self.composer.trim().is_empty()
+            || !self.composer_images.is_empty()
+            || !self.composer_files.is_empty();
         let running = !draft && self.running();
         if running {
             // Stop, then Send while there is something to queue (`gap-2`).
@@ -1424,14 +1524,23 @@ impl App {
 
     fn send_message(&mut self, draft: bool, mode: &str) {
         let text = self.composer.trim().to_owned();
-        if text.is_empty() && self.composer_images.is_empty() {
+        if text.is_empty() && self.composer_images.is_empty() && self.composer_files.is_empty() {
             return;
         }
+        // Pluto: files go once uploaded.
+        let files = match self.file_attachments() {
+            Ok(files) => files,
+            Err(reason) => {
+                self.status = Some(reason);
+                return;
+            }
+        };
         let runtime = self.composer_runtime_mode(draft);
         // `assistantCitationsToPlainText`: titles read quotes, not links.
         let title = title_seed(
             crate::ui::citations::to_plain_text(&text).trim(),
             &self.composer_images,
+            &self.composer_files,
         );
         let model = self.composer_model_json(draft);
         let interaction = self.composer_interaction_mode(draft);
@@ -1494,10 +1603,13 @@ impl App {
                 uploads,
             }
         };
+        let mut send = send;
+        send.set_attachments(json!(files));
         let thread_id = send.thread_id.clone();
         self.start_turn(send);
         self.composer.clear();
         self.composer_images.clear();
+        self.composer_files.clear();
         self.composer_contexts.clear();
         if draft {
             self.select_thread(Some(thread_id));

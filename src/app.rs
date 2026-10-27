@@ -21,6 +21,9 @@ pub struct App {
     pub(crate) composer: String,
     /// Images attached to the composer, sent with the next message.
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
+    /// Files attached to the composer, uploading or uploaded.
+    pub(crate) composer_files: Vec<crate::ui::attachments::ComposerFile>,
+    pub(crate) file_uploads: crate::ui::attachments::Uploads,
     /// The prompt recalled with the arrows, and the thread it came from.
     pub(crate) prompt_recall: Option<(String, crate::ui::prompt_history::Position)>,
     /// Clipboard and dropped images read off the UI thread.
@@ -386,6 +389,8 @@ impl App {
             draft_project_id: None,
             composer: String::new(),
             composer_images: Vec::new(),
+            composer_files: Vec::new(),
+            file_uploads: Default::default(),
             prompt_recall: None,
             incoming_images: Default::default(),
             turn_sends: Default::default(),
@@ -1392,6 +1397,7 @@ impl App {
             || self.chat_mode_result(&key, &result)
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)
+            || self.file_upload_result(&key, &result)
         {
             return;
         }

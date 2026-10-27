@@ -689,6 +689,7 @@ impl App {
     ) -> Option<ProposedPlan> {
         if !thread.latest_run_settled()
             || !self.composer_images.is_empty()
+            || !self.composer_files.is_empty()
             || self.composer_interaction_mode(false) != "plan"
         {
             return None;
