@@ -114,6 +114,15 @@ impl App {
         self.version_root_in(&self.thread_index(), thread_id)
     }
 
+    /// Every thread's first chat, computed together.
+    pub(crate) fn version_roots(&self) -> HashMap<String, String> {
+        let threads = self.thread_index();
+        threads
+            .keys()
+            .map(|id| ((*id).to_owned(), self.version_root_in(&threads, id)))
+            .collect()
+    }
+
     /// Every version of `thread_id`'s conversation, itself included; a
     /// thread that is not a chat stands alone.
     pub(crate) fn chat_family(&self, thread_id: &str) -> Vec<String> {

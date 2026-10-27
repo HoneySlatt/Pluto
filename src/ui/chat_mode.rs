@@ -10,6 +10,10 @@
 //! on a "How can I help?" draft. Chat threads run in approval-required mode,
 //! so an agent that tried to write or run something would ask first.
 //!
+//! The sidebar's search matches titles and, through the server's
+//! `orchestration.searchThreads` kept to the chat space, the messages, whose
+//! matching excerpt shows under the chat's title.
+//!
 //! Temporary chats, after ChatGPT's, live in a second hidden project beside
 //! it (`temporary-chats`), whose profile tells the server to leave memory
 //! out. They are listed nowhere and deleted as soon as the user leaves them.
@@ -26,6 +30,10 @@ use crate::ui::widgets;
 
 const PROFILE_PATH: &str = ".pluto/chat.json";
 const ROW: f32 = 32.0;
+/// A row with a message excerpt under its title.
+const MATCH_ROW: f32 = 50.0;
+/// The pause in typing before the messages are searched.
+const SEARCH_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 const GROUP: f32 = 28.0;
 
 /// One of the two hidden chat projects.
@@ -83,6 +91,44 @@ pub(crate) struct ChatMode {
     last: (Option<String>, Option<String>),
     /// Temporary chats already sent `thread.delete`.
     deleted: HashSet<String>,
+    search: ChatSearch,
+}
+
+/// The sidebar's message search.
+#[derive(Default)]
+struct ChatSearch {
+    /// The query being typed, and since when.
+    typed: Option<(String, std::time::Instant)>,
+    /// The query last sent, and its matches: thread and excerpt.
+    asked: String,
+    matches: Vec<(String, String)>,
+}
+
+/// An excerpt starting shortly before `query`, so the narrow sidebar shows
+/// the match.
+fn excerpt_around(snippet: &str, query: &str) -> String {
+    let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let chars: Vec<char> = snippet.chars().collect();
+    let lower: Vec<char> = chars.iter().copied().map(fold).collect();
+    let needle: Vec<char> = query.chars().map(fold).collect();
+    if needle.is_empty() || needle.len() > lower.len() {
+        return snippet.to_owned();
+    }
+    match lower
+        .windows(needle.len())
+        .position(|w| w == needle.as_slice())
+    {
+        Some(at) if at > 16 => {
+            // From the first word start within a dozen characters before it.
+            let mut start = at - 12;
+            if let Some(space) = chars[start..at].iter().position(|c| c.is_whitespace()) {
+                start += space + 1;
+            }
+            let rest: String = chars[start..].iter().collect();
+            format!("…{}", rest.trim_start_matches('…'))
+        }
+        _ => snippet.to_owned(),
+    }
 }
 
 /// A chat's day group, from the time of its last message.
@@ -281,8 +327,65 @@ impl App {
         }
     }
 
+    /// The chats whose messages match the sidebar's search, best match
+    /// first, with the excerpt; searched once typing pauses.
+    fn search_chat_messages(&mut self, ctx: &egui::Context) -> Vec<(String, String)> {
+        let query = self.search.trim().to_owned();
+        let search = &mut self.chat_mode.search;
+        if query.chars().count() < 2 {
+            search.typed = None;
+            search.asked.clear();
+            search.matches.clear();
+            return Default::default();
+        }
+        if query != search.asked {
+            match &search.typed {
+                Some((typed, since)) if *typed == query => {
+                    if since.elapsed() >= SEARCH_DELAY {
+                        search.typed = None;
+                        search.asked = query.clone();
+                        search.matches.clear();
+                        if let Some(chats) = self.chats_project() {
+                            self.send_request(
+                                format!("chat-search:{query}"),
+                                "orchestration.searchThreads",
+                                json!({"query": query, "limit": 50, "projectIds": [chats.id]}),
+                            );
+                        }
+                    } else {
+                        ctx.request_repaint_after(SEARCH_DELAY);
+                    }
+                }
+                _ => {
+                    search.typed = Some((query, std::time::Instant::now()));
+                    ctx.request_repaint_after(SEARCH_DELAY);
+                }
+            }
+        }
+        self.chat_mode.search.matches.clone()
+    }
+
     /// The chat projects' creation and profile answers.
     pub(crate) fn chat_mode_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
+        if let Some(query) = key.strip_prefix("chat-search:") {
+            // Only the search still asked counts.
+            if query == self.chat_mode.search.asked {
+                self.chat_mode.search.matches = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|value| value["matches"].as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|m| {
+                        Some((
+                            m["threadId"].as_str()?.to_owned(),
+                            m["snippet"].as_str().unwrap_or_default().to_owned(),
+                        ))
+                    })
+                    .collect();
+            }
+            return true;
+        }
         if let Some(index) = key.strip_prefix("chat-profile:") {
             if let Err(error) = result {
                 if let Some(state) = index
@@ -524,16 +627,44 @@ impl App {
 
         // The chats, newest first, by day.
         let query = self.search.trim().to_lowercase();
+        let roots = if query.is_empty() {
+            Default::default()
+        } else {
+            self.version_roots()
+        };
+        let root = |id: &str| roots.get(id).map_or(id, String::as_str).to_owned();
+        // A conversation shows its best-ranked excerpt.
+        let excerpts: std::collections::HashMap<String, String> = self
+            .search_chat_messages(ui.ctx())
+            .into_iter()
+            .rev()
+            .map(|(thread, excerpt)| (root(&thread), excerpt))
+            .collect();
         let chats: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
             .filter(|t| t.archived_at.is_none() && !t.is_subagent() && self.in_mode(t))
-            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .cloned()
             .collect();
-        // One entry per conversation, whatever its versions.
-        let conversations = self.chat_conversations(chats);
+        // One entry per conversation, whatever its versions; a search keeps
+        // those whose title or messages match.
+        let mut conversations = self.chat_conversations(chats);
+        if !query.is_empty() {
+            conversations.retain(|(t, _)| {
+                t.title.to_lowercase().contains(&query) || excerpts.contains_key(&root(&t.id))
+            });
+        }
+        let excerpt_of = |t: &Thread| {
+            excerpts
+                .get(&root(&t.id))
+                .filter(|_| !t.title.to_lowercase().contains(&query))
+                .map(|excerpt| excerpt_around(excerpt, &query))
+        };
+        let excerpts: std::collections::HashMap<String, String> = conversations
+            .iter()
+            .filter_map(|(t, _)| Some((t.id.clone(), excerpt_of(t)?)))
+            .collect();
         let at = |t: &Thread| {
             t.latest_user_message_at
                 .clone()
@@ -600,8 +731,10 @@ impl App {
                             theme::sidebar_muted(),
                         );
                     }
+                    let excerpt = excerpts.get(&thread.id);
+                    let height = if excerpt.is_some() { MATCH_ROW } else { ROW };
                     let (row, response) =
-                        ui.allocate_exact_size(Vec2::new(list.width(), ROW), Sense::click());
+                        ui.allocate_exact_size(Vec2::new(list.width(), height), Sense::click());
                     let item = Rect::from_min_max(
                         Pos2::new(row.left() + 8.0, row.top() + 1.0),
                         Pos2::new(row.right() - 8.0, row.bottom() - 1.0),
@@ -626,17 +759,35 @@ impl App {
                         );
                         text_right -= 14.0;
                     }
+                    // The title, above the excerpt a message search matched.
+                    let band = if excerpt.is_some() {
+                        Rect::from_min_max(item.min, Pos2::new(item.right(), item.top() + 28.0))
+                    } else {
+                        item
+                    };
+                    if let Some(excerpt) = excerpt {
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(item.left() + 10.0, band.bottom() - 4.0),
+                                Pos2::new(text_right, item.bottom() - 4.0),
+                            ),
+                            excerpt,
+                            font(12.0, Weight::Regular),
+                            theme::sidebar_muted(),
+                        );
+                    }
                     // "Rename thread" edits the title in place.
                     let title = Rect::from_min_max(
-                        Pos2::new(item.left() + 6.0, item.top() + 2.0),
-                        Pos2::new(text_right, item.bottom() - 2.0),
+                        Pos2::new(band.left() + 6.0, band.top() + 2.0),
+                        Pos2::new(text_right, band.bottom() - 2.0),
                     );
                     if !self.rename_editor(ui, &thread.id, title) {
                         widgets::text_in(
                             ui,
                             Rect::from_min_max(
-                                Pos2::new(item.left() + 10.0, item.top()),
-                                Pos2::new(text_right, item.bottom()),
+                                Pos2::new(band.left() + 10.0, band.top()),
+                                Pos2::new(text_right, band.bottom()),
                             ),
                             &thread.title,
                             font(14.0, Weight::Regular),
@@ -669,6 +820,17 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excerpts_start_near_the_match() {
+        let snippet = "…à Osaka, goûte les crêpes japonaises soufflées chez Gram";
+        assert_eq!(
+            excerpt_around(snippet, "crêpe"),
+            "…goûte les crêpes japonaises soufflées chez Gram"
+        );
+        assert_eq!(excerpt_around("Une crêpe", "CRÊPE"), "Une crêpe");
+        assert_eq!(excerpt_around("ab", "abc"), "ab");
+    }
 
     #[test]
     fn only_the_temporary_profile_leaves_memory_out() {
