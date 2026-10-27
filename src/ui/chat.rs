@@ -758,15 +758,7 @@ impl App {
     /// expanded preview; nothing when the server is remote or Codex saved
     /// no file for the call. Upstream shows nothing for these items.
     fn generated_image_row(&mut self, ui: &mut Ui, tool_call_id: &str, width: f32) -> bool {
-        let local = url::Url::parse(self.connect.server.trim())
-            .ok()
-            .and_then(|url| match url.host()? {
-                url::Host::Domain(host) => Some(host == "localhost"),
-                url::Host::Ipv4(ip) => Some(ip.is_loopback()),
-                url::Host::Ipv6(ip) => Some(ip.is_loopback()),
-            })
-            .unwrap_or(false);
-        if !local {
+        if !self.server_is_local() {
             return false;
         }
         let Some(image) = attachments::generated_image(tool_call_id, ui.ctx()) else {

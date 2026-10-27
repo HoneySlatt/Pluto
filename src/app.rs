@@ -796,6 +796,19 @@ impl App {
         self.dispatch(command);
     }
 
+    /// The server runs on this machine (a loopback URL), so its paths are
+    /// this machine's paths.
+    pub(crate) fn server_is_local(&self) -> bool {
+        url::Url::parse(self.connect.server.trim())
+            .ok()
+            .and_then(|url| match url.host()? {
+                url::Host::Domain(host) => Some(host == "localhost"),
+                url::Host::Ipv4(ip) => Some(ip.is_loopback()),
+                url::Host::Ipv6(ip) => Some(ip.is_loopback()),
+            })
+            .unwrap_or(false)
+    }
+
     /// Sends a command: project mutations go to `projects.mutate`, thread
     /// commands to `orchestration.dispatchCommand`.
     pub(crate) fn dispatch(&mut self, command: Value) {

@@ -8,6 +8,7 @@ use eframe::egui::{
     self, Color32, CornerRadius, Key, Modifiers, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
 use serde_json::{Value, json};
+use std::sync::mpsc::Receiver;
 
 use crate::app::App;
 use crate::model::{Project, Thread};
@@ -42,6 +43,10 @@ pub enum View {
     Favicon(String),
 }
 
+/// The native chooser's answer: (project id, chosen path), `None` on cancel,
+/// or why the path cannot be used.
+type PickedFavicon = Result<Option<(String, String)>, String>;
+
 #[derive(Default)]
 pub struct PaletteState {
     pub open: bool,
@@ -51,6 +56,9 @@ pub struct PaletteState {
     pub focus: bool,
     /// The browse view shows a highlight only after arrow-key navigation.
     pub keyboard_moved: bool,
+    /// The native image chooser opened from the favicon picker, while it is
+    /// open: the chosen file, `None` on cancel, or why it could not open.
+    picking_favicon: Option<Receiver<PickedFavicon>>,
 }
 
 impl PaletteState {
@@ -210,6 +218,7 @@ impl App {
             highlight: 0,
             focus: true,
             keyboard_moved: false,
+            picking_favicon: None,
         };
     }
 
@@ -700,6 +709,19 @@ impl App {
         if !self.palette.open {
             return;
         }
+        if let Some(picked) = &self.palette.picking_favicon
+            && let Ok(picked) = picked.try_recv()
+        {
+            self.palette.picking_favicon = None;
+            match picked {
+                Ok(Some((project_id, path))) => {
+                    self.run_palette_action(Action::SetFavicon(project_id, path));
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => self.status = Some(format!("Could not open image picker: {error}")),
+            }
+        }
         let (groups, empty) = self.palette_groups();
         let rows: Vec<&Item> = groups.iter().flat_map(|g| g.items.iter()).collect();
         let count = rows.len();
@@ -781,6 +803,16 @@ impl App {
         let mut close = false;
         let content_target = self.content_search_target();
         let mut opened = false;
+        // `onPickExternal`: only a local server can read a path on this machine.
+        let pick_external = match self.palette.view() {
+            View::Favicon(project_id) if self.server_is_local() => self
+                .state
+                .project(&project_id)
+                .map(|project| (project_id.clone(), project.workspace_root.clone())),
+            _ => None,
+        };
+        let picking = self.palette.picking_favicon.is_some();
+        let mut start_pick = false;
         egui::Area::new(ui.id().with("palette"))
             .order(egui::Order::Foreground)
             .fixed_pos(screen.min)
@@ -1060,7 +1092,41 @@ impl App {
                     "Close"
                 };
                 label(ui, x, escape);
+                // `CommandFooterAction`: "Open in {fileManagerName}".
+                if pick_external.is_some() {
+                    let text = "Open in Files";
+                    let font = font(12.0, Weight::Medium);
+                    let width = widgets::text_width(ui, text, font.clone()) + 16.0;
+                    let button = Rect::from_min_size(
+                        Pos2::new(footer.right() - 16.0 - width, y),
+                        Vec2::new(width, 20.0),
+                    );
+                    let response = ui.interact(
+                        button,
+                        ui.id().with("favicon-pick-external"),
+                        if picking {
+                            Sense::hover()
+                        } else {
+                            Sense::click()
+                        },
+                    );
+                    let color = if picking {
+                        theme::alpha(theme::muted_foreground(), 0.64)
+                    } else if response.hovered() {
+                        theme::foreground()
+                    } else {
+                        theme::muted_foreground()
+                    };
+                    if !picking && response.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    widgets::text_in(ui, button.shrink2(Vec2::new(8.0, 0.0)), text, font, color);
+                    start_pick = response.clicked();
+                }
             });
+        if start_pick && let Some((project_id, cwd)) = pick_external {
+            self.palette.picking_favicon = Some(pick_favicon(ui.ctx(), project_id, &cwd));
+        }
         if query != typed_from {
             self.palette.keyboard_moved = false;
             self.palette.highlight = 0;
@@ -1438,6 +1504,39 @@ fn fuzzy_text(ui: &Ui, rect: Rect, value: &str, query: &str, size: f32) -> f32 {
     let pos = Pos2::new(rect.left(), (rect.center().y - line / 2.0).round());
     ui.painter().galley(pos, galley, theme::muted_foreground());
     width
+}
+
+/// `PROJECT_FAVICON_EXTENSIONS`, without the dot.
+const FAVICON_EXTENSIONS: [&str; 9] = [
+    "avif", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp", "icns",
+];
+
+/// `desktopBridge.pickProjectFavicon`: the portal's file chooser, off the UI
+/// thread, starting in the project's folder. Any image on this machine may
+/// be chosen; the server serves one outside the project as an external
+/// override.
+fn pick_favicon(ctx: &egui::Context, project_id: String, cwd: &str) -> Receiver<PickedFavicon> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
+    let cwd = cwd.to_owned();
+    std::thread::spawn(move || {
+        let picked = rfd::FileDialog::new()
+            .set_title("Choose project icon")
+            .set_directory(&cwd)
+            .add_filter("Images", &FAVICON_EXTENSIONS)
+            .pick_file();
+        // rfd cannot tell a cancel from a missing portal (it loads libdbus
+        // at runtime), so both read as no choice.
+        let picked = picked
+            .map(|path| match path.to_str() {
+                Some(path) => Ok((project_id, path.to_owned())),
+                None => Err("the image path is not valid UTF-8.".to_owned()),
+            })
+            .transpose();
+        let _ = sender.send(picked);
+        ctx.request_repaint();
+    });
+    receiver
 }
 
 #[cfg(test)]
