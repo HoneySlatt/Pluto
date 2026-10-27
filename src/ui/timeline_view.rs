@@ -39,6 +39,7 @@ struct RowsCache {
     thread_id: String,
     revision: u64,
     expansion: Expansion,
+    images: Vec<crate::generated_images::GeneratedImage>,
     rows: Arc<Vec<Row>>,
 }
 
@@ -50,19 +51,24 @@ impl TimelineView {
         detail: &Detail,
         expansion: &Expansion,
         revision: u64,
+        images: &[crate::generated_images::GeneratedImage],
     ) -> Arc<Vec<Row>> {
         if let Some(cache) = &self.rows
             && cache.thread_id == thread.id
             && cache.revision == revision
             && cache.expansion == *expansion
+            && cache.images == images
         {
             return cache.rows.clone();
         }
-        let rows = Arc::new(timeline::rows(thread, detail, expansion));
+        let mut rows = timeline::rows(thread, detail, expansion);
+        timeline::insert_generated_images(&mut rows, images);
+        let rows = Arc::new(rows);
         self.rows = Some(RowsCache {
             thread_id: thread.id.clone(),
             revision,
             expansion: expansion.clone(),
+            images: images.to_vec(),
             rows: rows.clone(),
         });
         rows
@@ -106,7 +112,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::WorkToggle { group_id, .. } => Id::new(("toggle", group_id)),
         Row::WorkDetails { group_id, .. } => Id::new(("details", group_id)),
         Row::Working { .. } => Id::new("working"),
-        Row::GeneratedImage { tool_call_id } => Id::new(("generated", tool_call_id)),
+        Row::GeneratedImage { image } => Id::new(("generated", &image.path)),
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
         Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
     }
@@ -142,7 +148,7 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::WorkToggle { .. } => 6.0 + LINE + 8.0,
         Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
         Row::Working { .. } => LINE + 4.0 + 6.0,
-        Row::GeneratedImage { .. } => 0.0,
+        Row::GeneratedImage { .. } => width.min(384.0) * 0.75 + 16.0,
         // The frame (`px-1`) at its measured height, then `pb-2`.
         Row::HtmlRender(page) => page.render.frame_height(width - 8.0, None) + 8.0,
         // The card: padding, header, its text (a long plan folded to 26rem
@@ -154,4 +160,32 @@ fn estimate(row: &Row, width: f32) -> f32 {
     };
     // Whole points, like the layout the guess stands in for.
     height.round()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_image_refreshes_the_rows_without_a_server_event() {
+        let mut view = TimelineView::default();
+        let thread = Thread {
+            id: "t".into(),
+            ..Default::default()
+        };
+        let detail = Detail::default();
+        let expansion = Expansion::default();
+        let empty = view.rows(&thread, &detail, &expansion, 1, &[]);
+        assert!(empty.is_empty());
+        let images = vec![crate::generated_images::GeneratedImage {
+            path: "/fixture/native/exec-image.png".into(),
+            modified: std::time::SystemTime::UNIX_EPOCH,
+            bytes: 128,
+        }];
+        let loaded = view.rows(&thread, &detail, &expansion, 1, &images);
+        assert!(matches!(&loaded[..], [Row::GeneratedImage { .. }]));
+        assert!(estimate(&loaded[0], 768.0) > 0.0);
+        let unchanged = view.rows(&thread, &detail, &expansion, 1, &images);
+        assert!(Arc::ptr_eq(&loaded, &unchanged));
+    }
 }

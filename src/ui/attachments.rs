@@ -308,42 +308,28 @@ pub(crate) fn paint_contain(
         .paint_at(ui, Rect::from_min_size(min, size / ppp));
 }
 
-/// An image Codex generated, read on a background thread from the file it
-/// saves for each image generation call
-/// (`$CODEX_HOME/generated_images/<thread>/<call id>.png`, CODEX_HOME
-/// defaulting to ~/.codex). The server strips the picture from activities,
-/// so only a client on the server's machine can show it.
+/// Decode a discovered native-thread image on a background thread. Its key
+/// changes when Codex finishes writing it, so a partial write can retry.
 pub(crate) fn generated_image(
-    tool_call_id: &str,
+    generated: &crate::generated_images::GeneratedImage,
     ctx: &egui::Context,
 ) -> Option<Arc<image::RgbaImage>> {
-    let key = format!("generated:{tool_call_id}");
+    let key = generated.key();
     match cache().lock().ok()?.get(&key) {
         Some(Loaded::Image(image)) => return Some(image.clone()),
         Some(_) => return None,
         None => {}
     }
     cache().lock().ok()?.insert(key.clone(), Loaded::Pending);
-    let file = format!("{tool_call_id}.png");
+    let path = generated.path.clone();
     let ctx = ctx.clone();
     std::thread::spawn(move || {
-        let home = std::env::var_os("CODEX_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::home_dir().map(|home| home.join(".codex")));
-        let found = home
-            .and_then(|home| std::fs::read_dir(home.join("generated_images")).ok())
-            .into_iter()
-            .flatten()
-            .flatten()
-            .find_map(|dir| {
-                let path = dir.path().join(&file);
-                std::fs::read(&path).ok().map(|bytes| (path, bytes))
-            });
-        if let (Some((path, _)), Ok(mut origins)) = (&found, origins().lock()) {
-            origins.files.insert(key.clone(), path.clone());
+        let found = std::fs::read(&path).ok();
+        if let Ok(mut origins) = origins().lock() {
+            origins.files.insert(key.clone(), path);
         }
         let state = found
-            .and_then(|(_, bytes)| decode(&bytes))
+            .and_then(|bytes| decode(&bytes))
             .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
         if let Ok(mut cache) = cache().lock() {
             cache.insert(key, state);

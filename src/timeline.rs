@@ -208,10 +208,9 @@ pub enum Row {
     Plan(Box<ProposedPlan>),
     /// A page an agent published (`HtmlRenderTimelineRow`).
     HtmlRender(Box<HtmlRenderEntry>),
-    /// An image Codex may have generated, read from Codex's saved file by
-    /// call id. Not shown upstream; not produced from protocol 2 items yet.
+    /// A local Codex image omitted by the server's native item projection.
     GeneratedImage {
-        tool_call_id: String,
+        image: crate::generated_images::GeneratedImage,
     },
 }
 
@@ -1484,6 +1483,27 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
     out
 }
 
+/// Keep recovered images after their response and outside its work fold,
+/// before the next prompt written after the file was saved.
+pub(crate) fn insert_generated_images(
+    rows: &mut Vec<Row>,
+    images: &[crate::generated_images::GeneratedImage],
+) {
+    for image in images {
+        let saved_at: chrono::DateTime<chrono::Utc> = image.modified.into();
+        let next_prompt = rows.iter().position(|row| {
+            matches!(row, Row::User(message)
+                if parse_time(&message.created_at).is_some_and(|at| at > saved_at))
+        });
+        rows.insert(
+            next_prompt.unwrap_or(rows.len()),
+            Row::GeneratedImage {
+                image: image.clone(),
+            },
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1622,6 +1642,38 @@ mod tests {
             .collect();
         let rows = rows(&thread, &detail, &Expansion::default());
         assert!(matches!(&rows[1], Row::TurnFold { run_id, .. } if run_id == "runless:u"));
+    }
+
+    #[test]
+    fn recovered_images_stay_after_the_answer_and_outside_work_folds() {
+        let (thread, mut detail) = settled();
+        detail.visible.push(item(
+            "u2",
+            "user_message",
+            "2026-01-01T00:05:00.000Z",
+            Some("next-run"),
+            json!({"messageId":"u2","text":"Next prompt","inputIntent":"turn_start"}),
+        ));
+        let image = crate::generated_images::GeneratedImage {
+            path: "/fixture/native/exec-image.png".into(),
+            modified: parse_time("2026-01-01T00:03:00.000Z").unwrap().into(),
+            bytes: 128,
+        };
+        let mut shown = rows(&thread, &detail, &Expansion::default());
+        insert_generated_images(&mut shown, &[image]);
+        let picture = shown
+            .iter()
+            .position(|r| matches!(r, Row::GeneratedImage { .. }))
+            .unwrap();
+        assert!(matches!(&shown[picture - 1], Row::Assistant { message, .. } if message.id == "a"));
+        assert!(matches!(&shown[picture + 1], Row::User(message) if message.id == "u2"));
+        assert!(shown.iter().any(|r| matches!(
+            r,
+            Row::TurnFold {
+                expanded: false,
+                ..
+            }
+        )));
     }
 
     #[test]

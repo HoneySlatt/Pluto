@@ -540,9 +540,14 @@ impl App {
         // Until its projection arrives the thread shows no rows.
         let detail = self.current_detail().unwrap_or_default();
         let revision = self.state.revision;
-        let mut rows = self
-            .timeline_view
-            .rows(&thread, &detail, &self.expansion, revision);
+        let images = if self.server_is_local() {
+            crate::generated_images::images(&detail, ui.ctx())
+        } else {
+            Vec::new()
+        };
+        let mut rows =
+            self.timeline_view
+                .rows(&thread, &detail, &self.expansion, revision, &images);
         // A revealed citation's message: its folded turn opens, and the
         // timeline stops following its end until it is in view.
         let reveal = self.citation_scroll_target(&thread.id);
@@ -553,9 +558,9 @@ impl App {
             let fold = timeline::fold_containing(&thread, &detail, message_id);
             if !shown && let Some(fold) = fold {
                 self.expansion.turns.insert(fold);
-                rows = self
-                    .timeline_view
-                    .rows(&thread, &detail, &self.expansion, revision);
+                rows =
+                    self.timeline_view
+                        .rows(&thread, &detail, &self.expansion, revision, &images);
             }
             self.keep_scroll = true;
         }
@@ -742,8 +747,8 @@ impl App {
                 self.working_row(ui, started_at.as_deref(), width);
                 ui.add_space(6.0);
             }
-            Row::GeneratedImage { tool_call_id } => {
-                if self.generated_image_row(ui, tool_call_id, width) {
+            Row::GeneratedImage { image } => {
+                if self.generated_image_row(ui, image, width) {
                     ui.add_space(16.0);
                 }
             }
@@ -760,21 +765,44 @@ impl App {
 
     /// A generated image, at most 384px wide, a click opening it in the
     /// expanded preview; nothing when the server is remote or Codex saved
-    /// no file for the call. Upstream shows nothing for these items.
-    fn generated_image_row(&mut self, ui: &mut Ui, tool_call_id: &str, width: f32) -> bool {
+    /// no file for the native thread. Upstream shows nothing for these items.
+    fn generated_image_row(
+        &mut self,
+        ui: &mut Ui,
+        generated: &crate::generated_images::GeneratedImage,
+        width: f32,
+    ) -> bool {
         if !self.server_is_local() {
             return false;
         }
-        let Some(image) = attachments::generated_image(tool_call_id, ui.ctx()) else {
-            return false;
-        };
+        let image = attachments::generated_image(generated, ui.ctx());
         let frame_width = width.min(384.0);
+        let Some(image) = image else {
+            let (rect, _) =
+                ui.allocate_exact_size(Vec2::new(width, frame_width * 0.75), Sense::hover());
+            let failed = matches!(
+                attachments::media_state(&generated.key()),
+                Some(attachments::MediaState::Failed)
+            );
+            widgets::text_in(
+                ui,
+                rect,
+                if failed {
+                    "Image unavailable"
+                } else {
+                    "Loading image…"
+                },
+                font(12.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+            return true;
+        };
         let height = (frame_width * image.height() as f32 / image.width().max(1) as f32)
             .min(frame_width * 1.25);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
         let frame = Rect::from_min_size(rect.min, Vec2::new(frame_width, height));
         let radius = CornerRadius::same(8);
-        let key = format!("generated:{tool_call_id}");
+        let key = generated.key();
         attachments::paint_cover(ui, frame.shrink(1.0), &key, &image, CornerRadius::same(7));
         ui.painter().rect_stroke(
             frame,
@@ -798,7 +826,7 @@ impl App {
         let response = ui
             .interact(
                 frame,
-                ui.id().with(("generated-image", tool_call_id)),
+                ui.id().with(("generated-image", &generated.path)),
                 Sense::click(),
             )
             .on_hover_text(source.tooltip().to_owned());

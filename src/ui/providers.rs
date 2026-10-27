@@ -26,7 +26,6 @@ use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::accent_picker::{self, AccentPicker, PickerEvent};
 use crate::ui::custom_model_editor::{CustomModelEditor, EditorEvent};
-use crate::ui::instance_badge;
 use crate::ui::settings::{
     Control, Row, RowAction, Store, card_border, card_fill, number_or_text_field, row_divider,
     row_height, switch,
@@ -489,25 +488,6 @@ fn paint_card(ui: &Ui, rect: Rect) {
         Stroke::new(1.0, card_border()),
         StrokeKind::Inside,
     );
-}
-
-/// A `ghost-muted` `xs` button with an optional leading icon; returns
-/// whether it was clicked.
-/// `ProviderInstanceIcon`'s badge on the Providers page, shown only with an
-/// accent color (`showBadge={Boolean(accentColor)}`), ringed with the card.
-fn paint_accent_badge(ui: &Ui, row: &InstanceRow, min: Pos2, fade: f32) {
-    let Some(accent) = row.instance["accentColor"]
-        .as_str()
-        .and_then(accent_picker::parse)
-    else {
-        return;
-    };
-    let badge = instance_badge::Badge {
-        initials: instance_badge::initials(&row.display_name()),
-        accent: Some(accent),
-    };
-    let icon = Rect::from_min_size(min, Vec2::splat(20.0));
-    instance_badge::paint(ui, icon, 2.0, &badge, theme::card(), fade);
 }
 
 /// `readCustomModelEntries`: slugs (strings or `{slug, name}`), first
@@ -1115,7 +1095,6 @@ impl App {
         // `min-h-18 items-center`: short rows center their content.
         let line = top + 12.0 + ((height - natural) / 2.0).ceil();
         self.paint_provider_mark(ui, &row.driver, Pos2::new(left + 16.0, line), fade);
-        paint_accent_badge(ui, row, Pos2::new(left + 16.0, line), fade);
         let name = row.display_name();
         let name_font = font(14.0, Weight::Medium);
         widgets::text(
@@ -1197,9 +1176,8 @@ impl App {
         let name = row.display_name();
         let enabled = row.enabled();
 
-        // Title: mark, name, badge, version and the update marker.
+        // Title: mark, name, version and the update marker.
         self.paint_provider_mark(ui, &row.driver, Pos2::new(left + 16.0, top + 4.0), 1.0);
-        paint_accent_badge(ui, row, Pos2::new(left + 16.0, top + 4.0), 1.0);
         section_title(ui, Pos2::new(left + 44.0, top), &name);
         let mut x = right - 16.0;
         // Custom instances can be deleted (`Trash2Icon`, ghost-destructive).

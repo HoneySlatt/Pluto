@@ -591,16 +591,6 @@ impl App {
             "model-picker",
             fit.model_shrunk.then_some(fit.model_width - 6.0),
         );
-        if provider_icon.is_some()
-            && let Some(badge) = self.instance_badge(&selection.instance_id)
-        {
-            // Ringed with `--contrast-input`.
-            let icon = Rect::from_min_size(
-                Pos2::new(model_rect.left() + 11.0, bar_top + 6.0),
-                Vec2::splat(16.0),
-            );
-            crate::ui::instance_badge::paint(ui, icon, 2.0, &badge, theme::input(), 1.0);
-        }
         x = model_rect.right() + 6.0;
         let icon_only = |index: usize| index >= blocks.len() - fit.icon_only;
         let mut traits_rect = None;

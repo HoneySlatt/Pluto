@@ -1,5 +1,6 @@
 pub mod app;
 pub mod diff;
+pub mod generated_images;
 pub mod highlight;
 pub mod html_render;
 pub mod http;

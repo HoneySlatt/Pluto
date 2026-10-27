@@ -285,8 +285,6 @@ pub(crate) enum Control {
     Model {
         label: String,
         icon: Option<&'static str>,
-        /// The provider instance, for its accent badge.
-        instance: String,
         traits: Option<String>,
         /// A trailing switch that shows the picker while on.
         switch: Option<bool>,
@@ -572,7 +570,6 @@ impl App {
                     control: Control::Model {
                         label: model,
                         icon: model_icon,
-                        instance: selection.instance_id.clone(),
                         traits: self.traits_label(&selection),
                         switch: None,
                     },
@@ -969,7 +966,6 @@ impl App {
                 control: Control::Model {
                     label,
                     icon,
-                    instance: selection.instance_id.clone(),
                     traits: self.traits_label(&selection),
                     switch: None,
                 },
@@ -1317,7 +1313,6 @@ impl App {
                             Control::Model {
                                 label,
                                 icon,
-                                instance: selection.instance_id.clone(),
                                 traits: None,
                                 switch: Some(!writer.is_null()),
                             }
@@ -3013,7 +3008,6 @@ impl App {
             Control::Model {
                 label,
                 icon,
-                instance,
                 traits,
                 switch: trailing,
             } => {
@@ -3075,21 +3069,6 @@ impl App {
                             16.0,
                             theme::muted_foreground(),
                         );
-                        // Ringed with `--contrast-input`.
-                        if let Some(badge) = self.instance_badge(instance) {
-                            let mark = Rect::from_min_size(
-                                Pos2::new(tx + 1.0, button.center().y - 8.0),
-                                Vec2::splat(16.0),
-                            );
-                            crate::ui::instance_badge::paint(
-                                ui,
-                                mark,
-                                2.0,
-                                &badge,
-                                theme::input(),
-                                1.0,
-                            );
-                        }
                         tx += 23.0;
                     }
                     widgets::text_in(

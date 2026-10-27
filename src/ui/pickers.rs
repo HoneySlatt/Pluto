@@ -429,17 +429,6 @@ impl App {
                     enabled,
                     rail.right(),
                 );
-                if let Some(badge) = self.instance_badge(&id) {
-                    // `indicatorBackground`: the hover, the selection or the rail.
-                    let ring = if response.hovered() {
-                        theme::muted()
-                    } else if active == id {
-                        theme::background()
-                    } else {
-                        theme::alpha(theme::muted(), 0.3)
-                    };
-                    crate::ui::instance_badge::paint(ui, slot, 2.0, &badge, ring, 1.0);
-                }
                 // `describeUnavailableInstance`.
                 let label = provider["displayName"].as_str().unwrap_or(&id).to_owned();
                 let tooltip = if provider["enabled"] == false || provider["status"] == "disabled" {

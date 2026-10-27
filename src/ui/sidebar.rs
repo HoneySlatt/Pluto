@@ -979,14 +979,6 @@ impl App {
                 14.0,
                 theme::alpha(tint, 0.6),
             );
-            // The glyph dims, the badge stays saturated.
-            if let Some(badge) = self.instance_badge(&thread.model_selection.instance_id) {
-                let icon = Rect::from_min_size(
-                    Pos2::new(right - 14.0, row3.top() + 1.0),
-                    Vec2::splat(14.0),
-                );
-                crate::ui::instance_badge::paint(ui, icon, 3.0, &badge, theme::sidebar(), 1.0);
-            }
         }
 
         if response.clicked() {

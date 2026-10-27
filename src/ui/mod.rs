@@ -23,7 +23,6 @@ pub mod files;
 pub mod git_actions;
 pub mod html_render;
 pub mod icon_picker;
-pub mod instance_badge;
 pub mod keybindings;
 pub mod legacy_sidebar;
 pub mod lightbox;
