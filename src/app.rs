@@ -152,6 +152,7 @@ pub struct App {
     pub(crate) preview: crate::ui::preview::PreviewUi,
     pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
     pub(crate) design: crate::ui::design::DesignState,
+    pub(crate) design_home: crate::ui::design_home::DesignHome,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -455,6 +456,7 @@ impl App {
             preview: Default::default(),
             html_renders: Default::default(),
             design: Default::default(),
+            design_home: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -649,6 +651,7 @@ impl App {
     pub(crate) fn select_thread(&mut self, id: Option<String>) {
         self.usage_open = false;
         self.pull_requests_open = false;
+        self.design_home.open = false;
         if self.selected == id {
             return;
         }
@@ -997,16 +1000,28 @@ impl eframe::App for App {
                     rect
                 };
                 // The right panel keeps 360px for the chat column (`PreviewPanelShell`).
+                if !self.design_home.open {
+                    self.apply_studio();
+                }
                 let panel_open = !self.usage_open
                     && !self.pull_requests_open
+                    && !self.design_home.open
                     && self.panel_open()
                     && self.current_thread().is_some();
+                // A design project's thread keeps only a narrow chat.
+                let studio = panel_open && self.studio_active();
                 // A maximized panel leaves the chat column no width.
                 let maximized = panel_open && self.panel().maximized;
                 let main = if maximized {
                     Rect::from_min_max(
                         workspace.min,
                         Pos2::new(workspace.left(), workspace.bottom()),
+                    )
+                } else if studio {
+                    self.panel_width = self.studio_panel_width(workspace.width());
+                    Rect::from_min_max(
+                        workspace.min,
+                        Pos2::new(workspace.right() - self.panel_width, workspace.bottom()),
                     )
                 } else if panel_open {
                     let max = (rect.width() * 0.7)
@@ -1024,6 +1039,8 @@ impl eframe::App for App {
                     self.usage_page(ui, main);
                 } else if self.pull_requests_open {
                     self.pull_requests_page(ui, main);
+                } else if self.design_home.open {
+                    self.design_home_page(ui, main);
                 } else if maximized {
                 } else if let Some(height) = self
                     .drawer_height(main.height())
@@ -1360,6 +1377,8 @@ impl App {
             || self.publish_result(&key, &result)
             || self.command_menu_result(&key, &result)
             || self.html_render_url_result(&key, &result)
+            || self.design_home_result(&key, &result)
+            || self.design_result(&key, &result)
         {
             return;
         }

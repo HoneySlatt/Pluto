@@ -441,10 +441,11 @@ impl App {
     /// Footer shortcuts; the usage page swaps them for Back.
     fn sidebar_footer(&mut self, ui: &mut Ui, rect: Rect) {
         let left = rect.left();
-        if self.usage_open || self.pull_requests_open {
+        if self.usage_open || self.pull_requests_open || self.design_home.open {
             if self.sidebar_back(ui, rect, "page-back") {
                 self.usage_open = false;
                 self.pull_requests_open = false;
+                self.design_home.open = false;
             }
             return;
         }
@@ -452,6 +453,8 @@ impl App {
             ("settings", "Settings"),
             ("git-pull-request-arrow", "Pull requests"),
             ("chart-no-axes-column", "Usage"),
+            // Pluto: a design session (`crate::ui::design_home`).
+            ("palette", "New design"),
         ];
         for (i, (icon, label)) in footer.iter().enumerate() {
             let button = Rect::from_min_size(
@@ -475,6 +478,8 @@ impl App {
                     self.open_usage();
                 } else if *icon == "git-pull-request-arrow" {
                     self.open_pull_requests();
+                } else if *icon == "palette" {
+                    self.open_design_home();
                 } else {
                     self.status = Some(format!("{label} is not implemented yet"));
                 }

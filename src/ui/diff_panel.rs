@@ -1052,6 +1052,15 @@ impl App {
         }
         if response.dragged() {
             self.panel_width -= response.drag_delta().x;
+            // The studio keeps the chat's width as dragged.
+            if self.studio_active() {
+                let chat = if self.design.studio_chat > 0.0 {
+                    self.design.studio_chat
+                } else {
+                    crate::ui::design::STUDIO_CHAT
+                };
+                self.design.studio_chat = (chat + response.drag_delta().x).max(320.0);
+            }
         }
     }
 

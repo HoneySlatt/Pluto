@@ -16,6 +16,7 @@ pub mod context_menu;
 pub mod context_meter;
 pub mod custom_model_editor;
 pub mod design;
+pub mod design_home;
 pub mod diff_panel;
 pub mod emoji;
 pub mod favicon;

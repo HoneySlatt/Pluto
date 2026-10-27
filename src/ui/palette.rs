@@ -368,6 +368,12 @@ impl App {
                     "Open pull requests",
                     Action::Call(App::open_pull_requests),
                 ));
+                // Pluto: a design session (`crate::ui::design_home`).
+                actions.push(Item::new(
+                    "palette",
+                    "New design",
+                    Action::Call(App::open_design_home),
+                ));
                 let mut usage = Item::new(
                     "chart-no-axes-column",
                     "Open usage",

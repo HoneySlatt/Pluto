@@ -10,10 +10,18 @@
 //! the surface at full width or at a tablet or phone width, scrolls inside
 //! itself and takes the pointer and keys, through one preview-browser tab
 //! that navigates as the shown page changes.
+//!
+//! In a design project (a workspace with `.pluto/design.json`, see
+//! `crate::ui::design_home`), the HTML files the agents write are pages too,
+//! loaded through their signed `workspace-file` URL (which also serves the
+//! files beside and below them) and reloaded each time an agent changes
+//! them, and the thread opens in the studio layout: the surface beside a
+//! narrow chat, after OpenDesign's Studio.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use serde_json::{Value, json};
 
 use crate::app::{App, PanelTab};
 use crate::html_render::HtmlRender;
@@ -24,6 +32,10 @@ use crate::ui::widgets::{self, MenuEntry, MenuItem};
 const CHROME: f32 = 28.0;
 const CHROME_GAP: f32 = 12.0;
 const MENU: &str = "design-pages";
+/// A project file's page id: this prefix, then its absolute path.
+const FILE_PREFIX: &str = "file:";
+/// The studio's chat column, until the user drags the panel's edge.
+pub(crate) const STUDIO_CHAT: f32 = 420.0;
 
 /// The width the page is laid out at.
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -58,22 +70,229 @@ pub(crate) struct DesignState {
     /// The surface's preview-browser tab and the page it loaded.
     tab: Option<u64>,
     loaded: Option<String>,
+    /// The URL the tab loaded, so a reloaded file navigates again.
+    loaded_url: Option<String>,
     /// Drawn this frame, and whether the tab is casting.
     drawn: bool,
     shown: bool,
+    /// Workspaces known to be design projects or not (`None` while asked).
+    projects: HashMap<String, Option<bool>>,
+    /// Threads already opened in the studio layout once.
+    studio_threads: HashSet<String>,
+    /// The studio's chat width, as the user dragged it (0 until then).
+    pub(crate) studio_chat: f32,
+    /// Project files' signed URLs by absolute path, with the change they
+    /// were signed after.
+    files: HashMap<String, FileUrl>,
+}
+
+#[derive(Default)]
+struct FileUrl {
+    /// The change the newest request answers.
+    marker: String,
+    url: Option<Result<String, ()>>,
+}
+
+/// An HTML file a `file_change` item touched, absolute.
+fn changed_html_files(item: &crate::model::TurnItem, cwd: &str) -> Vec<String> {
+    let mut paths: Vec<String> = item
+        .get("changes")
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c["path"].as_str().map(str::to_owned))
+        .collect();
+    if let Some(file) = item.str("fileName") {
+        paths.push(file.to_owned());
+    }
+    let cwd = cwd.trim_end_matches('/');
+    let mut out: Vec<String> = Vec::new();
+    for path in paths {
+        let absolute = if path.starts_with('/') {
+            path
+        } else {
+            format!("{cwd}/{}", path.trim_start_matches("./"))
+        };
+        let lower = absolute.to_ascii_lowercase();
+        if (lower.ends_with(".html") || lower.ends_with(".htm"))
+            && absolute.starts_with(&format!("{cwd}/"))
+            && !out.contains(&absolute)
+        {
+            out.push(absolute);
+        }
+    }
+    out
 }
 
 impl App {
-    /// The thread's published pages, oldest first.
+    /// The thread's pages, oldest first: those published with
+    /// `html_render`, and in a design project the HTML files agents
+    /// changed, each where it last changed. A file's page id is
+    /// `FILE_PREFIX` and its path, its title the project-relative path.
     pub(crate) fn thread_pages(&self) -> Vec<HtmlRender> {
         let Some(detail) = self.current_detail() else {
             return Vec::new();
         };
+        let cwd = self
+            .workspace_cwd()
+            .filter(|cwd| self.design.projects.get(cwd) == Some(&Some(true)));
+        let mut pages: Vec<HtmlRender> = Vec::new();
+        for row in &detail.visible {
+            if let Some(render) = crate::html_render::from_tool_item(&row.item) {
+                pages.push(render);
+                continue;
+            }
+            let Some(cwd) = &cwd else { continue };
+            if row.item.kind != "file_change" {
+                continue;
+            }
+            for path in changed_html_files(&row.item, cwd) {
+                let id = format!("{FILE_PREFIX}{path}");
+                pages.retain(|p| p.attachment_id != id);
+                let title = path
+                    .strip_prefix(&format!("{}/", cwd.trim_end_matches('/')))
+                    .unwrap_or(&path)
+                    .to_owned();
+                pages.push(HtmlRender {
+                    attachment_id: id,
+                    title,
+                    height: 0.0,
+                    heights: Vec::new(),
+                });
+            }
+        }
+        pages
+    }
+
+    /// The newest change to a project file: its `file_change` item and time.
+    fn file_marker(&self, path: &str) -> String {
+        let (Some(detail), Some(cwd)) = (self.current_detail(), self.workspace_cwd()) else {
+            return String::new();
+        };
         detail
             .visible
             .iter()
-            .filter_map(|row| crate::html_render::from_tool_item(&row.item))
-            .collect()
+            .rev()
+            .find(|row| {
+                row.item.kind == "file_change"
+                    && changed_html_files(&row.item, &cwd)
+                        .iter()
+                        .any(|p| p == path)
+            })
+            .map(|row| format!("{}@{}", row.item.id, row.item.updated_at))
+            .unwrap_or_default()
+    }
+
+    /// Asks for a page's URL: a published page's once, a project file's
+    /// again after each change.
+    fn request_page_url(&mut self, page: &HtmlRender) {
+        let Some(path) = page.attachment_id.strip_prefix(FILE_PREFIX) else {
+            self.request_html_render_url(page);
+            return;
+        };
+        let marker = self.file_marker(path);
+        let known = self.design.files.get(path).map(|f| f.marker.clone());
+        if known.as_deref() == Some(marker.as_str()) {
+            return;
+        }
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let entry = self.design.files.entry(path.to_owned()).or_default();
+        entry.marker = marker.clone();
+        self.send_request(
+            format!("design-file:{path}\u{0}{marker}"),
+            "assets.createUrl",
+            json!({"resource": {"_tag": "workspace-file", "threadId": thread, "path": path}}),
+        );
+    }
+
+    /// A page's URL, as `html_render_url` answers; a project file keeps its
+    /// previous URL until the one after its latest change arrives.
+    fn page_url(&self, page: &HtmlRender) -> Option<Result<String, ()>> {
+        match page.attachment_id.strip_prefix(FILE_PREFIX) {
+            Some(path) => self.design.files.get(path)?.url.clone(),
+            None => self.html_render_url(&page.attachment_id),
+        }
+    }
+
+    /// Marks a workspace as a design project (it was just made one).
+    pub(crate) fn mark_design_project(&mut self, cwd: &str) {
+        self.design.projects.insert(cwd.to_owned(), Some(true));
+    }
+
+    /// Whether the open thread works in a design project, asking the server
+    /// for the workspace's profile the first time.
+    pub(crate) fn studio_active(&mut self) -> bool {
+        let Some(cwd) = self.workspace_cwd() else {
+            return false;
+        };
+        if self.current_thread().is_none() {
+            return false;
+        }
+        match self.design.projects.get(&cwd) {
+            Some(known) => *known == Some(true),
+            None => {
+                self.design.projects.insert(cwd.clone(), None);
+                self.send_request(
+                    format!("design-profile:{cwd}"),
+                    "projects.readFile",
+                    json!({"cwd": cwd, "relativePath": ".pluto/design.json"}),
+                );
+                false
+            }
+        }
+    }
+
+    /// Opens a design project's thread in the studio layout the first time
+    /// it shows: the panel on the Design surface, beside a narrow chat.
+    pub(crate) fn apply_studio(&mut self) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        if self.design.studio_threads.contains(&thread) || !self.studio_active() {
+            return;
+        }
+        self.design.studio_threads.insert(thread);
+        self.open_design(None);
+    }
+
+    /// The studio's panel width for a workspace this wide.
+    pub(crate) fn studio_panel_width(&self, workspace: f32) -> f32 {
+        let chat = if self.design.studio_chat > 0.0 {
+            self.design.studio_chat
+        } else {
+            STUDIO_CHAT
+        };
+        (workspace - chat).clamp(360.0, (workspace - 360.0).max(360.0))
+    }
+
+    /// The design requests' answers; true when `key` was one of them.
+    pub(crate) fn design_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
+        if let Some(cwd) = key.strip_prefix("design-profile:") {
+            let design = result.as_ref().is_ok_and(|value| {
+                value["contents"]
+                    .as_str()
+                    .is_some_and(|contents| contents.contains("\"version\""))
+            });
+            self.design.projects.insert(cwd.to_owned(), Some(design));
+            return true;
+        }
+        let Some(rest) = key.strip_prefix("design-file:") else {
+            return false;
+        };
+        let (path, marker) = rest.split_once('\u{0}').unwrap_or((rest, ""));
+        let base = url::Url::parse(self.connect.server.trim()).ok();
+        let url = result.as_ref().ok().and_then(|value| {
+            let relative = value["relativeUrl"].as_str()?;
+            Some(base?.join(relative).ok()?.to_string())
+        });
+        if let Some(entry) = self.design.files.get_mut(path)
+            && entry.marker == marker
+        {
+            entry.url = Some(url.ok_or(()));
+        }
+        true
     }
 
     /// Opens the Design surface, pinned to `page` or following the newest.
@@ -174,7 +393,7 @@ impl App {
             .rev()
             .map(|(width, icon, tip)| (*width, *icon, *tip, button(&mut right)))
             .collect();
-        let url = self.html_render_url(&page.attachment_id);
+        let url = self.page_url(&page);
         if widgets::icon_button(
             ui,
             open,
@@ -354,7 +573,7 @@ impl App {
             );
         }
         ui.painter().rect_filled(frame, 0.0, theme::background());
-        self.request_html_render_url(&page);
+        self.request_page_url(&page);
         let note = |ui: &Ui, text: &str| {
             let text_width = widgets::text_width(ui, text, font(13.0, Weight::Regular));
             widgets::text_in(
@@ -365,7 +584,7 @@ impl App {
                 theme::muted_foreground(),
             );
         };
-        let url = match self.html_render_url(&page.attachment_id) {
+        let url = match self.page_url(&page) {
             Some(Ok(url)) => url,
             Some(Err(())) => {
                 note(ui, &format!("Unable to load {}", page.title));
@@ -397,8 +616,10 @@ impl App {
                 (tab, true)
             }
         };
-        let navigate = self.design.loaded.as_deref() != Some(page.attachment_id.as_str());
+        let navigate = self.design.loaded.as_deref() != Some(page.attachment_id.as_str())
+            || self.design.loaded_url.as_deref() != Some(url.as_str());
         self.design.loaded = Some(page.attachment_id.clone());
+        self.design.loaded_url = Some(url.clone());
         self.design.drawn = true;
         let Some(engine) = &self.preview.engine else {
             return;
