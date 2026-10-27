@@ -40,6 +40,12 @@ pub struct App {
     pub(crate) keep_scroll: bool,
     pub(crate) timeline_view: crate::ui::timeline_view::TimelineView,
     pub(crate) open_menu: Option<String>,
+    /// The docked sidebar is shown (`SidebarProvider`'s `open`).
+    pub(crate) sidebar_open: bool,
+    /// Below `md` the sidebar is a sheet over the workspace (`openMobile`).
+    pub(crate) sidebar_sheet_open: bool,
+    /// The window is narrower than `md` (768px, `useIsMobile`).
+    pub(crate) mobile: bool,
     pub(crate) composer_selection: std::collections::HashMap<String, crate::model::ModelSelection>,
     pub(crate) composer_runtime: std::collections::HashMap<String, String>,
     /// The composer's interaction mode (plan or default) by composer key.
@@ -381,6 +387,9 @@ impl App {
             keep_scroll: false,
             timeline_view: Default::default(),
             open_menu: None,
+            sidebar_open: true,
+            sidebar_sheet_open: false,
+            mobile: false,
             composer_selection: Default::default(),
             composer_runtime: Default::default(),
             composer_interaction: Default::default(),
@@ -953,10 +962,19 @@ impl eframe::App for App {
                 // window; its layer stays on top.
                 self.lightbox_dialog(ui, rect);
                 self.palette_shortcuts(ui);
+                // Below `md` the sidebar leaves the layout and opens as a sheet.
+                self.mobile = rect.width() < 768.0;
+                if !self.mobile {
+                    self.sidebar_sheet_open = false;
+                }
+                let docked = self.sidebar_docked();
                 let sidebar =
                     Rect::from_min_size(rect.min, Vec2::new(theme::SIDEBAR_WIDTH, rect.height()));
-                let workspace =
-                    Rect::from_min_max(Pos2::new(sidebar.right(), rect.top()), rect.max);
+                let workspace = if docked {
+                    Rect::from_min_max(Pos2::new(sidebar.right(), rect.top()), rect.max)
+                } else {
+                    rect
+                };
                 // The right panel keeps 360px for the chat column (`PreviewPanelShell`).
                 let panel_open = !self.usage_open
                     && !self.pull_requests_open
@@ -998,7 +1016,11 @@ impl eframe::App for App {
                     let panel = Rect::from_min_max(Pos2::new(main.right(), rect.top()), rect.max);
                     self.diff_panel(ui, panel);
                 }
-                self.sidebar(ui, sidebar);
+                if docked {
+                    self.sidebar(ui, sidebar);
+                } else {
+                    self.sidebar_sheet(ui, rect, sidebar);
+                }
                 self.thread_menu(ui);
                 self.text_menu(ui);
                 self.cite_overlays(ui);

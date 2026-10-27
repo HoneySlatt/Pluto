@@ -431,7 +431,10 @@ impl App {
         ui.painter().rect_filled(rect, 0.0, theme::background());
         widgets::text_in(
             ui,
-            Rect::from_min_size(Pos2::new(rect.left() + 20.0, 16.0), Vec2::new(300.0, 20.0)),
+            Rect::from_min_size(
+                Pos2::new(self.titlebar_left(rect), 16.0),
+                Vec2::new(300.0, 20.0),
+            ),
             "Pull Requests",
             font(14.0, Weight::Medium),
             theme::foreground(),

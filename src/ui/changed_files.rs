@@ -202,6 +202,19 @@ impl App {
         let header = Rect::from_min_size(rect.min, Vec2::new(width, 40.0));
         let count = files.len();
         let label = format!("{count} changed file{}", if count == 1 { "" } else { "s" });
+        // "Open diff" keeps its label from 24rem of card (`@[24rem]/changed-files`).
+        let open_width = if width >= 384.0 {
+            20.0 + widgets::text_width(ui, "Open diff", font(12.0, Weight::Medium)) + 7.0
+        } else {
+            24.0
+        };
+        let open = Rect::from_min_size(
+            Pos2::new(header.right() - 12.0 - open_width, header.top() + 8.0),
+            Vec2::new(open_width, 24.0),
+        );
+        // The counts truncate before the header's buttons.
+        let actions_left = open.left() - if has_dirs { 28.0 } else { 0.0 } - 8.0;
+        let header = Rect::from_min_max(header.min, Pos2::new(actions_left, header.bottom()));
         let mut x = header.left() + 12.0;
         x += widgets::text_in(
             ui,
@@ -212,7 +225,7 @@ impl App {
         ) + 12.0;
         let additions: u64 = files.iter().map(|f| f.additions).sum();
         let deletions: u64 = files.iter().map(|f| f.deletions).sum();
-        if additions + deletions > 0 {
+        if additions + deletions > 0 && x < header.right() {
             let mono = theme::font(12.0, Weight::Medium);
             let mono = eframe::egui::FontId::new(mono.size, eframe::egui::FontFamily::Monospace);
             x += widgets::text_in(
@@ -230,11 +243,9 @@ impl App {
                 theme::diff_deletion(),
             );
         }
-        let open = Rect::from_min_size(
-            Pos2::new(header.right() - 12.0 - 79.0, header.top() + 8.0),
-            Vec2::new(79.0, 24.0),
-        );
-        let response = ui.interact(open, ui.id().with(("open-diff", turn_id)), Sense::click());
+        let response = ui
+            .interact(open, ui.id().with(("open-diff", turn_id)), Sense::click())
+            .on_hover_text("Open diff");
         let color = if response.hovered() {
             theme::foreground()
         } else {
@@ -251,13 +262,15 @@ impl App {
             12.0,
             color,
         );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(open.min + Vec2::new(20.0, 0.0), open.max),
-            "Open diff",
-            font(12.0, Weight::Medium),
-            color,
-        );
+        if open_width > 24.0 {
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(open.min + Vec2::new(20.0, 0.0), open.max),
+                "Open diff",
+                font(12.0, Weight::Medium),
+                color,
+            );
+        }
         if response.clicked() {
             self.open_diff(turn_id, None);
             // `onOpenTurnDiff(turnId, files[0]?.path)`: the tree selects the first file.

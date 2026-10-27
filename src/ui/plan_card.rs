@@ -698,8 +698,16 @@ impl App {
         (plan.status == "active").then_some(plan)
     }
 
-    /// The Plan/Build toggle after the runtime picker; returns its right edge.
-    pub(crate) fn interaction_toggle(&mut self, ui: &mut Ui, x: f32, top: f32, draft: bool) -> f32 {
+    /// The Plan/Build toggle after the runtime picker, its icon alone when
+    /// `icon_only`; returns its right edge.
+    pub(crate) fn interaction_toggle(
+        &mut self,
+        ui: &mut Ui,
+        x: f32,
+        top: f32,
+        draft: bool,
+        icon_only: bool,
+    ) -> f32 {
         let plan = self.composer_interaction_mode(draft) == "plan";
         let (icon, label, tip) = if plan {
             (
@@ -711,8 +719,12 @@ impl App {
             ("bot", "Build", "Default mode — click to enter plan mode")
         };
         let label_font = font(14.0, Weight::Medium);
-        let width = 10.0 + 16.0 + 6.0 + widgets::text_width(ui, label, label_font.clone()) + 10.0;
-        let rect = Rect::from_min_size(Pos2::new(x, top), Vec2::new(width.ceil(), 28.0));
+        let width = if icon_only {
+            10.0 + 16.0 + 10.0
+        } else {
+            crate::ui::composer::toggle_width(widgets::text_width(ui, label, label_font.clone()))
+        };
+        let rect = Rect::from_min_size(Pos2::new(x, top), Vec2::new(width, 28.0));
         let response = ui
             .interact(rect, ui.id().with("interaction-toggle"), Sense::click())
             .on_hover_text(tip);
@@ -744,13 +756,15 @@ impl App {
             16.0,
             icon_color,
         );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(x + 32.0, top), rect.max),
-            label,
-            label_font,
-            color,
-        );
+        if !icon_only {
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(x + 32.0, top), rect.max),
+                label,
+                label_font,
+                color,
+            );
+        }
         if response.clicked() {
             let next = if plan { "default" } else { "plan" };
             let key = self.composer_key(draft);

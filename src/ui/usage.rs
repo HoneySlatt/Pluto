@@ -326,7 +326,7 @@ impl App {
     pub(crate) fn usage_page(&mut self, ui: &mut Ui, rect: Rect) {
         ui.painter().rect_filled(rect, 0.0, theme::background());
         // Header: "Usage / All environments", the metric and period groups, refresh.
-        let mut x = rect.left() + 20.0;
+        let mut x = self.titlebar_left(rect);
         for (text, weight, color) in [
             ("Usage", Weight::Medium, theme::muted_foreground()),
             ("/", Weight::Regular, theme::muted_foreground()),

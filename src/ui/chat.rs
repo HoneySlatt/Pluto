@@ -86,18 +86,31 @@ impl App {
         }
     }
 
+    /// Where a workspace titlebar's content starts: past the floating
+    /// sidebar trigger while the sidebar is hidden
+    /// (`--workspace-titlebar-content-left`, 13 + 28 + 12px).
+    pub(crate) fn titlebar_left(&self, rect: Rect) -> f32 {
+        if self.sidebar_docked() {
+            rect.left() + theme::WORKSPACE_GUTTER
+        } else {
+            rect.left() + 53.0
+        }
+    }
+
     fn header(&mut self, ui: &mut Ui, rect: Rect, title: Option<&str>, draft: Option<&Project>) {
         let project = self
             .current_thread()
             .and_then(|t| self.state.project(&t.project_id).cloned())
             .or_else(|| draft.cloned());
-        let mut x = rect.left() + theme::WORKSPACE_GUTTER;
+        let mut x = self.titlebar_left(rect);
         let title = title.unwrap_or("New thread");
         // Right-side controls, laid out from the right edge. With the right
-        // panel open, its header owns the layout toggles and these buttons
-        // collapse to icons (their labels become screen-reader only upstream).
-        let compact = self.panel_open() && self.current_thread().is_some();
-        let mut right = if compact {
+        // panel open, its header owns the layout toggles. These buttons
+        // collapse to icons then, and below `@3xl` (48rem) of header (their
+        // labels become screen-reader only upstream).
+        let panel_header = self.panel_open() && self.current_thread().is_some();
+        let compact = panel_header || rect.width() < 768.0;
+        let mut right = if panel_header {
             rect.right() - theme::WORKSPACE_GUTTER
         } else {
             self.panel_controls(ui, rect.right());

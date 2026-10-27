@@ -14,6 +14,14 @@ use crate::ui::requests_panel::OVERLAP;
 use crate::ui::{cite, widgets};
 
 const MIN_TEXT_HEIGHT: f32 = 70.0;
+/// An icon-only picker: padding, 16px icon, 4px gap, chevron, padding.
+const ICON_PICKER: f32 = 11.0 + 16.0 + 4.0 + 14.0 + 9.0;
+/// The icon-only Build/Plan toggle.
+const ICON_TOGGLE: f32 = 10.0 + 16.0 + 10.0;
+/// The "…" overflow trigger: an icon between paddings.
+const OVERFLOW_TRIGGER: f32 = 11.0 + 16.0 + 9.0;
+/// The model picker's narrowest form (icon and a few letters), with its gap.
+const MODEL_MIN: f32 = 11.0 + 22.0 + 32.0 + 4.0 + 14.0 + 9.0 + 6.0;
 const MAX_TEXT_HEIGHT: f32 = 200.0;
 /// The composer card (gray 16 on the stock palette).
 fn card_surface() -> Color32 {
@@ -58,6 +66,60 @@ fn title_seed(text: &str, images: &[crate::ui::attachments::ComposerImage]) -> S
         seed
     } else {
         format!("{}...", chars[..50].iter().collect::<String>())
+    }
+}
+
+/// Width of a labelled picker (`picker`).
+fn picker_width(icon: bool, label_width: f32) -> f32 {
+    11.0 + if icon { 22.0 } else { 0.0 } + label_width + 4.0 + 14.0 + 9.0
+}
+
+/// Width of the labelled Build/Plan toggle (`interaction_toggle`).
+pub(crate) fn toggle_width(label_width: f32) -> f32 {
+    (10.0 + 16.0 + 6.0 + label_width + 10.0).ceil()
+}
+
+/// How the footer controls fit their room.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Fit {
+    /// Trailing blocks showing only their icons.
+    pub icon_only: usize,
+    /// The last (mode) block moved behind "…".
+    pub mode_hidden: bool,
+    /// The model picker's width, its gap included.
+    pub model_width: f32,
+    pub model_shrunk: bool,
+}
+
+/// `resolveRestingComposerControlsLayout`: the blocks after the model picker
+/// (`(natural, icon-only)` widths) drop their labels from the end, then the
+/// mode block moves into the overflow menu; past that the model label
+/// truncates, down to `MODEL_MIN`. Not ported: the traits block also moving
+/// into the overflow menu.
+pub(crate) fn fit_controls(model: f32, blocks: &[(f32, f32)], overflow: f32, room: f32) -> Fit {
+    let n = blocks.len();
+    let width = |icon_only: usize, hidden: bool| {
+        let shown = if hidden { n.saturating_sub(1) } else { n };
+        let blocks: f32 = blocks[..shown]
+            .iter()
+            .enumerate()
+            .map(|(i, (natural, icon))| if i + icon_only >= n { *icon } else { *natural })
+            .sum();
+        blocks + if hidden { overflow } else { 0.0 }
+    };
+    let (icon_only, mode_hidden) = (0..=n)
+        .map(|k| (k, false))
+        .chain((n > 0).then_some((n, true)))
+        .find(|&(k, hidden)| model + width(k, hidden) <= room)
+        .unwrap_or((n, n > 0));
+    let model_width = model
+        .min(room - width(icon_only, mode_hidden))
+        .max(MODEL_MIN.min(model));
+    Fit {
+        icon_only,
+        mode_hidden,
+        model_width,
+        model_shrunk: model_width < model,
     }
 }
 
@@ -437,59 +499,13 @@ impl App {
             self.composer_command_menu(ui, surface, editor_id, draft);
         }
 
-        // Toolbar.
+        // Toolbar. The actions go first: the controls fit the room they leave.
         let bar_top = text_rect.bottom()
             + if matches!(mode, Mode::Question(_)) {
                 16.0
             } else {
                 10.0
             };
-        let mut x = surface.left() + 7.0;
-        let selection = self.composer_model_selection(draft);
-        let (model_label, provider_icon) = self.model_label(&selection);
-        let model_rect = self.picker(ui, x, bar_top, provider_icon, &model_label, "model-picker");
-        if provider_icon.is_some()
-            && let Some(badge) = self.instance_badge(&selection.instance_id)
-        {
-            // Ringed with `--contrast-input`.
-            let icon = Rect::from_min_size(
-                Pos2::new(model_rect.left() + 11.0, bar_top + 6.0),
-                Vec2::splat(16.0),
-            );
-            crate::ui::instance_badge::paint(ui, icon, 2.0, &badge, theme::input(), 1.0);
-        }
-        x = model_rect.right() + 6.0;
-        let mut traits_rect = None;
-        if let Some(trait_label) = self.traits_label(&selection) {
-            self.separator(ui, x, bar_top);
-            x += 7.0;
-            let rect = self.picker(ui, x, bar_top, None, &trait_label, "traits-picker");
-            x = rect.right() + 6.0;
-            traits_rect = Some(rect);
-        }
-        self.separator(ui, x, bar_top);
-        x += 7.0;
-        let runtime = self.composer_runtime_mode(draft);
-        let (runtime_text, runtime_icon) = runtime_label(&runtime);
-        let runtime_rect = self.picker(
-            ui,
-            x,
-            bar_top,
-            Some(runtime_icon),
-            runtime_text,
-            "runtime-picker",
-        );
-        self.model_picker(ui, model_rect, draft);
-        if let Some(rect) = traits_rect {
-            self.traits_menu(ui, rect, draft);
-        }
-        if self.plan_mode_enabled(draft) {
-            let x = runtime_rect.right() + 6.0;
-            self.separator(ui, x, bar_top);
-            self.interaction_toggle(ui, x + 7.0, bar_top, draft);
-        }
-        self.runtime_menu(ui, runtime_rect, draft);
-
         let right = surface.right() - 17.0;
         let actions_left = match mode {
             Mode::Question(input) => {
@@ -525,6 +541,118 @@ impl App {
             && normal
         {
             crate::ui::attachments::pick_files(&self.incoming_images, ui.ctx());
+        }
+
+        let mut x = surface.left() + 7.0;
+        let selection = self.composer_model_selection(draft);
+        let (model_label, provider_icon) = self.model_label(&selection);
+        let trait_label = self.traits_label(&selection);
+        let runtime = self.composer_runtime_mode(draft);
+        let (runtime_text, runtime_icon) = runtime_label(&runtime);
+        let plan_toggle = self.plan_mode_enabled(draft);
+        let label_font = font(14.0, Weight::Medium);
+        let labelled = |icon: bool, label: &str| {
+            picker_width(icon, widgets::text_width(ui, label, label_font.clone()))
+        };
+        let mut blocks = Vec::new();
+        if let Some(label) = &trait_label {
+            blocks.push((7.0 + labelled(false, label) + 6.0, 7.0 + ICON_PICKER + 6.0));
+        }
+        let interaction = if self.composer_interaction_mode(draft) == "plan" {
+            "Plan"
+        } else {
+            "Build"
+        };
+        let toggle = |icon_only: bool| {
+            if !plan_toggle {
+                0.0
+            } else if icon_only {
+                6.0 + 7.0 + ICON_TOGGLE
+            } else {
+                6.0 + 7.0 + toggle_width(widgets::text_width(ui, interaction, label_font.clone()))
+            }
+        };
+        blocks.push((
+            7.0 + labelled(true, runtime_text) + toggle(false),
+            7.0 + ICON_PICKER + toggle(true),
+        ));
+        let fit = fit_controls(
+            labelled(provider_icon.is_some(), &model_label) + 6.0,
+            &blocks,
+            7.0 + 28.0,
+            attach.left() - 8.0 - x,
+        );
+        let model_rect = self.picker(
+            ui,
+            x,
+            bar_top,
+            provider_icon,
+            &model_label,
+            "model-picker",
+            fit.model_shrunk.then_some(fit.model_width - 6.0),
+        );
+        if provider_icon.is_some()
+            && let Some(badge) = self.instance_badge(&selection.instance_id)
+        {
+            // Ringed with `--contrast-input`.
+            let icon = Rect::from_min_size(
+                Pos2::new(model_rect.left() + 11.0, bar_top + 6.0),
+                Vec2::splat(16.0),
+            );
+            crate::ui::instance_badge::paint(ui, icon, 2.0, &badge, theme::input(), 1.0);
+        }
+        x = model_rect.right() + 6.0;
+        let icon_only = |index: usize| index >= blocks.len() - fit.icon_only;
+        let mut traits_rect = None;
+        if let Some(trait_label) = &trait_label {
+            self.separator(ui, x, bar_top);
+            x += 7.0;
+            let rect = if icon_only(0) {
+                self.icon_picker(ui, x, bar_top, "brain", trait_label, "traits-picker")
+            } else {
+                self.picker(ui, x, bar_top, None, trait_label, "traits-picker", None)
+            };
+            x = rect.right() + 6.0;
+            traits_rect = Some(rect);
+        }
+        self.separator(ui, x, bar_top);
+        x += 7.0;
+        let mode_index = blocks.len() - 1;
+        if fit.mode_hidden {
+            // `CompactComposerControlsMenu`: Mode and Access behind "…".
+            let rect = self.icon_picker(
+                ui,
+                x,
+                bar_top,
+                "ellipsis",
+                "More composer controls",
+                "composer-overflow",
+            );
+            self.composer_overflow_menu(ui, rect, draft, plan_toggle, &runtime);
+        } else {
+            let runtime_rect = if icon_only(mode_index) {
+                self.icon_picker(ui, x, bar_top, runtime_icon, runtime_text, "runtime-picker")
+            } else {
+                self.picker(
+                    ui,
+                    x,
+                    bar_top,
+                    Some(runtime_icon),
+                    runtime_text,
+                    "runtime-picker",
+                    None,
+                )
+            };
+            if plan_toggle {
+                let x = runtime_rect.right() + 6.0;
+                self.separator(ui, x, bar_top);
+                self.interaction_toggle(ui, x + 7.0, bar_top, draft, icon_only(mode_index));
+            }
+            self.runtime_menu(ui, runtime_rect, draft);
+        }
+        self.model_picker(ui, model_rect, draft);
+        if let Some(rect) = traits_rect {
+            self.traits_menu(ui, rect, draft);
         }
     }
 
@@ -803,6 +931,8 @@ impl App {
     }
 
     /// Ghost picker button: optional 16px icon, 14px medium label, chevron.
+    /// With `max_width` the label truncates to fit it.
+    #[allow(clippy::too_many_arguments)]
     fn picker(
         &mut self,
         ui: &mut Ui,
@@ -811,10 +941,13 @@ impl App {
         icon: Option<&str>,
         label: &str,
         id: &str,
+        max_width: Option<f32>,
     ) -> Rect {
         let label_font = font(14.0, Weight::Medium);
-        let label_width = widgets::text_width(ui, label, label_font.clone());
-        let width = 11.0 + if icon.is_some() { 22.0 } else { 0.0 } + label_width + 4.0 + 14.0 + 9.0;
+        let natural_label = widgets::text_width(ui, label, label_font.clone());
+        let natural = picker_width(icon.is_some(), natural_label);
+        let width = max_width.map_or(natural, |max| max.min(natural));
+        let label_width = (natural_label - (natural - width)).max(0.0);
         let rect = Rect::from_min_size(Pos2::new(x, top), Vec2::new(width, 28.0));
         let response = ui.interact(rect, ui.id().with(id), Sense::click());
         let open = self.open_menu.as_deref() == Some(id);
@@ -845,7 +978,7 @@ impl App {
         }
         widgets::text_in(
             ui,
-            Rect::from_min_max(Pos2::new(cx, top), rect.max),
+            Rect::from_min_size(Pos2::new(cx, top), Vec2::new(label_width, 28.0)),
             label,
             label_font,
             color,
@@ -868,6 +1001,111 @@ impl App {
             };
         }
         rect
+    }
+
+    /// A picker showing its icon only (`data-composer-block-icon-only`),
+    /// its label as the tooltip; the "…" trigger has no chevron.
+    fn icon_picker(
+        &mut self,
+        ui: &mut Ui,
+        x: f32,
+        top: f32,
+        icon: &str,
+        label: &str,
+        id: &str,
+    ) -> Rect {
+        let chevron = icon != "ellipsis";
+        let width = if chevron {
+            ICON_PICKER
+        } else {
+            OVERFLOW_TRIGGER
+        };
+        let rect = Rect::from_min_size(Pos2::new(x, top), Vec2::new(width, 28.0));
+        let response = ui
+            .interact(rect, ui.id().with(id), Sense::click())
+            .on_hover_text(label);
+        let open = self.open_menu.as_deref() == Some(id);
+        if response.hovered() || open {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(8), theme::accent());
+        }
+        let color = if response.hovered() {
+            theme::foreground()
+        } else {
+            theme::muted_foreground()
+        };
+        theme::paint_icon(
+            ui,
+            icon,
+            Rect::from_min_size(Pos2::new(x + 11.0, top + 6.0), Vec2::splat(16.0)),
+            16.0,
+            color,
+        );
+        if chevron {
+            theme::paint_icon(
+                ui,
+                "chevron-down",
+                Rect::from_min_size(Pos2::new(x + 31.0, top + 7.0), Vec2::splat(14.0)),
+                14.0,
+                color,
+            );
+        }
+        if response.clicked() {
+            self.open_menu = if open { None } else { Some(id.to_owned()) };
+        }
+        rect
+    }
+
+    /// `CompactComposerControlsMenu`: the Mode (with plan mode) and Access
+    /// choices of the controls that no longer fit.
+    fn composer_overflow_menu(
+        &mut self,
+        ui: &mut Ui,
+        anchor: Rect,
+        draft: bool,
+        plan_toggle: bool,
+        runtime: &str,
+    ) {
+        use crate::ui::pickers::RUNTIME_MODES;
+        use crate::ui::widgets::{MenuEntry, MenuItem};
+        let plan = self.composer_interaction_mode(draft) == "plan";
+        let mut entries = Vec::new();
+        if plan_toggle {
+            entries.push(MenuEntry::Header("Mode"));
+            for (label, selected) in [("Chat", !plan), ("Plan", plan)] {
+                entries.push(MenuEntry::Item(MenuItem {
+                    checked: Some(selected),
+                    ..MenuItem::new(label)
+                }));
+            }
+            entries.push(MenuEntry::Separator);
+        }
+        let access = entries.len() + 1;
+        entries.push(MenuEntry::Header("Access"));
+        for (mode, label, _, _) in RUNTIME_MODES {
+            entries.push(MenuEntry::Item(MenuItem {
+                checked: Some(mode == runtime),
+                ..MenuItem::new(label)
+            }));
+        }
+        let Some(index) = widgets::menu(
+            ui,
+            &mut self.open_menu,
+            "composer-overflow",
+            anchor,
+            true,
+            &entries,
+        ) else {
+            return;
+        };
+        let key = self.composer_key(draft);
+        if index >= access {
+            self.composer_runtime
+                .insert(key, RUNTIME_MODES[index - access].0.to_owned());
+        } else {
+            let next = if index == 1 { "default" } else { "plan" };
+            self.composer_interaction.insert(key, next.into());
+        }
     }
 
     fn checkout_strip(&mut self, ui: &mut Ui, rect: Rect, draft: bool) {
@@ -1346,5 +1584,27 @@ impl App {
         {
             self.start_turn(send);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn footer_controls_drop_labels_then_overflow_then_truncate() {
+        // Model 150, traits (80 → 60), mode (130 → 61), "…" 43.
+        let blocks = [(80.0, 60.0), (130.0, 61.0)];
+        let fit = |room| fit_controls(150.0, &blocks, 43.0, room);
+        assert_eq!(fit(400.0).icon_only, 0);
+        assert_eq!(fit(340.0).icon_only, 1);
+        assert_eq!(fit(290.0).icon_only, 2);
+        assert!(!fit(290.0).mode_hidden);
+        let hidden = fit(260.0);
+        assert!(hidden.mode_hidden && !hidden.model_shrunk);
+        let shrunk = fit(210.0);
+        assert!(shrunk.mode_hidden && shrunk.model_shrunk);
+        assert_eq!(shrunk.model_width, 210.0 - 60.0 - 43.0);
+        assert_eq!(fit(10.0).model_width, MODEL_MIN);
     }
 }

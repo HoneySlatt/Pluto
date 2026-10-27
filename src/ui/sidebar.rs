@@ -1,5 +1,12 @@
 //! Sidebar (`Sidebar.tsx`): wordmark, search, thread cards grouped into the
 //! pinned/active list and the settled shelf, footer shortcuts.
+//!
+//! Collapsing follows `ui/sidebar.tsx` and `AppSidebarLayout.tsx`: the toggle
+//! (or `sidebar.toggle`) hides the docked sidebar and a floating trigger takes
+//! its place; below `md` (768px) the sidebar opens as a sheet over a dimmed
+//! workspace and closes once a destination is picked. The sheet keeps the
+//! docked width rather than upstream's near full width, since this sidebar's
+//! layout is fixed to 16rem.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::app::App;
@@ -168,7 +175,7 @@ impl App {
         let left = rect.left();
 
         // Header: sidebar toggle + wordmark.
-        widgets::icon_button(
+        let toggle = widgets::icon_button(
             ui,
             Rect::from_min_size(Pos2::new(left + 13.0, 12.0), Vec2::splat(28.0)),
             "toggle-sidebar",
@@ -177,6 +184,10 @@ impl App {
             theme::muted_foreground(),
             "Toggle Sidebar",
         );
+        // The settings sidebar does not collapse.
+        if toggle.clicked() && self.settings_page.is_none() {
+            self.toggle_sidebar();
+        }
         // Pluto's wordmark (in place of T3's mark and "Code"), its baseline
         // where T3's wordmark sat.
         let wordmark = widgets::galley(
@@ -244,6 +255,60 @@ impl App {
             back_text,
         );
         response.clicked()
+    }
+
+    /// Whether the sidebar takes its column in the layout.
+    pub(crate) fn sidebar_docked(&self) -> bool {
+        !self.mobile && self.sidebar_open
+    }
+
+    /// `toggleSidebar`: the sheet below `md`, the docked sidebar above.
+    pub(crate) fn toggle_sidebar(&mut self) {
+        if self.mobile {
+            self.sidebar_sheet_open = !self.sidebar_sheet_open;
+        } else {
+            self.sidebar_open = !self.sidebar_open;
+        }
+    }
+
+    /// The hidden sidebar: the floating trigger, or the open sheet over a
+    /// dimmed window (`bg-background/60`).
+    pub(crate) fn sidebar_sheet(&mut self, ui: &mut Ui, window: Rect, rect: Rect) {
+        if !self.sidebar_sheet_open {
+            let trigger = widgets::icon_button(
+                ui,
+                Rect::from_min_size(Pos2::new(window.left() + 13.0, 12.0), Vec2::splat(28.0)),
+                "open-sidebar",
+                "panel-left-open",
+                16.0,
+                theme::muted_foreground(),
+                "Toggle main sidebar",
+            );
+            if trigger.clicked() {
+                self.toggle_sidebar();
+            }
+            return;
+        }
+        let backdrop = ui.interact(window, ui.id().with("sidebar-backdrop"), Sense::click());
+        ui.painter()
+            .rect_filled(window, 0.0, theme::alpha(theme::background(), 0.6));
+        let destination = |app: &App| {
+            (
+                app.selected.clone(),
+                app.draft_project().map(|p| p.id),
+                app.usage_open,
+                app.pull_requests_open,
+                app.settings_page.is_some(),
+            )
+        };
+        let before = destination(self);
+        // The sheet sits over the backdrop, so it takes the pointer first.
+        ui.interact(rect, ui.id().with("sidebar-sheet"), Sense::click());
+        self.sidebar(ui, rect);
+        let escape = self.open_menu.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if backdrop.clicked() || escape || destination(self) != before {
+            self.sidebar_sheet_open = false;
+        }
     }
 
     pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
