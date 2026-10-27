@@ -10,11 +10,11 @@
 //! with the app theme in its fragment, fits its reported height, and pauses
 //! while scrolled out of view; a page unseen for a while gives its tab back.
 //!
-//! Differences from upstream: the hover button opens the page in the system
-//! browser instead of a full-screen dialog, links the page opens go to the
-//! system browser (like chat links here), app shortcuts are not passed out
-//! of a focused page, and the loading skeleton is the generic one (the
-//! server's outline is not drawn).
+//! Differences from upstream: the hover buttons open the page in the Design
+//! surface (`crate::ui::design`, instead of a full-screen dialog) or in the
+//! system browser, links the page opens go to the system browser (like chat
+//! links here), app shortcuts are not passed out of a focused page, and the
+//! loading skeleton is the generic one (the server's outline is not drawn).
 
 use std::collections::HashMap;
 
@@ -81,11 +81,9 @@ fn file_name(title: &str) -> String {
 }
 
 impl App {
-    /// `HtmlRenderTimelineRow`: the page `px-1` inside the column.
-    pub(crate) fn html_render_row(&mut self, ui: &mut Ui, render: &HtmlRender, width: f32) {
-        let frame_width = (width - 8.0).max(1.0);
+    /// Asks for a page's signed URL the first time it is needed.
+    pub(crate) fn request_html_render_url(&mut self, render: &HtmlRender) {
         let id = render.attachment_id.clone();
-        let now = ui.input(|i| i.time);
         let page = self.html_renders.pages.entry(id.clone()).or_default();
         if page.url == Url::Unrequested {
             page.url = Url::Pending;
@@ -101,6 +99,24 @@ impl App {
                 }}),
             );
         }
+    }
+
+    /// A page's URL with the app theme in its fragment: `Some(Ok)` once
+    /// signed, `Some(Err)` when it could not be, `None` while waiting.
+    pub(crate) fn html_render_url(&self, id: &str) -> Option<Result<String, ()>> {
+        match &self.html_renders.pages.get(id)?.url {
+            Url::Ready(url) => Some(Ok(format!("{url}{}", self.html_render_fragment()))),
+            Url::Failed => Some(Err(())),
+            Url::Unrequested | Url::Pending => None,
+        }
+    }
+
+    /// `HtmlRenderTimelineRow`: the page `px-1` inside the column.
+    pub(crate) fn html_render_row(&mut self, ui: &mut Ui, render: &HtmlRender, width: f32) {
+        let frame_width = (width - 8.0).max(1.0);
+        let id = render.attachment_id.clone();
+        let now = ui.input(|i| i.time);
+        self.request_html_render_url(render);
         let state = self.html_render_tab(ui.ctx(), &id);
         let content = state.as_ref().and_then(|s| s.content_height);
         let height = render.frame_height(frame_width, content);
@@ -174,32 +190,43 @@ impl App {
                 .request_repaint_after(std::time::Duration::from_millis(50));
             return;
         }
-        // Open in the system browser, shown on hover.
+        // Open in the Design surface or the system browser, shown on hover
+        // (`variant="glass"` buttons at `end-2 top-2`).
         if ui.rect_contains_pointer(area) {
-            let button = Rect::from_min_size(
-                Pos2::new(area.right() - 8.0 - 24.0, area.top() + 8.0),
-                Vec2::splat(24.0),
-            );
-            ui.painter().rect(
-                button,
-                CornerRadius::same(6),
-                theme::alpha(theme::popover(), 0.9),
-                Stroke::new(1.0, theme::border()),
-                StrokeKind::Inside,
-            );
-            let response = widgets::icon_button(
-                ui,
-                button,
-                ("html-render-open", &id),
-                "external-link",
-                14.0,
-                theme::muted_foreground(),
-                "Open in browser",
-            );
-            if response.clicked()
-                && let Url::Ready(url) = &self.html_renders.pages[&id].url
-            {
-                widgets::open_external(&format!("{url}{}", self.html_render_fragment()));
+            let mut right = area.right() - 8.0;
+            for (icon, tip) in [
+                ("external-link", "Open in browser"),
+                ("maximize-2", "Open in Design"),
+            ] {
+                let button = Rect::from_min_size(
+                    Pos2::new(right - 24.0, area.top() + 8.0),
+                    Vec2::splat(24.0),
+                );
+                right -= 24.0 + 4.0;
+                ui.painter().rect(
+                    button,
+                    CornerRadius::same(6),
+                    theme::alpha(theme::popover(), 0.9),
+                    Stroke::new(1.0, theme::border()),
+                    StrokeKind::Inside,
+                );
+                let response = widgets::icon_button(
+                    ui,
+                    button,
+                    ("html-render-open", icon, &id),
+                    icon,
+                    14.0,
+                    theme::muted_foreground(),
+                    tip,
+                );
+                if !response.clicked() {
+                    continue;
+                }
+                if icon == "maximize-2" {
+                    self.open_design(Some(id.clone()));
+                } else if let Some(Ok(url)) = self.html_render_url(&id) {
+                    widgets::open_external(&url);
+                }
             }
         }
     }

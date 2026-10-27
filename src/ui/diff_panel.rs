@@ -204,7 +204,9 @@ impl App {
             0.0,
             theme::border(),
         );
-        self.resize_handle(ui, rect);
+        if !self.panel().maximized {
+            self.resize_handle(ui, rect);
+        }
         let inner = Rect::from_min_max(Pos2::new(rect.left() + 1.0, rect.top()), rect.max);
 
         // No surface open: the launcher fills the panel.
@@ -226,6 +228,11 @@ impl App {
         if let crate::app::PanelTab::Browser { id } = active {
             let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
             self.browser_surface(ui, body, id);
+            return;
+        }
+        if active == crate::app::PanelTab::Design {
+            let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
+            self.design_surface(ui, body);
             return;
         }
         if active == crate::app::PanelTab::Agents {
@@ -985,13 +992,19 @@ impl App {
     /// Maximize / terminal / right panel toggles shared by both headers.
     pub(crate) fn panel_controls(&mut self, ui: &mut Ui, right: f32) {
         let mut x = right - 13.0;
+        // `RightPanelMaximizeControl`.
+        let maximized = self.panel().maximized;
         let buttons = [
             ("panel-right", "Toggle right panel", self.panel_open()),
             ("panel-bottom", "Toggle terminal", false),
-            ("maximize-2", "Maximize panel", false),
+            if maximized {
+                ("minimize-2", "Restore panel size", true)
+            } else {
+                ("maximize-2", "Maximize panel", false)
+            },
         ];
         for (icon, tip, active) in buttons {
-            if icon == "maximize-2" && !self.panel_open() {
+            if matches!(icon, "maximize-2" | "minimize-2") && !self.panel_open() {
                 continue;
             }
             let button = Rect::from_min_size(Pos2::new(x - 28.0, 12.0), Vec2::splat(28.0));
@@ -1015,6 +1028,11 @@ impl App {
                     "panel-right" => {
                         if let Some(panel) = self.panel_mut() {
                             panel.open = !panel.open;
+                        }
+                    }
+                    "maximize-2" | "minimize-2" => {
+                        if let Some(panel) = self.panel_mut() {
+                            panel.maximized = !panel.maximized;
                         }
                     }
                     _ => self.status = Some(format!("{tip} is not implemented yet")),

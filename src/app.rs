@@ -151,6 +151,7 @@ pub struct App {
     /// The Browser surface's preview browser (`ui::preview`).
     pub(crate) preview: crate::ui::preview::PreviewUi,
     pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
+    pub(crate) design: crate::ui::design::DesignState,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -274,6 +275,8 @@ pub struct App {
 #[derive(Clone, Default)]
 pub(crate) struct Panel {
     pub open: bool,
+    /// The panel takes the chat column's width too (`maximized`).
+    pub maximized: bool,
     /// Open surfaces, as tabs, and the active one.
     pub tabs: Vec<PanelTab>,
     pub active: usize,
@@ -293,6 +296,8 @@ pub(crate) enum PanelTab {
     Browser {
         id: u64,
     },
+    /// The thread's published pages (`crate::ui::design`).
+    Design,
     /// A terminal group (`terminalIds`), shown as "Terminal N": its first
     /// session, the sessions split beside it, the active one and whether
     /// the split stacks them (`splitDirection: "vertical"`).
@@ -449,6 +454,7 @@ impl App {
             cite: Default::default(),
             preview: Default::default(),
             html_renders: Default::default(),
+            design: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -995,7 +1001,14 @@ impl eframe::App for App {
                     && !self.pull_requests_open
                     && self.panel_open()
                     && self.current_thread().is_some();
-                let main = if panel_open {
+                // A maximized panel leaves the chat column no width.
+                let maximized = panel_open && self.panel().maximized;
+                let main = if maximized {
+                    Rect::from_min_max(
+                        workspace.min,
+                        Pos2::new(workspace.left(), workspace.bottom()),
+                    )
+                } else if panel_open {
                     let max = (rect.width() * 0.7)
                         .min(workspace.width() - 360.0)
                         .max(360.0);
@@ -1011,6 +1024,7 @@ impl eframe::App for App {
                     self.usage_page(ui, main);
                 } else if self.pull_requests_open {
                     self.pull_requests_page(ui, main);
+                } else if maximized {
                 } else if let Some(height) = self
                     .drawer_height(main.height())
                     .filter(|_| self.current_thread().is_some())
@@ -1050,6 +1064,7 @@ impl eframe::App for App {
                 self.bubble_context_popover(ui);
                 self.preview_end_frame();
                 self.html_renders_end_frame(ui.input(|i| i.time));
+                self.design_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);

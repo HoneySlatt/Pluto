@@ -16,7 +16,7 @@ struct Surface {
     hint: &'static str,
 }
 
-const SURFACES: [Surface; 8] = [
+const SURFACES: [Surface; 9] = [
     Surface {
         label: "Browser",
         icon: "earth",
@@ -73,6 +73,14 @@ const SURFACES: [Surface; 8] = [
         key: Key::M,
         hint: "Available from a thread.",
     },
+    // Pluto: the thread's published pages (`crate::ui::design`).
+    Surface {
+        label: "Design",
+        icon: "palette",
+        shortcut: "G",
+        key: Key::G,
+        hint: "Available once the agent publishes a page.",
+    },
 ];
 
 const ADD_MENU: &str = "add-surface";
@@ -89,6 +97,7 @@ impl App {
             "Browser" => crate::preview::browser_binary().is_some(),
             "Pull request" | "Linked pull requests" => false,
             "Diff" => self.workspace_is_repo(),
+            "Design" => !self.thread_pages().is_empty(),
             _ => true,
         }
     }
@@ -112,6 +121,8 @@ impl App {
                     *t == crate::app::PanelTab::Agents
                 });
             }
+        } else if label == "Design" {
+            self.open_design(None);
         } else if label == "Files" {
             if let Some(panel) = self.panel_mut() {
                 panel.show(crate::app::PanelTab::Files { file: None }, |t| {
@@ -280,6 +291,9 @@ impl App {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
                 crate::app::PanelTab::Agents => ("Agents".to_owned(), "bot", theme::foreground()),
+                crate::app::PanelTab::Design => {
+                    ("Design".to_owned(), "palette", theme::foreground())
+                }
                 crate::app::PanelTab::Browser { id } => {
                     (self.browser_tab_title(*id), "earth", theme::foreground())
                 }
