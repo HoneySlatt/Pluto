@@ -87,6 +87,10 @@ fn main() {
             if args.iter().any(|a| a == "--running") {
                 app.simulate_running_turn();
             }
+            // `--context` gives the thread a context report and quota windows.
+            if args.iter().any(|a| a == "--context") {
+                app.simulate_context_usage();
+            }
             // `--diff` opens the diff panel on the thread's last turn.
             if args.iter().any(|a| a == "--diff") {
                 app.open_last_diff();

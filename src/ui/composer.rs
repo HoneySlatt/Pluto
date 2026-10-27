@@ -498,6 +498,16 @@ impl App {
             Mode::Plan(plan) => self.plan_actions(ui, right, bar_top, plan, submit),
             _ => self.send_actions(ui, right, bar_top, draft, submit),
         };
+        // The context window meter sits between the attach button and the actions.
+        let meter = Rect::from_min_size(
+            Pos2::new(actions_left - 8.0 - 28.0, bar_top),
+            Vec2::splat(28.0),
+        );
+        let actions_left = if matches!(mode, Mode::Normal) && self.context_meter(ui, meter, draft) {
+            meter.left() + 4.0
+        } else {
+            actions_left
+        };
         let attach = Rect::from_min_size(
             Pos2::new(actions_left - 8.0 - 28.0, bar_top),
             Vec2::splat(28.0),
@@ -606,7 +616,7 @@ impl App {
         }
     }
 
-    fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         self.current_thread().is_some_and(|t| t.is_running())
     }
 

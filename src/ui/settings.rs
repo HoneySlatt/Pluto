@@ -58,7 +58,7 @@ pub fn default_client_settings() -> Value {
         "sidebarProjectGroupingOverrides": {},
         "sidebarWorkingShelfEnabled": false,
         "planModeEnabled": false,
-        "contextWindowMeterEnabled": false,
+        "contextWindowMeterEnabled": true,
         "legacySidebarEnabled": false,
         "sidebarProjectSortOrder": "updated_at",
         "sidebarThreadSortOrder": "updated_at",

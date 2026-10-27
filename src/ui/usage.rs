@@ -819,7 +819,7 @@ impl App {
 
 /// `formatUpcomingTimestamp`: the local time, "tomorrow at" it, or the
 /// numeric date before it.
-fn upcoming_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn upcoming_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(date) = crate::timeline::parse_time(iso) else {
         return String::new();
     };

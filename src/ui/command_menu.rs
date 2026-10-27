@@ -380,7 +380,7 @@ pub(crate) fn file_link(path: &str) -> String {
 
 impl App {
     /// The selected provider's entry in the server config.
-    fn composer_provider(&self, draft: bool) -> Option<&Value> {
+    pub(crate) fn composer_provider(&self, draft: bool) -> Option<&Value> {
         let instance = self.composer_model_selection(draft).instance_id;
         self.providers()
             .iter()
@@ -388,7 +388,7 @@ impl App {
     }
 
     /// `resolveProviderSkillsForCwd` / `resolveProviderSlashCommandsForCwd`.
-    fn provider_list(&self, draft: bool, key: &str) -> Vec<Value> {
+    pub(crate) fn provider_list(&self, draft: bool, key: &str) -> Vec<Value> {
         let Some(provider) = self.composer_provider(draft) else {
             return Vec::new();
         };

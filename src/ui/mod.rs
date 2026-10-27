@@ -13,6 +13,7 @@ pub mod composer_context;
 pub mod connect;
 pub mod content_search;
 pub mod context_menu;
+pub mod context_meter;
 pub mod custom_model_editor;
 pub mod diff_panel;
 pub mod emoji;

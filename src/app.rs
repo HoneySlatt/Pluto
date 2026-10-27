@@ -1164,6 +1164,38 @@ impl App {
             });
         }
     }
+
+    /// Gives the open thread a context usage report and its provider quota
+    /// windows, for snapshots of the context window meter.
+    pub fn simulate_context_usage(&mut self) {
+        let instance = self.composer_model_selection(false).instance_id;
+        let resets =
+            |hours: i64| (chrono::Utc::now() + chrono::Duration::hours(hours)).to_rfc3339();
+        if let Some(providers) = self.state.config["providers"].as_array_mut() {
+            for provider in providers
+                .iter_mut()
+                .filter(|p| p["instanceId"] == instance.as_str())
+            {
+                provider["usageLimits"] = serde_json::json!({
+                    "checkedAt": resets(0),
+                    "windows": [
+                        {"id": "five_hour", "kind": "session", "label": "Session", "usedPercent": 3, "resetsAt": resets(3)},
+                        {"id": "seven_day", "kind": "weekly", "label": "Weekly", "usedPercent": 97, "resetsAt": resets(20)},
+                        {"id": "seven_day_fable", "kind": "weekly", "label": "Weekly · Fable", "usedPercent": 0, "resetsAt": resets(20)},
+                    ],
+                });
+            }
+        }
+        if let Some(detail) = self.state.detail.as_mut() {
+            let detail = Arc::make_mut(detail);
+            detail.thread["activeProviderThreadId"] = "snapshot-provider-thread".into();
+            detail.provider_threads.push(serde_json::json!({
+                "id": "snapshot-provider-thread",
+                "contextUsage": {"usedTokens": 712_500, "maxTokens": 1_000_000, "autoCompactThreshold": 962_500},
+            }));
+        }
+        self.state.revision += 1;
+    }
 }
 
 impl App {
