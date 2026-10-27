@@ -565,7 +565,28 @@ fn work_entry(item: &Arc<TurnItem>, created_at: &str) -> WorkEntry {
         }
         "dynamic_tool" => {
             let tool = item.str("toolName").map(str::to_owned);
-            entry.label = or(tool.unwrap_or_else(|| "Tool call".into()));
+            // Pluto's chat memory tools say what they remembered.
+            let memory = tool.as_deref().and_then(|name| {
+                [
+                    ("memory_save", "Saved to memory"),
+                    ("memory_update", "Updated a memory"),
+                    ("memory_delete", "Deleted a memory"),
+                ]
+                .into_iter()
+                .find(|(id, _)| crate::html_render::is_t3_tool(name, id))
+            });
+            let failed = |output: &Value| {
+                output["isError"] == true
+                    || output["is_error"] == true
+                    || !output["error"].is_null()
+            };
+            match memory {
+                Some((_, label)) if item.status == "completed" && !failed(item.get("output")) => {
+                    entry.label = label.into();
+                    entry.detail = text(&tool_arguments(item.get("input"))["text"]);
+                }
+                _ => entry.label = or(tool.unwrap_or_else(|| "Tool call".into())),
+            }
         }
         "approval_request" => {
             entry.label = or("Approval requested".into());
@@ -585,6 +606,20 @@ fn work_entry(item: &Arc<TurnItem>, created_at: &str) -> WorkEntry {
         _ => entry.label = or(item.kind.replace('_', " ")),
     }
     entry
+}
+
+/// `t3ToolSummary.ts`'s `readInput`: a tool call's arguments, which some
+/// adapters keep as JSON text and Cursor inside its MCP envelope.
+fn tool_arguments(input: &Value) -> Value {
+    let input = match input.as_str() {
+        Some(raw) => serde_json::from_str(raw).unwrap_or(Value::Null),
+        None => input.clone(),
+    };
+    if input["toolName"].is_string() {
+        input["args"].clone()
+    } else {
+        input
+    }
 }
 
 /// `turnItemIsWorkspacePreparation`.
@@ -1524,6 +1559,57 @@ mod tests {
             item: Arc::new(item),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn memory_calls_say_what_they_remembered() {
+        let call = |tool: &str, input: Value, output: Value| {
+            let row = item(
+                "m",
+                "dynamic_tool",
+                "2026-10-27T00:00:00.000Z",
+                None,
+                json!({"toolName": tool, "input": input, "output": output}),
+            );
+            let entry = work_entry(&row.item, "");
+            (entry.label, entry.detail)
+        };
+        let saved = (
+            "Saved to memory".to_owned(),
+            Some("Lives in Lyon.".to_owned()),
+        );
+        assert_eq!(
+            call(
+                "mcp__t3-code__memory_save",
+                json!({"text": "Lives in Lyon."}),
+                json!({})
+            ),
+            saved
+        );
+        // Kept as JSON text, or in Cursor's envelope.
+        assert_eq!(
+            call(
+                "t3-code.memory_save",
+                json!(r#"{"text":"Lives in Lyon."}"#),
+                json!({})
+            ),
+            saved
+        );
+        assert_eq!(
+            call(
+                "memory_save",
+                json!({"toolName": "memory_save", "args": {"text": "Lives in Lyon."}}),
+                json!({})
+            ),
+            saved
+        );
+        // A refused call keeps the tool's name.
+        let refused = call(
+            "memory_save",
+            json!({"text": "x"}),
+            json!({"isError": true}),
+        );
+        assert_eq!(refused.0, "memory_save");
     }
 
     fn settled() -> (Thread, Detail) {

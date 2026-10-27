@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::context_menu;
+use crate::ui::memory_settings::MEMORY_PAGE;
 use crate::ui::projects_page::PROJECT_PAGE;
 use crate::ui::widgets::{self, MenuEntry, MenuItem};
 
@@ -329,13 +330,13 @@ pub(crate) struct Row {
     pub(crate) control: Control,
 }
 
-struct Section {
-    title: String,
+pub(crate) struct Section {
+    pub(crate) title: String,
     /// Archive groups show their project's icon before the title.
-    project: Option<crate::model::Project>,
+    pub(crate) project: Option<crate::model::Project>,
     /// `SettingsUnavailableGroup`: a warning notice above rows dimmed to 64%.
-    unavailable: Option<&'static str>,
-    rows: Vec<Row>,
+    pub(crate) unavailable: Option<&'static str>,
+    pub(crate) rows: Vec<Row>,
 }
 
 pub(crate) enum RowAction {
@@ -2162,10 +2163,16 @@ impl App {
         let project_entry = self
             .is_project_scope()
             .then_some((PROJECT_PAGE, ("Project", "panels-top-left")));
-        let entries: Vec<(usize, (&str, &str))> = project_entry
+        let mut entries: Vec<(usize, (&str, &str))> = project_entry
             .into_iter()
             .chain(PAGES.iter().copied().enumerate())
             .collect();
+        // Pluto's Memory page follows Providers.
+        let providers = entries
+            .iter()
+            .position(|(index, _)| *index == PROVIDERS_PAGE)
+            .map_or(entries.len(), |at| at + 1);
+        entries.insert(providers, (MEMORY_PAGE, ("Memory", "brain")));
         for (slot, (index, (label, icon))) in entries.into_iter().enumerate().filter(|_| !searching)
         {
             let item = Rect::from_min_size(
@@ -2232,13 +2239,16 @@ impl App {
         if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
             self.request_discovery();
         }
+        if index == MEMORY_PAGE {
+            self.request_memory();
+        }
     }
 
     fn settings_page_view(&mut self, ui: &mut Ui, main: Rect, page: usize) {
-        let label = if page == PROJECT_PAGE {
-            "Project"
-        } else {
-            PAGES[page].0
+        let label = match page {
+            PROJECT_PAGE => "Project",
+            MEMORY_PAGE => "Memory",
+            _ => PAGES[page].0,
         };
         // Header: "Settings / Page", and Restore device defaults on General.
         let mut x = main.left() + 20.0;
@@ -2304,7 +2314,7 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if !PORTED_PAGES.contains(&page) && page != PROJECT_PAGE {
+        if !PORTED_PAGES.contains(&page) && page != PROJECT_PAGE && page != MEMORY_PAGE {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -2324,6 +2334,7 @@ impl App {
             CONNECTIONS_PAGE => connections_sections(),
             SOURCE_CONTROL_PAGE => self.source_control_sections(),
             INTEGRATIONS_PAGE => self.integrations_sections(),
+            MEMORY_PAGE => self.memory_sections(),
             crate::ui::typography::APPEARANCE_PAGE => self.appearance_sections(),
             _ => self.general_sections(),
         };
@@ -2342,7 +2353,14 @@ impl App {
                 let left = body.center().x - card_width / 2.0;
                 let top = ui.max_rect().top();
                 // `SETTINGS_DEVICE_ONLY_PATHS` (Appearance, SnapShots, Connections) skip the scope.
-                let mut y = if [1, SNAP_SHOT_PAGE, CONNECTIONS_PAGE, PROVIDERS_PAGE].contains(&page)
+                let mut y = if [
+                    1,
+                    SNAP_SHOT_PAGE,
+                    CONNECTIONS_PAGE,
+                    PROVIDERS_PAGE,
+                    MEMORY_PAGE,
+                ]
+                .contains(&page)
                 {
                     top + 24.0
                 } else {
@@ -2567,6 +2585,7 @@ impl App {
                 STORAGE_PAGE => self.apply_storage(&id, action),
                 SOURCE_CONTROL_PAGE => self.apply_source_control(&id, action),
                 INTEGRATIONS_PAGE => self.apply_integrations(&id, action),
+                MEMORY_PAGE => self.apply_memory(&id, action),
                 _ => self.apply_general(&id, action),
             }
         }
@@ -3491,7 +3510,7 @@ fn outline_icon_width(ui: &Ui, label: &str, icon_size: f32) -> f32 {
 }
 
 /// `formatRelativeTimeLabel`: "just now", "5m ago", "3h ago", "2d ago".
-fn relative_time_label(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn relative_time_label(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(date) = crate::timeline::parse_time(iso) else {
         return String::new();
     };

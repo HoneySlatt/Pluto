@@ -463,6 +463,10 @@ impl App {
         match decision {
             Some(true) => {
                 if let Some(confirm) = self.confirm.take() {
+                    if confirm.command["type"] == crate::ui::memory_settings::CLEAR_COMMAND {
+                        self.clear_memories();
+                        return;
+                    }
                     let deleted = confirm.command["type"] == "thread.delete";
                     let thread_id = confirm.command["threadId"].as_str().map(str::to_owned);
                     let deleted_selected = deleted

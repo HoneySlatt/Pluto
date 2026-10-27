@@ -34,6 +34,7 @@ pub mod markdown;
 pub mod md_copy;
 pub mod md_links;
 pub mod media;
+pub mod memory_settings;
 pub mod mentions;
 pub mod open_in;
 pub mod palette;

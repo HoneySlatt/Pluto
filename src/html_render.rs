@@ -32,9 +32,13 @@ pub fn clamp_height(height: f32) -> f32 {
     height.round().clamp(MIN_HEIGHT, MAX_HEIGHT)
 }
 
-/// `resolveT3McpToolName` for `html_render`: the tool under any of the
-/// prefixes providers give T3's server (`mcp__t3-code__`, `t3-code.`, …).
 fn is_html_render_tool(name: &str) -> bool {
+    is_t3_tool(name, "html_render")
+}
+
+/// `resolveT3McpToolName`: whether `name` is T3's `tool` under any of the
+/// prefixes providers give T3's server (`mcp__t3-code__`, `t3-code.`, …).
+pub fn is_t3_tool(name: &str, tool: &str) -> bool {
     let label = name.trim();
     let label = label
         .strip_suffix(" completed")
@@ -42,26 +46,26 @@ fn is_html_render_tool(name: &str) -> bool {
         .unwrap_or(label)
         .trim();
     if let Some(rest) = label.strip_prefix("mcp__") {
-        return rest.split_once("__").is_some_and(|(server, tool)| {
+        return rest.split_once("__").is_some_and(|(server, rest_tool)| {
             matches!(
                 server.to_lowercase().as_str(),
                 "t3-code" | "t3_code" | "t3code"
-            ) && tool == "html_render"
+            ) && rest_tool == tool
         });
     }
     let lower = label.to_lowercase();
     for server in ["t3-code", "t3_code", "t3code"] {
         if let Some(rest) = lower.strip_prefix(server) {
-            let tool = rest
+            let rest_tool = rest
                 .trim_start_matches(|c: char| ".:/ -_·".contains(c))
                 .trim();
-            if tool == "html_render" {
+            if rest_tool == tool {
                 return true;
             }
         }
     }
     // OpenCode 2 names one server per thread: `t3-code-<thread>_html_render`.
-    label == "html_render" || (lower.starts_with("t3-code-") && lower.ends_with("_html_render"))
+    label == tool || (lower.starts_with("t3-code-") && lower.ends_with(&format!("_{tool}")))
 }
 
 /// `readHtmlRenderReference`.
