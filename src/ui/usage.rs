@@ -4,9 +4,10 @@
 //! Ported: the header (metric and period groups, refresh) and the Limits view:
 //! provider quota windows pooled per driver from the server config, with the
 //! remaining share, pace and reset countdown, refreshed through
-//! `server.refreshProviders`. The Cost and Tokens views live in
+//! `server.refreshProviders`, then the providers' limit notices
+//! (`collectLimitNotices`, `LimitNotices`). The Cost and Tokens views live in
 //! `usage_summary.rs`. Not ported: segment popovers, reset credits, usage
-//! limit sources (hubs), limit notices and keyboard shortcuts. Like upstream,
+//! limit sources (hubs) and keyboard shortcuts. Like upstream,
 //! the limits clock only advances on refresh.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::Value;
@@ -269,6 +270,80 @@ fn limit_pools(providers: &[Value], now: i64, environment: Option<&str>) -> Vec<
         .collect()
 }
 
+/// `collectLimitNotices` for one environment: a line for each provider whose
+/// limits failed or reported nothing. Accounts that can never report (API
+/// keys, `unsupported`) are left out.
+fn limit_notices(providers: &[Value]) -> Vec<String> {
+    providers
+        .iter()
+        .filter(|p| {
+            p["enabled"] == true && p["installed"] == true && p["availability"] != "unavailable"
+        })
+        .filter_map(|provider| {
+            let limits = provider["usageLimits"].as_object()?;
+            let unavailable = &limits.get("unavailable").cloned().unwrap_or(Value::Null);
+            let message = || unavailable["message"].as_str().map(str::to_owned);
+            let notice = match unavailable["reason"].as_str() {
+                Some("unsupported") => return None,
+                Some("probeFailed") => message().unwrap_or_else(|| "Could not read limits.".into()),
+                _ if limits
+                    .get("windows")
+                    .and_then(Value::as_array)
+                    .is_none_or(|w| w.is_empty()) =>
+                {
+                    "No limits reported.".into()
+                }
+                _ => return None,
+            };
+            let name = provider["displayName"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| driver_label(provider["driver"].as_str().unwrap_or_default()));
+            Some(format!("{name}: {notice}"))
+        })
+        .collect()
+}
+
+/// `LimitNotices`: an `Alert variant="warning"` with a title per notice;
+/// returns its height.
+fn paint_limit_notices(ui: &Ui, min: Pos2, notices: &[String]) -> f32 {
+    if notices.is_empty() {
+        return 0.0;
+    }
+    let height = 24.0 + notices.len() as f32 * 20.0;
+    let rect = Rect::from_min_size(min, Vec2::new(COLUMN, height));
+    let warning = theme::warning();
+    let surface = if theme::palette().dark { 0.16 } else { 0.08 };
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(12),
+        theme::alpha(warning, surface),
+        Stroke::new(1.0, theme::alpha(warning, 0.32)),
+        StrokeKind::Inside,
+    );
+    theme::paint_icon(
+        ui,
+        "triangle-alert",
+        Rect::from_min_size(min + Vec2::new(14.0, 14.0), Vec2::splat(16.0)),
+        16.0,
+        warning,
+    );
+    for (index, notice) in notices.iter().enumerate() {
+        widgets::text_in(
+            ui,
+            Rect::from_min_size(
+                min + Vec2::new(14.0 + 16.0 + 8.0, 12.0 + index as f32 * 20.0),
+                Vec2::new(COLUMN - 52.0, 20.0),
+            ),
+            notice,
+            font(14.0, Weight::Medium),
+            theme::warning_foreground(),
+        );
+    }
+    height
+}
+
 fn driver_label(driver: &str) -> &str {
     match driver {
         "codex" => "Codex",
@@ -467,6 +542,7 @@ impl App {
             .as_str()
             .map(str::to_owned);
         let pools = limit_pools(self.providers(), now, environment.as_deref());
+        let notices = limit_notices(self.providers());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("usage-limits")
@@ -475,7 +551,7 @@ impl App {
                 let left = body.center().x - COLUMN / 2.0;
                 let top = ui.max_rect().top();
                 let mut y = top + 24.0;
-                if pools.is_empty() {
+                if pools.is_empty() && notices.is_empty() {
                     widgets::text(
                         ui,
                         Pos2::new(left, y),
@@ -523,6 +599,9 @@ impl App {
                         y += CARD_HEIGHT + 12.0;
                     }
                     y += 32.0 - 12.0;
+                }
+                if !notices.is_empty() {
+                    y += paint_limit_notices(ui, Pos2::new(left, y), &notices);
                 }
                 ui.allocate_rect(
                     Rect::from_min_max(Pos2::new(left, top), Pos2::new(left + COLUMN, y + 24.0)),
@@ -981,6 +1060,39 @@ pub(crate) fn segmented(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn limit_notices_follow_collect_limit_notices() {
+        let provider = |driver: &str, limits: Value| {
+            json!({"driver": driver, "enabled": true, "installed": true,
+                   "status": "ready", "usageLimits": limits})
+        };
+        let providers = [
+            provider("grok", json!({"checkedAt": "x", "windows": []})),
+            provider(
+                "mistralVibe",
+                json!({"checkedAt": "x", "windows": [],
+                "unavailable": {"reason": "unsupported"}}),
+            ),
+            provider(
+                "zcode",
+                json!({"checkedAt": "x", "windows": [],
+                "unavailable": {"reason": "probeFailed"}}),
+            ),
+            provider(
+                "claudeAgent",
+                json!({"checkedAt": "x", "windows": [
+                {"id": "five_hour", "kind": "session", "label": "Session", "usedPercent": 10}]}),
+            ),
+        ];
+        assert_eq!(
+            limit_notices(&providers),
+            [
+                "Grok: No limits reported.",
+                "Z Code: Could not read limits."
+            ]
+        );
+    }
 
     #[test]
     fn windows_pool_by_kind_with_pace_and_reset() {
