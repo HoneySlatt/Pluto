@@ -2,8 +2,10 @@
 //! items like upstream `session-logic.ts` (`deriveTimelineEntriesFromVisibleTurnItems`,
 //! `projectedWorkEntry`); rows fold settled runs and group tool calls like
 //! `MessagesTimeline.logic.ts` (`deriveTurnFolds`, `deriveMessagesTimelineRows`).
+//! Pages published with `html_render` show where the call happened and stay
+//! out of folds (`kind: "html-render"`).
 //! Not ported from v0.1.0's rows yet: the live activity row, superseded
-//! attempt folds, context compaction rows, html renders and MCP apps, and
+//! attempt folds, context compaction rows, MCP apps, and
 //! the lifecycle cards (`V2LifecycleRow.tsx`: interrupts, forks, handoffs,
 //! subagents, secret requests), which show as standalone work rows with
 //! their upstream labels.
@@ -72,7 +74,17 @@ pub struct WorkEntry {
 enum Entry {
     Message(Message),
     Plan(ProposedPlan),
+    HtmlRender(HtmlRenderEntry),
     Work(WorkEntry),
+}
+
+/// A page an agent published, where its call happened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HtmlRenderEntry {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub created_at: String,
+    pub render: crate::html_render::HtmlRender,
 }
 
 impl Entry {
@@ -80,6 +92,7 @@ impl Entry {
         match self {
             Entry::Message(m) => &m.id,
             Entry::Plan(p) => &p.id,
+            Entry::HtmlRender(h) => &h.id,
             Entry::Work(w) => &w.id,
         }
     }
@@ -88,6 +101,7 @@ impl Entry {
         match self {
             Entry::Message(m) => &m.created_at,
             Entry::Plan(p) => &p.created_at,
+            Entry::HtmlRender(h) => &h.created_at,
             Entry::Work(w) => &w.created_at,
         }
     }
@@ -98,6 +112,7 @@ impl Entry {
             Entry::Message(m) if m.role == "assistant" => m.run_id.as_deref(),
             Entry::Message(_) => None,
             Entry::Plan(p) => p.run_id.as_deref(),
+            Entry::HtmlRender(h) => h.run_id.as_deref(),
             Entry::Work(w) => w.run_id.as_deref(),
         }
     }
@@ -114,7 +129,7 @@ impl Entry {
                     )
             }
             Entry::Work(w) => w.item_type.as_deref() == Some("notification"),
-            Entry::Plan(_) => false,
+            Entry::Plan(_) | Entry::HtmlRender(_) => false,
         }
     }
 
@@ -123,7 +138,7 @@ impl Entry {
         match self {
             Entry::Message(m) => m.run_id.as_deref(),
             Entry::Work(w) => w.run_id.as_deref(),
-            Entry::Plan(_) => None,
+            Entry::Plan(_) | Entry::HtmlRender(_) => None,
         }
     }
 
@@ -191,6 +206,8 @@ pub enum Row {
     },
     /// A proposed plan (`ProposedPlanCard`).
     Plan(Box<ProposedPlan>),
+    /// A page an agent published (`HtmlRenderTimelineRow`).
+    HtmlRender(Box<HtmlRenderEntry>),
     /// An image Codex may have generated, read from Codex's saved file by
     /// call id. Not shown upstream; not produced from protocol 2 items yet.
     GeneratedImage {
@@ -623,6 +640,15 @@ fn entries(detail: &Detail) -> Vec<Entry> {
             .started_at
             .clone()
             .unwrap_or_else(|| item.updated_at.clone());
+        if let Some(render) = crate::html_render::from_tool_item(item) {
+            out.push(Entry::HtmlRender(HtmlRenderEntry {
+                id: item.id.clone(),
+                run_id: item.run_id.clone(),
+                created_at,
+                render,
+            }));
+            continue;
+        }
         match item.kind.as_str() {
             "notification" => out.push(Entry::Work(WorkEntry {
                 id: item.id.clone(),
@@ -1448,6 +1474,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                 });
             }
             Entry::Plan(plan) => out.push(Row::Plan(Box::new(plan.clone()))),
+            Entry::HtmlRender(page) => out.push(Row::HtmlRender(Box::new(page.clone()))),
         }
         index += 1;
     }
@@ -1548,6 +1575,27 @@ mod tests {
             }
         ));
         assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn published_pages_stay_out_of_folds() {
+        let (thread, mut detail) = settled();
+        detail.visible.insert(
+            3,
+            item(
+                "h",
+                "dynamic_tool",
+                "2026-01-01T00:02:30.000Z",
+                Some("run"),
+                json!({"toolName": "mcp__t3-code__html_render", "input": {},
+                    "output": {"htmlRender": {"attachmentId": "p-html", "title": "Chart", "height": 400}}}),
+            ),
+        );
+        let rows = rows(&thread, &detail, &Expansion::default());
+        assert!(matches!(&rows[1], Row::TurnFold { .. }));
+        assert!(matches!(&rows[2], Row::HtmlRender(page) if page.render.attachment_id == "p-html"));
+        assert!(matches!(&rows[3], Row::Assistant { .. }));
+        assert_eq!(rows.len(), 4);
     }
 
     #[test]

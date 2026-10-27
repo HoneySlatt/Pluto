@@ -968,17 +968,16 @@ impl App {
                 theme::alpha(theme::sidebar_muted(), 0.4),
             );
         }
-        if self
+        if let Some((icon, tint)) = self
             .provider_driver(&thread.model_selection.instance_id)
-            .as_deref()
-            == Some("codex")
+            .and_then(|driver| crate::ui::pickers::provider_icon(&driver))
         {
             theme::paint_icon(
                 ui,
-                "openai",
+                icon,
                 Rect::from_min_size(Pos2::new(right - 14.0, row3.top() + 1.0), Vec2::splat(14.0)),
                 14.0,
-                theme::alpha(theme::secondary_label(), 0.6),
+                theme::alpha(tint, 0.6),
             );
             // The glyph dims, the badge stays saturated.
             if let Some(badge) = self.instance_badge(&thread.model_selection.instance_id) {

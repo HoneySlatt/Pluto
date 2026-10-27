@@ -21,6 +21,7 @@ pub mod favicon;
 pub mod file_previews;
 pub mod files;
 pub mod git_actions;
+pub mod html_render;
 pub mod icon_picker;
 pub mod instance_badge;
 pub mod keybindings;

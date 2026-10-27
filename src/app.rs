@@ -150,6 +150,7 @@ pub struct App {
     pub(crate) cite: crate::ui::cite::CiteState,
     /// The Browser surface's preview browser (`ui::preview`).
     pub(crate) preview: crate::ui::preview::PreviewUi,
+    pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -447,6 +448,7 @@ impl App {
             pending_copy: false,
             cite: Default::default(),
             preview: Default::default(),
+            html_renders: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -1047,6 +1049,7 @@ impl eframe::App for App {
                 self.publish_dialog(ui, rect);
                 self.bubble_context_popover(ui);
                 self.preview_end_frame();
+                self.html_renders_end_frame(ui.input(|i| i.time));
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);
@@ -1069,17 +1072,8 @@ impl App {
     /// the stock dark palette; a built-in theme id takes that theme's dark
     /// variant (this client renders dark appearances only).
     fn sync_theme(&self, ctx: &egui::Context) {
-        let id = self.state.config["settings"]["defaultTheme"]
-            .as_str()
-            .unwrap_or_default();
-        // `getThemeDefinition`: a built-in first, then the published themes.
-        let palette = crate::theme::built_in_theme(id)
-            .or_else(|| {
-                (!id.is_empty())
-                    .then(|| self.state.config["environmentThemes"].as_array())
-                    .flatten()
-                    .and_then(|themes| themes.iter().find(|t| t["id"] == id).cloned())
-            })
+        let palette = self
+            .active_theme()
             .as_ref()
             .and_then(crate::theme::Palette::from_theme)
             .unwrap_or(crate::theme::DARK);
@@ -1087,6 +1081,21 @@ impl App {
             crate::theme::apply_palette(ctx);
             ctx.request_repaint();
         }
+    }
+
+    /// The theme the `defaultTheme` server setting names
+    /// (`getThemeDefinition`: a built-in first, then the published themes);
+    /// none on the stock theme.
+    pub(crate) fn active_theme(&self) -> Option<Value> {
+        let id = self.state.config["settings"]["defaultTheme"]
+            .as_str()
+            .unwrap_or_default();
+        crate::theme::built_in_theme(id).or_else(|| {
+            (!id.is_empty())
+                .then(|| self.state.config["environmentThemes"].as_array())
+                .flatten()
+                .and_then(|themes| themes.iter().find(|t| t["id"] == id).cloned())
+        })
     }
 
     /// Opens the first thread whose title starts with `prefix` (dev snapshots).
@@ -1335,6 +1344,7 @@ impl App {
             || self.plan_result(&key, &result)
             || self.publish_result(&key, &result)
             || self.command_menu_result(&key, &result)
+            || self.html_render_url_result(&key, &result)
         {
             return;
         }

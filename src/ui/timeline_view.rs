@@ -108,6 +108,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::Working { .. } => Id::new("working"),
         Row::GeneratedImage { tool_call_id } => Id::new(("generated", tool_call_id)),
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
+        Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
     }
 }
 
@@ -142,6 +143,8 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
         Row::Working { .. } => LINE + 4.0 + 6.0,
         Row::GeneratedImage { .. } => 0.0,
+        // The frame (`px-1`) at its measured height, then `pb-2`.
+        Row::HtmlRender(page) => page.render.frame_height(width - 8.0, None) + 8.0,
         // The card: padding, header, its text (a long plan folded to 26rem
         // and the Expand button) and the row's space.
         Row::Plan(plan) => {

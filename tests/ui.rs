@@ -74,6 +74,54 @@ fn clicking_a_sidebar_card_opens_its_thread() {
 }
 
 #[test]
+fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
+    let drivers = [
+        "codex",
+        "claudeAgent",
+        "cursor",
+        "grok",
+        "opencode",
+        "antigravity",
+        "kimiCode",
+        "mistralVibe",
+        "zcode",
+    ];
+    let providers: Vec<Value> = drivers
+        .iter()
+        .map(|driver| json!({"instanceId": format!("custom-{driver}"), "driver": driver}))
+        .collect();
+    let threads: Vec<Value> = drivers
+        .iter()
+        .enumerate()
+        .map(|(i, driver)| {
+            let mut thread = thread(driver, driver, i as i64 + 1);
+            thread["modelSelection"]["instanceId"] = json!(format!("custom-{driver}"));
+            thread
+        })
+        .collect();
+    let mut harness = harness();
+    let config = json!({"type": "snapshot", "config": {"providers": providers, "settings": {}}});
+    let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2,
+        "projects": [{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}],
+        "threads": threads}});
+    harness.state_mut().load_offline(&config, &shell).unwrap();
+    harness.run_steps(5);
+    for (i, driver) in drivers.iter().enumerate() {
+        let slot = egui::Rect::from_min_size(
+            egui::pos2(216.0, 150.0 + i as f32 * 83.0),
+            egui::vec2(28.0, 25.0),
+        );
+        assert!(
+            harness.output().shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Rect(rect)
+                    if rect.brush.is_some() && slot.contains_rect(rect.rect))
+            }),
+            "missing sidebar provider mark for {driver}"
+        );
+    }
+}
+
+#[test]
 fn worked_for_row_toggles_the_turn_fold() {
     let mut harness = harness();
     click(&mut harness, egui::pos2(60.0, 140.0));

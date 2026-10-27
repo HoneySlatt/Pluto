@@ -751,6 +751,10 @@ impl App {
                 self.plan_row(ui, plan, width);
                 ui.add_space(16.0);
             }
+            Row::HtmlRender(page) => {
+                self.html_render_row(ui, &page.render, width);
+                ui.add_space(8.0);
+            }
         }
     }
 

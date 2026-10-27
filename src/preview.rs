@@ -5,6 +5,11 @@
 //! DevTools protocol carries its frames (`Page.startScreencast`) to the
 //! panel and the panel's pointer and keys back to the page.
 //!
+//! The same browser draws the pages agents publish with `html_render` in the
+//! chat (`crate::html_render`): such a tab reports its content height
+//! through a binding, casts lossless frames for crisp text, and hands the
+//! links its page opens to the client instead of opening them.
+//!
 //! The browser runs with a throwaway profile in the temporary directory,
 //! never the user's own. It talks over `--remote-debugging-pipe` (file
 //! descriptors 3 and 4, NUL-separated JSON), so it exits on its own once
@@ -94,6 +99,7 @@ enum Request {
     Open {
         tab: u64,
         url: Option<String>,
+        render: bool,
     },
     Navigate {
         tab: u64,
@@ -158,6 +164,10 @@ pub struct TabState {
     pub frame: Option<Arc<egui::ColorImage>>,
     pub frame_seq: u64,
     pub error: Option<String>,
+    /// A render tab's content height in CSS pixels, as its page reports it.
+    pub content_height: Option<f32>,
+    /// Links a render tab's page opened, for the client to open elsewhere.
+    pub links: Vec<String>,
 }
 
 /// The running preview browser.
@@ -201,7 +211,30 @@ impl Preview {
     }
 
     pub fn open(&self, tab: u64, url: Option<String>) {
-        self.send(Request::Open { tab, url });
+        self.send(Request::Open {
+            tab,
+            url,
+            render: false,
+        });
+    }
+    /// A tab for a published page (`html_render`) at `url`.
+    pub fn open_render(&self, tab: u64, url: String) {
+        self.send(Request::Open {
+            tab,
+            url: Some(url),
+            render: true,
+        });
+    }
+    /// The links a render tab's page opened since the last call.
+    pub fn take_links(&self, tab: u64) -> Vec<String> {
+        self.tabs
+            .lock()
+            .ok()
+            .and_then(|mut tabs| {
+                tabs.get_mut(&tab)
+                    .map(|state| std::mem::take(&mut state.links))
+            })
+            .unwrap_or_default()
     }
     pub fn navigate(&self, tab: u64, url: String) {
         self.send(Request::Navigate { tab, url });
@@ -263,7 +296,17 @@ struct Page {
     viewport: Option<(u32, u32, f32)>,
     visible: bool,
     casting: bool,
+    /// A published page: lossless frames, a height binding, no popups.
+    render: bool,
 }
+
+/// The binding a render tab's page reports its content height through.
+const HEIGHT_BINDING: &str = "__plutoContentHeight";
+
+/// Reports the content height as the server measures it and as the
+/// render bootstrap reports it to a framed client (`size-changed`): the
+/// scroll height once the page overflows, else the document's own height.
+const HEIGHT_SCRIPT: &str = r#"(function(){var h;function z(){var r=document.documentElement;if(!r||!window.__plutoContentHeight)return;var v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.__plutoContentHeight(String(v));}if(window.ResizeObserver){var o=new ResizeObserver(z);document.addEventListener("DOMContentLoaded",function(){o.observe(document.documentElement);if(document.body)o.observe(document.body);z();});}window.addEventListener("load",z);})();"#;
 
 /// The headless browser process and its temporary profile.
 struct Process {
@@ -365,11 +408,13 @@ enum Pending {
     Created {
         tab: u64,
         url: Option<String>,
+        render: bool,
     },
     Attached {
         tab: u64,
         target: String,
         url: Option<String>,
+        render: bool,
     },
     History {
         tab: u64,
@@ -444,6 +489,8 @@ fn run(
         Pending::Ignore,
     )?;
     let mut pages: HashMap<u64, Page> = HashMap::new();
+    // Windows a render tab's page opened, by target, with the tab.
+    let mut popups: HashMap<String, u64> = HashMap::new();
     let update = |tab: u64, f: &mut dyn FnMut(&mut TabState)| {
         if let Ok(mut tabs) = tabs.lock() {
             f(tabs.entry(tab).or_default());
@@ -461,13 +508,13 @@ fn run(
                     pages.get(&tab).map(|p| p.session.clone())
                 };
                 match command {
-                    Request::Open { tab, url } => {
+                    Request::Open { tab, url, render } => {
                         update(tab, &mut |state| state.loading = url.is_some());
                         devtools.send(
                             None,
                             "Target.createTarget",
                             json!({"url": "about:blank"}),
-                            Pending::Created { tab, url },
+                            Pending::Created { tab, url, render },
                         )?;
                     }
                     Request::Navigate { tab, url } => {
@@ -659,7 +706,7 @@ fn run(
                         }
                     });
                 }
-                Some(Pending::Created { tab, url }) => {
+                Some(Pending::Created { tab, url, render }) => {
                     let Some(target) = result["targetId"].as_str() else {
                         update(tab, &mut |state| {
                             state.error = Some("Could not open the page".into())
@@ -674,14 +721,47 @@ fn run(
                             tab,
                             target: target.to_owned(),
                             url,
+                            render,
                         },
                     )?;
                 }
-                Some(Pending::Attached { tab, target, url }) => {
+                Some(Pending::Attached {
+                    tab,
+                    target,
+                    url,
+                    render,
+                }) => {
                     let Some(session) = result["sessionId"].as_str().map(str::to_owned) else {
                         continue;
                     };
                     devtools.send(Some(&session), "Page.enable", json!({}), Pending::Ignore)?;
+                    if render {
+                        // The client draws dark appearances only.
+                        devtools.send(
+                            Some(&session),
+                            "Emulation.setEmulatedMedia",
+                            json!({"features": [{"name": "prefers-color-scheme", "value": "dark"}]}),
+                            Pending::Ignore,
+                        )?;
+                        devtools.send(
+                            Some(&session),
+                            "Runtime.addBinding",
+                            json!({"name": HEIGHT_BINDING}),
+                            Pending::Ignore,
+                        )?;
+                        devtools.send(
+                            Some(&session),
+                            "Page.addScriptToEvaluateOnNewDocument",
+                            json!({"source": HEIGHT_SCRIPT}),
+                            Pending::Ignore,
+                        )?;
+                        devtools.send(
+                            Some(&session),
+                            "Runtime.enable",
+                            json!({}),
+                            Pending::Ignore,
+                        )?;
+                    }
                     if let Some(url) = url {
                         devtools.send(
                             Some(&session),
@@ -698,6 +778,7 @@ fn run(
                             viewport: None,
                             visible: true,
                             casting: false,
+                            render,
                         },
                     );
                 }
@@ -822,6 +903,54 @@ fn run(
                 let url = params["url"].as_str().unwrap_or_default().to_owned();
                 update(tab, &mut |state| state.url = url.clone());
             }
+            "Runtime.bindingCalled" if params["name"] == HEIGHT_BINDING => {
+                let height = params["payload"]
+                    .as_str()
+                    .and_then(|p| p.parse::<f32>().ok())
+                    .filter(|h| h.is_finite() && *h > 0.0);
+                if let (Some(tab), Some(height)) = (tab_of(session), height) {
+                    update(tab, &mut |state| state.content_height = Some(height));
+                }
+            }
+            // A render tab's page opening a window: the client gets its
+            // link, the window goes.
+            "Target.targetCreated" | "Target.targetInfoChanged"
+                if popups.contains_key(
+                    params["targetInfo"]["targetId"]
+                        .as_str()
+                        .unwrap_or_default(),
+                ) || pages.values().any(|p| {
+                    p.render && params["targetInfo"]["openerId"].as_str() == Some(p.target.as_str())
+                }) =>
+            {
+                let info = &params["targetInfo"];
+                let target = info["targetId"].as_str().unwrap_or_default().to_owned();
+                let tab = match popups.get(&target) {
+                    Some(tab) => *tab,
+                    None => {
+                        let Some((tab, _)) = pages
+                            .iter()
+                            .find(|(_, p)| info["openerId"].as_str() == Some(p.target.as_str()))
+                        else {
+                            continue;
+                        };
+                        popups.insert(target.clone(), *tab);
+                        *tab
+                    }
+                };
+                let url = info["url"].as_str().unwrap_or_default().to_owned();
+                if url.is_empty() || url == "about:blank" {
+                    continue;
+                }
+                popups.remove(&target);
+                update(tab, &mut |state| state.links.push(url.clone()));
+                devtools.send(
+                    None,
+                    "Target.closeTarget",
+                    json!({"targetId": target}),
+                    Pending::Ignore,
+                )?;
+            }
             "Target.targetInfoChanged" => {
                 let info = &params["targetInfo"];
                 if let Some((tab, _)) = pages
@@ -880,10 +1009,15 @@ fn still(
         .ok()
         .and_then(|tabs| tabs.get(&tab).map(|state| state.frame_seq))
         .unwrap_or(0);
+    let format = if page.render {
+        json!({"format": "png"})
+    } else {
+        json!({"format": "jpeg", "quality": 90})
+    };
     devtools.send(
         Some(&page.session),
         "Page.captureScreenshot",
-        json!({"format": "jpeg", "quality": 90}),
+        format,
         Pending::Still { tab, seq },
     )
 }
@@ -907,7 +1041,9 @@ fn cast(devtools: &mut Devtools, page: &mut Page, on: bool) -> Result<(), String
             Some(&session),
             "Page.startScreencast",
             json!({
-                "format": "jpeg",
+                // Text in a published page stays crisp; a browser tab
+                // trades that for smaller frames.
+                "format": if page.render { "png" } else { "jpeg" },
                 "quality": 90,
                 "maxWidth": (width as f32 * scale).round() as u32,
                 "maxHeight": (height as f32 * scale).round() as u32,

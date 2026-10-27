@@ -1,6 +1,7 @@
 pub mod app;
 pub mod diff;
 pub mod highlight;
+pub mod html_render;
 pub mod http;
 pub mod model;
 pub mod preview;

@@ -23,19 +23,19 @@ use crate::ui::widgets;
 
 #[derive(Default)]
 pub(crate) struct PreviewUi {
-    engine: Option<Preview>,
-    next_tab: u64,
+    pub(crate) engine: Option<Preview>,
+    pub(crate) next_tab: u64,
     /// Each tab's uploaded frame and the frame counter it shows.
-    textures: HashMap<u64, (u64, egui::TextureHandle)>,
+    pub(crate) textures: HashMap<u64, (u64, egui::TextureHandle)>,
     /// The address being typed, per tab.
     drafts: HashMap<u64, String>,
     /// The tab drawn this frame and the last one, for pausing hidden pages.
     drawn: Option<u64>,
     shown: Option<u64>,
-    /// The page pointer: its last position, the pressed button and the
-    /// last press (time, position, count) for click counts.
+    /// The page pointer: its last position, the tab and button pressed and
+    /// the last press (time, position, count) for click counts.
     pointer: Option<Pos2>,
-    pressed: Option<&'static str>,
+    pressed: Option<(u64, &'static str)>,
     last_press: Option<(f64, Pos2, u32)>,
     /// When each tab started loading (the progress bar).
     loading_since: HashMap<u64, f64>,
@@ -108,7 +108,7 @@ fn modifier_bits(modifiers: egui::Modifiers) -> u32 {
 }
 
 impl App {
-    fn preview_engine(&mut self, ctx: &egui::Context) -> &Preview {
+    pub(crate) fn preview_engine(&mut self, ctx: &egui::Context) -> &Preview {
         self.preview
             .engine
             .get_or_insert_with(|| Preview::start(ctx.clone()))
@@ -558,6 +558,24 @@ impl App {
         };
         engine.resize(tab, width, height, ppp);
         ui.painter().rect_filled(area, 0.0, Color32::WHITE);
+        self.page_view(ui, area, tab, state, true);
+    }
+
+    /// A page's latest frame in `area`, with the pointer and keys going to
+    /// the page, and the wheel too when `wheel` (else it scrolls what holds
+    /// the page). Returns whether the page has a frame to show.
+    pub(crate) fn page_view(
+        &mut self,
+        ui: &mut Ui,
+        area: Rect,
+        tab: u64,
+        state: &crate::preview::TabState,
+        wheel: bool,
+    ) -> bool {
+        let ppp = ui.ctx().pixels_per_point();
+        if self.preview.engine.is_none() {
+            return false;
+        }
         if let Some(frame) = &state.frame {
             let entry = self.preview.textures.get(&tab).map(|(seq, _)| *seq);
             if entry != Some(state.frame_seq) {
@@ -623,7 +641,8 @@ impl App {
         for event in &events {
             match event {
                 egui::Event::PointerMoved(pos)
-                    if area.contains(*pos) || self.preview.pressed.is_some() =>
+                    if (area.contains(*pos) && self.preview.pressed.is_none())
+                        || self.preview.pressed.is_some_and(|(t, _)| t == tab) =>
                 {
                     if self.preview.pointer != Some(*pos) {
                         self.preview.pointer = Some(*pos);
@@ -655,7 +674,7 @@ impl App {
                             _ => 1,
                         };
                         self.preview.last_press = Some((now, *pos, clicks));
-                        self.preview.pressed = Some(name);
+                        self.preview.pressed = Some((tab, name));
                         engine.pointer(
                             tab,
                             Pointer::Press {
@@ -666,7 +685,7 @@ impl App {
                             },
                             bits,
                         );
-                    } else if !*pressed && self.preview.pressed == Some(name) {
+                    } else if !*pressed && self.preview.pressed == Some((tab, name)) {
                         let clicks = self.preview.last_press.map_or(1, |(_, _, c)| c);
                         self.preview.pressed = None;
                         engine.pointer(
@@ -686,7 +705,7 @@ impl App {
                     delta,
                     modifiers,
                     ..
-                } if response.hovered() => {
+                } if wheel && response.hovered() => {
                     let scale = match unit {
                         egui::MouseWheelUnit::Point => 1.0,
                         egui::MouseWheelUnit::Line => 40.0,
@@ -737,11 +756,12 @@ impl App {
             }
         }
         // The page scrolls, not the panel.
-        if response.hovered() {
+        if wheel && response.hovered() {
             ui.input_mut(|i| {
                 i.smooth_scroll_delta = Vec2::ZERO;
             });
         }
+        state.frame.is_some()
     }
 }
 
