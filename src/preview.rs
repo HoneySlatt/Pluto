@@ -138,6 +138,12 @@ enum Request {
         tab: u64,
         text: String,
     },
+    /// Replaces the page's document, keeping its URL (and so the base its
+    /// relative links resolve against).
+    SetContent {
+        tab: u64,
+        html: String,
+    },
     /// The element at a point, for the Design surface's comments.
     Inspect {
         tab: u64,
@@ -235,6 +241,10 @@ impl Preview {
             url: Some(url),
             render: true,
         });
+    }
+    /// Shows `html` in place of the tab's document, at the same URL.
+    pub fn set_content(&self, tab: u64, html: String) {
+        self.send(Request::SetContent { tab, html });
     }
     /// Asks for the element at `(x, y)` (CSS pixels): it becomes the tab's
     /// `inspected` element, and also joins `picked` when `pick`.
@@ -701,6 +711,18 @@ fn run(
                                 Some(&session),
                                 "Input.insertText",
                                 json!({"text": text}),
+                                Pending::Ignore,
+                            )?;
+                        }
+                    }
+                    Request::SetContent { tab, html } => {
+                        if let Some(page) = pages.get(&tab) {
+                            // A page target's main frame shares its id.
+                            let (session, frame) = (page.session.clone(), page.target.clone());
+                            devtools.send(
+                                Some(&session),
+                                "Page.setDocumentContent",
+                                json!({"frameId": frame, "html": html}),
                                 Pending::Ignore,
                             )?;
                         }

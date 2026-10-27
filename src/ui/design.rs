@@ -84,6 +84,13 @@ pub(crate) struct DesignState {
     /// Project files' signed URLs by absolute path, with the change they
     /// were signed after.
     files: HashMap<String, FileUrl>,
+    /// The checkpoint each project file shows, by absolute path; none
+    /// shows the file as it is now.
+    file_version: HashMap<String, String>,
+    /// File contents at checkpoints, by `<ref>\0<path>`; `None` while asked.
+    versions: HashMap<String, Option<Result<String, String>>>,
+    /// The version the tab shows in place of its document, by the same key.
+    shown_version: Option<String>,
     /// Comment mode: the pointer picks elements instead of using the page.
     commenting: bool,
     /// The last point inspected while commenting, in CSS pixels.
@@ -202,6 +209,8 @@ impl App {
         let Some(thread) = self.selected.clone() else {
             return;
         };
+        // A new change shows the file as it is now.
+        self.design.file_version.remove(path);
         let entry = self.design.files.entry(path.to_owned()).or_default();
         entry.marker = marker.clone();
         self.send_request(
@@ -218,6 +227,28 @@ impl App {
             Some(path) => self.design.files.get(path)?.url.clone(),
             None => self.html_render_url(&page.attachment_id),
         }
+    }
+
+    /// A project file's versions: the ready checkpoints that captured a
+    /// change to it, oldest first, as (checkpoint id, Git ref).
+    fn file_checkpoints(&self, relative: &str) -> Vec<(String, String)> {
+        let Some(detail) = self.current_detail() else {
+            return Vec::new();
+        };
+        let mut checkpoints: Vec<&crate::model::Checkpoint> = detail
+            .checkpoints
+            .iter()
+            .filter(|c| {
+                c.status == "ready"
+                    && !c.git_ref.is_empty()
+                    && c.files.iter().any(|f| f.path == relative)
+            })
+            .collect();
+        checkpoints.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
+        checkpoints
+            .into_iter()
+            .map(|c| (c.id.clone(), c.git_ref.clone()))
+            .collect()
     }
 
     /// Marks a workspace as a design project (it was just made one).
@@ -282,6 +313,16 @@ impl App {
             self.design.projects.insert(cwd.to_owned(), Some(design));
             return true;
         }
+        if let Some(version) = key.strip_prefix("design-version:") {
+            let contents = result
+                .as_ref()
+                .map(|value| value["oldContents"].as_str().unwrap_or_default().to_owned())
+                .map_err(Clone::clone);
+            self.design
+                .versions
+                .insert(version.to_owned(), Some(contents));
+            return true;
+        }
         let Some(rest) = key.strip_prefix("design-file:") else {
             return false;
         };
@@ -327,11 +368,38 @@ impl App {
             return;
         };
         let page = pages[current].clone();
-        // The design's versions: its pages with the same title.
+        // The design's versions: its pages with the same title, or for a
+        // project file the checkpoints that captured it (the newest one is
+        // the file as it is now).
+        let file_path = page
+            .attachment_id
+            .strip_prefix(FILE_PREFIX)
+            .map(str::to_owned);
+        let checkpoints = if file_path.is_some() {
+            self.file_checkpoints(&page.title)
+        } else {
+            Vec::new()
+        };
         let versions: Vec<usize> = (0..pages.len())
             .filter(|&i| pages[i].title == page.title)
             .collect();
-        let version = versions.iter().position(|&i| i == current).unwrap_or(0);
+        let shown_checkpoint = file_path
+            .as_ref()
+            .and_then(|path| self.design.file_version.get(path))
+            .and_then(|id| checkpoints.iter().position(|(c, _)| c == id));
+        let (version, version_count) = if checkpoints.len() > 1 {
+            (
+                shown_checkpoint.unwrap_or(checkpoints.len() - 1),
+                checkpoints.len(),
+            )
+        } else {
+            (
+                versions.iter().position(|&i| i == current).unwrap_or(0),
+                versions.len(),
+            )
+        };
+        // A file version to show: Some(checkpoint) or Some(None) for now.
+        let mut select_file_version: Option<Option<String>> = None;
 
         let chrome = Rect::from_min_size(
             Pos2::new(body.left() + 8.0, body.top()),
@@ -339,22 +407,35 @@ impl App {
         );
         let mut select: Option<Option<String>> = None;
         let mut x = chrome.left();
-        for (icon, tip, target) in [
-            (
-                "chevron-left",
-                "Previous version",
-                version.checked_sub(1).map(|v| versions[v]),
-            ),
-            (
-                "chevron-right",
-                "Next version",
-                versions.get(version + 1).copied(),
-            ),
+        for (icon, tip, step) in [
+            ("chevron-left", "Previous version", -1i64),
+            ("chevron-right", "Next version", 1i64),
         ] {
             let button = Rect::from_min_size(Pos2::new(x, chrome.top()), Vec2::splat(CHROME));
             x += CHROME;
+            let target = usize::try_from(version as i64 + step)
+                .ok()
+                .filter(|&v| v < version_count);
             match target {
+                Some(target) if checkpoints.len() > 1 => {
+                    if widgets::icon_button(
+                        ui,
+                        button,
+                        ("design-version", icon),
+                        icon,
+                        16.0,
+                        theme::muted_foreground(),
+                        tip,
+                    )
+                    .clicked()
+                    {
+                        select_file_version = Some(
+                            (target + 1 < checkpoints.len()).then(|| checkpoints[target].0.clone()),
+                        );
+                    }
+                }
                 Some(target) => {
+                    let target = versions[target];
                     if widgets::icon_button(
                         ui,
                         button,
@@ -527,8 +608,8 @@ impl App {
             theme::foreground(),
         );
         let mut after = title_rect.left() + title_width + 6.0;
-        if versions.len() > 1 {
-            let label = format!("v{} of {}", version + 1, versions.len());
+        if version_count > 1 {
+            let label = format!("v{} of {}", version + 1, version_count);
             after += widgets::text_in(
                 ui,
                 Rect::from_min_max(Pos2::new(after, title_rect.top()), title_rect.max),
@@ -580,6 +661,37 @@ impl App {
                 Some(id) => self.design.pinned.insert(thread.clone(), id),
                 None => self.design.pinned.remove(&thread),
             };
+        }
+        if let (Some(choice), Some(path)) = (select_file_version, &file_path) {
+            match choice {
+                Some(id) => self.design.file_version.insert(path.clone(), id),
+                None => self.design.file_version.remove(path),
+            };
+        }
+        // An earlier version of a file: its contents at that checkpoint.
+        let old_version = file_path.as_ref().and_then(|path| {
+            let id = self.design.file_version.get(path)?;
+            let (_, git_ref) = checkpoints.iter().find(|(c, _)| c == id)?;
+            Some((format!("{git_ref}\u{0}{}", page.title), git_ref.clone()))
+        });
+        if let Some((key, git_ref)) = &old_version
+            && !self.design.versions.contains_key(key)
+            && let Some(cwd) = self.workspace_cwd()
+        {
+            self.design.versions.insert(key.clone(), None);
+            self.send_request(
+                format!("design-version:{key}"),
+                "review.getDiffFileContents",
+                json!({
+                    "cwd": cwd,
+                    "sourceKind": "working-tree",
+                    "changeType": "change",
+                    "baseRef": git_ref,
+                    "headRef": null,
+                    "oldPath": page.title,
+                    "newPath": page.title,
+                }),
+            );
         }
 
         // The page.
@@ -657,10 +769,15 @@ impl App {
         let Some(engine) = &self.preview.engine else {
             return;
         };
+        // Back to the file as it is now: its own document again.
+        let back_to_now = old_version.is_none() && self.design.shown_version.is_some();
         if fresh {
             engine.open_render(tab, url);
-        } else if navigate {
+        } else if navigate || back_to_now {
             engine.navigate(tab, url);
+        }
+        if navigate || back_to_now {
+            self.design.shown_version = None;
         }
         engine.resize(
             tab,
@@ -673,6 +790,25 @@ impl App {
         }
         let picked = engine.take_picked(tab);
         let state = engine.tab(tab).unwrap_or_default();
+        // An earlier version replaces the loaded document, so its relative
+        // assets still resolve against the file's URL.
+        if let Some((key, _)) = &old_version
+            && self.design.shown_version.as_ref() != Some(key)
+            && !state.loading
+            && state.frame.is_some()
+        {
+            match self.design.versions.get(key) {
+                Some(Some(Ok(html))) => {
+                    engine.set_content(tab, html.clone());
+                    self.design.shown_version = Some(key.clone());
+                }
+                Some(Some(Err(error))) => {
+                    note(ui, &format!("Could not read this version: {error}"));
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(error) = &state.error {
             note(ui, error);
             return;

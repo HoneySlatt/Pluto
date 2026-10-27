@@ -4,7 +4,10 @@
 //! one makes the folder a T3 project (`project.create`), writes its design
 //! profile (`.pluto/design.json`, which gives its sessions the server's
 //! design charter) and launches the thread with the brief, which then opens
-//! in the studio layout (`crate::ui::design`).
+//! in the studio layout (`crate::ui::design`). A new project in the folder
+//! the screen proposed also gets a Git repository (`vcs.init`), so T3
+//! checkpoints each turn and the Design surface can show earlier versions;
+//! a folder the user chose is left as it is.
 
 use std::sync::mpsc::Receiver;
 
@@ -77,6 +80,8 @@ struct Creating {
     brief: String,
     model: Value,
     stage: Stage,
+    /// Initialize Git once the profile is written.
+    init_git: bool,
 }
 
 #[derive(PartialEq)]
@@ -85,6 +90,8 @@ enum Stage {
     Project(String),
     /// `projects.writeFile` of the profile.
     Profile,
+    /// `vcs.init` of a new folder.
+    Git,
 }
 
 /// A folder name from the brief's first words.
@@ -519,17 +526,19 @@ impl App {
             .iter()
             .find(|p| p.workspace_root.trim_end_matches('/') == cwd)
             .map(|p| p.id.clone());
-        let creating = |project_id: String, stage| Creating {
+        let proposed = !home.folder_edited;
+        let creating = |project_id: String, stage, init_git| Creating {
             project_id,
             cwd: cwd.clone(),
             title: title.clone(),
             brief: brief.clone(),
             model: model.clone(),
             stage,
+            init_git,
         };
         match existing {
             Some(project_id) => {
-                self.design_home.creating = Some(creating(project_id, Stage::Profile));
+                self.design_home.creating = Some(creating(project_id, Stage::Profile, false));
                 self.write_design_profile();
             }
             None => {
@@ -543,6 +552,7 @@ impl App {
                 self.design_home.creating = Some(creating(
                     project_id.clone(),
                     Stage::Project(command_id.clone()),
+                    proposed,
                 ));
                 self.dispatch(json!({
                     "type": "project.create",
@@ -582,11 +592,15 @@ impl App {
         let ours = match &creating.stage {
             Stage::Project(command) => key == format!("project-mutation:{command}"),
             Stage::Profile => key == format!("design-profile-write:{}", creating.cwd),
+            Stage::Git => key == format!("design-git-init:{}", creating.cwd),
         };
         if !ours {
             return false;
         }
-        if let Err(error) = result {
+        // Without Git the design still works, only without versions.
+        if creating.stage != Stage::Git
+            && let Err(error) = result
+        {
             self.design_home.creating = None;
             self.design_home.error = Some(format!("Could not create the design: {error}"));
             return true;
@@ -598,7 +612,19 @@ impl App {
             self.write_design_profile();
             return true;
         }
-        // The profile is written: the thread starts with the brief.
+        if creating.stage == Stage::Profile && creating.init_git {
+            let cwd = creating.cwd.clone();
+            if let Some(creating) = &mut self.design_home.creating {
+                creating.stage = Stage::Git;
+            }
+            self.send_request(
+                format!("design-git-init:{cwd}"),
+                "vcs.init",
+                json!({"cwd": cwd}),
+            );
+            return true;
+        }
+        // The project is ready: the thread starts with the brief.
         let Some(creating) = self.design_home.creating.take() else {
             return true;
         };

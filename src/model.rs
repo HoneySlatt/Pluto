@@ -528,6 +528,9 @@ pub struct Checkpoint {
     pub node_id: String,
     pub ordinal_within_scope: u64,
     pub app_run_ordinal: Option<u64>,
+    /// The hidden Git ref holding the workspace at this checkpoint.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
     /// `ready`, `missing`, `error` or `stale`.
     pub status: String,
     pub files: Vec<CheckpointFile>,
