@@ -20,6 +20,10 @@ use crate::ui::widgets;
 
 const MENU: &str = "context-meter";
 const PANEL_WIDTH: f32 = 360.0;
+/// The panel grows up to this width before its labels truncate.
+const PANEL_MAX_WIDTH: f32 = 520.0;
+const LINK: &str = "See all \u{2192}";
+const COMPACT: &str = "Compact session";
 const PAD: f32 = 16.0;
 
 /// `ContextWindowSnapshot`, the fields this meter shows.
@@ -203,6 +207,17 @@ fn reset_text(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     }
 }
 
+/// The part of a row left of a `right_width` text at its end, with a 12px gap,
+/// so long labels truncate instead of running under it.
+fn before(line: Rect, right_width: f32) -> Rect {
+    let end = if right_width > 0.0 {
+        line.right() - right_width - 12.0
+    } else {
+        line.right()
+    };
+    Rect::from_min_max(line.min, Pos2::new(end.max(line.left()), line.bottom()))
+}
+
 /// Red past 90%, like upstream's ring.
 fn level_color(percent: f64, normal: Color32) -> Color32 {
     if percent > 90.0 {
@@ -319,6 +334,47 @@ impl App {
                 .iter()
                 .any(|c| c["name"] == "compact");
         let budget = context.and_then(budget_text);
+        let now = chrono::Utc::now();
+        let title = match &plan {
+            Some(plan) => format!("Plan usage limits · {plan}"),
+            None => "Plan usage limits".to_owned(),
+        };
+        let resets: Vec<String> = windows
+            .iter()
+            .map(|window| match &window.resets_at {
+                Some(at) => format!("{}  {}%", reset_text(at, now), window.used.round()),
+                None => format!("{}%", window.used.round()),
+            })
+            .collect();
+        // Wide enough for each row's label, a 12px gap and its right-hand text.
+        let body = theme::font(13.0, Weight::Regular);
+        let measure = |text: &str| widgets::text_width(ui, text, body.clone());
+        let mut rows: Vec<(f32, f32)> = Vec::new();
+        if let Some(context) = context {
+            rows.push((measure("Context window"), measure(&usage_text(context))));
+            let button = if can_compact {
+                widgets::outline_button_width(ui, false, COMPACT)
+            } else {
+                0.0
+            };
+            rows.push((budget.as_deref().map_or(0.0, measure), button));
+        }
+        if !windows.is_empty() {
+            rows.push((measure(&title), measure(LINK)));
+        }
+        for (window, reset) in windows.iter().zip(&resets) {
+            rows.push((measure(&window.label), measure(reset)));
+        }
+        let needed = rows
+            .iter()
+            .map(|(left, right)| left + 12.0 + right)
+            .fold(0.0, f32::max)
+            + 2.0 * PAD;
+        let screen = ui.ctx().content_rect();
+        let panel_width = needed
+            .ceil()
+            .clamp(PANEL_WIDTH, PANEL_MAX_WIDTH)
+            .min(screen.width() - 8.0);
         let mut height = PAD;
         if context.is_some() {
             height += 20.0 + 10.0 + 6.0;
@@ -333,18 +389,15 @@ impl App {
             height += 20.0 + windows.len() as f32 * (12.0 + 18.0 + 6.0 + 4.0);
         }
         height += PAD;
-        let screen = ui.ctx().content_rect();
-        let left = (anchor.right() - PANEL_WIDTH).max(screen.left() + 4.0);
+        let left = (anchor.right() - panel_width).max(screen.left() + 4.0);
         let popup = Rect::from_min_size(
             Pos2::new(left, anchor.top() - 6.0 - height),
-            Vec2::new(PANEL_WIDTH, height),
+            Vec2::new(panel_width, height),
         );
-        let now = chrono::Utc::now();
         let mut compact = false;
         let mut see_all = false;
         let mut open = self.open_menu.take();
         widgets::popup(ui, &mut open, MENU, popup, anchor, |ui, rect| {
-            let body = theme::font(13.0, Weight::Regular);
             let muted = theme::muted_foreground();
             let x = rect.left() + PAD;
             let right = rect.right() - PAD;
@@ -352,8 +405,8 @@ impl App {
             let mut y = rect.top() + PAD;
             let row = |ui: &Ui, y: f32, height: f32, left: &str, right_text: &str, color| {
                 let line = Rect::from_min_max(Pos2::new(x, y), Pos2::new(right, y + height));
-                widgets::text_in(ui, line, left, body.clone(), color);
                 let w = widgets::text_width(ui, right_text, body.clone());
+                widgets::text_in(ui, before(line, w), left, body.clone(), color);
                 widgets::text_in(
                     ui,
                     Rect::from_min_max(Pos2::new(right - w, y), line.max),
@@ -376,19 +429,23 @@ impl App {
                 if budget.is_some() || can_compact {
                     y += 10.0;
                     let line = Rect::from_min_max(Pos2::new(x, y), Pos2::new(right, y + 24.0));
+                    let w = if can_compact {
+                        widgets::outline_button_width(ui, false, COMPACT)
+                    } else {
+                        0.0
+                    };
                     if let Some(budget) = &budget {
-                        widgets::text_in(ui, line, budget, body.clone(), theme::foreground());
+                        let room = before(line, w);
+                        widgets::text_in(ui, room, budget, body.clone(), theme::foreground());
                     }
                     if can_compact {
-                        let label = "Compact session";
-                        let w = widgets::outline_button_width(ui, false, label);
                         let button = Rect::from_min_max(Pos2::new(right - w, y), line.max);
                         compact = widgets::outline_button(
                             ui,
                             button,
                             "context-compact",
                             None,
-                            label,
+                            COMPACT,
                             CornerRadius::same(6),
                         )
                         .clicked();
@@ -406,14 +463,9 @@ impl App {
                 y += 1.0 + 16.0;
             }
             if !windows.is_empty() {
-                let title = match &plan {
-                    Some(plan) => format!("Plan usage limits · {plan}"),
-                    None => "Plan usage limits".to_owned(),
-                };
                 let line = Rect::from_min_max(Pos2::new(x, y), Pos2::new(right, y + 20.0));
-                widgets::text_in(ui, line, &title, body.clone(), muted);
-                let link = "See all \u{2192}";
-                let w = widgets::text_width(ui, link, body.clone());
+                let w = widgets::text_width(ui, LINK, body.clone());
+                widgets::text_in(ui, before(line, w), &title, body.clone(), muted);
                 let link_rect = Rect::from_min_max(Pos2::new(right - w, y), line.max);
                 let response =
                     ui.interact(link_rect, ui.id().with("context-see-all"), Sense::click());
@@ -422,20 +474,15 @@ impl App {
                 } else {
                     theme::alpha(theme::foreground(), 0.85)
                 };
-                widgets::text_in(ui, link_rect, link, body.clone(), color);
+                widgets::text_in(ui, link_rect, LINK, body.clone(), color);
                 if response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 see_all = response.clicked();
                 y += 20.0;
-                for window in windows {
+                for (window, reset) in windows.iter().zip(&resets) {
                     y += 12.0;
-                    let reset = window
-                        .resets_at
-                        .as_deref()
-                        .map(|at| format!("{}  {}%", reset_text(at, now), window.used.round()))
-                        .unwrap_or_else(|| format!("{}%", window.used.round()));
-                    row(ui, y, 18.0, &window.label, &reset, theme::foreground());
+                    row(ui, y, 18.0, &window.label, reset, theme::foreground());
                     y += 18.0 + 6.0;
                     bar(
                         ui,
