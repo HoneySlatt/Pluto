@@ -45,6 +45,19 @@ const FIELD_WIDTH: f32 = 224.0;
 const ACCENT_DEFAULT: Color32 = Color32::from_rgb(37, 99, 235); // blue-600
 const HEALTH_STEP_SECONDS: i64 = 30;
 
+/// `DEFAULT_DISABLED_PROVIDER_DRIVERS` (contracts `settings.ts`): built-in
+/// drivers that stay off until the user turns them on.
+const DEFAULT_DISABLED_DRIVERS: [&str; 8] = [
+    "cursor",
+    "grok",
+    "muse",
+    "kimiCode",
+    "mistralVibe",
+    "pi",
+    "opencode",
+    "antigravity",
+];
+
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
 const DRIVERS: [(&str, &str, &str, Option<&str>); 8] = [
     ("codex", "Codex", "openai", None),
@@ -212,8 +225,18 @@ struct InstanceRow {
 }
 
 impl InstanceRow {
+    /// `resolveProviderInstanceEnabled`: an explicit false on the envelope
+    /// or the config wins, then the envelope, the config, and the driver's
+    /// default.
     fn enabled(&self) -> bool {
-        self.instance["enabled"].as_bool().unwrap_or(true)
+        let envelope = self.instance["enabled"].as_bool();
+        let config = self.instance["config"]["enabled"].as_bool();
+        if envelope == Some(false) || config == Some(false) {
+            return false;
+        }
+        envelope
+            .or(config)
+            .unwrap_or(!DEFAULT_DISABLED_DRIVERS.contains(&self.driver.as_str()))
     }
 
     fn display_name(&self) -> String {
@@ -530,21 +553,28 @@ fn ghost_button(ui: &Ui, rect: Rect, id: &str, icon: Option<&str>, label: &str) 
 
 impl App {
     /// The provider instances (`EnvironmentProviderSettings`): each known
-    /// driver's default slot (an explicit `providerInstances` entry, or one
-    /// synthesized from the legacy `providers` blob), its custom instances,
-    /// then instances of drivers this build does not know.
+    /// driver's default slot (an explicit `providerInstances` entry, one
+    /// synthesized from the legacy `providers` blob, or, for Codex and
+    /// Claude, which run unconfigured, the driver's default config), its
+    /// custom instances, then instances of drivers this build does not know.
+    /// Cursor is listed only when the server reports its default instance.
     fn provider_rows(&self) -> Vec<InstanceRow> {
         let settings = &self.state.config["settings"];
         let instances = settings["providerInstances"].as_object();
         let mut rows = Vec::new();
         for (driver, ..) in DRIVERS {
+            if driver == "cursor" && self.live_provider(driver).is_none() {
+                continue;
+            }
             let explicit = instances.and_then(|i| i.get(driver)).cloned();
             let synthesized = settings["providers"][driver].as_object().map(|legacy| {
                 let mut config = legacy.clone();
                 let enabled = config.remove("enabled").unwrap_or(json!(true));
                 json!({"driver": driver, "enabled": enabled, "config": config})
             });
-            if let Some(instance) = explicit.or(synthesized) {
+            let unconfigured =
+                matches!(driver, "codex" | "claudeAgent").then(|| json!({"driver": driver}));
+            if let Some(instance) = explicit.or(synthesized).or(unconfigured) {
                 rows.push(InstanceRow {
                     id: driver.into(),
                     driver: driver.into(),
@@ -2286,6 +2316,22 @@ mod tests {
                 ("b".to_owned(), "Bee".to_owned()),
                 ("c".to_owned(), "c".to_owned()),
             ]
+        );
+    }
+
+    #[test]
+    fn enabled_follows_resolve_provider_instance_enabled() {
+        let row = |instance: Value| InstanceRow {
+            id: "x".into(),
+            driver: instance["driver"].as_str().unwrap().into(),
+            instance,
+        };
+        assert!(row(json!({"driver": "codex"})).enabled());
+        assert!(!row(json!({"driver": "kimiCode"})).enabled());
+        assert!(row(json!({"driver": "kimiCode", "config": {"enabled": true}})).enabled());
+        assert!(
+            !row(json!({"driver": "codex", "enabled": true, "config": {"enabled": false}}))
+                .enabled()
         );
     }
 
