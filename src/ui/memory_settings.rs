@@ -59,7 +59,7 @@ fn parse_instructions(contents: &str) -> [String; 2] {
 }
 
 /// A memory file's contents, checked enough not to overwrite a stranger.
-fn parse(contents: &str) -> Result<Value, String> {
+pub(crate) fn parse(contents: &str) -> Result<Value, String> {
     serde_json::from_str::<Value>(contents)
         .ok()
         .filter(|memory| memory["version"] == 1 && memory["memories"].is_array())

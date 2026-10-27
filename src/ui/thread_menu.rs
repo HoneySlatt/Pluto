@@ -514,6 +514,11 @@ impl App {
                         self.clear_memories();
                         return;
                     }
+                    if confirm.command["type"] == crate::ui::chat_projects::CLEAR_MEMORY_COMMAND {
+                        let project = confirm.command["projectId"].as_str().unwrap_or_default();
+                        self.clear_project_memory(project);
+                        return;
+                    }
                     // Pluto: deleting the open chat project leaves for a new chat.
                     if confirm.command["type"] == "project.delete"
                         && self

@@ -8,8 +8,10 @@
 //! `files/` its reference files, all of which the server hands every chat in
 //! it (`chatProject.ts`). The chat sidebar lists the projects above the
 //! chats; a project opens on its page, a new chat's draft with the project's
-//! instructions, files and chats under the composer. Its chats stay out of
-//! the main chat list. Files travel as base64 through `projects.writeFile`,
+//! instructions, files, memory and chats under the composer. Its chats stay
+//! out of the main chat list. The project's memory (its own
+//! `.pluto/memory.json`, see `memory_settings`) is listed there, each
+//! memory with a remove button. Files travel as base64 through `projects.writeFile`,
 //! so a remote server works too.
 
 use std::collections::{HashMap, HashSet};
@@ -26,6 +28,9 @@ use crate::ui::widgets;
 
 const PROFILE: &str = "{\n  \"version\": 1\n}\n";
 const PROJECT_PATH: &str = ".pluto/project.json";
+const MEMORY_PATH: &str = ".pluto/memory.json";
+/// "Delete all"'s confirmation command: handled here, never dispatched.
+pub(crate) const CLEAR_MEMORY_COMMAND: &str = "pluto.project-memory.clear";
 const FILES: &str = "files";
 /// The largest reference file, in bytes.
 const MAX_FILE_BYTES: u64 = 30 * 1024 * 1024;
@@ -63,6 +68,9 @@ struct Page {
     files: Option<Vec<(String, Option<u64>)>>,
     /// Files being written.
     uploading: HashSet<String>,
+    /// The project's memory file, once read: an error when it holds
+    /// something else than memory JSON.
+    memory: Option<Result<Value, String>>,
 }
 
 /// A safe file name: no folders, no leading dots.
@@ -161,7 +169,44 @@ impl App {
             "projects.readFile",
             json!({"cwd": project.workspace_root, "relativePath": PROJECT_PATH}),
         );
+        self.send_request(
+            format!("chat-project-memory:{}", project.id),
+            "projects.readFile",
+            json!({"cwd": project.workspace_root, "relativePath": MEMORY_PATH}),
+        );
         self.list_project_files(project);
+    }
+
+    /// "Delete all", once confirmed.
+    pub(crate) fn clear_project_memory(&mut self, project_id: &str) {
+        if let Some(project) = self.state.project(project_id).cloned() {
+            self.forget_project_memory(&project, None);
+        }
+    }
+
+    /// Forgets one of a project's memories, or all of them (`None`).
+    fn forget_project_memory(&mut self, project: &Project, memory_id: Option<&str>) {
+        let Some(Some(Ok(memory))) = self
+            .chat_projects
+            .pages
+            .get_mut(&project.id)
+            .map(|page| page.memory.as_mut())
+        else {
+            return;
+        };
+        if let Some(entries) = memory["memories"].as_array_mut() {
+            entries.retain(|entry| memory_id.is_some_and(|id| entry["id"] != id));
+        }
+        let contents = format!(
+            "{}\n",
+            serde_json::to_string_pretty(memory).unwrap_or_default()
+        );
+        self.send_request(
+            format!("chat-project-memory-save:{}", project.id),
+            "projects.writeFile",
+            json!({"cwd": project.workspace_root, "relativePath": MEMORY_PATH,
+                "contents": contents}),
+        );
     }
 
     fn list_project_files(&mut self, project: &Project) {
@@ -441,6 +486,20 @@ impl App {
                 let page = self.chat_projects.pages.entry(rest.to_owned()).or_default();
                 page.files = Some(names.into_iter().map(|name| (name, None)).collect());
             }
+            // A missing file is no memory yet.
+            "memory" => {
+                let memory = match result {
+                    Ok(file) => crate::ui::memory_settings::parse(
+                        file["contents"].as_str().unwrap_or_default(),
+                    ),
+                    Err(_) => Ok(json!({"version": 1, "memories": []})),
+                };
+                self.chat_projects
+                    .pages
+                    .entry(rest.to_owned())
+                    .or_default()
+                    .memory = Some(memory);
+            }
             "sizes" => {
                 if let (Ok(value), Some(files)) = (
                     result,
@@ -480,7 +539,7 @@ impl App {
                     self.write_project_json(&project, name, &instructions);
                 }
             }
-            "save" | "profile" | "setup" | "file-delete" => {
+            "save" | "profile" | "setup" | "file-delete" | "memory-save" => {
                 if let Err(error) = result {
                     self.status = Some(format!("Could not update the project: {error}"));
                 }
@@ -778,6 +837,7 @@ impl App {
                 let mut y = top;
                 y = self.project_instructions_card(ui, project, left, y, width) + 24.0;
                 y = self.project_files_card(ui, project, left, y, width) + 24.0;
+                y = self.project_memory_card(ui, project, left, y, width) + 24.0;
                 y = self.project_chats(ui, project, left, y, width);
                 ui.allocate_rect(
                     Rect::from_min_max(Pos2::new(left, top), Pos2::new(left + width, y + 32.0)),
@@ -1015,6 +1075,128 @@ impl App {
         }
         if let Some(name) = remove {
             self.delete_project_file(&project.id, &name);
+        }
+        card.bottom()
+    }
+
+    /// The project's memory, newest first, each with a remove button, and
+    /// Delete all. Returns the card's bottom.
+    fn project_memory_card(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        left: f32,
+        top: f32,
+        width: f32,
+    ) -> f32 {
+        let memory = self
+            .chat_projects
+            .pages
+            .get(&project.id)
+            .and_then(|page| page.memory.clone());
+        let entries: Vec<Value> = match &memory {
+            Some(Ok(memory)) => memory["memories"].as_array().cloned().unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let card = Rect::from_min_size(
+            Pos2::new(left, top),
+            Vec2::new(width, 62.0 + (entries.len().max(1) as f32) * 36.0 + 12.0),
+        );
+        Self::card(ui, card);
+        Self::card_heading(
+            ui,
+            left,
+            top,
+            "Memory",
+            "What the chats in this project remember, apart from your other chats.",
+            width,
+        );
+        use crate::ui::action_editor::{Kind, footer_button, footer_rect};
+        if !entries.is_empty() {
+            let clear = footer_rect(ui, card.right() - 16.0, top + 14.0, "Delete all");
+            if footer_button(ui, clear, "Delete all", Kind::Destructive) {
+                self.confirm = Some(crate::ui::thread_menu::Confirm {
+                    title: format!("Delete the memory of \"{}\"?", project.title),
+                    message: "The chats in this project will forget everything they saved. \
+                              This cannot be undone."
+                        .into(),
+                    confirm_label: "Delete all",
+                    command: json!({"type": CLEAR_MEMORY_COMMAND, "projectId": project.id}),
+                    more: Vec::new(),
+                });
+            }
+        }
+        let mut y = top + 62.0;
+        let empty = match &memory {
+            None => Some("Loading…".to_owned()),
+            Some(Err(error)) => Some(error.clone()),
+            Some(Ok(_)) if entries.is_empty() => {
+                Some("Nothing remembered yet. Ask a chat here to remember something.".to_owned())
+            }
+            Some(Ok(_)) => None,
+        };
+        if let Some(text) = empty {
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(Pos2::new(left + 16.0, y), Vec2::new(width - 32.0, 36.0)),
+                &text,
+                font(13.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+        }
+        let mut forget = None;
+        for entry in entries.iter().rev() {
+            let id = entry["id"].as_str().unwrap_or_default().to_owned();
+            let text = entry["text"].as_str().unwrap_or_default();
+            let row = Rect::from_min_size(Pos2::new(left + 16.0, y), Vec2::new(width - 32.0, 36.0));
+            theme::paint_icon(
+                ui,
+                "brain",
+                Rect::from_min_size(
+                    Pos2::new(row.left(), row.center().y - 8.0),
+                    Vec2::splat(16.0),
+                ),
+                15.0,
+                theme::muted_foreground(),
+            );
+            let text_rect = Rect::from_min_max(
+                Pos2::new(row.left() + 26.0, row.top()),
+                Pos2::new(row.right() - 32.0, row.bottom()),
+            );
+            widgets::text_in(
+                ui,
+                text_rect,
+                text,
+                font(14.0, Weight::Regular),
+                theme::foreground(),
+            );
+            // The whole memory on hover, when the row cuts it.
+            ui.interact(
+                text_rect,
+                ui.id().with(("project-memory", &id)),
+                Sense::hover(),
+            )
+            .on_hover_text(text);
+            if widgets::icon_button(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(row.right() - 26.0, row.center().y - 12.0),
+                    Vec2::splat(24.0),
+                ),
+                ("project-memory-forget", &project.id, &id),
+                "x",
+                14.0,
+                theme::muted_foreground(),
+                "Forget",
+            )
+            .clicked()
+            {
+                forget = Some(id);
+            }
+            y += 36.0;
+        }
+        if let Some(id) = forget {
+            self.forget_project_memory(project, Some(&id));
         }
         card.bottom()
     }
