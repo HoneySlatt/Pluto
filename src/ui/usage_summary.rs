@@ -33,7 +33,7 @@ const TICK_COUNT: f64 = 4.0;
 
 /// `PROVIDER_PRESENTATION`, in its reading order: kind, label, color
 /// (`PLACEHOLDER` for Codex's `--contrast-foreground`).
-const PROVIDERS: [(&str, &str, Color32); 6] = [
+const PROVIDERS: [(&str, &str, Color32); 10] = [
     ("codex", "Codex", Color32::PLACEHOLDER),
     ("claude", "Claude Code", Color32::from_rgb(0xd9, 0x77, 0x57)),
     // `color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))`.
@@ -45,6 +45,12 @@ const PROVIDERS: [(&str, &str, Color32); 6] = [
         "Antigravity",
         Color32::from_rgb(0x8c, 0x7b, 0xd1),
     ),
+    ("pi", "Pi", Color32::from_rgb(0x4d, 0x9f, 0x8a)),
+    // Pluto's drivers, in their marks' colors (the fork's `usageProviders.ts`).
+    ("kimi", "Kimi Code", Color32::from_rgb(0x17, 0x83, 0xff)),
+    ("vibe", "Mistral Vibe", Color32::from_rgb(0xfa, 0x50, 0x0f)),
+    // `color-mix(in oklab, var(--contrast-foreground) 56%, var(--background))`.
+    ("zcode", "Z Code", Color32::from_rgb(147, 147, 147)),
 ];
 
 fn presentation(provider: &str) -> (&'static str, Color32) {
@@ -74,6 +80,16 @@ fn paint_mark(ui: &Ui, provider: &str, min: Pos2, size: f32, current: Color32) {
             ui,
             Rect::from_center_size(rect.center(), Vec2::new(size * 0.8, size)),
         ),
+        "kimi" | "vibe" | "zcode" => {
+            let driver = match provider {
+                "kimi" => "kimiCode",
+                "vibe" => "mistralVibe",
+                _ => "zcode",
+            };
+            if let Some((icon, tint)) = crate::ui::pickers::provider_icon(driver) {
+                theme::paint_icon(ui, icon, rect, size, tint);
+            }
+        }
         _ => {}
     }
 }
