@@ -1062,6 +1062,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "provider-kimi-dark",
         "provider-kimi-light",
         "provider-mistral-vibe",
+        "provider-zcode",
         "circle-arrow-up",
         "pipette",
         "calendar",

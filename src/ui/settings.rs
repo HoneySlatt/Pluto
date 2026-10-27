@@ -270,6 +270,14 @@ pub(crate) enum Control {
         placeholder: String,
         width: f32,
     },
+    /// A write-only password input (`control: "password"`): the server never
+    /// sends the secret, only whether one is saved, and the typed value is
+    /// committed on blur, then dropped.
+    Secret {
+        saved: bool,
+        placeholder: String,
+        width: f32,
+    },
     /// `RetentionControl`: a day count with its switch, or "Off".
     Retention(Option<i64>),
     Text(String),
@@ -2953,6 +2961,34 @@ impl App {
                 }
                 None
             }
+            Control::Secret {
+                saved,
+                placeholder,
+                width,
+            } => {
+                let field = Rect::from_min_size(
+                    Pos2::new(right - width, center_y - 14.0),
+                    Vec2::new(*width, 28.0),
+                );
+                // A saved secret shows as the server's redaction, like upstream's input.
+                let hint = if *saved {
+                    "\u{2022}".repeat(6)
+                } else {
+                    placeholder.clone()
+                };
+                let text = self.settings_edits.entry(row.id.to_owned()).or_default();
+                let (_, done, buffer) = text_input(ui, field, &row.id, text, &hint, true);
+                *self
+                    .settings_edits
+                    .get_mut(&row.id)
+                    .expect("inserted above") = buffer;
+                if done {
+                    let typed = self.settings_edits.remove(&row.id).unwrap_or_default();
+                    let typed = typed.trim();
+                    return (!typed.is_empty()).then(|| RowAction::Text(typed.to_owned()));
+                }
+                None
+            }
             Control::Text(value) => {
                 let field = Rect::from_min_size(
                     Pos2::new(right - 288.0, center_y - 14.0),
@@ -3346,6 +3382,17 @@ pub(crate) fn number_or_text_field(
     text: &mut String,
     placeholder: &str,
 ) -> (bool, bool, String) {
+    text_input(ui, rect, id, text, placeholder, false)
+}
+
+fn text_input(
+    ui: &mut Ui,
+    rect: Rect,
+    id: &str,
+    text: &mut String,
+    placeholder: &str,
+    password: bool,
+) -> (bool, bool, String) {
     ui.painter().rect(
         rect,
         CornerRadius::same(10),
@@ -3366,7 +3413,8 @@ pub(crate) fn number_or_text_field(
             .font(font(14.0, Weight::Regular))
             .text_color(theme::foreground())
             .desired_width(rect.width() - 20.0)
-            .vertical_align(egui::Align::Center),
+            .vertical_align(egui::Align::Center)
+            .password(password),
     );
     // The placeholder goes through the shared text path: egui's hint text
     // renders lighter than the same muted color elsewhere.
@@ -3394,7 +3442,7 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         }
         Control::Retention(Some(days)) => 42.0 + retention_width(ui, &days.to_string()),
         Control::Text(_) => 288.0,
-        Control::Field { width, .. } => *width,
+        Control::Field { width, .. } | Control::Secret { width, .. } => *width,
         Control::Model { label, traits, .. } => {
             let w = |t: &str| widgets::text_width(ui, t, font(14.0, Weight::Medium)) + 60.0;
             w(label) + traits.as_deref().map_or(0.0, |t| w(t) + 8.0)

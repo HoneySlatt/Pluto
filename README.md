@@ -3,8 +3,8 @@
 # Pluto
 
 A native [egui](https://github.com/emilk/egui) client for the Pluto server, a
-fork of the [T3 Code](https://t3.codes) server that adds native Kimi Code and
-Mistral Vibe drivers (`~/Projects/pluto-server`, see its `PLUTO.md`). The
+fork of the [T3 Code](https://t3.codes) server that adds native Kimi Code,
+Mistral Vibe and Z Code drivers (`~/Projects/pluto-server`, see its `PLUTO.md`). The
 client reproduces the interface of T3's web/Electron client and speaks its
 WebSocket protocol (Effect RPC envelopes, orchestration protocol 2, T3 Code
 v0.1.0). The interface was ported from v0.0.45; v0.1.0's interface changes are

@@ -14,9 +14,11 @@
 //! Not ported (a notice shows instead): adding or deleting instances, the
 //! accent color picker, environment variable editing, custom models, usage
 //! limit hubs, update installs and the Codex/Antigravity setup flows.
-//! Credential fields (`control: "password"`: the Antigravity API key, the
-//! OpenCode server password) and environment variable values are never read
-//! or shown.
+//! Credential fields (`control: "password"`) are write-only where
+//! `driver_secrets` lists them (Z Code's API key): the server sends only a
+//! redaction, and a typed value is saved, then dropped. The others (the
+//! Antigravity API key, the OpenCode server password) and environment
+//! variable values are not editable here. None is ever read or shown.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::{Value, json};
 
@@ -47,26 +49,66 @@ const HEALTH_STEP_SECONDS: i64 = 30;
 
 /// `DEFAULT_DISABLED_PROVIDER_DRIVERS` (contracts `settings.ts`): built-in
 /// drivers that stay off until the user turns them on.
-const DEFAULT_DISABLED_DRIVERS: [&str; 8] = [
+const DEFAULT_DISABLED_DRIVERS: [&str; 9] = [
     "cursor",
     "grok",
     "muse",
     "kimiCode",
     "mistralVibe",
+    "zcode",
     "pi",
     "opencode",
     "antigravity",
 ];
 
+/// A select field of a driver's settings schema (`control: "select"`): key,
+/// title, description, options as (value, label), and its decoding default.
+type SelectField = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static str,
+);
+
+fn driver_selects(driver: &str) -> &'static [SelectField] {
+    match driver {
+        "zcode" => &[(
+            "platform",
+            "Platform",
+            "Where your GLM Coding Plan is: Z.ai, or BigModel in mainland China.",
+            &[("zai", "Z.ai"), ("bigmodel", "BigModel")],
+            "zai",
+        )],
+        _ => &[],
+    }
+}
+
+/// A password field of a driver's settings schema (`control: "password"`):
+/// key, title, description, placeholder. The server stores it apart and
+/// sends only a redaction, so the client writes it and never reads it.
+fn driver_secrets(driver: &str) -> &'static [Field] {
+    match driver {
+        "zcode" => &[(
+            "apiKey",
+            "API key",
+            "GLM Coding Plan API key. Stored separately on the host.",
+            "Required",
+        )],
+        _ => &[],
+    }
+}
+
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
-const DRIVERS: [(&str, &str, &str, Option<&str>); 8] = [
+const DRIVERS: [(&str, &str, &str, Option<&str>); 9] = [
     ("codex", "Codex", "openai", None),
     ("claudeAgent", "Claude", "claude", None),
     ("cursor", "Cursor", "provider-cursor", Some("Early Access")),
     ("grok", "Grok", "provider-grok", Some("Early Access")),
     ("opencode", "OpenCode", "opencode", None),
     ("antigravity", "Antigravity", "provider-antigravity", None),
-    // Pluto's own drivers (packages/provider-kimi-code, provider-mistral-vibe).
+    // Pluto's own drivers (packages/provider-kimi-code, provider-mistral-vibe,
+    // provider-zcode).
     ("kimiCode", "Kimi Code", "provider-kimi-dark", Some("Beta")),
     (
         "mistralVibe",
@@ -74,10 +116,11 @@ const DRIVERS: [(&str, &str, &str, Option<&str>); 8] = [
         "provider-mistral-vibe",
         Some("Beta"),
     ),
+    ("zcode", "Z Code", "provider-zcode", Some("Beta")),
 ];
 
 /// One runtime field of a driver's settings schema: key, title,
-/// description, placeholder. Password fields are left out on purpose.
+/// description, placeholder. Password fields are `driver_secrets`.
 type Field = (&'static str, &'static str, &'static str, &'static str);
 
 fn driver_fields(driver: &str) -> &'static [Field] {
@@ -199,6 +242,12 @@ fn driver_fields(driver: &str) -> &'static [Field] {
             "Binary path",
             "Path to Mistral Vibe's vibe-app-server on this environment. It ships with the vibe CLI.",
             "vibe-app-server",
+        )],
+        "zcode" => &[(
+            "binaryPath",
+            "Binary path",
+            "Path to the Z Code desktop app on this environment. Pluto runs the agent it bundles.",
+            "zcode",
         )],
         _ => &[],
     }
@@ -1344,7 +1393,7 @@ impl App {
         let mut y = card.bottom() + 24.0;
         section_title(ui, Pos2::new(left + 16.0, y), "Runtime");
         let config = row.instance["config"].clone();
-        let field_rows: Vec<Row> = driver_fields(&row.driver)
+        let mut field_rows: Vec<Row> = driver_fields(&row.driver)
             .iter()
             .map(|(key, title, description, placeholder)| Row {
                 id: format!("provider:{}:{key}", row.id),
@@ -1365,10 +1414,46 @@ impl App {
                 },
             })
             .collect();
+        for (key, title, description, choices, default) in driver_selects(&row.driver) {
+            field_rows.push(Row {
+                id: format!("provider:{}:{key}", row.id),
+                title: (*title).into(),
+                description: (*description).into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: Control::Select {
+                    value: config[*key].as_str().unwrap_or(default).to_owned(),
+                    options: choices
+                        .iter()
+                        .map(|(value, label)| ((*value).to_owned(), (*label).to_owned()))
+                        .collect(),
+                    width: FIELD_WIDTH,
+                    icon: None,
+                },
+            });
+        }
+        for (key, title, description, placeholder) in driver_secrets(&row.driver) {
+            field_rows.push(Row {
+                id: format!("provider:{}:{key}", row.id),
+                title: (*title).into(),
+                description: (*description).into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: Control::Secret {
+                    saved: config[*key].as_str().is_some_and(|value| !value.is_empty()),
+                    placeholder: (*placeholder).into(),
+                    width: FIELD_WIDTH,
+                },
+            });
+        }
         let actions = self.provider_card_rows(ui, left, y + 38.0, width, &field_rows);
         y += 38.0 + self.rows_height(ui, &field_rows, width) + 24.0;
         for (id, action) in actions {
-            if let (Some(key), RowAction::Text(value)) = (id.rsplit(':').next(), action) {
+            if let (Some(key), RowAction::Text(value) | RowAction::Select(value)) =
+                (id.rsplit(':').next(), action)
+            {
                 let mut instance = row.instance.clone();
                 if !instance["config"].is_object() {
                     instance["config"] = json!({});

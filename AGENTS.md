@@ -2,9 +2,9 @@
 
 Build Pluto, a native Rust/egui client for the Pluto server: a TypeScript fork
 of the T3 Code server at `~/Projects/pluto-server` (branch `pluto`, see its
-`PLUTO.md`) that adds native Kimi Code and Mistral Vibe drivers. Visual and
-behavioral parity with the pinned upstream version is the goal; Pluto's own
-additions follow the fork's web client. Do not redesign the interface, replace
+`PLUTO.md`) that adds native Kimi Code, Mistral Vibe and Z Code drivers.
+Visual and behavioral parity with the pinned upstream version is the goal;
+Pluto's own additions follow the fork's web client. Do not redesign the interface, replace
 egui with a webview, or port the server to Rust.
 
 Reference: T3 Code v0.1.0, orchestration protocol 2. The interface was ported
