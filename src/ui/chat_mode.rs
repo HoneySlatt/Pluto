@@ -92,6 +92,8 @@ pub(crate) struct ChatMode {
     /// Temporary chats already sent `thread.delete`.
     deleted: HashSet<String>,
     search: ChatSearch,
+    /// The next message is a research request (`chat_research`).
+    pub(crate) research: bool,
 }
 
 /// The sidebar's message search.

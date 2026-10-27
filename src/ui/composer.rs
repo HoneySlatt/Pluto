@@ -428,6 +428,7 @@ impl App {
                 "Type your own answer, or leave this blank to use the selected option"
             }
             // Pluto: a chat asks like the chat sites do.
+            Mode::Normal if self.research_on(draft) => "What should I research?",
             Mode::Normal if self.chat_context(draft) => "Ask anything",
             Mode::Normal => "Ask for changes, send follow-ups, or attach images",
             Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
@@ -603,13 +604,18 @@ impl App {
                 6.0 + 7.0 + toggle_width(widgets::text_width(ui, interaction, label_font.clone()))
             }
         };
-        // A chat has no runtime or interaction mode to pick.
+        // A chat has no runtime or interaction mode to pick; it has the
+        // Research toggle instead (Pluto, `chat_research`).
         let chat = self.chat_context(draft);
+        let research = chat && !self.temporary_context();
         if !chat {
             blocks.push((
                 7.0 + labelled(true, runtime_text) + toggle(false),
                 7.0 + ICON_PICKER + toggle(true),
             ));
+        } else if research {
+            let label = widgets::text_width(ui, "Research", label_font.clone());
+            blocks.push((7.0 + toggle_width(label), 7.0 + ICON_TOGGLE));
         }
         let fit = fit_controls(
             labelled(provider_icon.is_some(), &model_label) + 6.0,
@@ -676,6 +682,15 @@ impl App {
                 self.interaction_toggle(ui, x + 7.0, bar_top, draft, icon_only(mode_index));
             }
             self.runtime_menu(ui, runtime_rect, draft);
+        }
+        if research {
+            self.separator(ui, x, bar_top);
+            self.research_toggle(
+                ui,
+                x + 7.0,
+                bar_top,
+                icon_only(mode_index) || fit.mode_hidden,
+            );
         }
         self.model_picker(ui, model_rect, draft);
         if let Some(rect) = traits_rect {
@@ -1546,6 +1561,12 @@ impl App {
         let interaction = self.composer_interaction_mode(draft);
         let uploads = crate::ui::attachments::upload_payload(&self.composer_images);
         let inline = self.inline_message_context();
+        // Pluto: a chat's Research toggle leads the message with its chip.
+        let (text, contexts) = if self.research_on(draft) {
+            crate::ui::chat_research::research_message(&text, &self.composer_contexts)
+        } else {
+            (text, self.composer_contexts.clone())
+        };
         let send = if draft {
             let Some(project) = self.draft_project() else {
                 return;
@@ -1573,7 +1594,7 @@ impl App {
             crate::ui::composer_context::apply(
                 &mut input["initialMessage"],
                 &text,
-                &self.composer_contexts,
+                &contexts,
                 inline,
             );
             TurnSend {
@@ -1589,12 +1610,7 @@ impl App {
             };
             let mut command = message_dispatch(&thread.id, &text, &model, mode);
             command["titleSeed"] = json!(title);
-            crate::ui::composer_context::apply(
-                &mut command,
-                &text,
-                &self.composer_contexts,
-                inline,
-            );
+            crate::ui::composer_context::apply(&mut command, &text, &contexts, inline);
             TurnSend {
                 thread_id: thread.id.clone(),
                 before: self.mode_commands(&thread, &runtime, &interaction),
@@ -1611,6 +1627,7 @@ impl App {
         self.composer_images.clear();
         self.composer_files.clear();
         self.composer_contexts.clear();
+        self.chat_mode.research = false;
         if draft {
             self.select_thread(Some(thread_id));
         }
