@@ -263,21 +263,39 @@ impl App {
                 let project = thread.project_id.clone();
                 self.open_project_settings(&project);
             }
-            "archive" => self.dispatch(command("thread.archive", id)),
+            // Pluto: a chat goes with all its versions (`chat_versions`).
+            "archive" => {
+                for version in self.chat_family(id) {
+                    self.dispatch(command("thread.archive", &version));
+                }
+            }
             // `confirmThreadDelete` asks first unless it was turned off.
             "delete" if self.client_settings["confirmThreadDelete"] == false => {
-                self.dispatch(command("thread.delete", id));
-                if self.selected.as_deref() == Some(id) {
+                let family = self.chat_family(id);
+                let open = self
+                    .selected
+                    .as_ref()
+                    .is_some_and(|selected| family.contains(selected));
+                for version in family {
+                    self.dispatch(command("thread.delete", &version));
+                }
+                if open {
                     self.start_draft(None);
                 }
             }
             "delete" => {
+                let more = self
+                    .chat_family(id)
+                    .into_iter()
+                    .filter(|version| version != id)
+                    .map(|version| command("thread.delete", &version))
+                    .collect();
                 self.confirm = Some(Confirm {
                     title: format!("Delete thread \"{}\"?", thread.title),
                     message: "This permanently clears conversation history for this thread.".into(),
                     confirm_label: "Delete",
                     command: command("thread.delete", id),
-                    more: Vec::new(),
+                    more,
                 });
             }
             _ => {}

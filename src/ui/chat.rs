@@ -609,6 +609,12 @@ impl App {
             }
             self.keep_scroll = true;
         }
+        // Pluto: a chat's versions are forks, which it does not announce.
+        let fork_card = |row: &Row| matches!(row, Row::Work { entry, .. } if entry.item_type.as_deref() == Some("fork"));
+        if self.is_chat_thread(&thread) && rows.iter().any(fork_card) {
+            rows =
+                std::sync::Arc::new(rows.iter().filter(|row| !fork_card(row)).cloned().collect());
+        }
         // Toggling a fold keeps the clicked row in place instead of following the end.
         let keep_scroll = std::mem::take(&mut self.keep_scroll);
         let (select_all, selecting) = {
@@ -1001,6 +1007,16 @@ impl App {
     }
 
     fn user_row(&mut self, ui: &mut Ui, message: &Message, width: f32) {
+        // Pluto: a chat message being edited (`chat_versions`).
+        if self
+            .chat_versions
+            .editing
+            .as_ref()
+            .is_some_and(|(id, _)| *id == message.id)
+        {
+            self.edit_user_row(ui, message, width);
+            return;
+        }
         let max_width = (width * 0.8).floor();
         let text = message.text.trim_end();
         // `UserMessageBody`: the text as markdown with its line breaks and
@@ -1167,12 +1183,35 @@ impl App {
                 }
             }
         }
+        let meta_top = bubble.bottom() + 4.0;
+        // Pluto: a chat message's versions, and its Edit button.
+        let mut meta_right = row_rect.right() - 4.0;
+        if let Some((versions, at)) = self.message_versions(&message.id) {
+            meta_right =
+                self.version_switcher(ui, meta_right, meta_top, &message.id, &versions, at) - 4.0;
+        }
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
-            let meta_top = bubble.bottom() + 4.0;
-            let copy = Rect::from_min_size(
-                Pos2::new(row_rect.right() - 4.0 - 24.0, meta_top),
-                Vec2::splat(24.0),
-            );
+            if self.can_branch(&message.id) {
+                let edit =
+                    Rect::from_min_size(Pos2::new(meta_right - 24.0, meta_top), Vec2::splat(24.0));
+                if widgets::icon_button(
+                    ui,
+                    edit,
+                    ("edit-user", &message.id),
+                    "pencil",
+                    14.0,
+                    theme::muted_foreground(),
+                    "Edit message",
+                )
+                .clicked()
+                {
+                    self.chat_versions.editing = Some((message.id.clone(), message.text.clone()));
+                    self.chat_versions.focus_editor = true;
+                }
+                meta_right = edit.left() - 4.0;
+            }
+            let copy =
+                Rect::from_min_size(Pos2::new(meta_right - 24.0, meta_top), Vec2::splat(24.0));
             widgets::copy_button(
                 ui,
                 copy,
@@ -1292,11 +1331,34 @@ impl App {
                     true,
                     || message.text.clone(),
                 );
+                // Pluto: a chat's last answer can be regenerated (`chat_versions`).
+                let mut after = copy.right();
+                if !message.streaming
+                    && let Some((prompt, text)) = self.regenerable_prompt(&message.id)
+                    && self.can_branch(&prompt)
+                {
+                    let regenerate =
+                        Rect::from_min_size(Pos2::new(after + 4.0, meta.top()), Vec2::splat(24.0));
+                    if widgets::icon_button(
+                        ui,
+                        regenerate,
+                        ("regenerate", &message.id),
+                        "refresh-cw",
+                        14.0,
+                        theme::muted_foreground(),
+                        "Regenerate",
+                    )
+                    .clicked()
+                    {
+                        self.branch_message(&prompt, &text);
+                    }
+                    after = regenerate.right();
+                }
                 if !message.streaming {
                     let time = widgets::clock_time(&message.updated_at, self.now);
                     widgets::text_in(
                         ui,
-                        Rect::from_min_max(Pos2::new(copy.right() + 8.0, meta.top()), meta.max),
+                        Rect::from_min_max(Pos2::new(after + 8.0, meta.top()), meta.max),
                         &time,
                         font(12.0, Weight::Regular),
                         theme::muted_foreground(),

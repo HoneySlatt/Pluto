@@ -319,6 +319,7 @@ impl App {
     /// Opens the new chat once a created chat project reaches the shell, and
     /// deletes the temporary chats the user left.
     pub(crate) fn poll_chat_mode(&mut self) {
+        self.poll_chat_versions();
         for space in Space::ALL {
             if self.chat_mode.spaces[space.index()].pending_draft
                 && let Some(project) = self.space_project(space)
@@ -330,16 +331,18 @@ impl App {
         if !self.connected() {
             return;
         }
+        // The open chat keeps its versions.
+        let open = self.selected.as_deref().map(|id| self.version_root(id));
         let left: Vec<String> = self
             .state
             .threads
             .iter()
             .filter(|t| {
                 // A subagent goes with its chat.
-                self.selected.as_deref() != Some(t.id.as_str())
-                    && !t.is_subagent()
+                !t.is_subagent()
                     && !self.chat_mode.deleted.contains(&t.id)
                     && self.is_temporary_thread(t)
+                    && open.as_deref() != Some(self.version_root(&t.id).as_str())
             })
             .map(|t| t.id.clone())
             .collect();
@@ -495,7 +498,7 @@ impl App {
 
         // The chats, newest first, by day.
         let query = self.search.trim().to_lowercase();
-        let mut chats: Vec<std::sync::Arc<Thread>> = self
+        let chats: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
@@ -503,6 +506,8 @@ impl App {
             .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .cloned()
             .collect();
+        // One entry per conversation, whatever its versions.
+        let mut chats = self.chat_conversations(chats);
         let at = |t: &Thread| {
             t.latest_user_message_at
                 .clone()
