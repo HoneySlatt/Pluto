@@ -1002,7 +1002,11 @@ impl App {
             })
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .or_else(|| descriptor["currentValue"].as_str().map(str::to_owned))?;
+            .or_else(|| {
+                crate::ui::pickers::descriptor_default(&descriptor)
+                    .as_str()
+                    .map(str::to_owned)
+            })?;
         descriptor["options"]
             .as_array()?
             .iter()

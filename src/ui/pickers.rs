@@ -118,7 +118,7 @@ impl App {
             .unwrap_or_default();
         let current = |descriptor: &Value| -> Value {
             let id = descriptor["id"].as_str().unwrap_or_default();
-            option_of(id).unwrap_or_else(|| descriptor["currentValue"].clone())
+            option_of(id).unwrap_or_else(|| descriptor_default(descriptor))
         };
         // Owned strings first; menu entries borrow them.
         struct Row {
@@ -888,6 +888,21 @@ impl App {
     }
 }
 
+/// A trait's value when the selection does not set it
+/// (`getProviderOptionCurrentValue`): the descriptor's `currentValue`, else,
+/// for a select, the option marked `isDefault`.
+pub(crate) fn descriptor_default(descriptor: &Value) -> Value {
+    let current = &descriptor["currentValue"];
+    if !current.is_null() || descriptor["type"] == "boolean" {
+        return current.clone();
+    }
+    descriptor["options"]
+        .as_array()
+        .and_then(|options| options.iter().find(|o| o["isDefault"] == true))
+        .map(|o| o["id"].clone())
+        .unwrap_or(Value::Null)
+}
+
 /// `formatProviderDriverKindLabel`: "claudeAgent" reads "Claude Agent".
 fn driver_kind_label(driver: &str) -> String {
     let mut spaced = String::new();
@@ -1060,6 +1075,18 @@ fn paint_kbd(ui: &Ui, label: &str, right: f32, center_y: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn descriptor_default_falls_back_to_the_default_option() {
+        use serde_json::json;
+        let select = json!({"type": "select", "options": [
+            {"id": "low"}, {"id": "medium", "isDefault": true}]});
+        assert_eq!(super::descriptor_default(&select), json!("medium"));
+        let mut chosen = select.clone();
+        chosen["currentValue"] = json!("low");
+        assert_eq!(super::descriptor_default(&chosen), json!("low"));
+        assert!(super::descriptor_default(&json!({"type": "boolean"})).is_null());
+    }
+
     use super::*;
 
     #[test]
