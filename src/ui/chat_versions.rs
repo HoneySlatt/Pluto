@@ -132,10 +132,24 @@ impl App {
             .collect()
     }
 
+    /// Whether any version of the chat `thread_id` is pinned.
+    pub(crate) fn chat_pinned(&self, thread_id: &str) -> bool {
+        let family = self.chat_family(thread_id);
+        self.state
+            .threads
+            .iter()
+            .any(|t| t.pinned_at.is_some() && family.contains(&t.id))
+    }
+
     /// One thread per conversation among `chats`: the open one, else the
-    /// one used last.
-    pub(crate) fn chat_conversations(&self, chats: Vec<Arc<Thread>>) -> Vec<Arc<Thread>> {
+    /// one used last; and whether any version of it is pinned.
+    pub(crate) fn chat_conversations(&self, chats: Vec<Arc<Thread>>) -> Vec<(Arc<Thread>, bool)> {
         let threads = self.thread_index();
+        let pinned: std::collections::HashSet<String> = threads
+            .values()
+            .filter(|t| t.pinned_at.is_some() && self.is_chat_thread(t))
+            .map(|t| self.version_root_in(&threads, &t.id))
+            .collect();
         let last = |t: &Thread| {
             t.latest_user_message_at
                 .clone()
@@ -155,7 +169,10 @@ impl App {
                 shown.insert(root, thread);
             }
         }
-        shown.into_values().collect()
+        shown
+            .into_iter()
+            .map(|(root, thread)| (thread, pinned.contains(&root)))
+            .collect()
     }
 
     /// Where the open chat's message `message_id` can branch, and the

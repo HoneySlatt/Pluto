@@ -2167,12 +2167,12 @@ impl App {
             .into_iter()
             .chain(PAGES.iter().copied().enumerate())
             .collect();
-        // Pluto's Memory page follows Providers.
+        // Pluto's Personalization page follows Providers.
         let providers = entries
             .iter()
             .position(|(index, _)| *index == PROVIDERS_PAGE)
             .map_or(entries.len(), |at| at + 1);
-        entries.insert(providers, (MEMORY_PAGE, ("Memory", "brain")));
+        entries.insert(providers, (MEMORY_PAGE, ("Personalization", "user-round")));
         for (slot, (index, (label, icon))) in entries.into_iter().enumerate().filter(|_| !searching)
         {
             let item = Rect::from_min_size(
@@ -2247,7 +2247,7 @@ impl App {
     fn settings_page_view(&mut self, ui: &mut Ui, main: Rect, page: usize) {
         let label = match page {
             PROJECT_PAGE => "Project",
-            MEMORY_PAGE => "Memory",
+            MEMORY_PAGE => "Personalization",
             _ => PAGES[page].0,
         };
         // Header: "Settings / Page", and Restore device defaults on General.
@@ -2402,6 +2402,10 @@ impl App {
                         Sense::hover(),
                     );
                     return;
+                }
+                // Custom instructions lead the Personalization page.
+                if page == MEMORY_PAGE {
+                    y = self.instructions_card(ui, left, y, card_width);
                 }
                 for section in &sections {
                     // Discovery sits between Repositories and Text generation.

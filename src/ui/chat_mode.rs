@@ -275,6 +275,10 @@ impl App {
             "projects.writeFile",
             json!({"cwd": root, "relativePath": PROFILE_PATH, "contents": space.profile()}),
         );
+        // Temporary chats follow the custom instructions too.
+        if space == Space::Temporary {
+            self.share_instructions();
+        }
     }
 
     /// The chat projects' creation and profile answers.
@@ -529,13 +533,21 @@ impl App {
             .cloned()
             .collect();
         // One entry per conversation, whatever its versions.
-        let mut chats = self.chat_conversations(chats);
+        let conversations = self.chat_conversations(chats);
         let at = |t: &Thread| {
             t.latest_user_message_at
                 .clone()
                 .unwrap_or_else(|| t.updated_at.clone())
         };
-        chats.sort_by_key(|t| std::cmp::Reverse(at(t)));
+        // Pinned chats lead, under their own heading.
+        let pinned: std::collections::HashSet<String> = conversations
+            .iter()
+            .filter(|(_, pinned)| *pinned)
+            .map(|(t, _)| t.id.clone())
+            .collect();
+        let mut chats: Vec<std::sync::Arc<Thread>> =
+            conversations.into_iter().map(|(t, _)| t).collect();
+        chats.sort_by_key(|t| (!pinned.contains(&t.id), std::cmp::Reverse(at(t))));
         let now = chrono::Local::now();
         let list = Rect::from_min_max(
             Pos2::new(left, 100.0),
@@ -568,7 +580,11 @@ impl App {
             .show(&mut list_ui, |ui| {
                 let mut group = "";
                 for thread in &chats {
-                    let label = day_group(&at(thread), now);
+                    let label = if pinned.contains(&thread.id) {
+                        "Pinned"
+                    } else {
+                        day_group(&at(thread), now)
+                    };
                     if label != group {
                         group = label;
                         let (rect, _) =
@@ -610,20 +626,27 @@ impl App {
                         );
                         text_right -= 14.0;
                     }
-                    widgets::text_in(
-                        ui,
-                        Rect::from_min_max(
-                            Pos2::new(item.left() + 10.0, item.top()),
-                            Pos2::new(text_right, item.bottom()),
-                        ),
-                        &thread.title,
-                        font(14.0, Weight::Regular),
-                        if selected {
-                            theme::sidebar_foreground()
-                        } else {
-                            theme::alpha(theme::sidebar_foreground(), 0.85)
-                        },
+                    // "Rename thread" edits the title in place.
+                    let title = Rect::from_min_max(
+                        Pos2::new(item.left() + 6.0, item.top() + 2.0),
+                        Pos2::new(text_right, item.bottom() - 2.0),
                     );
+                    if !self.rename_editor(ui, &thread.id, title) {
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(item.left() + 10.0, item.top()),
+                                Pos2::new(text_right, item.bottom()),
+                            ),
+                            &thread.title,
+                            font(14.0, Weight::Regular),
+                            if selected {
+                                theme::sidebar_foreground()
+                            } else {
+                                theme::alpha(theme::sidebar_foreground(), 0.85)
+                            },
+                        );
+                    }
                     if response.clicked() {
                         open = Some(thread.id.clone());
                     }

@@ -68,7 +68,12 @@ impl App {
             return Self::legacy_thread_menu_items(thread);
         }
         let now = self.now;
-        let pinned = thread.pinned_at.is_some();
+        // Pluto: a chat is pinned when any of its versions is.
+        let pinned = if self.is_chat_thread(thread) {
+            self.chat_pinned(&thread.id)
+        } else {
+            thread.pinned_at.is_some()
+        };
         let settled = thread.settled_override.as_deref() == Some("settled");
         let snoozed = crate::snooze::effective_snoozed(thread, now);
         let mut items = Vec::new();
@@ -214,8 +219,24 @@ impl App {
             // Branch and worktree carry-over is not ported: the draft opens
             // in the thread's project on its current checkout.
             "new-thread-on-branch" => self.start_draft(Some(thread.project_id.clone())),
-            "pin" => self.dispatch(command("thread.pin", id)),
-            "unpin" => self.dispatch(command("thread.unpin", id)),
+            // Pluto: a chat's versions are pinned together (`chat_versions`).
+            "pin" | "unpin" => {
+                let pinned = self.chat_family(id).into_iter().filter(|version| {
+                    self.state
+                        .threads
+                        .iter()
+                        .any(|t| t.id == *version && t.pinned_at.is_some())
+                });
+                let action = clicked.as_str();
+                let versions: Vec<String> = if action == "pin" {
+                    vec![id.to_owned()]
+                } else {
+                    pinned.collect()
+                };
+                for version in versions {
+                    self.dispatch(command(&format!("thread.{action}"), &version));
+                }
+            }
             "settle" => self.dispatch(command("thread.settle", id)),
             "unsettle" => {
                 let mut cmd = command("thread.unsettle", id);
@@ -360,9 +381,12 @@ impl App {
                 .unwrap_or_default();
             let trimmed = title.trim();
             if !trimmed.is_empty() && trimmed != original {
-                let mut cmd = command("thread.metadata.update", thread_id);
-                cmd["title"] = json!(trimmed);
-                self.dispatch(cmd);
+                // Pluto: a chat's versions share its title.
+                for version in self.chat_family(thread_id) {
+                    let mut cmd = command("thread.metadata.update", &version);
+                    cmd["title"] = json!(trimmed);
+                    self.dispatch(cmd);
+                }
             }
         } else {
             self.renaming = Some((renaming_id, title));

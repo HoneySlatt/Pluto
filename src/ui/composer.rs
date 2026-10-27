@@ -400,6 +400,8 @@ impl App {
             Mode::Question(_) => {
                 "Type your own answer, or leave this blank to use the selected option"
             }
+            // Pluto: a chat asks like the chat sites do.
+            Mode::Normal if self.chat_context(draft) => "Ask anything",
             Mode::Normal => "Ask for changes, send follow-ups, or attach images",
             Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
         };
