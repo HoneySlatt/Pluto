@@ -158,6 +158,7 @@ pub struct App {
     pub(crate) design_home: crate::ui::design_home::DesignHome,
     pub(crate) chat_mode: crate::ui::chat_mode::ChatMode,
     pub(crate) chat_versions: crate::ui::chat_versions::ChatVersions,
+    pub(crate) chat_projects: crate::ui::chat_projects::ChatProjects,
     /// A chat to export as Markdown once its history is loaded.
     pub(crate) pending_chat_export: Option<String>,
     pub(crate) memory: crate::ui::memory_settings::MemorySettings,
@@ -469,6 +470,7 @@ impl App {
             design_home: Default::default(),
             chat_mode: Default::default(),
             chat_versions: Default::default(),
+            chat_projects: Default::default(),
             pending_chat_export: None,
             memory: Default::default(),
             pr_summaries: Default::default(),
@@ -1101,6 +1103,7 @@ impl eframe::App for App {
                 self.command_palette(ui, rect);
                 self.legacy_rename_dialog(ui, rect);
                 self.legacy_grouping_dialog(ui, rect);
+                self.chat_project_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
@@ -1394,6 +1397,7 @@ impl App {
             || self.html_render_url_result(&key, &result)
             || self.design_home_result(&key, &result)
             || self.design_result(&key, &result)
+            || self.chat_project_result(&key, &result)
             || self.chat_mode_result(&key, &result)
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)

@@ -7,6 +7,7 @@ pub mod changed_files;
 pub mod chat;
 pub mod chat_export;
 pub mod chat_mode;
+pub mod chat_projects;
 pub mod chat_versions;
 pub mod citations;
 pub mod cite;

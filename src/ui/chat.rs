@@ -67,6 +67,9 @@ impl App {
                 false,
                 &mode,
             );
+        } else if let Some(project) = draft_project.clone().filter(|p| self.is_chat_project(p)) {
+            // Pluto: a chat project's page (`chat_projects`).
+            self.project_page(ui, body, &project, column_left, column);
         } else if let Some(project) = draft_project {
             // Hero + composer, vertically centered as one group.
             // Centered as one group; without the checkout strip it is 32px

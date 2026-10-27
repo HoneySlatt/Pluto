@@ -167,9 +167,10 @@ impl App {
             .find(|space| self.space_root(*space).is_some_and(|r| r == root))
     }
 
-    /// Whether `project` holds chats (the chat space or temporary chats).
+    /// Whether `project` holds chats: the chat space, temporary chats or a
+    /// chat project (`chat_projects`).
     pub(crate) fn is_chats(&self, project: &Project) -> bool {
-        self.space_of(project).is_some()
+        self.space_of(project).is_some() || self.is_chat_project(project)
     }
 
     /// Whether `project` holds temporary chats.
@@ -323,7 +324,7 @@ impl App {
         );
         // Temporary chats follow the custom instructions too.
         if space == Space::Temporary {
-            self.share_instructions();
+            self.share_instructions(root);
         }
     }
 
@@ -427,6 +428,7 @@ impl App {
     /// deletes the temporary chats the user left.
     pub(crate) fn poll_chat_mode(&mut self) {
         self.poll_chat_versions();
+        self.poll_chat_projects();
         self.poll_chat_export();
         for space in Space::ALL {
             if self.chat_mode.spaces[space.index()].pending_draft
@@ -472,8 +474,9 @@ impl App {
             rect.right() - 13.0 - 3.0 * 32.0
         };
         let temporary = self.temporary_context();
-        // A new chat can be made temporary.
-        if self.current_thread().is_none() {
+        let project = self.open_chat_project();
+        // A new chat can be made temporary, except in a project.
+        if self.current_thread().is_none() && project.is_none() {
             let button = Rect::from_min_size(
                 Pos2::new(right - 32.0, rect.center().y - 14.0),
                 Vec2::splat(28.0),
@@ -528,6 +531,53 @@ impl App {
             right = button.left() - 4.0;
         }
         let title = if temporary { "Temporary chat" } else { title };
+        // A project's chat leads with the project, which opens its page.
+        let mut left = left;
+        if let Some(project) = &project {
+            let draft = self.current_thread().is_none();
+            let label_font = font(
+                14.0,
+                if draft {
+                    Weight::Medium
+                } else {
+                    Weight::Regular
+                },
+            );
+            let width = widgets::text_width(ui, &project.title, label_font.clone());
+            let crumb = Rect::from_min_size(
+                Pos2::new(left, rect.center().y - 12.0),
+                Vec2::new(width + 1.0, 24.0),
+            );
+            let response = ui.interact(crumb, ui.id().with("chat-project-crumb"), Sense::click());
+            widgets::text_in(
+                ui,
+                crumb,
+                &project.title,
+                label_font,
+                if draft || response.hovered() {
+                    theme::foreground()
+                } else {
+                    theme::muted_foreground()
+                },
+            );
+            if response.clicked() && !draft {
+                self.open_project_page(&project.id);
+            }
+            if draft {
+                return;
+            }
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(crumb.right() + 8.0, rect.top()),
+                    Vec2::new(12.0, rect.height()),
+                ),
+                "/",
+                font(14.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+            left = crumb.right() + 26.0;
+        }
         widgets::text_in(
             ui,
             Rect::from_min_max(
@@ -644,7 +694,13 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && self.in_mode(t))
+            // A project's chats live on its page.
+            .filter(|t| {
+                t.archived_at.is_none()
+                    && !t.is_subagent()
+                    && self.in_mode(t)
+                    && !self.is_project_chat_thread(t)
+            })
             .cloned()
             .collect();
         // One entry per conversation, whatever its versions; a search keeps
@@ -684,24 +740,6 @@ impl App {
             Pos2::new(left, 100.0),
             Pos2::new(rect.right() - 1.0, rect.bottom() - 48.0),
         );
-        if chats.is_empty() {
-            let text = if query.is_empty() {
-                "No chats yet"
-            } else {
-                "No matching chats"
-            };
-            widgets::text_in(
-                ui,
-                Rect::from_min_size(
-                    Pos2::new(left + 16.0, list.top() + 8.0),
-                    Vec2::new(220.0, 20.0),
-                ),
-                text,
-                font(13.0, Weight::Regular),
-                theme::sidebar_muted(),
-            );
-            return;
-        }
         let mut open = None;
         let mut menu = None;
         let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
@@ -709,6 +747,26 @@ impl App {
             .id_salt("chat-list")
             .auto_shrink([false, false])
             .show(&mut list_ui, |ui| {
+                // Pluto's chat projects lead the list (`chat_projects`).
+                if query.is_empty() {
+                    self.chat_projects_section(ui, list.width());
+                }
+                if chats.is_empty() {
+                    let text = if query.is_empty() {
+                        "No chats yet"
+                    } else {
+                        "No matching chats"
+                    };
+                    let (row, _) =
+                        ui.allocate_exact_size(Vec2::new(list.width(), 36.0), Sense::hover());
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_max(Pos2::new(row.left() + 16.0, row.top() + 8.0), row.max),
+                        text,
+                        font(13.0, Weight::Regular),
+                        theme::sidebar_muted(),
+                    );
+                }
                 let mut group = "";
                 for thread in &chats {
                     let label = if pinned.contains(&thread.id) {
@@ -814,6 +872,7 @@ impl App {
         if let Some((id, at)) = menu {
             self.open_thread_menu(&id, at);
         }
+        self.chat_project_menu(ui);
     }
 }
 

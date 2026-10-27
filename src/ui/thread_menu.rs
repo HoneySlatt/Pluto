@@ -514,6 +514,16 @@ impl App {
                         self.clear_memories();
                         return;
                     }
+                    // Pluto: deleting the open chat project leaves for a new chat.
+                    if confirm.command["type"] == "project.delete"
+                        && self
+                            .open_chat_project()
+                            .is_some_and(|p| confirm.command["projectId"] == p.id.as_str())
+                    {
+                        self.dispatch(confirm.command);
+                        self.new_chat();
+                        return;
+                    }
                     let deleted = confirm.command["type"] == "thread.delete";
                     let thread_id = confirm.command["threadId"].as_str().map(str::to_owned);
                     let deleted_selected = deleted

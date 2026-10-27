@@ -136,14 +136,14 @@ impl App {
         }
     }
 
-    /// Copies the chat space's instructions to the temporary chat space,
-    /// whose profile was just written.
-    pub(crate) fn share_instructions(&mut self) {
+    /// Copies the chat space's instructions to another chat space (the
+    /// temporary one, a project) whose profile was just written.
+    pub(crate) fn share_instructions(&mut self, target: &str) {
         let Some(root) = self.chats_project().map(|chats| chats.workspace_root) else {
             return;
         };
         self.send_request(
-            "chat-instructions:share".into(),
+            format!("chat-instructions:share:{target}"),
             "projects.readFile",
             json!({"cwd": root, "relativePath": INSTRUCTIONS_PATH}),
         );
@@ -297,24 +297,16 @@ impl App {
                 self.memory.instructions = Some(fields);
                 true
             }
-            "chat-instructions:share" => {
+            key if key.starts_with("chat-instructions:share:") => {
+                let root = &key["chat-instructions:share:".len()..];
                 if let Ok(file) = result
                     && let Some(contents) = file["contents"].as_str()
                 {
-                    let contents = contents.to_owned();
-                    if let Some(root) = self
-                        .state
-                        .projects
-                        .iter()
-                        .find(|p| self.is_temporary_chats(p))
-                        .map(|p| p.workspace_root.clone())
-                    {
-                        self.send_request(
-                            format!("chat-instructions:write:{root}"),
-                            "projects.writeFile",
-                            json!({"cwd": root, "relativePath": INSTRUCTIONS_PATH, "contents": contents}),
-                        );
-                    }
+                    self.send_request(
+                        format!("chat-instructions:write:{root}"),
+                        "projects.writeFile",
+                        json!({"cwd": root, "relativePath": INSTRUCTIONS_PATH, "contents": contents}),
+                    );
                 }
                 true
             }
