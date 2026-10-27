@@ -572,10 +572,14 @@ impl App {
                 6.0 + 7.0 + toggle_width(widgets::text_width(ui, interaction, label_font.clone()))
             }
         };
-        blocks.push((
-            7.0 + labelled(true, runtime_text) + toggle(false),
-            7.0 + ICON_PICKER + toggle(true),
-        ));
+        // A chat has no runtime or interaction mode to pick.
+        let chat = self.chat_context(draft);
+        if !chat {
+            blocks.push((
+                7.0 + labelled(true, runtime_text) + toggle(false),
+                7.0 + ICON_PICKER + toggle(true),
+            ));
+        }
         let fit = fit_controls(
             labelled(provider_icon.is_some(), &model_label) + 6.0,
             &blocks,
@@ -605,10 +609,10 @@ impl App {
             x = rect.right() + 6.0;
             traits_rect = Some(rect);
         }
-        self.separator(ui, x, bar_top);
-        x += 7.0;
-        let mode_index = blocks.len() - 1;
-        if fit.mode_hidden {
+        let mode_index = blocks.len().saturating_sub(1);
+        if !chat && fit.mode_hidden {
+            self.separator(ui, x, bar_top);
+            x += 7.0;
             // `CompactComposerControlsMenu`: Mode and Access behind "…".
             let rect = self.icon_picker(
                 ui,
@@ -619,7 +623,9 @@ impl App {
                 "composer-overflow",
             );
             self.composer_overflow_menu(ui, rect, draft, plan_toggle, &runtime);
-        } else {
+        } else if !chat {
+            self.separator(ui, x, bar_top);
+            x += 7.0;
             let runtime_rect = if icon_only(mode_index) {
                 self.icon_picker(ui, x, bar_top, runtime_icon, runtime_text, "runtime-picker")
             } else {
@@ -1298,6 +1304,10 @@ impl App {
     }
 
     pub(crate) fn composer_runtime_mode(&self, draft: bool) -> String {
+        // Pluto: chats ask before anything that would write or run.
+        if self.chat_context(draft) {
+            return "approval-required".to_owned();
+        }
         if let Some(mode) = self.composer_runtime.get(&self.composer_key(draft)) {
             return mode.clone();
         }
@@ -1429,6 +1439,16 @@ impl App {
             let Some(project) = self.draft_project() else {
                 return;
             };
+            // Pluto: the chat space keeps the last chat model as its default,
+            // so Chat mode has its own default model.
+            if self.is_chats(&project) && project.default_model_selection.as_ref() != Some(&model) {
+                self.dispatch(json!({
+                    "type": "project.update",
+                    "commandId": uuid::Uuid::new_v4().to_string(),
+                    "projectId": project.id,
+                    "defaultModelSelection": model,
+                }));
+            }
             let thread_id = uuid::Uuid::new_v4().to_string();
             let mut input = launch_input(
                 &thread_id,

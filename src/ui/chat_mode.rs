@@ -1,0 +1,456 @@
+//! Pluto's Chat mode (not upstream): the app as a chat client for the
+//! user's subscriptions, apart from coding, after LibreChat and the
+//! providers' own chat sites.
+//!
+//! Chats live in one hidden project, the chat space: a `chats` folder beside
+//! the server's Scratch folder, holding `.pluto/chat.json`, whose sessions
+//! the server gives its chat charter and closed tools. The sidebar's
+//! Code | Chat switch splits the app: Code lists every thread but the chat
+//! space's, Chat lists only those, by date, and opens new chats on a
+//! "How can I help?" draft. Chat threads run in approval-required mode, so
+//! an agent that tried to write or run something would ask first.
+
+use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
+use serde_json::{Value, json};
+
+use crate::app::App;
+use crate::model::{Project, Thread};
+use crate::theme::{self, Weight, font};
+use crate::ui::widgets;
+
+const PROFILE_PATH: &str = ".pluto/chat.json";
+const ROW: f32 = 32.0;
+const GROUP: f32 = 28.0;
+
+#[derive(Default)]
+pub(crate) struct ChatMode {
+    /// The chat space is being created: its `project.create` command id.
+    creating: Option<String>,
+    /// The chat space's profile was written this run.
+    profile_written: bool,
+    /// Open a new chat once the chat space exists.
+    pending_draft: bool,
+    /// The thread each mode showed last: (code, chat).
+    last: (Option<String>, Option<String>),
+}
+
+/// A chat's day group, from the time of its last message.
+fn day_group(at: &str, now: chrono::DateTime<chrono::Local>) -> &'static str {
+    let Some(at) = crate::timeline::parse_time(at) else {
+        return "Older";
+    };
+    let days = (now.date_naive() - at.with_timezone(&chrono::Local).date_naive()).num_days();
+    match days {
+        ..=0 => "Today",
+        1 => "Yesterday",
+        2..=7 => "Previous 7 days",
+        8..=30 => "Previous 30 days",
+        _ => "Older",
+    }
+}
+
+impl App {
+    /// The sidebar's Chat mode is on.
+    pub(crate) fn chat_mode(&self) -> bool {
+        self.client_settings["plutoMode"] == "chat"
+    }
+
+    /// The chat space's folder: `chats` beside the Scratch folder.
+    pub(crate) fn chats_root(&self) -> Option<String> {
+        let scratch = self.scratch_root()?.trim_end_matches('/');
+        let (parent, _) = scratch.rsplit_once('/')?;
+        Some(format!("{parent}/chats"))
+    }
+
+    /// Whether `project` is the chat space.
+    pub(crate) fn is_chats(&self, project: &Project) -> bool {
+        self.chats_root()
+            .is_some_and(|root| project.workspace_root.trim_end_matches('/') == root)
+    }
+
+    pub(crate) fn chats_project(&self) -> Option<Project> {
+        self.state
+            .projects
+            .iter()
+            .find(|p| self.is_chats(p))
+            .cloned()
+    }
+
+    /// Whether `thread` is a chat (it works in the chat space).
+    pub(crate) fn is_chat_thread(&self, thread: &Thread) -> bool {
+        self.state
+            .project(&thread.project_id)
+            .is_some_and(|p| self.is_chats(p))
+    }
+
+    /// Whether `thread` belongs to the mode the sidebar shows.
+    pub(crate) fn in_mode(&self, thread: &Thread) -> bool {
+        self.is_chat_thread(thread) == self.chat_mode()
+    }
+
+    /// Whether the open thread or draft is a chat.
+    pub(crate) fn chat_context(&self, draft: bool) -> bool {
+        if draft {
+            self.draft_project().is_some_and(|p| self.is_chats(&p))
+        } else {
+            self.current_thread()
+                .is_some_and(|t| self.is_chat_thread(&t))
+        }
+    }
+
+    /// Switches between Code and Chat, each mode coming back to the thread it
+    /// showed last (a new chat when Chat had none).
+    pub(crate) fn set_chat_mode(&mut self, chat: bool) {
+        if chat == self.chat_mode() {
+            return;
+        }
+        let current = self.selected.clone();
+        if chat {
+            self.chat_mode.last.0 = current;
+        } else {
+            self.chat_mode.last.1 = current;
+        }
+        self.client_settings["plutoMode"] = json!(if chat { "chat" } else { "code" });
+        self.save_client_settings();
+        let back = if chat {
+            self.chat_mode.last.1.clone()
+        } else {
+            self.chat_mode.last.0.clone()
+        };
+        let back = back.filter(|id| self.state.threads.iter().any(|t| &t.id == id));
+        match back {
+            Some(id) => self.select_thread(Some(id)),
+            None if chat => self.new_chat(),
+            None => self.select_thread(None),
+        }
+    }
+
+    /// Opens a new chat, creating the chat space the first time.
+    pub(crate) fn new_chat(&mut self) {
+        let Some(root) = self.chats_root() else {
+            self.status = Some("Chats need a connected server with a Scratch folder".into());
+            return;
+        };
+        match self.chats_project() {
+            Some(project) => {
+                if !self.chat_mode.profile_written {
+                    self.write_chat_profile(&root);
+                }
+                self.start_draft(Some(project.id));
+            }
+            None => {
+                if self.chat_mode.creating.is_some() {
+                    return;
+                }
+                let command_id = uuid::Uuid::new_v4().to_string();
+                self.chat_mode.creating = Some(command_id.clone());
+                self.chat_mode.pending_draft = true;
+                self.select_thread(None);
+                self.dispatch(json!({
+                    "type": "project.create",
+                    "commandId": command_id,
+                    "projectId": uuid::Uuid::new_v4().to_string(),
+                    "title": "Chats",
+                    "workspaceRoot": root,
+                    "createWorkspaceRootIfMissing": true,
+                    "defaultModelSelection": null,
+                }));
+            }
+        }
+    }
+
+    fn write_chat_profile(&mut self, root: &str) {
+        self.chat_mode.profile_written = true;
+        self.send_request(
+            format!("chat-profile:{root}"),
+            "projects.writeFile",
+            json!({"cwd": root, "relativePath": PROFILE_PATH, "contents": "{\n  \"version\": 1\n}\n"}),
+        );
+    }
+
+    /// The chat space's creation and profile answers.
+    pub(crate) fn chat_mode_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
+        if key.starts_with("chat-profile:") {
+            if let Err(error) = result {
+                self.chat_mode.profile_written = false;
+                self.status = Some(format!("Could not prepare the chat space: {error}"));
+            }
+            return true;
+        }
+        let Some(command) = &self.chat_mode.creating else {
+            return false;
+        };
+        if key != format!("project-mutation:{command}") {
+            return false;
+        }
+        self.chat_mode.creating = None;
+        match result {
+            Ok(_) => {
+                if let Some(root) = self.chats_root() {
+                    self.write_chat_profile(&root);
+                }
+            }
+            Err(error) => {
+                self.chat_mode.pending_draft = false;
+                self.status = Some(format!("Could not create the chat space: {error}"));
+            }
+        }
+        true
+    }
+
+    /// Opens the new chat once the created chat space reaches the shell.
+    pub(crate) fn poll_chat_mode(&mut self) {
+        if self.chat_mode.pending_draft
+            && let Some(project) = self.chats_project()
+        {
+            self.chat_mode.pending_draft = false;
+            self.start_draft(Some(project.id));
+        }
+    }
+
+    /// A chat's header: its title, and the panel controls while the panel
+    /// is closed.
+    pub(crate) fn chat_header(&mut self, ui: &mut Ui, rect: Rect, title: &str) {
+        let left = self.titlebar_left(rect);
+        let panel_header = self.panel_open() && self.current_thread().is_some();
+        let right = if panel_header {
+            rect.right() - theme::WORKSPACE_GUTTER
+        } else {
+            self.panel_controls(ui, rect.right());
+            rect.right() - 13.0 - 3.0 * 32.0
+        };
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(left, rect.top()),
+                Pos2::new(right - 8.0, rect.bottom()),
+            ),
+            title,
+            font(14.0, Weight::Medium),
+            theme::foreground(),
+        );
+    }
+
+    /// The header's Code | Chat switch, right of the wordmark.
+    pub(crate) fn mode_switch(&mut self, ui: &mut Ui, rect: Rect) {
+        let track = Rect::from_min_size(
+            Pos2::new(rect.left() + 247.0 - 104.0, 14.0),
+            Vec2::new(104.0, 24.0),
+        );
+        ui.painter().rect_filled(
+            track,
+            CornerRadius::same(8),
+            theme::alpha(theme::sidebar_foreground(), 0.06),
+        );
+        let chat = self.chat_mode();
+        for (index, label) in ["Code", "Chat"].into_iter().enumerate() {
+            let segment = Rect::from_min_size(
+                track.min + Vec2::new(2.0 + 50.0 * index as f32, 2.0),
+                Vec2::new(50.0, 20.0),
+            );
+            let active = (index == 1) == chat;
+            let response = ui.interact(segment, ui.id().with(("mode", index)), Sense::click());
+            if active {
+                ui.painter()
+                    .rect_filled(segment, CornerRadius::same(6), theme::accent());
+            }
+            let color = if active || response.hovered() {
+                theme::sidebar_foreground()
+            } else {
+                theme::sidebar_muted()
+            };
+            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium));
+            widgets::text_in(
+                ui,
+                Rect::from_center_size(segment.center(), Vec2::new(width + 1.0, 16.0)),
+                label,
+                font(12.0, Weight::Medium),
+                color,
+            );
+            if response.clicked() {
+                self.set_chat_mode(index == 1);
+            }
+        }
+    }
+
+    /// Chat mode's sidebar: search, a new chat, and the chats by day.
+    pub(crate) fn chat_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
+        let left = rect.left();
+        let search_rect = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(207.0, 32.0));
+        theme::paint_icon(
+            ui,
+            "search",
+            Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
+            16.0,
+            theme::sidebar_icon(),
+        );
+        let input_rect = Rect::from_min_size(
+            Pos2::new(left + 40.0, 65.5),
+            Vec2::new(search_rect.width() - 40.0, 21.0),
+        );
+        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
+        search_ui.add(
+            egui::TextEdit::singleline(&mut self.search)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .font(font(14.0, Weight::Medium))
+                .text_color(theme::sidebar_foreground())
+                .hint_text(
+                    egui::RichText::new("Search chats")
+                        .font(font(14.0, Weight::Medium))
+                        .color(theme::sidebar_muted()),
+                )
+                .desired_width(input_rect.width()),
+        );
+        if widgets::icon_button(
+            ui,
+            Rect::from_min_size(Pos2::new(left + 219.0, 62.0), Vec2::splat(28.0)),
+            "chat-new",
+            "square-pen",
+            16.0,
+            theme::sidebar_icon(),
+            "New chat",
+        )
+        .clicked()
+        {
+            self.new_chat();
+        }
+
+        // The chats, newest first, by day.
+        let query = self.search.trim().to_lowercase();
+        let mut chats: Vec<std::sync::Arc<Thread>> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && self.is_chat_thread(t))
+            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
+            .cloned()
+            .collect();
+        let at = |t: &Thread| {
+            t.latest_user_message_at
+                .clone()
+                .unwrap_or_else(|| t.updated_at.clone())
+        };
+        chats.sort_by_key(|t| std::cmp::Reverse(at(t)));
+        let now = chrono::Local::now();
+        let list = Rect::from_min_max(
+            Pos2::new(left, 100.0),
+            Pos2::new(rect.right() - 1.0, rect.bottom() - 48.0),
+        );
+        if chats.is_empty() {
+            let text = if query.is_empty() {
+                "No chats yet"
+            } else {
+                "No matching chats"
+            };
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(left + 16.0, list.top() + 8.0),
+                    Vec2::new(220.0, 20.0),
+                ),
+                text,
+                font(13.0, Weight::Regular),
+                theme::sidebar_muted(),
+            );
+            return;
+        }
+        let mut open = None;
+        let mut menu = None;
+        let mut list_ui = ui.new_child(egui::UiBuilder::new().max_rect(list));
+        egui::ScrollArea::vertical()
+            .id_salt("chat-list")
+            .auto_shrink([false, false])
+            .show(&mut list_ui, |ui| {
+                let mut group = "";
+                for thread in &chats {
+                    let label = day_group(&at(thread), now);
+                    if label != group {
+                        group = label;
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(list.width(), GROUP), Sense::hover());
+                        widgets::text_in(
+                            ui,
+                            Rect::from_min_max(
+                                Pos2::new(rect.left() + 16.0, rect.top() + 8.0),
+                                rect.max,
+                            ),
+                            label,
+                            font(12.0, Weight::Medium),
+                            theme::sidebar_muted(),
+                        );
+                    }
+                    let (row, response) =
+                        ui.allocate_exact_size(Vec2::new(list.width(), ROW), Sense::click());
+                    let item = Rect::from_min_max(
+                        Pos2::new(row.left() + 8.0, row.top() + 1.0),
+                        Pos2::new(row.right() - 8.0, row.bottom() - 1.0),
+                    );
+                    let selected = self.selected.as_deref() == Some(thread.id.as_str());
+                    if selected {
+                        ui.painter()
+                            .rect_filled(item, CornerRadius::same(8), theme::row_active());
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(
+                            item,
+                            CornerRadius::same(8),
+                            theme::alpha(theme::sidebar_foreground(), 0.06),
+                        );
+                    }
+                    let mut text_right = item.right() - 10.0;
+                    if thread.is_running() {
+                        ui.painter().circle_filled(
+                            Pos2::new(item.right() - 14.0, item.center().y),
+                            3.0,
+                            theme::primary(),
+                        );
+                        text_right -= 14.0;
+                    }
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_max(
+                            Pos2::new(item.left() + 10.0, item.top()),
+                            Pos2::new(text_right, item.bottom()),
+                        ),
+                        &thread.title,
+                        font(14.0, Weight::Regular),
+                        if selected {
+                            theme::sidebar_foreground()
+                        } else {
+                            theme::alpha(theme::sidebar_foreground(), 0.85)
+                        },
+                    );
+                    if response.clicked() {
+                        open = Some(thread.id.clone());
+                    }
+                    if response.secondary_clicked()
+                        && let Some(at) = response.interact_pointer_pos()
+                    {
+                        menu = Some((thread.id.clone(), at));
+                    }
+                }
+            });
+        if let Some(id) = open {
+            self.select_thread(Some(id));
+        }
+        if let Some((id, at)) = menu {
+            self.open_thread_menu(&id, at);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chats_group_by_day() {
+        let now = chrono::Local::now();
+        let ago = |days: i64| (now - chrono::Duration::days(days)).to_rfc3339();
+        assert_eq!(day_group(&ago(0), now), "Today");
+        assert_eq!(day_group(&ago(1), now), "Yesterday");
+        assert_eq!(day_group(&ago(5), now), "Previous 7 days");
+        assert_eq!(day_group(&ago(20), now), "Previous 30 days");
+        assert_eq!(day_group(&ago(90), now), "Older");
+    }
+}

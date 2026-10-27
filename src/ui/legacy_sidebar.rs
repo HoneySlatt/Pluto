@@ -244,7 +244,12 @@ impl App {
 
     /// Projects in the saved manual order (`orderItemsByPreferredIds`).
     fn legacy_ordered_projects(&self) -> Vec<&Project> {
-        let projects: Vec<&Project> = self.state.projects.iter().collect();
+        let projects: Vec<&Project> = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| !self.is_chats(p))
+            .collect();
         project_grouping::order_projects(
             &self.environment_id(),
             &projects,
@@ -260,7 +265,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none() && !t.is_subagent())
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && !self.is_chat_thread(t))
             .map(std::sync::Arc::as_ref)
             .collect();
         let mut groups = self.legacy_groups();
@@ -1202,7 +1207,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none() && !t.is_subagent())
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && !self.is_chat_thread(t))
             .map(std::sync::Arc::as_ref)
             .collect();
         let mut groups = self.legacy_groups();

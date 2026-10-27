@@ -153,6 +153,7 @@ pub struct App {
     pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
     pub(crate) design: crate::ui::design::DesignState,
     pub(crate) design_home: crate::ui::design_home::DesignHome,
+    pub(crate) chat_mode: crate::ui::chat_mode::ChatMode,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
@@ -457,6 +458,7 @@ impl App {
             html_renders: Default::default(),
             design: Default::default(),
             design_home: Default::default(),
+            chat_mode: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
             legacy_confirm_archive: None,
@@ -612,6 +614,7 @@ impl App {
             }
         }
         self.poll_scratch();
+        self.poll_chat_mode();
         if let Some(message) = disconnected {
             self.connection = None;
             self.connect.error = Some(message);
@@ -1379,6 +1382,7 @@ impl App {
             || self.html_render_url_result(&key, &result)
             || self.design_home_result(&key, &result)
             || self.design_result(&key, &result)
+            || self.chat_mode_result(&key, &result)
         {
             return;
         }

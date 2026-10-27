@@ -239,7 +239,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none())
+            .filter(|t| t.archived_at.is_none() && self.in_mode(t))
             .map(std::sync::Arc::as_ref)
             .collect();
         threads.sort_by(|a, b| {
@@ -412,6 +412,7 @@ impl App {
                         .state
                         .projects
                         .iter()
+                        .filter(|p| !self.is_chats(p))
                         .map(|p| {
                             let mut item =
                                 Item::new("folder", &p.title, Action::NewThreadIn(p.id.clone()));
@@ -465,7 +466,7 @@ impl App {
                     .state
                     .projects
                     .iter()
-                    .filter(|p| !self.is_scratch(p))
+                    .filter(|p| !self.is_scratch(p) && !self.is_chats(p))
                     .map(|p| {
                         let mut item =
                             Item::new("folder", &p.title, Action::NewThreadIn(p.id.clone()));

@@ -313,7 +313,11 @@ impl App {
 
     pub(crate) fn sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         self.sidebar_chrome(ui, rect);
-        if self.client_setting("legacySidebarEnabled") == true {
+        // Pluto: Code | Chat (`crate::ui::chat_mode`).
+        self.mode_switch(ui, rect);
+        if self.chat_mode() {
+            self.chat_sidebar(ui, rect);
+        } else if self.client_setting("legacySidebarEnabled") == true {
             self.legacy_sidebar(ui, rect);
         } else {
             self.inbox_sidebar(ui, rect);
@@ -496,6 +500,7 @@ impl App {
             .iter()
             .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
+            .filter(|t| !self.is_chat_thread(t))
             .cloned()
             .collect();
         let sections = sections(threads.iter().map(std::sync::Arc::as_ref), self.now);

@@ -98,6 +98,11 @@ impl App {
     }
 
     fn header(&mut self, ui: &mut Ui, rect: Rect, title: Option<&str>, draft: Option<&Project>) {
+        // Pluto: a chat's header is its title alone (`crate::ui::chat_mode`).
+        if self.chat_context(self.current_thread().is_none()) {
+            self.chat_header(ui, rect, title.unwrap_or("New chat"));
+            return;
+        }
         let project = self
             .current_thread()
             .and_then(|t| self.state.project(&t.project_id).cloned())
@@ -317,6 +322,23 @@ impl App {
         width: f32,
         composer_top: f32,
     ) {
+        // Pluto: a new chat asks how it can help, with no project picker.
+        if self.is_chats(project) {
+            let text = "How can I help?";
+            let hero = font(30.0, Weight::Regular);
+            let text_width = widgets::text_width(ui, text, hero.clone());
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(left + (width - text_width) / 2.0, composer_top - 72.0),
+                    Vec2::new(text_width + 1.0, 40.0),
+                ),
+                text,
+                hero,
+                theme::foreground(),
+            );
+            return;
+        }
         let offers_scratch = self.scratch_root().is_some();
         let scratch_draft = self.is_scratch(project);
         let regular = font(30.0, Weight::Regular);

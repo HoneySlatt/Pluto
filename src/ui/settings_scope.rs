@@ -409,6 +409,7 @@ impl App {
         // The project menu: All projects, then the projects.
         // `useSettingsProjectGroups`: sorted by display name (`localeCompare`).
         let mut projects = self.state.projects.clone();
+        projects.retain(|p| !self.is_chats(p));
         projects.sort_by(|a, b| {
             a.title
                 .to_lowercase()
