@@ -196,7 +196,7 @@ impl App {
             let mut right = area.right() - 8.0;
             for (icon, tip) in [
                 ("external-link", "Open in browser"),
-                ("maximize-2", "Open in Design"),
+                ("palette", "Open in Design"),
             ] {
                 let button = Rect::from_min_size(
                     Pos2::new(right - 24.0, area.top() + 8.0),
@@ -222,7 +222,7 @@ impl App {
                 if !response.clicked() {
                     continue;
                 }
-                if icon == "maximize-2" {
+                if icon == "palette" {
                     self.open_design(Some(id.clone()));
                 } else if let Some(Ok(url)) = self.html_render_url(&id) {
                     widgets::open_external(&url);
