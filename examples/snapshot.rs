@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use egui_kittest::Harness;
-use t3_code_rust::app::{App, Options};
+use pluto::app::{App, Options};
 use zeroize::Zeroizing;
 
 /// A file dropped on the window by `--drop path`.

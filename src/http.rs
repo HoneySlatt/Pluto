@@ -43,7 +43,7 @@ fn request(url: &url::Url) -> Option<(u16, String, Vec<u8>)> {
         None => url.path().to_owned(),
     };
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: t3-code-rust\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\nConnection: close\r\n\r\n"
     );
     let mut response = Vec::new();
     match url.scheme() {

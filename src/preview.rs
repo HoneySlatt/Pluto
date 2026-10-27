@@ -295,7 +295,7 @@ fn pipe() -> Result<(RawFd, RawFd), String> {
 /// the pipe it answers on.
 fn launch() -> Result<(Process, File, File), String> {
     let binary = browser_binary().ok_or("No Chromium-based browser was found")?;
-    let profile = std::env::temp_dir().join(format!("t3-code-rust-preview-{}", std::process::id()));
+    let profile = std::env::temp_dir().join(format!("pluto-preview-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
     std::fs::create_dir_all(&profile).map_err(|_| "Could not create the preview profile")?;
     let (commands_read, commands_write) = pipe()?;

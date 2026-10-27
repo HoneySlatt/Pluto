@@ -359,7 +359,7 @@ impl App {
                 server: options
                     .server
                     .clone()
-                    .unwrap_or_else(|| "http://127.0.0.1:3773".into()),
+                    .unwrap_or_else(|| "http://127.0.0.1:3774".into()),
                 ..Default::default()
             },
             connection: None,

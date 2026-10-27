@@ -177,26 +177,27 @@ impl App {
             theme::muted_foreground(),
             "Toggle Sidebar",
         );
-        let mark = Rect::from_min_size(Pos2::new(left + 52.0, 21.0), Vec2::new(16.5, 9.9));
-        egui::Image::new(theme::icon("t3-wordmark"))
-            .tint(theme::sidebar_foreground())
-            .paint_at(ui, mark);
-        // "Code" is cap-trimmed: its baseline sits on the wordmark's bottom edge.
-        let code = widgets::galley(
+        // Pluto's wordmark (in place of T3's mark and "Code"), its baseline
+        // where T3's wordmark sat.
+        let wordmark = widgets::galley(
             ui,
-            "Code",
-            font(14.0, Weight::Medium),
-            theme::sidebar_muted(),
+            "Pluto",
+            font(14.0, Weight::SemiBold),
+            theme::sidebar_foreground(),
             20.0,
             f32::INFINITY,
         );
         // Glyph positions are baselines relative to their row.
-        let baseline =
-            code.rows[0].pos.y + code.rows[0].row.glyphs.first().map_or(15.0, |g| g.pos.y);
+        let baseline = wordmark.rows[0].pos.y
+            + wordmark.rows[0]
+                .row
+                .glyphs
+                .first()
+                .map_or(15.0, |g| g.pos.y);
         painter.galley(
-            Pos2::new(left + 72.5, mark.bottom() - baseline),
-            code,
-            theme::sidebar_muted(),
+            Pos2::new(left + 52.0, 30.9 - baseline),
+            wordmark,
+            theme::sidebar_foreground(),
         );
     }
 

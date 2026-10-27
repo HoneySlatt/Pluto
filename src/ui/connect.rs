@@ -37,7 +37,7 @@ impl App {
         widgets::text(
             ui,
             Pos2::new(x, card.top() + 60.0),
-            "Connect to a T3 Code server",
+            "Connect to a Pluto server",
             font(30.0, Weight::SemiBold),
             theme::foreground(),
             36.0,
@@ -80,7 +80,7 @@ impl App {
                     )
             } else {
                 egui::TextEdit::singleline(&mut self.connect.server).hint_text(
-                    egui::RichText::new("http://127.0.0.1:3773").color(theme::muted_foreground()),
+                    egui::RichText::new("http://127.0.0.1:3774").color(theme::muted_foreground()),
                 )
             };
             child.add(

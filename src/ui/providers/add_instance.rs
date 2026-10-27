@@ -142,7 +142,11 @@ impl App {
         let environment = self.environment_label();
 
         let panel_height = match dialog.step {
-            0 => 20.0 + 8.0 + 5.0 * 44.0 + 4.0 * 12.0,
+            // The driver grid: two columns of 44px cells, 12px apart.
+            0 => {
+                let rows = (DRIVERS.len() + COMING_SOON.len()).div_ceil(2) as f32;
+                20.0 + 8.0 + rows * 44.0 + (rows - 1.0) * 12.0
+            }
             // Label and Instance ID (80 each), then the accent row (76).
             1 => 80.0 + 80.0 + 76.0,
             _ if fields.is_empty() => 20.0,

@@ -275,6 +275,8 @@ fn driver_label(driver: &str) -> &str {
         "claudeAgent" => "Claude",
         "cursor" => "Cursor",
         "grok" => "Grok",
+        "kimiCode" => "Kimi Code",
+        "mistralVibe" => "Mistral Vibe",
         "opencode" => "OpenCode",
         "antigravity" => "Antigravity",
         other => other,

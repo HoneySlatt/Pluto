@@ -1,6 +1,6 @@
 use zeroize::Zeroizing;
 
-/// usage: t3-code-rust [--server URL] [--token-file PATH]
+/// usage: pluto [--server URL] [--token-file PATH]
 /// The token file is read once at startup and kept in memory only.
 fn main() -> eframe::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -9,11 +9,10 @@ fn main() -> eframe::Result<()> {
     let config_home = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")));
-    let mut options = t3_code_rust::app::Options {
+    let mut options = pluto::app::Options {
         server: None,
         token: None,
-        client_settings_path: config_home
-            .map(|d| d.join("t3-code-rust").join("client-settings.json")),
+        client_settings_path: config_home.map(|d| d.join("pluto").join("client-settings.json")),
         block_turn_starts: false,
     };
     while let Some(arg) = args.next() {
@@ -30,12 +29,12 @@ fn main() -> eframe::Result<()> {
         }
     }
     let viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("T3 Code")
-        .with_app_id("t3-code-rust")
+        .with_title("Pluto")
+        .with_app_id("pluto")
         .with_inner_size([1440.0, 900.0])
         .with_min_inner_size([720.0, 480.0]);
     eframe::run_native(
-        "t3-code-rust",
+        "pluto",
         eframe::NativeOptions {
             viewport,
             // Frames take little GPU work: one frame queued instead of two
@@ -46,6 +45,6 @@ fn main() -> eframe::Result<()> {
             },
             ..Default::default()
         },
-        Box::new(move |cc| Ok(Box::new(t3_code_rust::app::App::new(cc, options)))),
+        Box::new(move |cc| Ok(Box::new(pluto::app::App::new(cc, options)))),
     )
 }

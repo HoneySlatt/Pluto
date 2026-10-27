@@ -1,10 +1,11 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# T3-Code Rust
+# Pluto
 
-A native [egui](https://github.com/emilk/egui) client for the
-[T3 Code](https://t3.codes) server, reproducing the interface of the upstream
-web/Electron client. The server stays upstream's: this client speaks its
+A native [egui](https://github.com/emilk/egui) client for the Pluto server, a
+fork of the [T3 Code](https://t3.codes) server that adds native Kimi Code and
+Mistral Vibe drivers (`~/Projects/pluto-server`, see its `PLUTO.md`). The
+client reproduces the interface of T3's web/Electron client and speaks its
 WebSocket protocol (Effect RPC envelopes, orchestration protocol 2, T3 Code
 v0.1.0). The interface was ported from v0.0.45; v0.1.0's interface changes are
 being ported (see "Protocol 2" below).
@@ -13,11 +14,11 @@ being ported (see "Protocol 2" below).
 
 ```sh
 # NixOS: provides the Vulkan/Wayland/X11 libraries eframe loads at runtime.
-nix-shell --run 'cargo run --release -- --server http://127.0.0.1:3773'
+nix-shell --run 'cargo run --release -- --server http://127.0.0.1:3774'
 ```
 
 The connection screen asks for the server address and an access token. Issue a
-token on the server machine with `t3 auth session issue`. `--token-file PATH`
+token on the server machine with `pluto-server auth session issue`. `--token-file PATH`
 reads it from a file at startup instead; it is kept in memory only.
 
 ## What is ported
@@ -111,7 +112,7 @@ OKLCH tokens converted to sRGB; this client renders dark appearances only), and
 clearing the environment theme returns to the stock palette (upstream keeps the last theme).
 
 The Usage page's metric and period live in memory (upstream: local storage).
-Client settings persist in `$XDG_CONFIG_HOME/t3-code-rust/client-settings.json`
+Client settings persist in `$XDG_CONFIG_HOME/pluto/client-settings.json`
 (upstream: local storage). The project scope lives in memory (upstream persists it in its UI state store);
 thread visits, which decide the Done status, persist in `visited.json` beside the
 client settings.

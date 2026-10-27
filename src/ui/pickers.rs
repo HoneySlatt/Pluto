@@ -46,6 +46,16 @@ pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
         "grok" => Some(("provider-grok", Color32::from_rgb(0xf5, 0xf5, 0xf5))),
         "opencode" => Some(("opencode", Color32::WHITE)),
         "antigravity" => Some(("provider-antigravity", Color32::WHITE)),
+        // Pluto's drivers: full-color marks, Kimi's moon following the theme.
+        "kimiCode" => Some((
+            if theme::palette().dark {
+                "provider-kimi-dark"
+            } else {
+                "provider-kimi-light"
+            },
+            Color32::WHITE,
+        )),
+        "mistralVibe" => Some(("provider-mistral-vibe", Color32::WHITE)),
         _ => None,
     }
 }

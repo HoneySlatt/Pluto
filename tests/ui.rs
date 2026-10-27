@@ -1,8 +1,8 @@
 //! Interaction checks against synthetic data, rendered headlessly.
 use eframe::egui;
 use egui_kittest::Harness;
+use pluto::app::{App, Options};
 use serde_json::{Value, json};
-use t3_code_rust::app::{App, Options};
 
 fn at(minutes_ago: i64) -> String {
     (chrono::Utc::now() - chrono::Duration::minutes(minutes_ago))

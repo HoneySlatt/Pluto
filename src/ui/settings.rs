@@ -706,7 +706,7 @@ impl App {
             Row {
                 id: "thread-notifications".into(),
                 title: "Thread notifications".into(),
-                description: "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while T3 Code is open.".into(),
+                description: "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while Pluto is open.".into(),
                 status: None,
                 layers: false,
                 reset: false,
@@ -1033,7 +1033,7 @@ impl App {
                         id: "open-source-licenses".into(),
                         title: "Open source licenses".into(),
                         description:
-                            "Notices for dependencies, assets, and optional tools used by T3 Code."
+                            "Notices for dependencies, assets, and optional tools used by Pluto."
                                 .into(),
                         status: None,
                         layers: false,

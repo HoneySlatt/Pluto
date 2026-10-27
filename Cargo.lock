@@ -2818,6 +2818,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "pluto"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "eframe",
+ "egui_extras",
+ "egui_kittest",
+ "iana-time-zone",
+ "image",
+ "libc",
+ "pulldown-cmark",
+ "rfd",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "skrifa",
+ "syntect",
+ "tungstenite",
+ "unicode-segmentation",
+ "url",
+ "uuid",
+ "vte",
+ "zeroize",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3702,34 +3730,6 @@ dependencies = [
  "serde_derive",
  "thiserror 2.0.21",
  "walkdir",
-]
-
-[[package]]
-name = "t3-code-rust"
-version = "0.1.0"
-dependencies = [
- "base64",
- "chrono",
- "eframe",
- "egui_extras",
- "egui_kittest",
- "iana-time-zone",
- "image",
- "libc",
- "pulldown-cmark",
- "rfd",
- "rustls",
- "rustls-native-certs",
- "serde",
- "serde_json",
- "skrifa",
- "syntect",
- "tungstenite",
- "unicode-segmentation",
- "url",
- "uuid",
- "vte",
- "zeroize",
 ]
 
 [[package]]

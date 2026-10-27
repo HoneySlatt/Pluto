@@ -1,6 +1,6 @@
 //! Dumps the config, shell and first thread snapshot of a server as JSON.
 //! usage: cargo run --example probe -- <server-url> <token-file> <out-dir>
-use t3_code_rust::protocol::{Action, Connection, Event, Route};
+use pluto::protocol::{Action, Connection, Event, Route};
 use zeroize::Zeroizing;
 
 fn main() {

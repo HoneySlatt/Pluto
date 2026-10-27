@@ -46,13 +46,21 @@ const ACCENT_DEFAULT: Color32 = Color32::from_rgb(37, 99, 235); // blue-600
 const HEALTH_STEP_SECONDS: i64 = 30;
 
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
-const DRIVERS: [(&str, &str, &str, Option<&str>); 6] = [
+const DRIVERS: [(&str, &str, &str, Option<&str>); 8] = [
     ("codex", "Codex", "openai", None),
     ("claudeAgent", "Claude", "claude", None),
     ("cursor", "Cursor", "provider-cursor", Some("Early Access")),
     ("grok", "Grok", "provider-grok", Some("Early Access")),
     ("opencode", "OpenCode", "opencode", None),
     ("antigravity", "Antigravity", "provider-antigravity", None),
+    // Pluto's own drivers (packages/provider-kimi-code, provider-mistral-vibe).
+    ("kimiCode", "Kimi Code", "provider-kimi-dark", Some("Beta")),
+    (
+        "mistralVibe",
+        "Mistral Vibe",
+        "provider-mistral-vibe",
+        Some("Beta"),
+    ),
 ];
 
 /// One runtime field of a driver's settings schema: key, title,
@@ -167,6 +175,18 @@ fn driver_fields(driver: &str) -> &'static [Field] {
                 "Automatic",
             ),
         ],
+        "kimiCode" => &[(
+            "binaryPath",
+            "Binary path",
+            "Path to the Kimi Code binary on this environment. Sign in by running kimi and /login on that host.",
+            "kimi",
+        )],
+        "mistralVibe" => &[(
+            "binaryPath",
+            "Binary path",
+            "Path to Mistral Vibe's vibe-app-server on this environment. It ships with the vibe CLI.",
+            "vibe-app-server",
+        )],
         _ => &[],
     }
 }

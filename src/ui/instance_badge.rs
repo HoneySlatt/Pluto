@@ -25,6 +25,8 @@ fn kind_label(driver: &str) -> Option<&'static str> {
         "claudeAgent" => "Claude",
         "cursor" => "Cursor",
         "grok" => "Grok",
+        "kimiCode" => "Kimi Code",
+        "mistralVibe" => "Mistral Vibe",
         "opencode" => "OpenCode",
         _ => return None,
     })

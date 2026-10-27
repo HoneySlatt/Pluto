@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use t3_code_rust::app::{App, Options};
+use pluto::app::{App, Options};
 use zeroize::Zeroizing;
 
 struct Bench {
