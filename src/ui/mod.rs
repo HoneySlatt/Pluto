@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod bitbucket;
 pub mod changed_files;
 pub mod chat;
+pub mod chat_export;
 pub mod chat_mode;
 pub mod chat_versions;
 pub mod citations;

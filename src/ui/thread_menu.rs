@@ -123,6 +123,10 @@ impl App {
             items.push(Item::new("regenerate-title", "Regenerate title").icon("refresh-cw"));
         }
         items.push(Item::new("mark-unread", "Mark unread").icon("mail-open"));
+        // Pluto: a chat can be saved as Markdown (`chat_export`).
+        if self.is_chat_thread(thread) {
+            items.push(Item::new("export-markdown", "Export as Markdown").icon("download"));
+        }
         if let Some(project) = self.state.project(&thread.project_id) {
             let label = if self.project_scope.as_deref() == Some(project.id.as_str()) {
                 "Show all projects".to_owned()
@@ -264,6 +268,7 @@ impl App {
                 self.open_project_settings(&project);
             }
             // Pluto: a chat goes with all its versions (`chat_versions`).
+            "export-markdown" => self.request_chat_export(id),
             "archive" => {
                 for version in self.chat_family(id) {
                     self.dispatch(command("thread.archive", &version));

@@ -320,6 +320,7 @@ impl App {
     /// deletes the temporary chats the user left.
     pub(crate) fn poll_chat_mode(&mut self) {
         self.poll_chat_versions();
+        self.poll_chat_export();
         for space in Space::ALL {
             if self.chat_mode.spaces[space.index()].pending_draft
                 && let Some(project) = self.space_project(space)
@@ -395,6 +396,27 @@ impl App {
             .clicked()
             {
                 self.toggle_temporary_chat();
+            }
+            right = button.left() - 4.0;
+        }
+        // An open chat can be exported.
+        if let Some(thread) = self.current_thread() {
+            let button = Rect::from_min_size(
+                Pos2::new(right - 32.0, rect.center().y - 14.0),
+                Vec2::splat(28.0),
+            );
+            if widgets::icon_button(
+                ui,
+                button,
+                "export-chat",
+                "download",
+                16.0,
+                theme::muted_foreground(),
+                "Export as Markdown",
+            )
+            .clicked()
+            {
+                self.request_chat_export(&thread.id);
             }
             right = button.left() - 4.0;
         }

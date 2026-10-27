@@ -155,6 +155,8 @@ pub struct App {
     pub(crate) design_home: crate::ui::design_home::DesignHome,
     pub(crate) chat_mode: crate::ui::chat_mode::ChatMode,
     pub(crate) chat_versions: crate::ui::chat_versions::ChatVersions,
+    /// A chat to export as Markdown once its history is loaded.
+    pub(crate) pending_chat_export: Option<String>,
     pub(crate) memory: crate::ui::memory_settings::MemorySettings,
     /// `pullRequests.summary` by PR URL, with when it was asked for.
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
@@ -462,6 +464,7 @@ impl App {
             design_home: Default::default(),
             chat_mode: Default::default(),
             chat_versions: Default::default(),
+            pending_chat_export: None,
             memory: Default::default(),
             pr_summaries: Default::default(),
             legacy_thread_lists: Default::default(),
