@@ -174,7 +174,7 @@ impl App {
             page_ui.set_clip_rect(area.intersect(ui.clip_rect()));
             // Shown once the page reported its height, like upstream's
             // `ready` on the frame's first size message.
-            shown = self.page_view(&mut page_ui, area, tab, state, scrolls)
+            shown = self.page_view(&mut page_ui, area, tab, state, scrolls, true)
                 && state.content_height.is_some();
             if let Some(engine) = &self.preview.engine {
                 for link in engine.take_links(tab) {

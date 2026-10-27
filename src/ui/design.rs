@@ -84,6 +84,10 @@ pub(crate) struct DesignState {
     /// Project files' signed URLs by absolute path, with the change they
     /// were signed after.
     files: HashMap<String, FileUrl>,
+    /// Comment mode: the pointer picks elements instead of using the page.
+    commenting: bool,
+    /// The last point inspected while commenting, in CSS pixels.
+    inspected_at: Option<Pos2>,
 }
 
 #[derive(Default)]
@@ -387,6 +391,7 @@ impl App {
         let open = button(&mut right);
         let reload = button(&mut right);
         let pin = button(&mut right);
+        let comment = button(&mut right);
         right -= 6.0;
         let width_buttons: Vec<(Width, &str, &str, Rect)> = Width::ALL
             .iter()
@@ -421,6 +426,34 @@ impl App {
             && let (Some(engine), Some(tab)) = (&self.preview.engine, self.design.tab)
         {
             engine.reload(tab);
+        }
+        // Comment mode (OpenDesign's comment tool): a click on an element
+        // adds it to the message as an element reference.
+        if self.design.commenting {
+            ui.painter()
+                .rect_filled(comment, CornerRadius::same(8), theme::accent());
+        }
+        if widgets::icon_button(
+            ui,
+            comment,
+            "design-comment",
+            "message-square-plus",
+            16.0,
+            if self.design.commenting {
+                theme::foreground()
+            } else {
+                theme::muted_foreground()
+            },
+            if self.design.commenting {
+                "Stop commenting"
+            } else {
+                "Comment on an element"
+            },
+        )
+        .clicked()
+        {
+            self.design.commenting = !self.design.commenting;
+            self.design.inspected_at = None;
         }
         if pinned.is_some() {
             ui.painter()
@@ -638,10 +671,16 @@ impl App {
         for link in engine.take_links(tab) {
             widgets::open_external(&link);
         }
+        let picked = engine.take_picked(tab);
         let state = engine.tab(tab).unwrap_or_default();
         if let Some(error) = &state.error {
             note(ui, error);
             return;
+        }
+        for element in picked {
+            if let Some(record) = element_record(&element, &page) {
+                self.add_composer_context(ui.ctx(), record);
+            }
         }
         let mut page_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -649,13 +688,74 @@ impl App {
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
         page_ui.set_clip_rect(frame.intersect(ui.clip_rect()));
-        if !self.page_view(&mut page_ui, frame, tab, &state, true) || state.loading {
+        let commenting = self.design.commenting;
+        if !self.page_view(&mut page_ui, frame, tab, &state, true, !commenting) || state.loading {
             if state.frame.is_none() {
                 note(ui, "Loading…");
             }
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+        if commenting {
+            self.comment_overlay(ui, frame, tab, &state);
+        }
+    }
+
+    /// Comment mode over the page: the element under the pointer outlined
+    /// with its tag, and a click adding it to the message.
+    fn comment_overlay(
+        &mut self,
+        ui: &mut Ui,
+        frame: Rect,
+        tab: u64,
+        state: &crate::preview::TabState,
+    ) {
+        let response = ui.interact(frame, ui.id().with("design-comment-layer"), Sense::click());
+        let Some(engine) = &self.preview.engine else {
+            return;
+        };
+        let pointer = response.hover_pos().map(|pos| (pos - frame.min).to_pos2());
+        if let Some(at) = pointer {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+            if self.design.inspected_at != Some(at) {
+                self.design.inspected_at = Some(at);
+                engine.inspect(tab, at.x, at.y, false);
+            }
+            if response.clicked() {
+                engine.inspect(tab, at.x, at.y, true);
+            }
+        }
+        let Some(element) = state.inspected.as_ref().filter(|_| pointer.is_some()) else {
+            return;
+        };
+        let number = |key: &str| element[key].as_f64().unwrap_or(0.0) as f32;
+        let outline = Rect::from_min_size(
+            frame.min + Vec2::new(number("x"), number("y")),
+            Vec2::new(number("width"), number("height")),
+        );
+        let painter = ui.painter_at(frame);
+        let color = theme::primary();
+        painter.rect_filled(outline, 2.0, theme::alpha(color, 0.12));
+        painter.rect_stroke(outline, 2.0, Stroke::new(2.0, color), StrokeKind::Outside);
+        let tag = element["tag"].as_str().unwrap_or_default();
+        let tag_width = widgets::text_width(ui, tag, font(11.0, Weight::Medium)) + 10.0;
+        let chip_top = if outline.top() - 20.0 >= frame.top() {
+            outline.top() - 20.0
+        } else {
+            outline.top() + 2.0
+        };
+        let chip = Rect::from_min_size(
+            Pos2::new(outline.left().max(frame.left()), chip_top),
+            Vec2::new(tag_width, 18.0),
+        );
+        painter.rect_filled(chip, CornerRadius::same(4), color);
+        painter.text(
+            chip.center(),
+            egui::Align2::CENTER_CENTER,
+            tag,
+            font(11.0, Weight::Medium),
+            theme::primary_foreground(),
+        );
     }
 
     /// Pauses the surface's page while it is not shown.
@@ -706,4 +806,89 @@ fn empty_state(ui: &Ui, body: Rect) {
         galley,
         theme::muted_foreground(),
     );
+}
+
+/// An `element` context record (`ElementContextRecord`) for an element
+/// picked on `page`: the agent gets the page's project path (or published
+/// page's title), the selector, the HTML and the notable styles.
+fn element_record(element: &Value, page: &HtmlRender) -> Option<Value> {
+    let tag = element["tag"].as_str().filter(|t| !t.is_empty())?;
+    let text = element["text"].as_str().unwrap_or_default();
+    let selector = element["selector"].as_str().filter(|s| !s.is_empty());
+    let label = if text.is_empty() {
+        selector.map_or_else(|| format!("<{tag}>"), str::to_owned)
+    } else {
+        let short: String = text.chars().take(40).collect();
+        let ellipsis = if text.chars().count() > 40 { "…" } else { "" };
+        format!("{tag} \u{201c}{short}{ellipsis}\u{201d}")
+    };
+    let page_url = if page.attachment_id.starts_with(FILE_PREFIX) {
+        page.title.clone()
+    } else {
+        format!("html_render page \u{201c}{}\u{201d}", page.title)
+    };
+    let id = format!("element_{}", uuid::Uuid::new_v4().simple());
+    Some(json!({
+        "version": 1,
+        "contextId": id,
+        "kind": "element",
+        "label": crate::ui::composer_context::sanitize_label(&label, "element"),
+        "pageUrl": page_url,
+        "pageTitle": element["title"].as_str().map(str::to_owned).or(Some(page.title.clone())),
+        "tagName": tag,
+        "selector": selector,
+        "htmlPreview": element["html"].as_str().unwrap_or_default(),
+        "componentName": null,
+        "source": null,
+        "styles": element["styles"].as_str().unwrap_or_default(),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picked_elements_become_element_records() {
+        let element = json!({"tag": "div", "text": "Pro 12 € per month, billed yearly for teams",
+            "selector": "section.plans > div.card.pro", "html": "<div class=\"card pro\">…</div>",
+            "styles": "border-radius: 12px;", "title": "Pricing"});
+        let file = HtmlRender {
+            attachment_id: format!("{FILE_PREFIX}/designs/p/pricing-page.html"),
+            title: "pricing-page.html".into(),
+            height: 0.0,
+            heights: Vec::new(),
+        };
+        let record = element_record(&element, &file).unwrap();
+        assert_eq!(record["kind"], "element");
+        assert_eq!(record["pageUrl"], "pricing-page.html");
+        assert_eq!(
+            record["label"],
+            "div \u{201c}Pro 12 € per month, billed yearly for te…\u{201d}"
+        );
+        assert!(
+            record["contextId"]
+                .as_str()
+                .unwrap()
+                .starts_with("element_")
+        );
+        assert!(element_record(&json!({"tag": ""}), &file).is_none());
+        let legacy = crate::ui::composer_context::legacy_text("Make it stand out", &[record]);
+        assert!(legacy.contains("<element_context>\n- <div>:\n  url: pricing-page.html\n  selector: section.plans > div.card.pro"));
+    }
+
+    #[test]
+    fn changed_html_files_resolve_against_the_project() {
+        let item: crate::model::TurnItem = serde_json::from_value(json!({
+            "id": "f", "threadId": "t", "ordinal": 0, "status": "completed",
+            "updatedAt": "2026-10-27T00:00:00Z", "type": "file_change",
+            "fileName": "/designs/p/pricing-page.html",
+            "changes": [{"path": "deck.html"}, {"path": "notes.md"}, {"path": "/elsewhere/x.html"}],
+        }))
+        .unwrap();
+        assert_eq!(
+            changed_html_files(&item, "/designs/p"),
+            vec!["/designs/p/deck.html", "/designs/p/pricing-page.html"]
+        );
+    }
 }

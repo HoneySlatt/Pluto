@@ -558,12 +558,13 @@ impl App {
         };
         engine.resize(tab, width, height, ppp);
         ui.painter().rect_filled(area, 0.0, Color32::WHITE);
-        self.page_view(ui, area, tab, state, true);
+        self.page_view(ui, area, tab, state, true, true);
     }
 
     /// A page's latest frame in `area`, with the pointer and keys going to
-    /// the page, and the wheel too when `wheel` (else it scrolls what holds
-    /// the page). Returns whether the page has a frame to show.
+    /// the page unless `pointer` is off (the Design surface's comment mode
+    /// takes them), and the wheel too when `wheel` (else it scrolls what
+    /// holds the page). Returns whether the page has a frame to show.
     pub(crate) fn page_view(
         &mut self,
         ui: &mut Ui,
@@ -571,6 +572,7 @@ impl App {
         tab: u64,
         state: &crate::preview::TabState,
         wheel: bool,
+        pointer: bool,
     ) -> bool {
         let ppp = ui.ctx().pixels_per_point();
         if self.preview.engine.is_none() {
@@ -611,6 +613,42 @@ impl App {
             }
         }
 
+        if !pointer {
+            // Only the wheel reaches the page.
+            if wheel && ui.rect_contains_pointer(area) {
+                let events = ui.input(|i| i.events.clone());
+                let at = ui.input(|i| i.pointer.hover_pos()).unwrap_or(area.center()) - area.min;
+                if let Some(engine) = &self.preview.engine {
+                    for event in &events {
+                        if let egui::Event::MouseWheel {
+                            unit,
+                            delta,
+                            modifiers,
+                            ..
+                        } = event
+                        {
+                            let scale = match unit {
+                                egui::MouseWheelUnit::Point => 1.0,
+                                egui::MouseWheelUnit::Line => 40.0,
+                                egui::MouseWheelUnit::Page => area.height(),
+                            };
+                            engine.pointer(
+                                tab,
+                                Pointer::Wheel {
+                                    x: at.x,
+                                    y: at.y,
+                                    dx: -delta.x * scale,
+                                    dy: -delta.y * scale,
+                                },
+                                modifier_bits(*modifiers),
+                            );
+                        }
+                    }
+                }
+                ui.input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
+            }
+            return state.frame.is_some();
+        }
         // Input.
         let id = ui.id().with(("preview-page", tab));
         let response = ui.interact(area, id, Sense::click_and_drag());

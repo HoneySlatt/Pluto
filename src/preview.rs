@@ -138,6 +138,13 @@ enum Request {
         tab: u64,
         text: String,
     },
+    /// The element at a point, for the Design surface's comments.
+    Inspect {
+        tab: u64,
+        x: f32,
+        y: f32,
+        pick: bool,
+    },
     Close {
         tab: u64,
     },
@@ -168,6 +175,10 @@ pub struct TabState {
     pub content_height: Option<f32>,
     /// Links a render tab's page opened, for the client to open elsewhere.
     pub links: Vec<String>,
+    /// The element under the pointer while commenting (`ELEMENT_SCRIPT`).
+    pub inspected: Option<Value>,
+    /// Elements clicked while commenting, for the client to take.
+    pub picked: Vec<Value>,
 }
 
 /// The running preview browser.
@@ -224,6 +235,22 @@ impl Preview {
             url: Some(url),
             render: true,
         });
+    }
+    /// Asks for the element at `(x, y)` (CSS pixels): it becomes the tab's
+    /// `inspected` element, and also joins `picked` when `pick`.
+    pub fn inspect(&self, tab: u64, x: f32, y: f32, pick: bool) {
+        self.send(Request::Inspect { tab, x, y, pick });
+    }
+    /// The elements clicked since the last call.
+    pub fn take_picked(&self, tab: u64) -> Vec<Value> {
+        self.tabs
+            .lock()
+            .ok()
+            .and_then(|mut tabs| {
+                tabs.get_mut(&tab)
+                    .map(|state| std::mem::take(&mut state.picked))
+            })
+            .unwrap_or_default()
     }
     /// The links a render tab's page opened since the last call.
     pub fn take_links(&self, tab: u64) -> Vec<String> {
@@ -299,6 +326,11 @@ struct Page {
     /// A published page: lossless frames, a height binding, no popups.
     render: bool,
 }
+
+/// Describes the element at a viewport point: its box, a selector, its
+/// HTML and its notable computed styles (the fields of upstream's
+/// `ElementContextDetails`), and the text it shows.
+const ELEMENT_SCRIPT: &str = r#"(function(x,y){var el=document.elementFromPoint(x,y);if(!el)return null;var r=el.getBoundingClientRect();function sel(e){var parts=[];while(e&&e.nodeType===1&&parts.length<5){if(e.id){parts.unshift('#'+CSS.escape(e.id));break;}var s=e.tagName.toLowerCase()+Array.from(e.classList).slice(0,2).map(function(c){return '.'+CSS.escape(c);}).join('');var p=e.parentElement;if(p){var same=Array.from(p.children).filter(function(c){return c.tagName===e.tagName;});if(same.length>1)s+=':nth-of-type('+(same.indexOf(e)+1)+')';}parts.unshift(s);if(e===document.body)break;e=p;}return parts.join(' > ');}var cs=getComputedStyle(el);var keys=['display','position','width','height','margin','padding','gap','font-family','font-size','font-weight','line-height','color','background-color','background-image','border','border-radius','box-shadow','text-align','grid-template-columns','flex-direction','justify-content','align-items'];var styles=keys.map(function(k){var v=cs.getPropertyValue(k);return v&&v!=='none'&&v!=='normal'&&v!=='auto'&&v!=='0px'&&v!=='rgba(0, 0, 0, 0)'?k+': '+v+';':'';}).filter(Boolean).join('\n');var html=el.outerHTML;if(html.length>4000)html=html.slice(0,3999)+'…';var text=(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,80);return {x:r.left,y:r.top,width:r.width,height:r.height,tag:el.tagName.toLowerCase(),selector:sel(el),html:html,styles:styles,text:text,title:document.title||null};})"#;
 
 /// The binding a render tab's page reports its content height through.
 const HEIGHT_BINDING: &str = "__plutoContentHeight";
@@ -425,6 +457,10 @@ enum Pending {
     Still {
         tab: u64,
         seq: u64,
+    },
+    Inspect {
+        tab: u64,
+        pick: bool,
     },
     Ignore,
 }
@@ -669,6 +705,16 @@ fn run(
                             )?;
                         }
                     }
+                    Request::Inspect { tab, x, y, pick } => {
+                        if let Some(session) = session_of(&pages, tab) {
+                            devtools.send(
+                                Some(&session),
+                                "Runtime.evaluate",
+                                json!({"expression": format!("{ELEMENT_SCRIPT}({x},{y})"), "returnByValue": true}),
+                                Pending::Inspect { tab, pick },
+                            )?;
+                        }
+                    }
                     Request::Close { tab } => {
                         if let Some(page) = pages.remove(&tab) {
                             devtools.send(
@@ -704,6 +750,16 @@ fn run(
                             state.frame = image.take();
                             state.frame_seq += 1;
                         }
+                    });
+                }
+                Some(Pending::Inspect { tab, pick }) => {
+                    let element = result["result"]["value"].clone();
+                    let element = element.is_object().then_some(element);
+                    update(tab, &mut |state| {
+                        if pick && let Some(element) = &element {
+                            state.picked.push(element.clone());
+                        }
+                        state.inspected = element.clone();
                     });
                 }
                 Some(Pending::Created { tab, url, render }) => {

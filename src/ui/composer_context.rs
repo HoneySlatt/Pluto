@@ -209,6 +209,33 @@ fn terminal_entry(record: &Value) -> String {
     )
 }
 
+/// `renderElementDetailsEntry`: a picked element's page, selector, HTML and
+/// styles.
+fn element_entry(record: &Value) -> String {
+    let indent = |text: &str| {
+        text.lines()
+            .map(|line| format!("  {line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut lines = Vec::new();
+    for (key, name) in [("pageUrl", "url"), ("selector", "selector")] {
+        if let Some(value) = record[key].as_str().filter(|v| !v.is_empty()) {
+            lines.push(format!("{name}: {value}"));
+        }
+    }
+    for (key, name) in [("htmlPreview", "html"), ("styles", "styles")] {
+        if let Some(value) = record[key].as_str().filter(|v| !v.is_empty()) {
+            lines.push(format!("{name}:\n{}", indent(value)));
+        }
+    }
+    let name = record["componentName"]
+        .as_str()
+        .or(record["tagName"].as_str())
+        .unwrap_or_default();
+    format!("- <{name}>:\n{}", indent(&lines.join("\n")))
+}
+
 /// `inlineLabel`: a terminal excerpt as `@terminal-1:4-9`, else its label.
 fn inline_label(record: &Value) -> String {
     if record["kind"] == "terminal" {
@@ -261,6 +288,17 @@ pub(crate) fn legacy_text(text: &str, records: &[Value]) -> String {
         parts.push(format!(
             "<terminal_context>\n{}\n</terminal_context>",
             entries.join("\n")
+        ));
+    }
+    let elements: Vec<String> = records
+        .iter()
+        .filter(|r| r["kind"] == "element")
+        .map(element_entry)
+        .collect();
+    if !elements.is_empty() {
+        parts.push(format!(
+            "<element_context>\n{}\n</element_context>",
+            elements.join("\n")
         ));
     }
     // Review comments not inlined still ship their block.
