@@ -322,21 +322,44 @@ impl App {
         width: f32,
         composer_top: f32,
     ) {
-        // Pluto: a new chat asks how it can help, with no project picker.
+        // Pluto: a new chat asks how it can help, with no project picker; a
+        // temporary one says what it keeps.
         if self.is_chats(project) {
-            let text = "How can I help?";
+            let temporary = self.is_temporary_chats(project);
+            let text = if temporary {
+                "Temporary chat"
+            } else {
+                "How can I help?"
+            };
             let hero = font(30.0, Weight::Regular);
             let text_width = widgets::text_width(ui, text, hero.clone());
+            let top = composer_top - if temporary { 100.0 } else { 72.0 };
             widgets::text_in(
                 ui,
                 Rect::from_min_size(
-                    Pos2::new(left + (width - text_width) / 2.0, composer_top - 72.0),
+                    Pos2::new(left + (width - text_width) / 2.0, top),
                     Vec2::new(text_width + 1.0, 40.0),
                 ),
                 text,
                 hero,
                 theme::foreground(),
             );
+            if temporary {
+                let note = "This chat won't appear in your history or use your memory, \
+                            and it is deleted when you leave it.";
+                let small = font(14.0, Weight::Regular);
+                let note_width = widgets::text_width(ui, note, small.clone());
+                widgets::text_in(
+                    ui,
+                    Rect::from_min_size(
+                        Pos2::new(left + (width - note_width) / 2.0, top + 44.0),
+                        Vec2::new(note_width + 1.0, 20.0),
+                    ),
+                    note,
+                    small,
+                    theme::muted_foreground(),
+                );
+            }
             return;
         }
         let offers_scratch = self.scratch_root().is_some();

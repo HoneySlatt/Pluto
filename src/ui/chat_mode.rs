@@ -4,11 +4,17 @@
 //!
 //! Chats live in one hidden project, the chat space: a `chats` folder beside
 //! the server's Scratch folder, holding `.pluto/chat.json`, whose sessions
-//! the server gives its chat charter and closed tools. The sidebar's
-//! Code | Chat switch splits the app: Code lists every thread but the chat
-//! space's, Chat lists only those, by date, and opens new chats on a
-//! "How can I help?" draft. Chat threads run in approval-required mode, so
-//! an agent that tried to write or run something would ask first.
+//! the server gives its chat charter, the saved memories and closed tools.
+//! The sidebar's Code | Chat switch splits the app: Code lists every thread
+//! but the chat space's, Chat lists only those, by date, and opens new chats
+//! on a "How can I help?" draft. Chat threads run in approval-required mode,
+//! so an agent that tried to write or run something would ask first.
+//!
+//! Temporary chats, after ChatGPT's, live in a second hidden project beside
+//! it (`temporary-chats`), whose profile tells the server to leave memory
+//! out. They are listed nowhere and deleted as soon as the user leaves them.
+
+use std::collections::HashSet;
 
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::{Value, json};
@@ -22,16 +28,61 @@ const PROFILE_PATH: &str = ".pluto/chat.json";
 const ROW: f32 = 32.0;
 const GROUP: f32 = 28.0;
 
+/// One of the two hidden chat projects.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Space {
+    Chats,
+    Temporary,
+}
+
+impl Space {
+    const ALL: [Space; 2] = [Space::Chats, Space::Temporary];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The folder beside the Scratch folder.
+    fn folder(self) -> &'static str {
+        match self {
+            Space::Chats => "chats",
+            Space::Temporary => "temporary-chats",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Space::Chats => "Chats",
+            Space::Temporary => "Temporary chats",
+        }
+    }
+
+    fn profile(self) -> &'static str {
+        match self {
+            Space::Chats => "{\n  \"version\": 1\n}\n",
+            Space::Temporary => "{\n  \"version\": 1,\n  \"temporary\": true\n}\n",
+        }
+    }
+}
+
+/// A chat project's setup this run.
+#[derive(Default)]
+struct SpaceState {
+    /// Being created: its `project.create` command id.
+    creating: Option<String>,
+    /// Its profile was written this run.
+    profile_written: bool,
+    /// Open a new chat in it once it exists.
+    pending_draft: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct ChatMode {
-    /// The chat space is being created: its `project.create` command id.
-    creating: Option<String>,
-    /// The chat space's profile was written this run.
-    profile_written: bool,
-    /// Open a new chat once the chat space exists.
-    pending_draft: bool,
+    spaces: [SpaceState; 2],
     /// The thread each mode showed last: (code, chat).
     last: (Option<String>, Option<String>),
+    /// Temporary chats already sent `thread.delete`.
+    deleted: HashSet<String>,
 }
 
 /// A chat's day group, from the time of its last message.
@@ -55,37 +106,62 @@ impl App {
         self.client_settings["plutoMode"] == "chat"
     }
 
-    /// The chat space's folder: `chats` beside the Scratch folder.
-    pub(crate) fn chats_root(&self) -> Option<String> {
+    /// A chat project's folder, beside the Scratch folder.
+    fn space_root(&self, space: Space) -> Option<String> {
         let scratch = self.scratch_root()?.trim_end_matches('/');
         let (parent, _) = scratch.rsplit_once('/')?;
-        Some(format!("{parent}/chats"))
+        Some(format!("{parent}/{}", space.folder()))
     }
 
-    /// Whether `project` is the chat space.
+    /// Which chat project `project` is, if any.
+    fn space_of(&self, project: &Project) -> Option<Space> {
+        let root = project.workspace_root.trim_end_matches('/');
+        Space::ALL
+            .into_iter()
+            .find(|space| self.space_root(*space).is_some_and(|r| r == root))
+    }
+
+    /// Whether `project` holds chats (the chat space or temporary chats).
     pub(crate) fn is_chats(&self, project: &Project) -> bool {
-        self.chats_root()
-            .is_some_and(|root| project.workspace_root.trim_end_matches('/') == root)
+        self.space_of(project).is_some()
     }
 
-    pub(crate) fn chats_project(&self) -> Option<Project> {
+    /// Whether `project` holds temporary chats.
+    pub(crate) fn is_temporary_chats(&self, project: &Project) -> bool {
+        self.space_of(project) == Some(Space::Temporary)
+    }
+
+    fn space_project(&self, space: Space) -> Option<Project> {
         self.state
             .projects
             .iter()
-            .find(|p| self.is_chats(p))
+            .find(|p| self.space_of(p) == Some(space))
             .cloned()
     }
 
-    /// Whether `thread` is a chat (it works in the chat space).
+    /// The chat space, whose chats are kept.
+    pub(crate) fn chats_project(&self) -> Option<Project> {
+        self.space_project(Space::Chats)
+    }
+
+    /// Whether `thread` is a chat, temporary or not.
     pub(crate) fn is_chat_thread(&self, thread: &Thread) -> bool {
         self.state
             .project(&thread.project_id)
             .is_some_and(|p| self.is_chats(p))
     }
 
-    /// Whether `thread` belongs to the mode the sidebar shows.
+    /// Whether `thread` is a temporary chat.
+    pub(crate) fn is_temporary_thread(&self, thread: &Thread) -> bool {
+        self.state
+            .project(&thread.project_id)
+            .is_some_and(|p| self.is_temporary_chats(p))
+    }
+
+    /// Whether `thread` belongs to the mode the sidebar shows; temporary
+    /// chats belong to none.
     pub(crate) fn in_mode(&self, thread: &Thread) -> bool {
-        self.is_chat_thread(thread) == self.chat_mode()
+        !self.is_temporary_thread(thread) && self.is_chat_thread(thread) == self.chat_mode()
     }
 
     /// Whether the open thread or draft is a chat.
@@ -95,6 +171,16 @@ impl App {
         } else {
             self.current_thread()
                 .is_some_and(|t| self.is_chat_thread(&t))
+        }
+    }
+
+    /// Whether the open thread or draft is a temporary chat.
+    pub(crate) fn temporary_context(&self) -> bool {
+        match self.current_thread() {
+            Some(thread) => self.is_temporary_thread(&thread),
+            None => self
+                .draft_project()
+                .is_some_and(|p| self.is_temporary_chats(&p)),
         }
     }
 
@@ -127,84 +213,139 @@ impl App {
 
     /// Opens a new chat, creating the chat space the first time.
     pub(crate) fn new_chat(&mut self) {
-        let Some(root) = self.chats_root() else {
+        self.open_space(Space::Chats);
+    }
+
+    /// Opens a new temporary chat, or a regular one from a temporary draft.
+    pub(crate) fn toggle_temporary_chat(&mut self) {
+        if self.temporary_context() {
+            self.open_space(Space::Chats);
+        } else {
+            self.open_space(Space::Temporary);
+        }
+    }
+
+    /// Opens a new chat in `space`, creating it the first time.
+    fn open_space(&mut self, space: Space) {
+        let Some(root) = self.space_root(space) else {
             self.status = Some("Chats need a connected server with a Scratch folder".into());
             return;
         };
-        match self.chats_project() {
+        match self.space_project(space) {
             Some(project) => {
-                if !self.chat_mode.profile_written {
-                    self.write_chat_profile(&root);
+                if !self.chat_mode.spaces[space.index()].profile_written {
+                    self.write_chat_profile(space, &root);
                 }
                 self.start_draft(Some(project.id));
             }
             None => {
-                if self.chat_mode.creating.is_some() {
+                let state = &mut self.chat_mode.spaces[space.index()];
+                if state.creating.is_some() {
                     return;
                 }
                 let command_id = uuid::Uuid::new_v4().to_string();
-                self.chat_mode.creating = Some(command_id.clone());
-                self.chat_mode.pending_draft = true;
+                state.creating = Some(command_id.clone());
+                state.pending_draft = true;
+                // Temporary chats start on the chat space's model.
+                let model = match space {
+                    Space::Chats => Value::Null,
+                    Space::Temporary => self
+                        .chats_project()
+                        .and_then(|p| p.default_model_selection)
+                        .unwrap_or(Value::Null),
+                };
                 self.select_thread(None);
                 self.dispatch(json!({
                     "type": "project.create",
                     "commandId": command_id,
                     "projectId": uuid::Uuid::new_v4().to_string(),
-                    "title": "Chats",
+                    "title": space.title(),
                     "workspaceRoot": root,
                     "createWorkspaceRootIfMissing": true,
-                    "defaultModelSelection": null,
+                    "defaultModelSelection": model,
                 }));
             }
         }
     }
 
-    fn write_chat_profile(&mut self, root: &str) {
-        self.chat_mode.profile_written = true;
+    fn write_chat_profile(&mut self, space: Space, root: &str) {
+        self.chat_mode.spaces[space.index()].profile_written = true;
         self.send_request(
-            format!("chat-profile:{root}"),
+            format!("chat-profile:{}", space.index()),
             "projects.writeFile",
-            json!({"cwd": root, "relativePath": PROFILE_PATH, "contents": "{\n  \"version\": 1\n}\n"}),
+            json!({"cwd": root, "relativePath": PROFILE_PATH, "contents": space.profile()}),
         );
     }
 
-    /// The chat space's creation and profile answers.
+    /// The chat projects' creation and profile answers.
     pub(crate) fn chat_mode_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
-        if key.starts_with("chat-profile:") {
+        if let Some(index) = key.strip_prefix("chat-profile:") {
             if let Err(error) = result {
-                self.chat_mode.profile_written = false;
+                if let Some(state) = index
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| self.chat_mode.spaces.get_mut(i))
+                {
+                    state.profile_written = false;
+                }
                 self.status = Some(format!("Could not prepare the chat space: {error}"));
             }
             return true;
         }
-        let Some(command) = &self.chat_mode.creating else {
+        let Some(space) = Space::ALL.into_iter().find(|space| {
+            self.chat_mode.spaces[space.index()]
+                .creating
+                .as_ref()
+                .is_some_and(|command| key == format!("project-mutation:{command}"))
+        }) else {
             return false;
         };
-        if key != format!("project-mutation:{command}") {
-            return false;
-        }
-        self.chat_mode.creating = None;
+        let state = &mut self.chat_mode.spaces[space.index()];
+        state.creating = None;
         match result {
             Ok(_) => {
-                if let Some(root) = self.chats_root() {
-                    self.write_chat_profile(&root);
+                if let Some(root) = self.space_root(space) {
+                    self.write_chat_profile(space, &root);
                 }
             }
             Err(error) => {
-                self.chat_mode.pending_draft = false;
+                state.pending_draft = false;
                 self.status = Some(format!("Could not create the chat space: {error}"));
             }
         }
         true
     }
 
-    /// Opens the new chat once the created chat space reaches the shell.
+    /// Opens the new chat once a created chat project reaches the shell, and
+    /// deletes the temporary chats the user left.
     pub(crate) fn poll_chat_mode(&mut self) {
-        if self.chat_mode.pending_draft
-            && let Some(project) = self.chats_project()
-        {
-            self.chat_mode.pending_draft = false;
-            self.start_draft(Some(project.id));
+        for space in Space::ALL {
+            if self.chat_mode.spaces[space.index()].pending_draft
+                && let Some(project) = self.space_project(space)
+            {
+                self.chat_mode.spaces[space.index()].pending_draft = false;
+                self.start_draft(Some(project.id));
+            }
+        }
+        if !self.connected() {
+            return;
+        }
+        let left: Vec<String> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| {
+                // A subagent goes with its chat.
+                self.selected.as_deref() != Some(t.id.as_str())
+                    && !t.is_subagent()
+                    && !self.chat_mode.deleted.contains(&t.id)
+                    && self.is_temporary_thread(t)
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        for id in left {
+            self.dispatch(crate::model::command("thread.delete", &id));
+            self.chat_mode.deleted.insert(id);
         }
     }
 
@@ -213,12 +354,48 @@ impl App {
     pub(crate) fn chat_header(&mut self, ui: &mut Ui, rect: Rect, title: &str) {
         let left = self.titlebar_left(rect);
         let panel_header = self.panel_open() && self.current_thread().is_some();
-        let right = if panel_header {
+        let mut right = if panel_header {
             rect.right() - theme::WORKSPACE_GUTTER
         } else {
             self.panel_controls(ui, rect.right());
             rect.right() - 13.0 - 3.0 * 32.0
         };
+        let temporary = self.temporary_context();
+        // A new chat can be made temporary.
+        if self.current_thread().is_none() {
+            let button = Rect::from_min_size(
+                Pos2::new(right - 32.0, rect.center().y - 14.0),
+                Vec2::splat(28.0),
+            );
+            if temporary {
+                ui.painter()
+                    .rect_filled(button, CornerRadius::same(8), theme::accent());
+            }
+            let tip = if temporary {
+                "Turn off temporary chat"
+            } else {
+                "Temporary chat"
+            };
+            if widgets::icon_button(
+                ui,
+                button,
+                "temporary-chat",
+                "message-square-dashed",
+                16.0,
+                if temporary {
+                    theme::foreground()
+                } else {
+                    theme::muted_foreground()
+                },
+                tip,
+            )
+            .clicked()
+            {
+                self.toggle_temporary_chat();
+            }
+            right = button.left() - 4.0;
+        }
+        let title = if temporary { "Temporary chat" } else { title };
         widgets::text_in(
             ui,
             Rect::from_min_max(
@@ -322,7 +499,7 @@ impl App {
             .state
             .threads
             .iter()
-            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && self.is_chat_thread(t))
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && self.in_mode(t))
             .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .cloned()
             .collect();
@@ -442,6 +619,17 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_temporary_profile_leaves_memory_out() {
+        let profile = |space: Space| serde_json::from_str::<Value>(space.profile()).unwrap();
+        assert_eq!(profile(Space::Chats), json!({"version": 1}));
+        assert_eq!(
+            profile(Space::Temporary),
+            json!({"version": 1, "temporary": true})
+        );
+        assert_ne!(Space::Chats.folder(), Space::Temporary.folder());
+    }
 
     #[test]
     fn chats_group_by_day() {
