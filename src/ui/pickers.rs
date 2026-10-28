@@ -64,9 +64,24 @@ pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
     }
 }
 
-/// Pluto: drivers whose models run only in chats for now (the Ollama driver
-/// has no tools yet, and its server refuses other projects).
+/// Pluto: drivers whose models run only in chats (the Ollama driver's server
+/// refuses other projects; their code runs through its OpenCode companion).
 const CHAT_ONLY_DRIVERS: [&str; 1] = ["ollama"];
+
+/// Pluto: whether `provider` is the OpenCode instance the server runs beside
+/// an Ollama instance for code projects (`<ollama id>_code`, provider-ollama's
+/// `codeModels.ts`). It shows as Ollama, in code projects only.
+pub(crate) fn is_ollama_companion(providers: &[Value], provider: &Value) -> bool {
+    provider["driver"] == "opencode"
+        && provider["instanceId"]
+            .as_str()
+            .and_then(|id| id.strip_suffix("_code"))
+            .is_some_and(|base| {
+                providers
+                    .iter()
+                    .any(|p| p["instanceId"] == base && p["driver"] == "ollama")
+            })
+}
 
 const PICKER_WIDTH: f32 = 362.0;
 const PICKER_HEIGHT: f32 = 348.0;
@@ -299,6 +314,7 @@ impl App {
                 .filter(|p| {
                     chats || !CHAT_ONLY_DRIVERS.contains(&p["driver"].as_str().unwrap_or(""))
                 })
+                .filter(|p| !chats || !is_ollama_companion(self.providers(), p))
                 .cloned()
                 .collect(),
         );
@@ -421,7 +437,11 @@ impl App {
                     .as_str()
                     .unwrap_or_default()
                     .to_owned();
-                let driver = provider["driver"].as_str().unwrap_or_default();
+                let driver = if is_ollama_companion(self.providers(), provider) {
+                    "ollama"
+                } else {
+                    provider["driver"].as_str().unwrap_or_default()
+                };
                 let (icon, tint) =
                     provider_icon(driver).unwrap_or(("circle-alert", theme::muted_foreground()));
                 let enabled = ready(provider) || setup.contains_key(&id);
@@ -1079,6 +1099,23 @@ fn paint_kbd(ui: &Ui, label: &str, right: f32, center_y: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ollama_instance_s_opencode_companion_is_recognized() {
+        use serde_json::json;
+        let providers = vec![
+            json!({"instanceId": "ollama_local", "driver": "ollama"}),
+            json!({"instanceId": "ollama_local_code", "driver": "opencode"}),
+            json!({"instanceId": "work_code", "driver": "opencode"}),
+            json!({"instanceId": "opencode", "driver": "opencode"}),
+        ];
+        let companion = |index: usize| super::is_ollama_companion(&providers, &providers[index]);
+        assert!(!companion(0));
+        assert!(companion(1));
+        // A `_code` OpenCode instance without an Ollama instance of that name is the user's own.
+        assert!(!companion(2));
+        assert!(!companion(3));
+    }
+
     #[test]
     fn descriptor_default_falls_back_to_the_default_option() {
         use serde_json::json;

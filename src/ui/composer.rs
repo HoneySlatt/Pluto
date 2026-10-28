@@ -1316,11 +1316,17 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// The driver whose mark shows for `instance_id`: Ollama's for its
+    /// OpenCode companion.
     pub(crate) fn provider_driver(&self, instance_id: &str) -> Option<String> {
-        self.providers()
+        let provider = self
+            .providers()
             .iter()
-            .find(|p| p["instanceId"] == instance_id)
-            .and_then(|p| p["driver"].as_str().map(str::to_owned))
+            .find(|p| p["instanceId"] == instance_id)?;
+        if crate::ui::pickers::is_ollama_companion(self.providers(), provider) {
+            return Some("ollama".into());
+        }
+        provider["driver"].as_str().map(str::to_owned)
     }
 
     pub(crate) fn model_entry(&self, selection: &ModelSelection) -> Option<Value> {

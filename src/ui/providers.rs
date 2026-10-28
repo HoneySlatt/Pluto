@@ -105,6 +105,13 @@ fn driver_selects(driver: &str) -> &'static [SelectField] {
                 ],
                 "searxng",
             ),
+            (
+                "codeAgent",
+                "Code projects",
+                "Run local models in code projects through OpenCode, which reads and edits files and runs commands with approvals.",
+                &[("off", "Off"), ("opencode", "OpenCode")],
+                "off",
+            ),
         ],
         _ => &[],
     }
