@@ -2113,7 +2113,8 @@ impl App {
             }
             return;
         }
-        if let Some(chosen) = self.model_picker_popup(ui, anchor, &model_menu, current, true) {
+        if let Some(chosen) = self.model_picker_popup(ui, anchor, &model_menu, current, true, true)
+        {
             self.update_setting(
                 Store::Server,
                 key,

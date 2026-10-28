@@ -48,13 +48,14 @@ const HEALTH_STEP_SECONDS: i64 = 30;
 
 /// `DEFAULT_DISABLED_PROVIDER_DRIVERS` (contracts `settings.ts`): built-in
 /// drivers that stay off until the user turns them on.
-const DEFAULT_DISABLED_DRIVERS: [&str; 9] = [
+const DEFAULT_DISABLED_DRIVERS: [&str; 10] = [
     "cursor",
     "grok",
     "muse",
     "kimiCode",
     "mistralVibe",
     "zcode",
+    "ollama",
     "pi",
     "opencode",
     "antigravity",
@@ -79,6 +80,19 @@ fn driver_selects(driver: &str) -> &'static [SelectField] {
             &[("zai", "Z.ai"), ("bigmodel", "BigModel")],
             "zai",
         )],
+        "ollama" => &[(
+            "contextLength",
+            "Context length",
+            "Tokens of conversation each model keeps, capped at the model's own limit. Longer contexts take more GPU memory.",
+            &[
+                ("8192", "8K"),
+                ("16384", "16K"),
+                ("32768", "32K"),
+                ("65536", "64K"),
+                ("131072", "128K"),
+            ],
+            "32768",
+        )],
         _ => &[],
     }
 }
@@ -99,7 +113,7 @@ fn driver_secrets(driver: &str) -> &'static [Field] {
 }
 
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
-const DRIVERS: [(&str, &str, &str, Option<&str>); 9] = [
+const DRIVERS: [(&str, &str, &str, Option<&str>); 10] = [
     ("codex", "Codex", "openai", None),
     ("claudeAgent", "Claude", "claude", None),
     ("cursor", "Cursor", "provider-cursor", Some("Early Access")),
@@ -116,6 +130,8 @@ const DRIVERS: [(&str, &str, &str, Option<&str>); 9] = [
         Some("Beta"),
     ),
     ("zcode", "Z Code", "provider-zcode", Some("Beta")),
+    // packages/provider-ollama: local models, chats only for now.
+    ("ollama", "Ollama", "provider-ollama", Some("Beta")),
 ];
 
 /// One runtime field of a driver's settings schema: key, title,
@@ -247,6 +263,12 @@ fn driver_fields(driver: &str) -> &'static [Field] {
             "Binary path",
             "Path to the Z Code desktop app on this environment. Pluto runs the agent it bundles.",
             "zcode",
+        )],
+        "ollama" => &[(
+            "baseUrl",
+            "Server URL",
+            "Address of the Ollama server, as seen from this environment.",
+            "http://127.0.0.1:11434",
         )],
         _ => &[],
     }

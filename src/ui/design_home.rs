@@ -377,7 +377,7 @@ impl App {
             };
         }
         if let Some(chosen) =
-            self.model_picker_popup(ui, model_button, MODEL_MENU, selection.clone(), true)
+            self.model_picker_popup(ui, model_button, MODEL_MENU, selection.clone(), true, false)
         {
             self.design_home.model = Some(chosen);
         }

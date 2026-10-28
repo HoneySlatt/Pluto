@@ -58,9 +58,15 @@ pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
         "mistralVibe" => Some(("provider-mistral-vibe", Color32::WHITE)),
         // Z Code's monochrome Z follows the text color, like Codex's mark.
         "zcode" => Some(("provider-zcode", theme::foreground())),
+        // Ollama's monochrome llama too.
+        "ollama" => Some(("provider-ollama", theme::foreground())),
         _ => None,
     }
 }
+
+/// Pluto: drivers whose models run only in chats for now (the Ollama driver
+/// has no tools yet, and its server refuses other projects).
+const CHAT_ONLY_DRIVERS: [&str; 1] = ["ollama"];
 
 const PICKER_WIDTH: f32 = 362.0;
 const PICKER_HEIGHT: f32 = 348.0;
@@ -261,14 +267,17 @@ impl App {
 
     pub(crate) fn model_picker(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
         let selection = self.composer_model_selection(draft);
-        if let Some(chosen) = self.model_picker_popup(ui, anchor, "model-picker", selection, false)
+        let chat = self.chat_context(draft);
+        if let Some(chosen) =
+            self.model_picker_popup(ui, anchor, "model-picker", selection, false, chat)
         {
             self.set_selection(draft, chosen);
         }
     }
 
     /// The model picker (`ProviderModelPicker`) open as `menu`, above
-    /// `anchor` or below it; returns the model chosen.
+    /// `anchor` or below it; returns the model chosen. `chats` offers the
+    /// providers that run only in chats (Pluto's `CHAT_ONLY_DRIVERS`).
     pub(crate) fn model_picker_popup(
         &mut self,
         ui: &mut Ui,
@@ -276,6 +285,7 @@ impl App {
         menu: &str,
         selection: ModelSelection,
         below: bool,
+        chats: bool,
     ) -> Option<ModelSelection> {
         if self.open_menu.as_deref() != Some(menu) {
             return None;
@@ -286,6 +296,9 @@ impl App {
             self.providers()
                 .iter()
                 .filter(|p| p["enabled"] != false)
+                .filter(|p| {
+                    chats || !CHAT_ONLY_DRIVERS.contains(&p["driver"].as_str().unwrap_or(""))
+                })
                 .cloned()
                 .collect(),
         );
