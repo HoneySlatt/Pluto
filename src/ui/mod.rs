@@ -36,6 +36,7 @@ pub mod keybindings;
 pub mod legacy_sidebar;
 pub mod lifecycle;
 pub mod lightbox;
+pub mod live_activity;
 pub mod lucide;
 pub mod markdown;
 pub mod md_copy;

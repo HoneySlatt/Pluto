@@ -7,8 +7,9 @@
 //! Lifecycle items (`V2LifecycleRow.tsx`) are event rows, drawn by
 //! `ui/lifecycle.rs`; adjacent subagents of a provider turn share one, and
 //! subagents fold with their turn once none of the batch works.
-//! Not ported from v0.1.0's rows yet: the live activity row, superseded
-//! attempt folds, context compaction rows, MCP apps, and the secret request
+//! A working turn's trailing calls become one live row (`work-live`, drawn
+//! by `ui/live_activity.rs`), or "Thinking" (`thinking`).
+//! Not ported from v0.1.0's rows yet: superseded attempt folds, context compaction rows, MCP apps, and the secret request
 //! card, which shows as a standalone work row with its upstream label.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -207,6 +208,22 @@ pub enum Row {
     },
     Working {
         started_at: Option<String>,
+    },
+    /// The active run's trailing work as one row (`work-live`): the running
+    /// tool, or the last one in past tense, with the latest thought above.
+    LiveWork {
+        group_id: String,
+        entry: Box<WorkEntry>,
+        entries: Vec<WorkEntry>,
+        expanded: bool,
+        active: bool,
+        thought: Option<String>,
+    },
+    /// "Thinking" while the active turn shows nothing live (`thinking`);
+    /// after a failed tool it opens that tool's group.
+    Thinking {
+        group_id: Option<String>,
+        expanded: bool,
     },
     /// A proposed plan (`ProposedPlanCard`).
     Plan(Box<ProposedPlan>),
@@ -649,6 +666,202 @@ const STANDALONE: &[&str] = &[
     "secret_request",
     "subagent",
 ];
+
+/// `workEntryIndicatesToolSuccess`.
+fn indicates_success(entry: &WorkEntry) -> bool {
+    if !is_tool_like(entry)
+        || indicates_failure(entry)
+        || (entry.tone == "thinking" && entry.item_type.as_deref() != Some("reasoning"))
+    {
+        return false;
+    }
+    !matches!(
+        entry.status.as_deref(),
+        Some("failed" | "declined" | "inProgress" | "stopped" | "idle")
+    )
+}
+
+/// `workEntryIsVisibleInGroup` for an expanded group: a thought with text,
+/// a call still running, a stopped call, or one with a clear outcome.
+fn visible_in_live_group(entry: &WorkEntry) -> bool {
+    if entry.item_type.as_deref() == Some("reasoning") {
+        return entry
+            .detail
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty());
+    }
+    let neutral = is_tool_like(entry) && !indicates_failure(entry) && !indicates_success(entry);
+    matches!(entry.status.as_deref(), Some("inProgress" | "stopped"))
+        || entry.source_kind == "task.progress"
+        || !neutral
+}
+
+/// `workEntryIsActiveTurnActivity`.
+fn active_activity(entry: &WorkEntry) -> bool {
+    entry.status.as_deref() == Some("inProgress")
+        || (entry.status.is_none() && (entry.source_kind == "task.progress" || is_tool_like(entry)))
+}
+
+/// `liveActivityToolStatus`: a settled call takes the live group's present
+/// tense.
+fn live_status(entry: &WorkEntry, present: bool) -> &str {
+    match entry.status.as_deref() {
+        Some(status @ ("failed" | "declined" | "stopped" | "idle")) => status,
+        Some("inProgress") => "inProgress",
+        _ if present => "inProgress",
+        _ => "completed",
+    }
+}
+
+/// `commandProgramName`: the program a command runs, past environment
+/// assignments, `env` and a shell's `-c` script.
+pub fn command_program(command: &str) -> Option<String> {
+    let mut words = command.split_whitespace().peekable();
+    while let Some(word) = words.peek() {
+        let assignment = word.split_once('=').is_some_and(|(name, _)| {
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+        let base = word.rsplit('/').next().unwrap_or(word);
+        if assignment || matches!(base, "env" | "sudo" | "exec") {
+            words.next();
+        } else {
+            break;
+        }
+    }
+    let program = words.next()?;
+    let name = program
+        .trim_matches(['"', '\''])
+        .rsplit('/')
+        .next()
+        .unwrap_or(program);
+    if matches!(name, "bash" | "sh" | "zsh" | "fish" | "dash") {
+        let rest: Vec<&str> = words.collect();
+        if let Some(at) = rest
+            .iter()
+            .position(|w| w.starts_with('-') && w.contains('c'))
+        {
+            let script = rest[at + 1..].join(" ");
+            let script = script.trim().trim_matches(['"', '\'']);
+            if let Some(inner) = command_program(script) {
+                return Some(inner);
+            }
+        }
+    }
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// `liveWorkEntryLabel`: what the live row says the call does or did.
+pub fn live_label(entry: &WorkEntry, active: bool) -> String {
+    let status = live_status(entry, active);
+    if entry.item_type.as_deref() == Some("reasoning") {
+        let detail = entry
+            .detail
+            .as_deref()
+            .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|d| !d.is_empty());
+        return detail.unwrap_or_else(|| {
+            if status == "inProgress" {
+                "Thinking".into()
+            } else {
+                "Thought".into()
+            }
+        });
+    }
+    if let Some(command) = entry
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    {
+        let verb = match status {
+            "inProgress" => "Running",
+            "failed" => "Failed",
+            "declined" => "Declined",
+            "stopped" => "Stopped",
+            _ => "Ran",
+        };
+        let program = command_program(command).unwrap_or_else(|| "command".into());
+        return format!("{verb} {program}");
+    }
+    display_label(entry)
+}
+
+/// `liveThoughtLine`: a bold-only opening line (a summary heading), else
+/// the first sentence, as plain text.
+pub fn live_thought_line(markdown: &str) -> String {
+    let first = markdown
+        .trim_start()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim_end();
+    let heading = first
+        .strip_prefix("**")
+        .and_then(|rest| rest.strip_suffix("**"))
+        .filter(|inner| !inner.is_empty() && !inner.contains('*'));
+    let source = heading.unwrap_or(markdown);
+    let mut text = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let unlisted = ["# ", "## ", "### ", "#### ", "- ", "* ", "+ "]
+            .iter()
+            .find_map(|prefix| trimmed.strip_prefix(prefix))
+            .or_else(|| {
+                let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
+                (digits > 0)
+                    .then(|| trimmed[digits..].strip_prefix(". "))
+                    .flatten()
+            })
+            .unwrap_or(line);
+        text.push_str(unlisted);
+        text.push(' ');
+    }
+    // Links read as their labels; code ticks, bold and strikes drop.
+    let mut plain = String::new();
+    let mut rest = text.as_str();
+    while let Some(open) = rest.find('[') {
+        match (rest[open..].find("]("), rest[open..].find(')')) {
+            (Some(close), Some(end)) if close < end => {
+                let label_start = if rest[..open].ends_with('!') {
+                    open - 1
+                } else {
+                    open
+                };
+                plain.push_str(&rest[..label_start]);
+                plain.push_str(&rest[open + 1..open + close]);
+                rest = &rest[open + end + 1..];
+            }
+            _ => {
+                plain.push_str(&rest[..=open]);
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    plain.push_str(rest);
+    let plain = plain.replace("**", "").replace("~~", "").replace('`', "");
+    let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    if heading.is_some() {
+        return plain;
+    }
+    // Cut after the first sentence end that a space follows.
+    let chars: Vec<(usize, char)> = plain.char_indices().collect();
+    for (i, (at, c)) in chars.iter().enumerate() {
+        if matches!(c, '.' | '?' | '!') {
+            let mut end = at + c.len_utf8();
+            let mut next = i + 1;
+            if let Some((q_at, q)) = chars.get(next)
+                && matches!(q, '"' | '\'' | '”' | '’' | ')')
+            {
+                end = q_at + q.len_utf8();
+                next += 1;
+            }
+            if chars.get(next).is_some_and(|(_, c)| c.is_whitespace()) {
+                return plain[..end].to_owned();
+            }
+        }
+    }
+    plain
+}
 
 /// `PERSISTENT_RESOURCE_V2_ITEM_TYPES`: linked resources stay visible when
 /// their turn folds.
@@ -1500,6 +1713,74 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             || entry.run_id.as_ref().is_some_and(|r| failed.contains(r))
     };
 
+    // `activeToolEntries`: the active run's trailing work becomes one live
+    // row that keeps the latest tool once everything settles.
+    let mut active: Vec<&WorkEntry> = Vec::new();
+    if is_working && unsettled.is_some() {
+        for entry in entries.iter().skip(working_index).rev() {
+            let Entry::Work(w) = entry else {
+                break;
+            };
+            if w.tone == "error"
+                || w.source_kind == "runtime.error"
+                || w.source_kind == "event"
+                || w.source_kind == "context-compaction"
+                || matches!(
+                    w.item_type.as_deref(),
+                    Some("system_notice" | "notification")
+                )
+                || !w.run_id.as_ref().is_some_and(|r| active_runs.contains(r))
+                || collapsed.contains(&w.id)
+                || folds.contains_key(&w.id)
+            {
+                break;
+            }
+            active.push(w);
+        }
+        active.reverse();
+    }
+    let visible: Vec<&WorkEntry> = active
+        .iter()
+        .copied()
+        .filter(|e| visible_in_live_group(e))
+        .collect();
+    let latest_visible = visible.last().copied();
+    let latest_running = visible.iter().rev().copied().find(|e| active_activity(e));
+    let keeps_live = latest_running.is_some() || latest_visible.is_some_and(indicates_success);
+    let latest_failed = latest_running.is_none()
+        && latest_visible
+            .is_some_and(|e| e.status.as_deref() != Some("declined") && indicates_failure(e));
+    let anchor_group = active.first().map(|a| format!("work-group:{}", a.id));
+    let live_row = match (&anchor_group, latest_visible) {
+        (Some(group_id), Some(latest)) if !latest_failed => Some(Row::LiveWork {
+            group_id: group_id.clone(),
+            entry: Box::new(latest_running.unwrap_or(latest).clone()),
+            entries: visible.iter().map(|e| (*e).clone()).collect(),
+            expanded: expansion.groups.contains(group_id),
+            active: keeps_live,
+            thought: visible
+                .iter()
+                .rev()
+                .find(|e| {
+                    e.item_type.as_deref() == Some("reasoning")
+                        && e.detail.as_deref().is_some_and(|d| !d.trim().is_empty())
+                })
+                .and_then(|e| e.detail.clone()),
+        }),
+        _ => None,
+    };
+    let placement = latest_visible.map(|e| e.id.clone());
+    let live_ids: HashSet<String> = if live_row.is_some() || latest_failed {
+        active.iter().map(|e| e.id.clone()).collect()
+    } else {
+        HashSet::new()
+    };
+    let compacting = entries.iter().any(|e| {
+        matches!(e, Entry::Work(w) if w.source_kind == "context-compaction"
+            && w.status.as_deref() == Some("inProgress"))
+    });
+    let mut has_activity = false;
+
     let mut out = Vec::new();
     let mut index = 0;
     while index < entries.len() {
@@ -1509,6 +1790,31 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             });
         }
         let entry = &entries[index];
+        if placement.as_deref() == Some(entry.id())
+            && let Some(row) = &live_row
+        {
+            out.push(row.clone());
+            if let Row::LiveWork {
+                group_id,
+                entries,
+                expanded,
+                active,
+                ..
+            } = row
+            {
+                has_activity |= *active;
+                if *expanded {
+                    out.push(Row::WorkDetails {
+                        group_id: group_id.clone(),
+                        entries: entries.clone(),
+                    });
+                }
+            }
+        }
+        if live_ids.contains(entry.id()) {
+            index += 1;
+            continue;
+        }
         if let Some(fold) = folds.get(entry.id()) {
             out.push(Row::TurnFold {
                 run_id: fold.run_id.clone(),
@@ -1554,6 +1860,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                 let mut cursor = index + 1;
                 while let Some(Entry::Work(next)) = entries.get(cursor) {
                     if breaks_group(next)
+                        || live_ids.contains(&next.id)
                         || collapsed.contains(&next.id)
                         || folds.contains_key(&next.id)
                         || cursor == working_index
@@ -1623,6 +1930,24 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
     }
     if is_working && working_index >= entries.len() {
         out.push(Row::Working { started_at });
+    }
+    if is_working && !compacting && (!has_activity || latest_failed) {
+        // A failed latest tool hands the row back to thinking; its group
+        // stays one click away.
+        let group_id = anchor_group.filter(|_| latest_failed);
+        let expanded = group_id
+            .as_ref()
+            .is_some_and(|g| expansion.groups.contains(g));
+        out.push(Row::Thinking {
+            group_id: group_id.clone(),
+            expanded,
+        });
+        if let Some(group_id) = group_id.filter(|_| expanded) {
+            out.push(Row::WorkDetails {
+                group_id,
+                entries: visible.iter().map(|e| (*e).clone()).collect(),
+            });
+        }
     }
     out
 }
@@ -1885,6 +2210,69 @@ mod tests {
         assert!(!rows.iter().any(|r| matches!(r, Row::TurnFold { .. })));
         assert!(matches!(rows.last(), Some(Row::Event { entries, .. })
             if entries[0].item_type.as_deref() == Some("run_interrupt_result")));
+    }
+
+    #[test]
+    fn a_working_turn_shows_its_trailing_calls_as_one_live_row() {
+        let (mut thread, mut detail) = settled();
+        // The run still works: no answer yet, the last call running.
+        detail.visible.truncate(4);
+        Arc::make_mut(&mut detail.visible[3].item).status = "running".into();
+        thread.latest_run = Some(RunSummary {
+            run_id: "run".into(),
+            status: "running".into(),
+            ..Default::default()
+        });
+        thread.runtime = Some(crate::model::RuntimeSummary {
+            status: "running".into(),
+            active_run_id: Some("run".into()),
+            ..Default::default()
+        });
+        let rows = rows(&thread, &detail, &Expansion::default());
+        let live: Vec<&Row> = rows
+            .iter()
+            .filter(|r| matches!(r, Row::LiveWork { .. }))
+            .collect();
+        assert_eq!(live.len(), 1, "one live row");
+        let Row::LiveWork {
+            entry,
+            entries,
+            active,
+            ..
+        } = live[0]
+        else {
+            unreachable!()
+        };
+        assert!(*active);
+        assert_eq!(entry.id, "f1");
+        assert_eq!(entries.len(), 3);
+        // The calls it stands for are not drawn again, and nothing thinks.
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r, Row::WorkToggle { .. } | Row::Work { .. }))
+        );
+        assert!(!rows.iter().any(|r| matches!(r, Row::Thinking { .. })));
+    }
+
+    #[test]
+    fn live_labels_name_the_program_and_the_first_sentence() {
+        assert_eq!(
+            command_program("cargo test --all").as_deref(),
+            Some("cargo")
+        );
+        assert_eq!(
+            command_program("RUST_LOG=debug /usr/bin/env bash -lc \"npm run build\"").as_deref(),
+            Some("npm")
+        );
+        assert_eq!(
+            live_thought_line("I checked `src/app.rs`. Then the [docs](x)."),
+            "I checked src/app.rs."
+        );
+        assert_eq!(
+            live_thought_line("**Planning the port**\n\nFirst the rows."),
+            "Planning the port"
+        );
     }
 
     #[test]

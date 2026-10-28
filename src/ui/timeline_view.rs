@@ -126,6 +126,13 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
         Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
         Row::Event { id, .. } => Id::new(("event", id)),
+        // One live row whether it shows a tool or "Thinking".
+        Row::LiveWork {
+            active: false,
+            group_id,
+            ..
+        } => Id::new(("work-live", group_id)),
+        Row::LiveWork { .. } | Row::Thinking { .. } => Id::new("live-activity"),
     }
 }
 
@@ -158,7 +165,9 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::Work { .. } => 9.25 + LINE + 8.0,
         Row::WorkToggle { .. } => 6.0 + LINE + 8.0,
         Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
-        Row::Working { .. } => LINE + 4.0 + 6.0,
+        Row::Working { .. } => 37.0 + 4.0,
+        Row::LiveWork { thought, .. } => 28.0 + if thought.is_some() { 28.0 } else { 0.0 } + 8.0,
+        Row::Thinking { .. } => 28.0 + 8.0,
         // The card or divider, then the row's space.
         Row::Event { entries, .. } => {
             let card = match entries.first().and_then(|e| e.item_type.as_deref()) {

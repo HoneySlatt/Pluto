@@ -1047,6 +1047,31 @@ impl App {
                 ui.add_space(8.0);
             }
             Row::Event { id, entries } => self.event_row(ui, id, entries, width),
+            Row::LiveWork {
+                group_id,
+                entry,
+                expanded,
+                active,
+                thought,
+                ..
+            } => {
+                let thought = thought.as_deref().filter(|_| !*expanded);
+                if self
+                    .live_work_row(ui, entry, thought, *active, width)
+                    .clicked()
+                {
+                    self.toggle_work_group(group_id);
+                }
+                ui.add_space(if *expanded { 0.0 } else { 8.0 });
+            }
+            Row::Thinking { group_id, expanded } => {
+                if self.thinking_row(ui, group_id.is_some(), width).clicked()
+                    && let Some(group_id) = group_id
+                {
+                    self.toggle_work_group(group_id);
+                }
+                ui.add_space(if *expanded { 0.0 } else { 8.0 });
+            }
             Row::WorkToggle {
                 group_id,
                 summary,
@@ -1073,7 +1098,7 @@ impl App {
             }
             Row::Working { started_at } => {
                 self.working_row(ui, started_at.as_deref(), width);
-                ui.add_space(6.0);
+                ui.add_space(4.0);
             }
             Row::GeneratedImage { image } => {
                 if self.generated_image_row(ui, image, width) {
@@ -1970,9 +1995,23 @@ impl App {
         }
     }
 
+    /// Opens or closes a work group, keeping the clicked row in place.
+    fn toggle_work_group(&mut self, group_id: &str) {
+        if !self.expansion.groups.remove(group_id) {
+            self.expansion.groups.insert(group_id.to_owned());
+        }
+        self.keep_scroll = true;
+    }
+
     fn working_row(&mut self, ui: &mut Ui, started_at: Option<&str>, width: f32) {
+        // `pt-1`, an `h-6` line, `pb-2` and the bottom border.
         let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(width, MESSAGE_LINE + 4.0), Sense::hover());
+            ui.allocate_exact_size(Vec2::new(width, 4.0 + 24.0 + 8.0 + 1.0), Sense::hover());
+        ui.painter().rect_filled(
+            Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 1.0), rect.max),
+            0.0,
+            theme::alpha(theme::border(), 0.6),
+        );
         let elapsed = started_at
             .and_then(timeline::parse_time)
             .map(|start| (self.now - start).num_milliseconds().max(0))
@@ -1981,7 +2020,10 @@ impl App {
             .unwrap_or_else(|| "Working".into());
         widgets::text(
             ui,
-            Pos2::new(rect.left() + 4.0, rect.top() + 2.0),
+            Pos2::new(
+                rect.left() + 4.0,
+                rect.top() + 4.0 + (24.0 - MESSAGE_LINE) / 2.0,
+            ),
             &elapsed,
             font(14.0, Weight::Regular),
             theme::muted_foreground(),
@@ -1995,7 +2037,7 @@ impl App {
 const DESTRUCTIVE: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(251, 65, 74); // --destructive
 
 /// `workEntryIconName`: tool action icons, then the tone icon.
-fn work_icon(entry: &WorkEntry) -> &'static str {
+pub(crate) fn work_icon(entry: &WorkEntry) -> &'static str {
     match entry.item_type.as_deref() {
         Some("command_execution") => return "terminal",
         Some("file_change") => return "square-pen",
