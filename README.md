@@ -188,8 +188,25 @@ Tokens from `server.getUsageSummary` with the bar chart and the split by
 provider). Android's back gesture closes the top layer (sheet, drawer, page,
 thread).
 
+Personalization (the drawer's Memory in Chat, Settings → Personalization)
+reads and writes the chat space's `.pluto/instructions.json` (written to every
+chat space, the temporary one included) and `.pluto/memory.json` through
+`projects.readFile` and `projects.writeFile`, like the desktop's
+`memory_settings.rs`: About you and How chats should respond with Cancel and
+Save, Use memory, Learn from chats, Add a memory, Delete all memories, and
+each saved memory's Edit and Forget. Open source licenses lists Pluto and
+pluto-core (MIT), Geist (OFL-1.1), Lucide (ISC), the provider marks, and the
+direct crates of `mobile/` and `pluto-core` with the licenses cargo-about
+finds in them: `scripts/mobile-notice.sh` (in `nix develop .#mobile`, before
+`dx bundle`) writes `mobile/notice/about.json`, and `mobile/build.rs` turns it
+into the page's data and the full notice of every crate the app links (a
+build without it says so). The app draws edge to edge through its own
+activity (`mobile/android/MainActivity.kt`), which hands the system bars'
+heights to the page and shrinks it for the keyboard.
+
 Not wired yet: attachments (the Attach sheet's Photos, Camera and Files show a
-notice), Memory (it points to the computer), thread notifications and a
+notice), chat projects' own memories (the desktop's chat project pages),
+thread notifications and a
 background connection (the Settings row is hidden until they exist), creating
 the chat space from the phone (Chat needs it created once on the computer),
 the "ask" line of Needs you (it reads "Waiting for your approval" or "Waiting
@@ -197,10 +214,12 @@ for your answer", not the request's text), unread state, snoozed threads
 (listed with the others), published pages, MCP apps and generated images in
 the timeline (a note points to the computer), the code blocks' copy button
 and syntax colors, the drawer's refresh (the shell is live; a refresh only
-reconnects an offline session), https servers (the app finds no Android root
-certificates yet), and the licenses page. Checked in the emulator against a
+reconnects an offline session), and https servers (the app finds no Android root
+certificates yet). Checked in the emulator against a
 disposable server (connection, drafts, drawer, sheets, Settings, projects,
-tasks, usage, reconnection); a thread's timeline, the request cards and the
+tasks, usage, reconnection, Personalization with a synthetic chat space,
+the licenses, the keyboard and the edge-to-edge layout on Android 14); a
+thread's timeline, the request cards and the
 diff were not seen there, since a thread needs a provider turn.
 
 ## Development

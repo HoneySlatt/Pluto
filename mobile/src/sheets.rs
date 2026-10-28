@@ -72,6 +72,27 @@ pub fn SheetView() -> Element {
                 .unwrap_or_default();
             (title, rsx! { crate::tasks::TaskMenu { id } })
         }
+        Sheet::MemoryEdit(id) => (
+            if id.is_some() {
+                "Edit memory"
+            } else {
+                "Add a memory"
+            }
+            .to_owned(),
+            rsx! { crate::memory::MemoryEditSheet { id } },
+        ),
+        Sheet::MemoryMenu(id) => (
+            "Memory".to_owned(),
+            rsx! { crate::memory::MemoryMenu { id } },
+        ),
+        Sheet::ClearMemories => (
+            "Delete all memories".to_owned(),
+            rsx! { crate::memory::ClearMemories {} },
+        ),
+        Sheet::License(key) => (
+            crate::licenses::title(&key),
+            rsx! { crate::licenses::LicenseSheet { license: key } },
+        ),
         Sheet::TaskField(field) => (
             crate::tasks::field_title(field).to_owned(),
             rsx! { crate::tasks::TaskField { field } },
@@ -175,7 +196,7 @@ fn ModelSheet() -> Element {
     rsx! {
         if let Some((id, options, chosen)) = effort {
             div { class: "slabel", "Effort" }
-            div { class: "seg", role: "radiogroup",
+            div { class: "choices", role: "radiogroup",
                 for (value, label) in options {
                     button {
                         role: "radio",
@@ -208,7 +229,7 @@ fn ModelSheet() -> Element {
                 }
             }
             div { class: "slabel", "Access" }
-            div { class: "seg", role: "radiogroup",
+            div { class: "choices", role: "radiogroup",
                 for (value, label, _, _) in catalog::ACCESS {
                     button {
                         role: "radio",

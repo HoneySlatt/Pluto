@@ -106,16 +106,18 @@ pub fn Connect() -> Element {
                 }
                 label { class: "field", span { "Server" }
                     div { class: if bad_server { "inbox bad" } else { "inbox" },
-                        input {
-                            key: "server-{server_key}",
-                            r#type: "url",
-                            inputmode: "url",
-                            autocapitalize: "off",
-                            autocorrect: "off",
-                            spellcheck: "false",
-                            class: "mono",
-                            initial_value: "{server}",
-                            oninput: move |e| { server.set(e.value()); local_error.set(None); },
+                        for generation in [server_key()] {
+                            input {
+                                key: "server-{generation}",
+                                r#type: "url",
+                                inputmode: "url",
+                                autocapitalize: "off",
+                                autocorrect: "off",
+                                spellcheck: "false",
+                                class: "mono",
+                                initial_value: "{server}",
+                                oninput: move |e| { server.set(e.value()); local_error.set(None); },
+                            }
                         }
                     }
                 }
@@ -126,15 +128,17 @@ pub fn Connect() -> Element {
                 }
                 label { class: "field", span { "Token" }
                     div { class: if bad_token { "inbox bad" } else { "inbox" },
-                        input {
-                            key: "token-{token_key}",
-                            r#type: if reveal() { "text" } else { "password" },
-                            autocomplete: "off",
-                            autocapitalize: "off",
-                            spellcheck: "false",
-                            class: "mono",
-                            initial_value: "{token}",
-                            oninput: move |e| { token.set(e.value()); local_error.set(None); },
+                        for generation in [token_key()] {
+                            input {
+                                key: "token-{generation}",
+                                r#type: if reveal() { "text" } else { "password" },
+                                autocomplete: "off",
+                                autocapitalize: "off",
+                                spellcheck: "false",
+                                class: "mono",
+                                initial_value: "{token}",
+                                oninput: move |e| { token.set(e.value()); local_error.set(None); },
+                            }
                         }
                         button { r#type: "button", "aria-label": if reveal() { "Hide token" } else { "Show token" }, onclick: move |_| reveal.toggle(),
                             Icon { name: eye_icon }

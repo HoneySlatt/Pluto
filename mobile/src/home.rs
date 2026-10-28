@@ -269,15 +269,21 @@ pub fn Composer(target: Target, placeholder: &'static str) -> Element {
     let input_key = key.clone();
     rsx! {
         div { class: "composer",
-            textarea {
-                key: "{input_key}-{cleared}",
-                rows: "1",
-                "aria-label": "Message",
-                placeholder,
-                initial_value: "{text}",
-                oninput: move |e| {
-                    drafts.write().text.insert(input_key.clone(), e.value());
-                },
+            // A key only remounts an element in a list: a list of one.
+            for generation in [cleared] {
+                textarea {
+                    key: "{input_key}-{generation}",
+                    rows: "1",
+                    "aria-label": "Message",
+                    placeholder,
+                    initial_value: "{text}",
+                    oninput: {
+                        let input_key = input_key.clone();
+                        move |e: FormEvent| {
+                            drafts.write().text.insert(input_key.clone(), e.value());
+                        }
+                    },
+                }
             }
             div { class: "tools",
                 button { class: "tool round", "aria-label": "Attach", onclick: move |_| ui.open_sheet(Sheet::Attach),

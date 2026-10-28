@@ -188,7 +188,7 @@ pub fn Drawer() -> Element {
                 if q.is_empty() {
                     div { class: "menu",
                         if chat {
-                            button { onclick: move |_| ui.ctx.toast("Memory is set in Pluto on the computer"),
+                            button { onclick: move |_| ui.open_page(Page::Memory),
                                 Icon { name: "brain" }
                                 "Memory"
                             }

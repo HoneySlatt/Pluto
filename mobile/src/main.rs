@@ -15,7 +15,9 @@ mod diff;
 mod drawer;
 mod home;
 mod icons;
+mod licenses;
 mod markdown;
+mod memory;
 mod nav;
 mod pages;
 mod prefs;
@@ -37,10 +39,17 @@ static GEIST_MEDIUM: Asset = asset!("/assets/fonts/Geist-Medium.otf");
 static GEIST_SEMIBOLD: Asset = asset!("/assets/fonts/Geist-SemiBold.otf");
 static GEIST_MONO: Asset = asset!("/assets/fonts/GeistMono-Regular.otf");
 
-/// The drawer's edge swipe and the list's pull to refresh (the prototype's
-/// `swipe` and `pullToRefresh`), sending `drawer`, `close` or `refresh`.
+/// The system bar insets (`MainActivity.kt`), the drawer's edge swipe and
+/// the list's pull to refresh (the prototype's `swipe` and `pullToRefresh`),
+/// sending `drawer`, `close` or `refresh`.
 const GESTURES: &str = r#"
 (() => {
+  // The activity's system bar heights (MainActivity.kt), once the page runs.
+  try {
+    const i = JSON.parse(window.PlutoInsets.read());
+    document.documentElement.style.setProperty('--sat', i.top + 'px');
+    document.documentElement.style.setProperty('--sab', i.bottom + 'px');
+  } catch (_) {}
   const app = () => document.querySelector('.app');
   let x0 = null, y0 = 0, opening = false;
   document.addEventListener('touchstart', e => {

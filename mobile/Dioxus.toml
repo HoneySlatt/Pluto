@@ -1,10 +1,12 @@
 [application]
 name = "Pluto"
+# Edge to edge, with the bars' heights handed to the page.
+android_main_activity = "android/MainActivity.kt"
 
 [bundle]
 identifier = "app.pluto.mobile"
 publisher = "Pluto"
 
 [android.application]
-# The app's window stays dark (AppCompat's dark theme: black status bar).
+# The window stays dark until the page draws (AppCompat's dark theme).
 theme = "@style/Theme.AppCompat.NoActionBar"

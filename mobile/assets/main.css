@@ -61,8 +61,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .view {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
-  padding-top: max(env(safe-area-inset-top), 12px);
-  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+  padding-top: max(env(safe-area-inset-top), var(--sat, 0px), 12px);
+  padding-bottom: max(env(safe-area-inset-bottom), var(--sab, 0px), 8px);
   transition: transform 280ms var(--ease), opacity 200ms;
 }
 .view[hidden] { display: none; }
@@ -209,8 +209,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .drawer {
   position: absolute; inset: 0; z-index: 10;
   display: flex; flex-direction: column;
-  padding-top: max(env(safe-area-inset-top), 12px);
-  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+  padding-top: max(env(safe-area-inset-top), var(--sat, 0px), 12px);
+  padding-bottom: max(env(safe-area-inset-bottom), var(--sab, 0px), 8px);
   background: var(--sidebar);
   transform: translateX(-100%);
   transition: transform 280ms var(--ease);
@@ -425,7 +425,7 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 21;
   max-height: 86%; display: flex; flex-direction: column;
-  padding-bottom: max(env(safe-area-inset-bottom), 12px);
+  padding-bottom: max(env(safe-area-inset-bottom), var(--sab, 0px), 12px);
   border-radius: 28px 28px 0 0; background: var(--surface); border-top: 1px solid var(--input);
   transform: translateY(105%); visibility: hidden; transition: transform 260ms var(--ease), visibility 0s 260ms;
 }
@@ -461,7 +461,7 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .sfield input { flex: 1; border: 0; outline: 0; background: none; font-size: 16px; }
 
 .toast {
-  position: absolute; left: 50%; top: 84px; z-index: 30;
+  position: absolute; left: 50%; top: calc(var(--sat, 0px) + 84px); z-index: 30;
   transform: translate(-50%, -12px); opacity: 0; pointer-events: none;
   padding: 10px 16px; border-radius: 20px; background: var(--overlay); border: 1px solid var(--input);
   font-size: 14px; white-space: nowrap; transition: opacity 200ms, transform 200ms;
@@ -472,8 +472,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .page {
   position: absolute; inset: 0; z-index: 8;
   display: flex; flex-direction: column;
-  padding-top: max(env(safe-area-inset-top), 12px);
-  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+  padding-top: max(env(safe-area-inset-top), var(--sat, 0px), 12px);
+  padding-bottom: max(env(safe-area-inset-bottom), var(--sab, 0px), 8px);
   background: var(--canvas);
   transform: translateX(100%); visibility: hidden;
   transition: transform 280ms var(--ease), visibility 0s 280ms;
@@ -702,7 +702,7 @@ label.set { cursor: pointer; }
 /* Connection trouble */
 .netbar {
   position: absolute; left: 16px; right: 16px; z-index: 9;
-  top: calc(max(env(safe-area-inset-top), 12px) + 70px);
+  top: calc(max(env(safe-area-inset-top), var(--sat, 0px), 12px) + 70px);
   display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 6px 6px 16px;
   border-radius: 24px; background: var(--overlay); border: 1px solid var(--input);
   font-size: 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .4);
@@ -781,3 +781,38 @@ label.set { cursor: pointer; }
 .u .ctxtext { color: var(--accent-hover); }
 
 .seg button { padding: 0 6px; line-height: 1.2; }
+
+/* Personalization */
+.instr { display: block; padding: 16px 18px; border-radius: 24px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 10px; }
+.instr b { display: block; font-size: 16px; font-weight: 500; }
+.instr small { display: block; margin: 2px 0 10px; font-size: 13px; color: var(--muted); }
+.instr textarea { width: 100%; min-height: 76px; padding: 12px 14px; border-radius: 16px; border: 1px solid var(--input); background: var(--chip); outline: 0; resize: none; font-size: 15px; line-height: 1.5; field-sizing: content; }
+.instr textarea:focus { border-color: var(--accent); }
+.savebar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 4px 0 0; min-height: 48px; font-size: 13px; color: var(--muted); }
+.savebar .btn { height: 44px; }
+.set.is-off { opacity: .45; pointer-events: none; }
+.mem { display: flex; align-items: flex-start; gap: 8px; padding: 14px 4px 14px 18px; background: var(--overlay); }
+.mem .grow { flex: 1; min-width: 0; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.mem small { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.mem .kebab { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; color: var(--muted); flex: none; margin-top: -8px; }
+.mem .kebab:hover { background: var(--row-active); color: var(--text); }
+.mems.dim { opacity: .45; }
+.sheet .sbody .instr-sheet { padding: 0 20px 4px; }
+.sheet textarea.big { width: 100%; min-height: 110px; padding: 14px 16px; border-radius: 20px; border: 1px solid var(--input); background: var(--chip); outline: 0; resize: none; font-size: 16px; line-height: 1.5; }
+.sheet textarea.big:focus { border-color: var(--accent); }
+
+/* Licenses */
+.lic .val { font: 12px "Geist Mono", monospace; }
+.lictext { margin: 0 20px 8px; padding: 14px 16px; border-radius: 16px; background: var(--chip); border: 1px solid var(--border); font: 12px/1.6 "Geist Mono", monospace; color: var(--muted-2); white-space: pre-wrap; max-height: 52vh; overflow-y: auto; overflow-wrap: anywhere; }
+.licmeta { padding: 0 24px 10px; font-size: 13px; color: var(--muted); }
+.lichead { margin: 0 20px 6px; font-size: 13px; font-weight: 500; color: var(--muted-2); }
+
+/* A model's many efforts (Claude's run to seven) and the four accesses wrap
+   as chips instead of squeezing into one segment. */
+.choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 20px 4px; }
+.choices button {
+  height: 40px; padding: 0 14px; border-radius: 20px;
+  background: var(--chip); border: 1px solid var(--border);
+  font-size: 14px; font-weight: 500; color: var(--muted);
+}
+.choices button[aria-checked="true"] { background: rgb(167 139 250 / .16); border-color: rgb(167 139 250 / .5); color: var(--accent-hover); }

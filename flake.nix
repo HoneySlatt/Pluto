@@ -66,6 +66,8 @@
           packages = [
             rust
             pkgs.dioxus-cli
+            # The app's license notice (scripts/mobile-notice.sh).
+            pkgs.cargo-about
             pkgs.jdk17
             android.androidsdk
             android.platform-tools

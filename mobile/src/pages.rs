@@ -24,6 +24,8 @@ pub fn PageView(page: Page) -> Element {
         Page::Tasks => rsx! { crate::tasks::Tasks {} },
         Page::TaskEdit(id) => rsx! { crate::tasks::TaskEditor { id } },
         Page::Usage => rsx! { crate::usage::Usage {} },
+        Page::Memory => rsx! { crate::memory::Memory {} },
+        Page::Licenses => rsx! { crate::licenses::Licenses {} },
     }
 }
 
@@ -242,7 +244,7 @@ fn Settings() -> Element {
                 div { class: "glabel", "Chat" }
                 div { class: "group",
                     SetChoice { icon: "message-square", label: "Default model", value: chat_label, mark: chat_mark, onclick: move |_| ui.open_sheet(Sheet::Setting("chatModel")) }
-                    button { class: "set", onclick: move |_| ui.ctx.toast("Memory is set in Pluto on the computer"),
+                    button { class: "set", onclick: move |_| ui.open_page(Page::Memory),
                         Icon { name: "brain" }
                         span { class: "grow", "Personalization" }
                         span { class: "val", "Memory" }
@@ -295,7 +297,7 @@ fn Settings() -> Element {
                 div { class: "glabel", "About" }
                 div { class: "group",
                     div { class: "set", Icon { name: "server" } span { class: "grow", "Server" } span { class: "val", "{version}" } }
-                    button { class: "set", onclick: move |_| ui.ctx.toast("Geist (OFL), Lucide (ISC), Dioxus (MIT)"),
+                    button { class: "set", onclick: move |_| ui.open_page(Page::Licenses),
                         Icon { name: "info" }
                         span { class: "grow", "Open source licenses" }
                         Icon { name: "chevron-right", class: "chev" }

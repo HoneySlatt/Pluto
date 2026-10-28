@@ -28,6 +28,9 @@ pub enum Page {
     /// The task editor: an existing task's id, or a new task.
     TaskEdit(Option<String>),
     Usage,
+    /// Personalization: custom instructions and memory.
+    Memory,
+    Licenses,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,6 +51,12 @@ pub enum Sheet {
     TaskMenu(String),
     /// A task editor field (`project`, `workspace`, `model`).
     TaskField(&'static str),
+    /// Add a memory (`None`) or edit one.
+    MemoryEdit(Option<String>),
+    MemoryMenu(String),
+    ClearMemories,
+    /// A license's text by key (`licenses::title`).
+    License(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,6 +102,7 @@ pub struct Drafts {
     pub plan: HashMap<String, bool>,
     /// The scheduled task editor's draft.
     pub task: Option<crate::tasks::TaskDraft>,
+    pub personalization: crate::memory::Personalization,
 }
 
 /// The screens' handle on the session, the layers and the drafts.
