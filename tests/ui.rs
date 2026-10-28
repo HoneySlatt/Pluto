@@ -641,3 +641,41 @@ fn the_sidebar_search_finds_threads_by_their_messages() {
         "{shown:?}"
     );
 }
+
+#[test]
+fn a_failed_workspace_preparation_offers_a_retry() {
+    let mut harness = harness();
+    click(&mut harness, egui::pos2(60.0, 248.0));
+    let item = |id: &str, kind: &str, status: &str, extra: Value| {
+        let mut item = json!({"id": id, "threadId": "a", "runId": "r", "ordinal": 1,
+            "status": status, "startedAt": at(10), "updatedAt": at(10), "type": kind});
+        for (key, value) in extra.as_object().unwrap() {
+            item[key] = value.clone();
+        }
+        json!({"position": 0, "visibility": "local", "sourceThreadId": "a",
+            "sourceItemId": id, "item": item})
+    };
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "runs": [{"id": "r", "threadId": "a", "ordinal": 1, "status": "failed",
+            "userMessageId": "u", "requestedAt": at(10), "workspacePreparation": {}}],
+        "visibleTurnItems": [
+            item("u", "user_message", "completed", json!({"messageId": "u", "text": "Go",
+                "inputIntent": "turn_start", "attachments": []})),
+            item("e", "error", "failed", json!({"failure": {"code": "workspace_preparation_failed",
+                "class": "workspace", "message": "git worktree add failed"}})),
+        ],
+        "updatedAt": at(5)}});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(3);
+    let shown: Vec<String> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(shown.iter().any(|t| t == "Retry"), "{shown:?}");
+}

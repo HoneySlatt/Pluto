@@ -2006,6 +2006,40 @@ impl App {
                 theme::secondary_label(),
             );
         }
+        // `workspacePreparationRetryRunIds`: a failed preparation retries.
+        if let Some(run_id) = entry
+            .item
+            .as_deref()
+            .and_then(|item| self.retryable_preparation(item))
+        {
+            let label = "Retry";
+            let button_width = widgets::outline_button_width(ui, true, label);
+            let (row, _) = ui.allocate_exact_size(Vec2::new(width, 24.0 + 4.0), Sense::hover());
+            let button = Rect::from_min_size(
+                Pos2::new(row.left() + 2.0 + 28.0, row.top()),
+                Vec2::new(button_width, 24.0),
+            );
+            if widgets::outline_button(
+                ui,
+                button,
+                ("retry-preparation", &run_id),
+                Some(("rotate-ccw", theme::foreground())),
+                label,
+                CornerRadius::same(6),
+            )
+            .clicked()
+            {
+                let mut command = crate::model::command(
+                    "prepared-run.retry",
+                    &entry
+                        .item
+                        .as_ref()
+                        .map_or_else(String::new, |i| i.thread_id.clone()),
+                );
+                command["runId"] = serde_json::json!(run_id);
+                self.dispatch(command);
+            }
+        }
         if expanded && let Some(item) = &call {
             self.inspector_body(ui, item, rect.left() + 2.0 + 28.0, width - 30.0);
         }
@@ -2070,6 +2104,25 @@ impl App {
             muted,
         );
         response
+    }
+
+    /// The failed run a workspace preparation error can retry.
+    fn retryable_preparation(&self, item: &crate::model::TurnItem) -> Option<String> {
+        if item.kind != "error"
+            || item.status != "failed"
+            || item.get("failure")["code"] != "workspace_preparation_failed"
+        {
+            return None;
+        }
+        let run_id = item.run_id.as_deref()?;
+        let detail = self.current_detail()?;
+        detail
+            .runs
+            .iter()
+            .any(|run| {
+                run.id == run_id && run.status == "failed" && run.workspace_preparation.is_some()
+            })
+            .then(|| run_id.to_owned())
     }
 
     /// Opens or closes a work group, keeping the clicked row in place.

@@ -409,6 +409,8 @@ pub struct Run {
     pub work_started_at: Option<String>,
     pub source_plan_ref: Option<Value>,
     pub restart_cancelled_background_work: Option<Value>,
+    /// `OrchestrationV2RunWorkspacePreparation`, kept as sent.
+    pub workspace_preparation: Option<Value>,
 }
 
 /// `OrchestrationV2RunAttempt`.
