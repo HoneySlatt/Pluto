@@ -489,25 +489,6 @@ impl App {
             font(14.0, Weight::Medium),
             theme::sidebar_foreground(),
         );
-        let bindings = self.state.config["keybindings"].clone();
-        if let Some(shortcut) = crate::ui::shortcuts::effective_shortcut_label(
-            &bindings,
-            "chat.new",
-            &[("isDesktop", true)],
-        ) {
-            let small = font(11.5, Weight::Regular);
-            let shortcut_width = widgets::text_width(ui, &shortcut, small.clone());
-            widgets::text_in(
-                ui,
-                Rect::from_min_max(
-                    Pos2::new(new_row.right() - 10.0 - shortcut_width, NEW_TOP),
-                    Pos2::new(new_row.right() - 9.0, new_row.bottom()),
-                ),
-                &shortcut,
-                small,
-                theme::sidebar_icon(),
-            );
-        }
 
         let search_top = NEW_TOP + 34.0;
         theme::paint_icon(
