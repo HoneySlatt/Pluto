@@ -26,6 +26,7 @@ pub mod custom_model_editor;
 pub mod design;
 pub mod design_home;
 pub mod diff_panel;
+pub mod drafts;
 pub mod emoji;
 pub mod favicon;
 pub mod file_previews;

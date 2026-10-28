@@ -146,6 +146,19 @@ pub(crate) struct TurnSend {
 }
 
 impl TurnSend {
+    /// Where the server's answer lands: the launch request, or the
+    /// message's command.
+    pub(crate) fn send_key(&self) -> String {
+        if self.launch {
+            format!("launch:{}", self.thread_id)
+        } else {
+            format!(
+                "command:{}",
+                self.message["commandId"].as_str().unwrap_or_default()
+            )
+        }
+    }
+
     fn message_id(&self) -> String {
         let message = if self.launch {
             &self.message["initialMessage"]
@@ -1782,11 +1795,12 @@ impl App {
                 .image_return
                 .insert(thread_id.clone(), chosen);
         }
+        // The draft waits for the server: refused, it comes back.
+        let key = send.send_key();
+        let composer = self.composer_key(draft);
+        let held = self.take_composer();
+        self.hold_sent(key, composer, held);
         self.start_turn(send);
-        self.composer.clear();
-        self.composer_images.clear();
-        self.composer_files.clear();
-        self.composer_contexts.clear();
         self.chat_mode.research = false;
         self.chat_mode.image = false;
         if draft {
@@ -1856,9 +1870,12 @@ impl App {
 
     /// The persisted images of a message on its way, or a launch's outcome.
     pub(crate) fn turn_send_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
-        if key.starts_with("launch:") {
-            if let Err(error) = result {
-                self.status = Some(format!("Could not start the thread: {error}"));
+        if let Some(thread) = key.strip_prefix("launch:") {
+            match result {
+                Ok(_) => self.sent_done(key),
+                Err(error) => {
+                    self.refused_send(key, thread, &format!("Could not start the thread: {error}"));
+                }
             }
             return true;
         }
@@ -1873,20 +1890,45 @@ impl App {
                 send.set_attachments(value["attachments"].clone());
                 self.start_turn(send);
             }
-            Err(error) => self.status = Some(format!("Could not upload the images: {error}")),
+            Err(error) => {
+                let (key, thread) = (send.send_key(), send.thread_id.clone());
+                self.refused_send(
+                    &key,
+                    &thread,
+                    &format!("Could not upload the images: {error}"),
+                );
+            }
         }
         true
     }
 
+    /// A message that did not go: a new thread that will not exist leaves
+    /// for the draft, and the text comes back to its composer.
+    fn refused_send(&mut self, key: &str, thread: &str, error: &str) {
+        if key.starts_with("launch:") && self.selected.as_deref() == Some(thread) {
+            self.select_thread(None);
+        }
+        self.status = Some(if self.give_back(key) {
+            format!("{error} Your text is back in the composer.")
+        } else {
+            error.to_owned()
+        });
+    }
+
     /// A command a message waited on was received: the message goes on, or
     /// stops with the command's failure.
-    pub(crate) fn turn_command_done(&mut self, command_id: &str, ok: bool) {
+    /// Returns whether a message waiting on it came back to its composer.
+    pub(crate) fn turn_command_done(&mut self, command_id: &str, ok: bool) -> bool {
         self.resume_queue_after(command_id, ok);
-        if let Some(send) = self.turn_sends.remove(&format!("after:{command_id}"))
-            && ok
-        {
+        let Some(send) = self.turn_sends.remove(&format!("after:{command_id}")) else {
+            return false;
+        };
+        if ok {
             self.start_turn(send);
+            return false;
         }
+        // The mode change before it failed: the message stays here.
+        self.give_back(&send.send_key())
     }
 }
 

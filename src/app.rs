@@ -10,10 +10,42 @@ use crate::protocol::{Action, Connection, Event, Route};
 use crate::theme;
 use crate::timeline::Expansion;
 
+/// A lost connection's way back (`WsTransport`'s reconnection): attempts
+/// one after another, from 1.5 s apart up to 15 s, until the server answers
+/// or the user changes server.
+pub(crate) struct Reconnect {
+    attempt: u32,
+    next: std::time::Instant,
+    toast: u64,
+}
+
+/// "192.168.1.20:3774" from "http://192.168.1.20:3774/".
+fn server_host(server: &str) -> String {
+    let server = server.trim();
+    server
+        .split_once("://")
+        .map_or(server, |(_, rest)| rest)
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+const NOT_CONNECTED: &str = "Not connected: message not sent. Reconnecting to the environment; try again once it is connected.";
+
 pub struct App {
     pub(crate) screen: Screen,
     pub(crate) connect: ConnectForm,
     connection: Option<Connection>,
+    /// The connection's server synchronized (its config arrived): until
+    /// then commands fail at once and subscriptions wait (`send`).
+    synced: bool,
+    /// A lost connection coming back: the attempt, when the next one goes,
+    /// and its toast.
+    reconnect: Option<Reconnect>,
+    /// The streams open, by key, opened again after a reconnection.
+    streams: Vec<(String, &'static str, Value)>,
+    /// Failures of what was sent without a synchronized connection, handled
+    /// with the server's events.
+    offline_failures: Vec<Event>,
     pub(crate) state: State,
     pub(crate) selected: Option<String>,
     /// The open thread, when its subscription failed before the server had
@@ -44,6 +76,8 @@ pub struct App {
     /// Messages on their way: waiting for their images to persist
     /// (`persist:<message id>`) or for a command's receipt (`after:<command id>`).
     pub(crate) turn_sends: std::collections::HashMap<String, crate::ui::composer::TurnSend>,
+    /// The drafts of the composers not open, and of the messages on their way.
+    pub(crate) drafts: crate::ui::drafts::Drafts,
     block_turn_starts: bool,
     pub(crate) status: Option<String>,
     pub(crate) expansion: Expansion,
@@ -420,6 +454,10 @@ impl App {
                 ..Default::default()
             },
             connection: None,
+            synced: false,
+            reconnect: None,
+            streams: Vec::new(),
+            offline_failures: Vec::new(),
             state: State::default(),
             selected: None,
             thread_retry: None,
@@ -434,6 +472,7 @@ impl App {
             prompt_recall: None,
             incoming_images: Default::default(),
             turn_sends: Default::default(),
+            drafts: crate::ui::drafts::load(options.client_settings_path.as_deref()),
             lightbox: None,
             typography: Default::default(),
             block_turn_starts: options.block_turn_starts,
@@ -633,26 +672,33 @@ impl App {
     }
 
     pub(crate) fn connected(&self) -> bool {
-        self.connection.is_some() && self.screen == Screen::Main
+        self.connection.is_some() && self.synced && self.screen == Screen::Main
     }
 
     fn poll_events(&mut self) {
-        let Some(connection) = &self.connection else {
-            return;
-        };
+        let mut events = std::mem::take(&mut self.offline_failures);
         let mut disconnected = None;
-        let mut events = Vec::new();
-        while let Ok(event) = connection.events.try_recv() {
-            events.push(event);
+        if let Some(connection) = &self.connection {
+            while let Ok(event) = connection.events.try_recv() {
+                events.push(event);
+            }
+        }
+        if self.connection.is_none() && events.is_empty() {
+            return;
         }
         for event in events {
             match event {
                 Event::Data(route, value) => match route {
                     Route::Config => {
                         self.state.config_event(&value);
+                        if !self.synced {
+                            self.synced = true;
+                            self.reconnected();
+                        }
                         if self.connect.busy {
                             self.connect.busy = false;
                             self.screen = Screen::Main;
+                            self.restore_open_draft();
                         }
                     }
                     Route::Shell => {
@@ -675,6 +721,7 @@ impl App {
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
                     Route::Command(id) => {
                         self.finish_reply(&id);
+                        self.sent_done(&format!("command:{id}"));
                         self.turn_command_done(&id, true);
                     }
                     Route::Rpc(key) => self.rpc_result(key, Ok(value)),
@@ -700,11 +747,19 @@ impl App {
                     self.state.history_failed(&thread_id, &cursor, message);
                 }
                 Event::Failed(Route::Vcs(_), _) => self.vcs = None,
-                Event::Failed(Route::Rpc(key), message) => self.rpc_result(key, Err(message)),
+                Event::Failed(Route::Rpc(key), message) => {
+                    // A stream that failed is not opened again.
+                    self.streams.retain(|(open, ..)| *open != key);
+                    self.rpc_result(key, Err(message))
+                }
                 Event::Failed(Route::Command(id), message) => {
                     self.finish_reply(&id);
-                    self.turn_command_done(&id, false);
-                    self.status = Some(message);
+                    let waiting = self.turn_command_done(&id, false);
+                    self.status = Some(if waiting || self.give_back(&format!("command:{id}")) {
+                        format!("Message not sent: {message} Your text is back in the composer.")
+                    } else {
+                        message
+                    });
                 }
                 Event::Failed(Route::Thread(id), message) => {
                     let attempts = match &self.thread_retry {
@@ -737,11 +792,107 @@ impl App {
         self.poll_scratch();
         self.poll_chat_mode();
         if let Some(message) = disconnected {
+            // What was on its way may not have arrived: it comes back.
+            if self.give_back_all() > 0 {
+                self.status = Some(
+                    "The connection dropped while sending: your message is back in the composer. Check the thread before sending it again.".into(),
+                );
+            }
             self.connection = None;
-            self.connect.error = Some(message);
-            self.connect.busy = false;
-            self.screen = Screen::Connect;
+            self.synced = false;
+            if self.screen == Screen::Main && !self.connect.busy {
+                // A session lost after it was established comes back by itself.
+                self.lost(message);
+            } else {
+                self.connect.error = Some(message);
+                self.connect.busy = false;
+                self.screen = Screen::Connect;
+            }
         }
+    }
+
+    /// The connection dropped: the next attempt is due shortly, and a toast
+    /// says so until the server is back.
+    fn lost(&mut self, error: String) {
+        let attempt = self.reconnect.as_ref().map_or(0, |r| r.attempt) + 1;
+        let delay = (1500u64 << (attempt - 1).min(4)).min(15_000);
+        let host = server_host(&self.connect.server);
+        let mut toast = crate::ui::toasts::Toast::new(
+            crate::ui::toasts::Kind::Loading,
+            format!("Reconnecting to {host}…"),
+        )
+        .description(format!("Attempt {attempt} · {error}"));
+        toast.action = Some((
+            "Change server".into(),
+            crate::ui::toasts::Action::ChangeServer,
+        ));
+        let id = match &self.reconnect {
+            Some(r) => {
+                self.toasts.update(r.toast, toast);
+                r.toast
+            }
+            None => self.toasts.add(toast),
+        };
+        self.reconnect = Some(Reconnect {
+            attempt,
+            next: std::time::Instant::now() + std::time::Duration::from_millis(delay),
+            toast: id,
+        });
+    }
+
+    /// Opens the next attempt once it is due (every frame).
+    fn poll_reconnect(&mut self, ctx: &egui::Context) {
+        let Some(reconnect) = &self.reconnect else {
+            return;
+        };
+        if self.connection.is_some() {
+            return;
+        }
+        let wait = reconnect
+            .next
+            .saturating_duration_since(std::time::Instant::now());
+        if !wait.is_zero() {
+            ctx.request_repaint_after(wait);
+            return;
+        }
+        let token = self.connect.token.clone();
+        match Connection::open(&self.connect.server, token, crate::repaint(ctx)) {
+            Ok(connection) => self.connection = Some(connection),
+            Err(error) => self.lost(error),
+        }
+    }
+
+    /// The server synchronized again: the streams open again, the open
+    /// thread and the VCS status are followed again.
+    fn reconnected(&mut self) {
+        let Some(reconnect) = self.reconnect.take() else {
+            return;
+        };
+        let mut toast =
+            crate::ui::toasts::Toast::new(crate::ui::toasts::Kind::Success, "Reconnected");
+        toast.timeout = Some(3.0);
+        self.toasts.update(reconnect.toast, toast);
+        for (key, method, payload) in self.streams.clone() {
+            self.send(Action::Stream {
+                key,
+                method,
+                payload,
+            });
+        }
+        self.watched_vcs = None;
+        if let Some(id) = self.selected.clone() {
+            self.thread_retry = Some((id, 0, true));
+        }
+    }
+
+    /// Gives up on a server that does not answer, for the connection screen.
+    pub(crate) fn change_server(&mut self) {
+        if let Some(reconnect) = self.reconnect.take() {
+            self.toasts.close(reconnect.toast);
+        }
+        self.connection = None;
+        self.synced = false;
+        self.screen = Screen::Connect;
     }
 
     fn vcs_event(&mut self, cwd: String, value: &Value) {
@@ -779,6 +930,9 @@ impl App {
         if self.selected == id {
             return;
         }
+        // The composer keeps each thread's draft.
+        let from = self.composer_key(false);
+        self.swap_drafts(&from, id.as_deref().unwrap_or("draft"));
         self.selected = id.clone();
         self.state.switch_detail(id.as_deref());
         self.expansion = Expansion::default();
@@ -993,6 +1147,41 @@ impl App {
     }
 
     pub(crate) fn send(&mut self, action: Action) {
+        match &action {
+            Action::Stream {
+                key,
+                method,
+                payload,
+            } => {
+                self.streams.retain(|(open, ..)| open != key);
+                self.streams.push((key.clone(), method, payload.clone()));
+            }
+            Action::StopStream(key) => self.streams.retain(|(open, ..)| open != key),
+            _ => {}
+        }
+        // Without a synchronized server a command fails at once (sent
+        // early it would end the connection); subscriptions open once it is.
+        // With no session at all (the connection screen), nothing goes.
+        if !self.synced {
+            let session = self.connection.is_some() || self.reconnect.is_some();
+            match action {
+                _ if !session => {}
+                Action::Dispatch(command) => {
+                    if let Some(id) = command["commandId"].as_str() {
+                        self.offline_failures.push(Event::Failed(
+                            Route::Command(id.to_owned()),
+                            NOT_CONNECTED.into(),
+                        ));
+                    }
+                }
+                Action::Request { key, .. } => {
+                    self.offline_failures
+                        .push(Event::Failed(Route::Rpc(key), NOT_CONNECTED.into()));
+                }
+                _ => {}
+            }
+            return;
+        }
         if let Some(connection) = &self.connection {
             connection.send(action);
         }
@@ -1080,6 +1269,10 @@ impl App {
     pub(crate) fn connect_now(&mut self, ctx: &egui::Context) {
         self.connect.error = None;
         self.connect.busy = true;
+        self.synced = false;
+        if let Some(reconnect) = self.reconnect.take() {
+            self.toasts.close(reconnect.toast);
+        }
         let token = self.connect.token.clone();
         match Connection::open(&self.connect.server, token, crate::repaint(ctx)) {
             Ok(connection) => self.connection = Some(connection),
@@ -1118,12 +1311,17 @@ impl App {
                 self.settings_page = None;
                 self.select_thread(Some(thread_id));
             }
+            Some(crate::ui::toasts::Action::ChangeServer) => self.change_server(),
             None => {}
         }
     }
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self) {
+        self.save_drafts();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::set_blue_orange_diffs(self.client_setting("diffColorScheme") == "blue-orange");
         // The text menu's Copy lands as a copy event for this pass.
@@ -1140,6 +1338,8 @@ impl eframe::App for App {
             self.request_favicons();
         }
         self.sync_theme(ui.ctx());
+        self.save_drafts_when_idle(ui.ctx());
+        self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
@@ -1845,6 +2045,7 @@ mod thread_retry_tests {
         let (connection, actions, events) = Connection::fake(crate::repaint(&ctx));
         let app = harness.state_mut();
         app.connection = Some(connection);
+        app.synced = true;
         app.select_thread(Some("new".into()));
         assert!(matches!(actions.try_recv(), Ok(Action::Select(Some(id))) if id == "new"));
 
@@ -1868,5 +2069,110 @@ mod thread_retry_tests {
         assert!(matches!(actions.try_recv(), Ok(Action::Select(Some(id))) if id == "new"));
         app.poll_events();
         assert!(actions.try_recv().is_err());
+    }
+
+    fn app() -> egui_kittest::Harness<'static, App> {
+        egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: false,
+                },
+            )
+        })
+    }
+
+    #[test]
+    fn each_thread_keeps_its_draft() {
+        let mut harness = app();
+        let app = harness.state_mut();
+        app.select_thread(Some("a".into()));
+        app.composer = "for a".into();
+        app.select_thread(Some("b".into()));
+        assert!(app.composer.is_empty());
+        app.composer = "for b".into();
+        app.select_thread(None);
+        app.composer = "a new thread".into();
+        app.select_thread(Some("a".into()));
+        assert_eq!(app.composer, "for a");
+        app.select_thread(Some("b".into()));
+        assert_eq!(app.composer, "for b");
+        app.select_thread(None);
+        assert_eq!(app.composer, "a new thread");
+    }
+
+    #[test]
+    fn a_refused_message_comes_back_and_a_lost_session_reconnects() {
+        let mut harness = app();
+        let ctx = harness.ctx.clone();
+        let (connection, actions, events) = Connection::fake(crate::repaint(&ctx));
+        let app = harness.state_mut();
+        app.connection = Some(connection);
+        app.synced = true;
+        app.screen = Screen::Main;
+        app.select_thread(Some("t".into()));
+        while actions.try_recv().is_ok() {}
+        app.composer = "hello".into();
+        let draft = app.take_composer();
+        app.hold_sent("command:c1".into(), "t".into(), draft);
+        events
+            .send(Event::Failed(
+                Route::Command("c1".into()),
+                "Refused.".into(),
+            ))
+            .unwrap();
+        app.poll_events();
+        assert_eq!(app.composer, "hello");
+        assert!(
+            app.status
+                .as_deref()
+                .is_some_and(|s| s.contains("back in the composer"))
+        );
+
+        // A stream is open, then the connection drops.
+        app.send(Action::Stream {
+            key: "scheduled-tasks".into(),
+            method: "scheduledTasks.subscribe",
+            payload: serde_json::json!({}),
+        });
+        events.send(Event::Disconnected("gone".into())).unwrap();
+        app.poll_events();
+        assert!(app.screen == Screen::Main);
+        assert!(app.reconnect.is_some() && !app.connected());
+        // Meanwhile a command fails at once instead of ending the next connection.
+        app.send(Action::Request {
+            key: "mutation:x".into(),
+            method: "server.getSettings",
+            payload: serde_json::json!({}),
+        });
+        assert_eq!(app.offline_failures.len(), 1);
+
+        // The next connection synchronizes: the stream and the thread come back.
+        let (connection, actions, events) = Connection::fake(crate::repaint(&ctx));
+        app.connection = Some(connection);
+        events
+            .send(Event::Data(
+                Route::Config,
+                serde_json::json!({"type": "snapshot", "config": {}}),
+            ))
+            .unwrap();
+        app.poll_events();
+        assert!(app.reconnect.is_none() && app.synced);
+        assert!(
+            matches!(actions.try_recv(), Ok(Action::Stream { key, .. }) if key == "scheduled-tasks")
+        );
+        app.state.threads.push(Arc::new(crate::model::Thread {
+            id: "t".into(),
+            ..Default::default()
+        }));
+        app.poll_events();
+        let mut selected = false;
+        while let Ok(action) = actions.try_recv() {
+            selected |= matches!(action, Action::Select(Some(ref id)) if id == "t");
+        }
+        assert!(selected);
     }
 }
