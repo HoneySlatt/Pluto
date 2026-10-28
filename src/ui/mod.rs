@@ -34,6 +34,7 @@ pub mod html_render;
 pub mod icon_picker;
 pub mod keybindings;
 pub mod legacy_sidebar;
+pub mod lifecycle;
 pub mod lightbox;
 pub mod lucide;
 pub mod markdown;

@@ -125,6 +125,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::GeneratedImage { image } => Id::new(("generated", &image.path)),
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
         Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
+        Row::Event { id, .. } => Id::new(("event", id)),
     }
 }
 
@@ -158,6 +159,15 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::WorkToggle { .. } => 6.0 + LINE + 8.0,
         Row::WorkDetails { entries, .. } => entries.len() as f32 * (5.25 + LINE) + 4.0,
         Row::Working { .. } => LINE + 4.0 + 6.0,
+        // The card or divider, then the row's space.
+        Row::Event { entries, .. } => {
+            let card = match entries.first().and_then(|e| e.item_type.as_deref()) {
+                Some("subagent") => 46.0,
+                Some("fork") => 42.0,
+                _ => 40.0,
+            };
+            card + 8.0
+        }
         Row::GeneratedImage { .. } => width.min(384.0) * 0.75 + 16.0,
         // The frame (`px-1`) at its measured height, then `pb-2`.
         Row::HtmlRender(page) => page.render.frame_height(width - 8.0, None) + 8.0,

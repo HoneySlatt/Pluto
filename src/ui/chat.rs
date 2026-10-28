@@ -740,7 +740,13 @@ impl App {
             self.find_paint = None;
         }
         // Pluto: a chat's versions are forks, which it does not announce.
-        let fork_card = |row: &Row| matches!(row, Row::Work { entry, .. } if entry.item_type.as_deref() == Some("fork"));
+        let fork_card = |row: &Row| match row {
+            Row::Work { entry, .. } => entry.item_type.as_deref() == Some("fork"),
+            Row::Event { entries, .. } => {
+                entries.first().and_then(|e| e.item_type.as_deref()) == Some("fork")
+            }
+            _ => false,
+        };
         if self.is_chat_thread(&thread) && rows.iter().any(fork_card) {
             rows =
                 std::sync::Arc::new(rows.iter().filter(|row| !fork_card(row)).cloned().collect());
@@ -1040,6 +1046,7 @@ impl App {
                 self.work_entry_row(ui, entry, label, width, false);
                 ui.add_space(8.0);
             }
+            Row::Event { id, entries } => self.event_row(ui, id, entries, width),
             Row::WorkToggle {
                 group_id,
                 summary,

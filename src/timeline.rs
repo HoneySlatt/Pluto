@@ -4,11 +4,12 @@
 //! `MessagesTimeline.logic.ts` (`deriveTurnFolds`, `deriveMessagesTimelineRows`).
 //! Pages published with `html_render` show where the call happened and stay
 //! out of folds (`kind: "html-render"`).
+//! Lifecycle items (`V2LifecycleRow.tsx`) are event rows, drawn by
+//! `ui/lifecycle.rs`; adjacent subagents of a provider turn share one, and
+//! subagents fold with their turn once none of the batch works.
 //! Not ported from v0.1.0's rows yet: the live activity row, superseded
-//! attempt folds, context compaction rows, MCP apps, and
-//! the lifecycle cards (`V2LifecycleRow.tsx`: interrupts, forks, handoffs,
-//! subagents, secret requests), which show as standalone work rows with
-//! their upstream labels.
+//! attempt folds, context compaction rows, MCP apps, and the secret request
+//! card, which shows as a standalone work row with its upstream label.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -142,11 +143,14 @@ impl Entry {
         }
     }
 
-    /// `timelineEntryFoldRunId`; lifecycle items stay out of folds.
+    /// `timelineEntryFoldRunId`; lifecycle items stay out of folds, except
+    /// linked resources and subagents.
     fn fold_run_id(&self, runless: Option<&str>) -> Option<String> {
         match self {
             Entry::Work(w) if w.item_type.as_deref() == Some("system_notice") => None,
-            Entry::Work(w) if w.source_kind == "event" => None,
+            Entry::Work(w) if w.source_kind == "event" && !persistent_card(w) && !subagent(w) => {
+                None
+            }
             Entry::Message(m) if m.role == "assistant" => {
                 m.run_id.as_deref().or(runless).map(str::to_owned)
             }
@@ -208,6 +212,12 @@ pub enum Row {
     Plan(Box<ProposedPlan>),
     /// A page an agent published (`HtmlRenderTimelineRow`).
     HtmlRender(Box<HtmlRenderEntry>),
+    /// A lifecycle card (`V2LifecycleRow`): an interrupt, a handoff, a fork
+    /// or a subagent; adjacent subagents of one provider turn share a row.
+    Event {
+        id: String,
+        entries: Vec<WorkEntry>,
+    },
     /// A local Codex image omitted by the server's native item projection.
     GeneratedImage {
         image: crate::generated_images::GeneratedImage,
@@ -639,6 +649,71 @@ const STANDALONE: &[&str] = &[
     "secret_request",
     "subagent",
 ];
+
+/// `PERSISTENT_RESOURCE_V2_ITEM_TYPES`: linked resources stay visible when
+/// their turn folds.
+fn persistent_card(entry: &WorkEntry) -> bool {
+    entry.source_kind == "event"
+        && matches!(
+            entry.item_type.as_deref(),
+            Some("fork" | "thread_created" | "secret_request")
+        )
+}
+
+fn subagent(entry: &WorkEntry) -> bool {
+    entry.source_kind == "event" && entry.item_type.as_deref() == Some("subagent")
+}
+
+/// The lifecycle items drawn as cards (`isV2LifecycleItem`).
+pub fn is_card(entry: &WorkEntry) -> bool {
+    entry.source_kind == "event"
+        && matches!(
+            entry.item_type.as_deref(),
+            Some("run_interrupt_result" | "handoff" | "fork" | "subagent")
+        )
+}
+
+fn provider_turn(entry: &WorkEntry) -> Option<&str> {
+    entry.item.as_ref()?.provider_turn_id.as_deref()
+}
+
+/// `liveSubagentCardEntryIds`: a batch of adjacent subagent cards from one
+/// provider turn stays out of its fold while any of them still works.
+fn live_subagent_ids(entries: &[Entry]) -> HashSet<String> {
+    let mut visible = HashSet::new();
+    let mut batch: Vec<&WorkEntry> = Vec::new();
+    let mut flush = |batch: &mut Vec<&WorkEntry>| {
+        let live = batch.iter().any(|w| {
+            matches!(
+                w.item.as_ref().map(|i| i.status.as_str()),
+                Some("pending" | "running" | "waiting")
+            )
+        });
+        if live {
+            visible.extend(batch.iter().map(|w| w.id.clone()));
+        }
+        batch.clear();
+    };
+    for entry in entries {
+        let Entry::Work(w) = entry else {
+            flush(&mut batch);
+            continue;
+        };
+        if !subagent(w) {
+            flush(&mut batch);
+            continue;
+        }
+        if batch
+            .last()
+            .is_some_and(|p| p.run_id != w.run_id || provider_turn(p) != provider_turn(w))
+        {
+            flush(&mut batch);
+        }
+        batch.push(w);
+    }
+    flush(&mut batch);
+    visible
+}
 
 /// `deriveTimelineEntriesFromVisibleTurnItems`, in the order the server
 /// committed. A run's interrupt request is bookkeeping its result repeats.
@@ -1151,6 +1226,7 @@ fn turn_folds(
     latest: Option<&RunSummary>,
     unfolded: &HashSet<String>,
 ) -> BTreeMap<String, Fold> {
+    let live_subagents = live_subagent_ids(entries);
     let mut interrupted: HashSet<String> = HashSet::new();
     let mut prompt_index: HashMap<String, usize> = HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -1252,8 +1328,15 @@ fn turn_folds(
             let compaction =
                 matches!(entry, Entry::Work(w) if w.source_kind == "context-compaction");
             let foldable_trailing = matches!(entry, Entry::Work(w)
-                if w.status.as_deref() != Some("inProgress") && !indicates_failure(w));
+                if w.source_kind != "event" && w.status.as_deref() != Some("inProgress")
+                    && !indicates_failure(w));
             if !compaction && index > terminal_index && !foldable_trailing {
+                continue;
+            }
+            // Linked resources and still-working children outlive the fold.
+            if matches!(entry, Entry::Work(w) if persistent_card(w))
+                || live_subagents.contains(entry.id())
+            {
                 continue;
             }
             if matches!(entry, Entry::Work(w) if w.item_type.as_deref() == Some("notification")) {
@@ -1439,6 +1522,24 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             continue;
         }
         match entry {
+            Entry::Work(first) if is_card(first) => {
+                // Adjacent subagents of one provider turn share a row.
+                if subagent(first)
+                    && let Some(Row::Event { entries, .. }) = out.last_mut()
+                    && entries.last().is_some_and(|p| {
+                        subagent(p)
+                            && p.run_id == first.run_id
+                            && provider_turn(p) == provider_turn(first)
+                    })
+                {
+                    entries.push(first.clone());
+                } else {
+                    out.push(Row::Event {
+                        id: first.id.clone(),
+                        entries: vec![first.clone()],
+                    });
+                }
+            }
             Entry::Work(first) => {
                 if breaks_group(first) {
                     out.push(Row::Work {
@@ -1782,7 +1883,43 @@ mod tests {
         ));
         let rows = rows(&thread, &detail, &Expansion::default());
         assert!(!rows.iter().any(|r| matches!(r, Row::TurnFold { .. })));
-        assert!(matches!(rows.last(), Some(Row::Work { label, .. }) if label == "Run interrupted"));
+        assert!(matches!(rows.last(), Some(Row::Event { entries, .. })
+            if entries[0].item_type.as_deref() == Some("run_interrupt_result")));
+    }
+
+    #[test]
+    fn subagents_of_a_turn_share_a_row_and_fold_once_settled() {
+        let with_agents = |status: &str| {
+            let (thread, mut detail) = settled();
+            for (index, id) in ["s1", "s2"].into_iter().enumerate() {
+                let mut agent = item(
+                    id,
+                    "subagent",
+                    &format!("2026-01-01T00:03:3{index}.000Z"),
+                    Some("run"),
+                    json!({"subagentId": id, "providerTurnId": "pt", "title": "Explore"}),
+                );
+                Arc::make_mut(&mut agent.item).status = if index == 0 {
+                    status.into()
+                } else {
+                    "completed".into()
+                };
+                detail.visible.insert(4, agent);
+            }
+            rows(&thread, &detail, &Expansion::default())
+        };
+        let event = |rows: &[Row]| {
+            rows.iter().find_map(|r| match r {
+                Row::Event { entries, .. } => Some(entries.len()),
+                _ => None,
+            })
+        };
+        // A working child keeps its batch out of the fold, as one row.
+        assert_eq!(event(&with_agents("running")), Some(2));
+        // Settled children fold with their turn.
+        let rows = with_agents("completed");
+        assert!(rows.iter().any(|r| matches!(r, Row::TurnFold { .. })));
+        assert_eq!(event(&rows), None);
     }
 
     #[test]

@@ -1191,6 +1191,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "list-ordered",
         "list-plus",
         "play-fill",
+        "arrow-right-left",
+        "git-fork",
     )
 }
 
