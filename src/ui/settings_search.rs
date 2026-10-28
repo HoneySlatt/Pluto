@@ -1343,6 +1343,7 @@ const KEYBINDINGS: &[(&str, &[&str])] = &[
     ("modelPicker.jump.9", &["mod+9"]),
     ("thread.stop", &[]),
     ("thread.steerQueuedMessage", &["mod+shift+enter"]),
+    ("thread.editQueuedMessage", &["alt+arrowup"]),
     ("thread.previous", &["mod+shift+["]),
     ("thread.next", &["mod+shift+]"]),
     ("thread.copyReference", &["mod+shift+c"]),

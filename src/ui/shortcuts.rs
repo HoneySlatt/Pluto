@@ -5,7 +5,8 @@
 //!
 //! Handled: the palette modes, Usage and its metric and period keys, new
 //! threads, the terminal drawer, the right panel and diff toggles, closing a surface, thread
-//! traversal and jumps, settle and pin. Other commands (the terminal drawer,
+//! traversal and jumps, settle and pin, steering and editing queued
+//! messages. Other commands (the terminal drawer,
 //! previews, composer controls, themes) are not ported and fall through.
 use eframe::egui::{self, Key, Modifiers, Ui};
 use serde_json::{Value, json};
@@ -145,6 +146,12 @@ impl App {
             ("editableFocus", editable),
             ("modelPickerOpen", model_picker),
             ("usagePageOpen", self.usage_open),
+            (
+                "composerFocus",
+                self.cite
+                    .editor_id
+                    .is_some_and(|id| ui.memory(|m| m.has_focus(id))),
+            ),
         ];
         for (key, modifiers) in presses {
             let Some(token) = event_key(key) else {
@@ -163,7 +170,12 @@ impl App {
             ) else {
                 continue;
             };
-            if self.run_command(&command) {
+            let handled = match command.as_str() {
+                "thread.steerQueuedMessage" => self.steer_next_queued(),
+                "thread.editQueuedMessage" => self.edit_latest_queued(ui.ctx()),
+                _ => self.run_command(&command),
+            };
+            if handled {
                 ui.ctx().input_mut(|i| i.consume_key(modifiers, key));
             }
         }

@@ -791,8 +791,7 @@ impl App {
             .map(|(row, key)| view.height(*key, row, column))
             .collect();
         let history_height = history_control_height(&detail.history);
-        let content_height =
-            24.0 + history_height + guesses.iter().sum::<f32>() + view.tail + bottom_padding;
+        let content_height = 24.0 + history_height + guesses.iter().sum::<f32>() + bottom_padding;
         // Older turns loaded above keep what is on screen in place
         // (`maintainVisibleContentPosition`).
         if !view.follow {
@@ -896,10 +895,6 @@ impl App {
                             cut_changed |= top + guess > viewport.top();
                         }
                     }
-                    // Queued follow-ups close the timeline.
-                    let before = ui.cursor().top();
-                    self.queued_rows(ui, &detail, column);
-                    view.tail = ui.cursor().top() - before;
                 });
                 ui.add_space(bottom_padding);
             });

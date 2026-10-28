@@ -1062,6 +1062,7 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
         "thread.steerQueuedMessage",
         "!terminalFocus",
     ),
+    ("alt+arrowup", "thread.editQueuedMessage", "composerFocus"),
     ("mod+n", "chat.new", "!terminalFocus"),
     ("mod+shift+o", "chat.new", "!terminalFocus"),
     ("mod+shift+n", "chat.newLocal", "!terminalFocus"),

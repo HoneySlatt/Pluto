@@ -486,3 +486,80 @@ fn an_opened_tool_call_loads_the_images_it_returned() {
         egui::Shape::Rect(rect) if (rect.rect.height() - 180.0).abs() < 0.5))
     );
 }
+
+#[test]
+fn queued_messages_list_above_the_composer_and_open_in_it() {
+    let mut harness = harness();
+    click(&mut harness, egui::pos2(60.0, 248.0));
+    let run = |id: &str, ordinal: u64, status: &str, message: &str| {
+        json!({"id": id, "threadId": "a", "ordinal": ordinal, "status": status,
+            "providerInstanceId": "codex", "queuePosition": ordinal, "userMessageId": message,
+            "requestedAt": at(5)})
+    };
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "runs": [run("r1", 1, "running", "m1"), run("r2", 2, "queued", "m2"),
+            run("r3", 3, "queued", "m3")],
+        "messages": [
+            {"id": "m1", "text": "Start", "attachments": []},
+            {"id": "m2", "text": "First follow-up", "attachments": []},
+            {"id": "m3", "text": "Second follow-up", "attachments": []},
+        ],
+        "providerSessions": [{"id": "s", "status": "running",
+            "capabilities": {"turns": {"supportsQueuedMessages": true}}}],
+        "updatedAt": at(5)}});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(3);
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    let shown = texts(&harness);
+    let find = |shown: &[(String, egui::Rect)], label: &str| {
+        shown
+            .iter()
+            .filter(|(text, _)| text == label)
+            .map(|(_, rect)| *rect)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(find(&shown, "Queued").len(), 1, "{shown:?}");
+    assert_eq!(find(&shown, "2").len(), 1);
+    assert_eq!(find(&shown, "Steer").len(), 2);
+    let second = find(&shown, "Second follow-up")[0];
+    let first = find(&shown, "First follow-up")[0];
+    assert!(first.top() < second.top(), "queue order");
+    // The pencil sits left of the row's Steer button.
+    let steer = find(&shown, "Steer")[1];
+    click(
+        &mut harness,
+        egui::pos2(steer.left() - 37.0, steer.center().y),
+    );
+    let shown = texts(&harness);
+    assert_eq!(find(&shown, "Cancel").len(), 1, "{shown:?}");
+    assert_eq!(
+        find(&shown, "Second follow-up").len(),
+        2,
+        "the row and the composer"
+    );
+    let cancel = find(&shown, "Cancel")[0];
+    click(&mut harness, cancel.center());
+    let shown = texts(&harness);
+    assert!(find(&shown, "Cancel").is_empty());
+    assert_eq!(find(&shown, "Second follow-up").len(), 1);
+    // Collapsing keeps the header only.
+    let header = find(&shown, "Queued")[0];
+    click(&mut harness, header.center());
+    let shown = texts(&harness);
+    assert!(find(&shown, "First follow-up").is_empty());
+    assert_eq!(find(&shown, "Queued").len(), 1);
+}

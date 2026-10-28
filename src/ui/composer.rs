@@ -320,7 +320,22 @@ impl App {
         }
     }
 
+    /// The attached banners' height: the queue's above the mode's banner.
     fn banner_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
+        let lower = self.mode_banner_height(ui, width, mode);
+        let queue = if self.selected.is_some() {
+            self.queue_banner_height(self.queue_workflow().as_ref())
+        } else {
+            0.0
+        };
+        if queue > 0.0 && lower > 0.0 {
+            lower + queue - OVERLAP
+        } else {
+            lower + queue
+        }
+    }
+
+    fn mode_banner_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         match mode {
             Mode::Normal => self
                 .composer_tasks()
@@ -359,7 +374,20 @@ impl App {
         let surface = Rect::from_min_size(top_left, Vec2::new(width, height));
         let thread_id = self.selected.clone().unwrap_or_default();
 
-        // Attached banners sit behind the surface's top edge.
+        // Attached banners sit behind the surface's top edge, the queue's
+        // behind the mode's banner.
+        self.check_queued_edit(ui.ctx());
+        if !draft {
+            let lower = self.mode_banner_height(ui, width, mode);
+            let bottom = if lower > 0.0 {
+                surface.top() + OVERLAP - lower
+            } else {
+                surface.top()
+            };
+            self.queue_banner(ui, surface, bottom);
+            let queued = self.queue_workflow().is_some_and(|w| !w.queued.is_empty());
+            crate::ui::requests_panel::join_banners(queued && lower > 0.0);
+        }
         match mode {
             Mode::Approval(approval, count) => {
                 self.approval_banner(ui, surface, approval, *count, &thread_id)
@@ -371,6 +399,7 @@ impl App {
                 None => self.tasks_open = false,
             },
         }
+        crate::ui::requests_panel::join_banners(false);
 
         // Checkout strip, tucked 16px under the surface (`-mt-4`); only for a
         // repository (`shouldShowComposerContextStrip`, one environment).
@@ -868,7 +897,10 @@ impl App {
         self.current_thread().is_some_and(|t| t.is_running())
     }
 
-    /// Send button, or Stop while a turn runs. Returns the left edge.
+    /// The primary action (`ComposerPrimaryActions.tsx`): Stop while a turn
+    /// runs and the composer is empty, Resume for a stopped thread, else
+    /// the send button (queue or steer during a turn, update while a
+    /// queued message is edited). Returns the left edge.
     fn send_actions(
         &mut self,
         ui: &mut Ui,
@@ -878,33 +910,31 @@ impl App {
         submit: bool,
     ) -> f32 {
         let send = Rect::from_min_size(Pos2::new(right - 32.0, bar_top - 2.0), Vec2::splat(32.0));
-        let has_content = !self.composer.trim().is_empty()
-            || !self.composer_images.is_empty()
-            || !self.composer_files.is_empty();
+        let editing = !draft && self.editing_queued();
+        let has_content = if editing {
+            self.queued_edit_sendable()
+        } else {
+            !self.composer.trim().is_empty()
+                || !self.composer_images.is_empty()
+                || !self.composer_files.is_empty()
+        };
         let running = !draft && self.running();
-        if running {
-            // Stop, then Send while there is something to queue (`gap-2`).
-            let stop = if has_content {
-                send.translate(Vec2::new(-32.0 - 8.0, 0.0))
-            } else {
-                send
-            };
-            let response = ui.interact(stop, ui.id().with("stop"), Sense::click());
+        if running && !has_content && !editing {
+            let response = ui.interact(send, ui.id().with("stop"), Sense::click());
             let fill = if response.hovered() {
                 DESTRUCTIVE
             } else {
                 theme::alpha(DESTRUCTIVE, 0.9)
             };
-            ui.painter().circle_filled(stop.center(), 16.0, fill);
-            theme::paint_icon(ui, "stop-square", stop, 12.0, Color32::WHITE);
-            if response.on_hover_text("Stop generation").clicked() {
+            ui.painter().circle_filled(send.center(), 16.0, fill);
+            theme::paint_icon(ui, "stop-square", send, 12.0, Color32::WHITE);
+            if response.on_hover_text("Interrupt").clicked() {
                 self.interrupt();
             }
-            if !has_content {
-                return stop.left();
-            }
+            return send.left();
         }
-        let can_send = has_content && self.connected();
+        let resume = !draft && !has_content && !editing && self.can_resume();
+        let can_send = (has_content || resume) && self.connected();
         let response = ui.interact(
             send,
             ui.id().with("send"),
@@ -925,21 +955,58 @@ impl App {
             response.hovered() && can_send,
             opacity,
         );
-        theme::paint_icon(ui, "send-arrow", send, 14.0, arrow);
-        let response = if running {
-            response.on_hover_text("Queue message")
+        // `resolveComposerDispatchMode`: Ctrl flips the follow-up behavior.
+        let follow_up = if self.client_setting("followUpBehavior").as_str() == Some("steer") {
+            "steer"
         } else {
-            response
+            "queue"
         };
-        if (response.clicked() || submit) && can_send {
-            let alternate = ui.input(|i| i.modifiers.command);
-            self.submit_message(draft, alternate);
-        }
-        if running {
-            send.left() - 8.0 - 32.0
+        let alternate = if follow_up == "queue" {
+            "steer"
         } else {
-            send.left()
+            "queue"
+        };
+        let queuing =
+            running && !editing && (follow_up == "queue") != ui.input(|i| i.modifiers.command);
+        let (icon, label) = if resume {
+            ("play-fill", "Resume thread")
+        } else if editing {
+            ("check", "Update queued message")
+        } else if queuing {
+            ("list-plus", "Queue message")
+        } else if running {
+            ("corner-up-right", "Steer message")
+        } else {
+            ("send-arrow", "Submit message")
+        };
+        let size = if icon == "send-arrow" { 14.0 } else { 16.0 };
+        theme::paint_icon(ui, icon, send, size, arrow);
+        let tooltip = if running && !editing {
+            let shortcut = crate::ui::shortcuts::effective_shortcut_label(
+                &self.state.config["keybindings"],
+                "composer.sendAlternate",
+                &[("composerFocus", true), ("turnRunning", true)],
+            )
+            .map(|label| format!(" or {label}"))
+            .unwrap_or_default();
+            format!("Click to {follow_up}, Ctrl/⌘-click{shortcut} to {alternate}")
+        } else {
+            label.to_owned()
+        };
+        let response = response.on_hover_text(tooltip);
+        if resume {
+            if response.clicked() {
+                self.resume_thread();
+            }
+        } else if (response.clicked() || submit) && can_send {
+            if editing {
+                self.save_queued_edit(ui.ctx());
+            } else {
+                let alternate = ui.input(|i| i.modifiers.command);
+                self.submit_message(draft, alternate);
+            }
         }
+        send.left()
     }
 
     /// Previous / Next / Submit for a pending question. Returns the left edge.
@@ -1765,6 +1832,7 @@ impl App {
     /// A command a message waited on was received: the message goes on, or
     /// stops with the command's failure.
     pub(crate) fn turn_command_done(&mut self, command_id: &str, ok: bool) {
+        self.resume_queue_after(command_id, ok);
         if let Some(send) = self.turn_sends.remove(&format!("after:{command_id}"))
             && ok
         {

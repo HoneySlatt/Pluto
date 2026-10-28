@@ -226,6 +226,31 @@ fn context_references(text: &str) -> Vec<(usize, usize)> {
     references
 }
 
+/// `replaceComposerContextReferences`: each reference replaced by what
+/// `replace` returns for its kind and label.
+pub(crate) fn replace_context_references(
+    text: &str,
+    replace: impl Fn(&str, &str) -> String,
+) -> String {
+    const HREF: &str = "](t3-context://v1/";
+    let mut result = String::new();
+    let mut cursor = 0;
+    for (start, end) in context_references(text) {
+        let reference = &text[start..end];
+        let open = reference.find('[').unwrap_or(0);
+        let close = reference.find(HREF).unwrap_or(open + 1);
+        let kind = reference[close + HREF.len()..]
+            .split('/')
+            .next()
+            .unwrap_or_default();
+        result.push_str(&text[cursor..start]);
+        result.push_str(&replace(kind, &reference[open + 1..close]));
+        cursor = end;
+    }
+    result.push_str(&text[cursor..]);
+    result
+}
+
 /// `recallableComposerPrompt`: a sent message reduced to the text the user
 /// typed, without send-time appends or context chips.
 pub fn recallable_prompt(message_text: &str) -> String {

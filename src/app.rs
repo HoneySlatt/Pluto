@@ -72,6 +72,8 @@ pub struct App {
     pub(crate) expanded_user_messages: std::collections::HashSet<String>,
     pub(crate) user_text_sizes: std::collections::HashMap<(String, usize, u32), eframe::egui::Vec2>,
     pub(crate) tasks_open: bool,
+    /// The queued messages' banner above the composer.
+    pub(crate) queue: crate::ui::queue::QueueUi,
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
@@ -437,6 +439,7 @@ impl App {
             expanded_user_messages: Default::default(),
             user_text_sizes: Default::default(),
             tasks_open: false,
+            queue: Default::default(),
             tasks_thread: None,
             picker_provider: None,
             picker_query: String::new(),

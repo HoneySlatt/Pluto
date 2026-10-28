@@ -28,8 +28,6 @@ pub(crate) struct TimelineView {
     pub pinned: HashSet<Id>,
     /// The viewport height of the last pass.
     pub viewport: f32,
-    /// The height of what closes the timeline (queued follow-ups).
-    pub tail: f32,
     /// The wheel or the scroll bar moved the view this pass (the wheel
     /// delta is used up by then).
     pub scrolled: bool,

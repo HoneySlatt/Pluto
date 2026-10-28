@@ -116,7 +116,37 @@ fn body_metrics(ui: &Ui, question: &Question, width: f32) -> (f32, f32, f32) {
     (max, body_height(ui, question, narrow), narrow)
 }
 
+thread_local! {
+    /// The next banner hangs under another attachment (adjacent
+    /// `ComposerBanner.Attachment`s share their outline).
+    static JOINED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the banners drawn next hang under the queue's banner.
+pub(crate) fn join_banners(joined: bool) {
+    JOINED.set(joined);
+}
+
 fn banner_surface(ui: &Ui, rect: Rect, fill: Color32, outline: Color32) {
+    if JOINED.get() {
+        // `before:rounded-none before:border-t-0`.
+        let stroke = Stroke::new(1.0, outline);
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, fill);
+        let (left, right) = (rect.left() + 0.5, rect.right() - 0.5);
+        painter.line_segment(
+            [Pos2::new(left, rect.top()), Pos2::new(left, rect.bottom())],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                Pos2::new(right, rect.top()),
+                Pos2::new(right, rect.bottom()),
+            ],
+            stroke,
+        );
+        return;
+    }
     let corners = CornerRadius {
         nw: 16,
         ne: 16,

@@ -1187,6 +1187,10 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "bug",
         "corner-up-right",
         "circle-dot-dashed",
+        "grip-vertical",
+        "list-ordered",
+        "list-plus",
+        "play-fill",
     )
 }
 
