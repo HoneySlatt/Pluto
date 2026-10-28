@@ -1140,6 +1140,7 @@ impl eframe::App for App {
                 self.snooze_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
+                self.scheduled_task_editor(ui, rect);
                 self.icon_picker_dialog(ui, rect);
                 self.command_palette(ui, rect);
             }
@@ -1257,6 +1258,7 @@ impl eframe::App for App {
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
+                self.scheduled_task_editor(ui, rect);
             }
         }
         // Relative times tick; repaint at least once a minute.

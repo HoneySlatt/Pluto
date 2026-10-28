@@ -2698,6 +2698,56 @@ impl App {
                             font(14.0, Weight::Regular),
                             theme::alpha(theme::foreground(), 0.7),
                         );
+                        // `headerAction`: Scheduled Tasks' "New task".
+                        if page == SCHEDULED_TASKS_PAGE && self.connected() {
+                            let label = "New task";
+                            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium))
+                                + 7.0 * 2.0
+                                + 12.0
+                                + 4.0;
+                            let button = Rect::from_min_size(
+                                Pos2::new(left + card_width - width, y + 2.0),
+                                Vec2::new(width, 24.0),
+                            );
+                            let response = ui.interact(
+                                button,
+                                ui.id().with("scheduled-new-task"),
+                                Sense::click(),
+                            );
+                            let color = if response.hovered() {
+                                ui.painter().rect_filled(
+                                    button,
+                                    CornerRadius::same(6),
+                                    theme::accent(),
+                                );
+                                theme::foreground()
+                            } else {
+                                theme::muted_foreground()
+                            };
+                            theme::paint_icon(
+                                ui,
+                                "plus",
+                                Rect::from_center_size(
+                                    Pos2::new(button.left() + 7.0 + 6.0, button.center().y),
+                                    Vec2::splat(12.0),
+                                ),
+                                12.0,
+                                color,
+                            );
+                            widgets::text_in(
+                                ui,
+                                Rect::from_min_max(
+                                    Pos2::new(button.left() + 7.0 + 16.0, button.top()),
+                                    button.max,
+                                ),
+                                label,
+                                font(12.0, Weight::Medium),
+                                color,
+                            );
+                            if response.clicked() {
+                                self.new_scheduled_task();
+                            }
+                        }
                         y += 28.0 + 10.0;
                     }
                     // Every row but the first carries a 1px divider.
