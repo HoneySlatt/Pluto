@@ -1,13 +1,16 @@
 //! "New design" (Pluto, not upstream): the entry screen of a design session,
 //! after OpenDesign's Home (nexu-io/open-design): a brief, the kind of
-//! deliverable, the agent, the project folder and example briefs. Creating
-//! one makes the folder a T3 project (`project.create`), writes its design
-//! profile (`.pluto/design.json`, which gives its sessions the server's
-//! design charter) and launches the thread with the brief, which then opens
-//! in the studio layout (`crate::ui::design`). A new project in the folder
-//! the screen proposed also gets a Git repository (`vcs.init`), so T3
-//! checkpoints each turn and the Design surface can show earlier versions;
-//! a folder the user chose is left as it is. References (images and files,
+//! deliverable, the agent, the project folder and example briefs. Designs
+//! share one T3 project, Designs (`~/Designs`, created by the first one with
+//! `project.create`): each works in its own folder there, its thread's
+//! directory (`existing_worktree`), with its design profile
+//! (`.pluto/design.json`, which gives its sessions the server's design
+//! charter). A folder chosen elsewhere becomes a project of its own, as one
+//! that already is a project stays. The thread starts with the brief and
+//! opens in the studio layout (`crate::ui::design`). The folder the screen
+//! proposed also gets a Git repository (`vcs.init`), so T3 checkpoints each
+//! turn and the Design surface can show earlier versions; a folder the user
+//! chose is left as it is. References (images and files,
 //! pasted, dropped or picked) go with the brief, through the composer's
 //! attachments and launch (`start_turn`).
 
@@ -26,6 +29,8 @@ const MODEL_MENU: &str = "design-home-model";
 const TRAITS_MENU: &str = "design-home-traits";
 const KIND_MENU: &str = "design-home-kind";
 const PROFILE_PATH: &str = ".pluto/design.json";
+/// The Designs project's folder, which holds every design's folder.
+const DESIGNS_ROOT: &str = "~/Designs";
 
 /// The kinds of deliverable, as the server's `DESIGN_KIND_RULES` keys.
 const KINDS: [(&str, &str, &str); 6] = [
@@ -78,7 +83,11 @@ pub(crate) struct DesignHome {
 /// A design being created, waiting on `stage`.
 struct Creating {
     project_id: String,
+    /// The design's folder: the thread's directory.
     cwd: String,
+    /// The folder within the project's (the Designs project's) root, for a
+    /// design that does not work at the root.
+    within: Option<(String, String)>,
     title: String,
     brief: String,
     model: Value,
@@ -694,16 +703,48 @@ impl App {
             model["options"] = options.clone();
         }
         home.error = None;
-        let existing = self
-            .state
-            .projects
-            .iter()
-            .find(|p| p.workspace_root.trim_end_matches('/') == cwd)
-            .map(|p| p.id.clone());
         let proposed = !home.folder_edited;
+        let project_at = |root: &str| {
+            self.state
+                .projects
+                .iter()
+                .find(|p| p.workspace_root.trim_end_matches('/') == root)
+                .map(|p| p.id.clone())
+        };
+        let mut cwd = cwd;
+        let mut existing = project_at(&cwd);
+        // A folder under Designs works there, in the Designs project; the
+        // proposed one skips the folders other designs already use.
+        let designs = expand_home(DESIGNS_ROOT);
+        let within = if existing.is_none()
+            && cwd
+                .strip_prefix(&format!("{designs}/"))
+                .is_some_and(|rest| !rest.is_empty())
+        {
+            if proposed {
+                let used = |path: &str| {
+                    self.state
+                        .threads
+                        .iter()
+                        .any(|t| t.worktree_path.as_deref() == Some(path))
+                };
+                let base = cwd.clone();
+                let mut n = 2;
+                while used(&cwd) {
+                    cwd = format!("{base}-{n}");
+                    n += 1;
+                }
+            }
+            existing = project_at(&designs);
+            let rest = cwd[designs.len() + 1..].to_owned();
+            Some((designs.clone(), rest))
+        } else {
+            None
+        };
         let creating = |project_id: String, stage, init_git| Creating {
             project_id,
             cwd: cwd.clone(),
+            within: within.clone(),
             title: title.clone(),
             brief: brief.clone(),
             model: model.clone(),
@@ -714,16 +755,22 @@ impl App {
         };
         match existing {
             Some(project_id) => {
-                self.design_home.creating = Some(creating(project_id, Stage::Profile, false));
+                // A new folder in Designs is versioned; a folder that already
+                // is a project is left as it is.
+                let init_git = proposed && within.is_some();
+                self.design_home.creating = Some(creating(project_id, Stage::Profile, init_git));
                 self.write_design_profile();
             }
             None => {
                 let project_id = uuid::Uuid::new_v4().to_string();
                 let command_id = uuid::Uuid::new_v4().to_string();
-                let name = cwd
+                let root = within
+                    .as_ref()
+                    .map_or(cwd.clone(), |(root, _)| root.clone());
+                let name = root
                     .rsplit('/')
                     .find(|s| !s.is_empty())
-                    .unwrap_or(&cwd)
+                    .unwrap_or(&root)
                     .to_owned();
                 self.design_home.creating = Some(creating(
                     project_id.clone(),
@@ -735,7 +782,7 @@ impl App {
                     "commandId": command_id,
                     "projectId": project_id,
                     "title": name,
-                    "workspaceRoot": cwd,
+                    "workspaceRoot": root,
                     "createWorkspaceRootIfMissing": true,
                     "defaultModelSelection": null,
                 }));
@@ -752,11 +799,16 @@ impl App {
             "{}\n",
             serde_json::to_string_pretty(&json!({"version": 1, "kind": kind})).unwrap_or_default()
         );
-        let cwd = creating.cwd.clone();
+        // A folder within the project is written from its root, which
+        // creates it.
+        let (root, path) = match &creating.within {
+            Some((root, rest)) => (root.clone(), format!("{rest}/{PROFILE_PATH}")),
+            None => (creating.cwd.clone(), PROFILE_PATH.to_owned()),
+        };
         self.send_request(
-            format!("design-profile-write:{cwd}"),
+            format!("design-profile-write:{}", creating.cwd),
             "projects.writeFile",
-            json!({"cwd": cwd, "relativePath": PROFILE_PATH, "contents": contents}),
+            json!({"cwd": root, "relativePath": path, "contents": contents}),
         );
     }
 
@@ -806,7 +858,7 @@ impl App {
         };
         let thread_id = uuid::Uuid::new_v4().to_string();
         let runtime = self.composer_runtime_mode(true);
-        let input = crate::ui::composer::launch_input(
+        let mut input = crate::ui::composer::launch_input(
             &thread_id,
             &creating.project_id,
             &creating.title,
@@ -815,6 +867,10 @@ impl App {
             &runtime,
             "default",
         );
+        if creating.within.is_some() {
+            input["workspaceStrategy"] =
+                json!({"type": "existing_worktree", "worktreePath": creating.cwd});
+        }
         // The composer's launch: the reference images are persisted first.
         let mut send = crate::ui::composer::TurnSend {
             thread_id: thread_id.clone(),
