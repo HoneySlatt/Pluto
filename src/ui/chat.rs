@@ -84,6 +84,9 @@ impl App {
         let body = Rect::from_min_max(Pos2::new(rect.left(), header.bottom()), rect.max);
         let thread = self.current_thread();
         let draft_project = self.draft_project();
+        // Pluto stock's glow, dimmer under a thread.
+        let glow = if thread.is_some() { 0.4 } else { 1.0 };
+        crate::ui::backdrop::paint_glow(ui.painter(), rect, glow);
         self.header(
             ui,
             header,
@@ -134,6 +137,11 @@ impl App {
             // shorter.
             let strip = if self.workspace_is_repo() { 0.0 } else { 16.0 };
             let composer_top = (body.center().y - 98.0 + strip).round();
+            crate::ui::backdrop::paint_sky(
+                ui.painter(),
+                body,
+                Pos2::new(column_left + column / 2.0, composer_top - 40.0),
+            );
             self.draft_hero(ui, &project, column_left, column, composer_top);
             self.composer(
                 ui,

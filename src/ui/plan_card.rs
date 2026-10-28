@@ -845,15 +845,10 @@ impl App {
                     Sense::hover()
                 },
             );
-            let fill = if response.hovered() && enabled {
-                crate::ui::composer::message_action_hover()
-            } else {
-                theme::primary()
-            };
             let opacity = if enabled { 1.0 } else { 0.64 };
-            ui.painter()
-                .rect_filled(rect, corners, theme::alpha(fill, opacity));
-            (response, theme::alpha(Color32::WHITE, opacity))
+            let hovered = response.hovered() && enabled;
+            let text = crate::ui::backdrop::fill_action(ui, rect, corners, hovered, opacity);
+            (response, text)
         };
         if !self.composer.trim().is_empty() {
             let width = (widgets::text_width(ui, "Refine", label_font.clone()) + 32.0).ceil();

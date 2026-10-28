@@ -914,21 +914,18 @@ impl App {
                 Sense::hover()
             },
         );
-        let fill = if response.hovered() && can_send {
-            message_action_hover()
-        } else {
-            theme::primary()
-        };
         let opacity = if can_send { 1.0 } else { 0.64 };
-        ui.painter()
-            .circle_filled(send.center(), 16.0, theme::alpha(fill, opacity));
-        theme::paint_icon(
+        // A circle; Pluto stock fills it with its gradient, and the arrow takes
+        // the accent's text color (white on the stock palette, dark on a
+        // white accent).
+        let arrow = crate::ui::backdrop::fill_action(
             ui,
-            "send-arrow",
-            send,
-            14.0,
-            theme::alpha(Color32::WHITE, opacity),
+            Rect::from_center_size(send.center(), Vec2::splat(32.0)),
+            CornerRadius::same(16),
+            response.hovered() && can_send,
+            opacity,
         );
+        theme::paint_icon(ui, "send-arrow", send, 14.0, arrow);
         let response = if running {
             response.on_hover_text("Queue message")
         } else {
