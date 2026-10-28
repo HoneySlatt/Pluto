@@ -290,5 +290,7 @@ to egui's monochrome emoji, and ZWJ sequences show their first emoji.
 
 Fonts: Geist (SIL OFL, `assets/fonts/OFL.txt`). Icons: Lucide (ISC,
 `assets/icons/LUCIDE-LICENSE`); the `diffs-symbol-*` file status icons come
-from @pierre/diffs (Apache-2.0, `assets/PIERRE-DIFFS-LICENSE`). Code theme:
-pierre-dark (MIT, `assets/PIERRE-THEME-LICENSE`).
+from @pierre/diffs and the `lang-*` file type icons from @pierre/trees
+(Apache-2.0, `assets/PIERRE-DIFFS-LICENSE`). Code theme: pierre-dark (MIT,
+`assets/PIERRE-THEME-LICENSE`). `NOTICE.md` lists every bundled asset, the
+provider trademarks and the T3 Code notice.
