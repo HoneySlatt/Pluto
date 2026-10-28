@@ -303,7 +303,7 @@ impl App {
         }
         self.watch_discovered_servers();
         // Search: opens the command palette.
-        let search = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(239.0, 32.0));
+        let search = Rect::from_min_size(Pos2::new(left + 8.0, 96.0), Vec2::new(239.0, 32.0));
         let response = ui.interact(search, ui.id().with("legacy-search"), Sense::click());
         let hovered = response.hovered();
         if hovered {
@@ -313,7 +313,7 @@ impl App {
         theme::paint_icon(
             ui,
             "search",
-            Rect::from_min_size(Pos2::new(left + 18.0, 68.0), Vec2::splat(16.0)),
+            Rect::from_min_size(Pos2::new(left + 18.0, 104.0), Vec2::splat(16.0)),
             16.0,
             if hovered {
                 theme::sidebar_foreground()
@@ -323,7 +323,7 @@ impl App {
         );
         widgets::text_in(
             ui,
-            Rect::from_min_max(Pos2::new(left + 42.0, 60.0), Pos2::new(left + 185.0, 92.0)),
+            Rect::from_min_max(Pos2::new(left + 42.0, 96.0), Pos2::new(left + 185.0, 128.0)),
             "Search",
             font(14.0, Weight::Medium),
             if hovered {
@@ -339,14 +339,15 @@ impl App {
             "commandPalette.toggle",
             &context,
         ) {
-            kbd(ui, &label, left + 237.0, 76.0);
+            kbd(ui, &label, left + 237.0, 112.0);
         }
         if response.clicked() {
             self.toggle_palette(crate::ui::palette::View::Root);
         }
 
+        // Pluto: under the Code | Chat switch.
         let list = Rect::from_min_max(
-            Pos2::new(left, 100.0),
+            Pos2::new(left, 136.0),
             Pos2::new(rect.right() - 1.0, rect.bottom() - 48.0),
         );
         self.legacy_project_list(ui, list);

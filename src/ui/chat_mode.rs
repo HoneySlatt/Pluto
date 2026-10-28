@@ -598,38 +598,62 @@ impl App {
 
     /// The header's Code | Chat switch, right of the wordmark.
     pub(crate) fn mode_switch(&mut self, ui: &mut Ui, rect: Rect) {
+        // Pluto: a full-width segmented control under the header, its thumb
+        // sliding between Code and Chat.
         let track = Rect::from_min_size(
-            Pos2::new(rect.left() + 247.0 - 104.0, 14.0),
-            Vec2::new(104.0, 24.0),
+            Pos2::new(rect.left() + 12.0, 52.0),
+            Vec2::new(rect.width() - 25.0, 36.0),
         );
-        ui.painter().rect_filled(
+        let painter = ui.painter().clone();
+        painter.rect_filled(track, CornerRadius::same(10), theme::overlay(0.03));
+        painter.rect_stroke(
             track,
-            CornerRadius::same(8),
-            theme::alpha(theme::sidebar_foreground(), 0.06),
+            CornerRadius::same(10),
+            egui::Stroke::new(1.0, theme::sidebar_border()),
+            egui::StrokeKind::Inside,
         );
         let chat = self.chat_mode();
-        for (index, label) in ["Code", "Chat"].into_iter().enumerate() {
-            let segment = Rect::from_min_size(
-                track.min + Vec2::new(2.0 + 50.0 * index as f32, 2.0),
-                Vec2::new(50.0, 20.0),
-            );
+        let slide = ui
+            .ctx()
+            .animate_bool_with_time(ui.id().with("mode-thumb"), chat, 0.18);
+        let half = (track.width() - 6.0) / 2.0;
+        let segment = |index: f32| {
+            Rect::from_min_size(
+                Pos2::new(track.left() + 3.0 + half * index, track.top() + 3.0),
+                Vec2::new(half, 30.0),
+            )
+        };
+        painter.rect_filled(segment(slide), CornerRadius::same(7), theme::row_active());
+        let label_font = font(13.0, Weight::Medium);
+        for (index, (label, icon)) in [("Code", "code-xml"), ("Chat", "message-circle")]
+            .into_iter()
+            .enumerate()
+        {
+            let rect = segment(index as f32);
             let active = (index == 1) == chat;
-            let response = ui.interact(segment, ui.id().with(("mode", index)), Sense::click());
-            if active {
-                ui.painter()
-                    .rect_filled(segment, CornerRadius::same(6), theme::accent());
-            }
+            let response = ui.interact(rect, ui.id().with(("mode", index)), Sense::click());
             let color = if active || response.hovered() {
                 theme::sidebar_foreground()
             } else {
                 theme::sidebar_muted()
             };
-            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium));
+            let text_width = widgets::text_width(ui, label, label_font.clone());
+            let start = rect.center().x - (14.0 + 7.0 + text_width) / 2.0;
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_min_size(Pos2::new(start, rect.center().y - 7.0), Vec2::splat(14.0)),
+                14.0,
+                color,
+            );
             widgets::text_in(
                 ui,
-                Rect::from_center_size(segment.center(), Vec2::new(width + 1.0, 16.0)),
+                Rect::from_min_max(
+                    Pos2::new(start + 21.0, rect.top()),
+                    Pos2::new(start + 22.0 + text_width, rect.bottom()),
+                ),
                 label,
-                font(12.0, Weight::Medium),
+                label_font.clone(),
                 color,
             );
             if response.clicked() {
@@ -641,43 +665,7 @@ impl App {
     /// Chat mode's sidebar: search, a new chat, and the chats by day.
     pub(crate) fn chat_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let left = rect.left();
-        let search_rect = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(207.0, 32.0));
-        theme::paint_icon(
-            ui,
-            "search",
-            Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
-            16.0,
-            theme::sidebar_icon(),
-        );
-        let input_rect = Rect::from_min_size(
-            Pos2::new(left + 40.0, 65.5),
-            Vec2::new(search_rect.width() - 40.0, 21.0),
-        );
-        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
-        search_ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .font(font(14.0, Weight::Medium))
-                .text_color(theme::sidebar_foreground())
-                .hint_text(
-                    egui::RichText::new("Search chats")
-                        .font(font(14.0, Weight::Medium))
-                        .color(theme::sidebar_muted()),
-                )
-                .desired_width(input_rect.width()),
-        );
-        if widgets::icon_button(
-            ui,
-            Rect::from_min_size(Pos2::new(left + 219.0, 62.0), Vec2::splat(28.0)),
-            "chat-new",
-            "square-pen",
-            16.0,
-            theme::sidebar_icon(),
-            "New chat",
-        )
-        .clicked()
-        {
+        if self.sidebar_new_and_search(ui, rect, "New chat", "Search chats") {
             self.new_chat();
         }
 
@@ -743,7 +731,7 @@ impl App {
         chats.sort_by_key(|t| (!pinned.contains(&t.id), std::cmp::Reverse(at(t))));
         let now = chrono::Local::now();
         let list = Rect::from_min_max(
-            Pos2::new(left, 100.0),
+            Pos2::new(left, crate::ui::sidebar::NEW_TOP + 72.0),
             Pos2::new(rect.right() - 1.0, rect.bottom() - 48.0),
         );
         let mut open = None;

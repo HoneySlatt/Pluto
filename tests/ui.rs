@@ -66,10 +66,10 @@ fn click(harness: &mut Harness<'static, App>, pos: egui::Pos2) {
 #[test]
 fn clicking_a_sidebar_card_opens_its_thread() {
     let mut harness = harness();
-    // Cards start at y = 102 and repeat every 83px; the newest thread leads.
-    click(&mut harness, egui::pos2(60.0, 102.0 + 83.0 + 40.0));
+    // Cards start at y = 210 and repeat every 83px; the newest thread leads.
+    click(&mut harness, egui::pos2(60.0, 210.0 + 83.0 + 40.0));
     assert_eq!(harness.state().selected_thread_id(), Some("b"));
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     assert_eq!(harness.state().selected_thread_id(), Some("a"));
 }
 
@@ -100,6 +100,8 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
         })
         .collect();
     let mut harness = harness();
+    // Nine cards from y = 210 run past 900px; the window grows to show them all.
+    harness.set_size(egui::vec2(1440.0, 1100.0));
     let config = json!({"type": "snapshot", "config": {"providers": providers, "settings": {}}});
     let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2,
         "projects": [{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}],
@@ -108,7 +110,7 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
     harness.run_steps(5);
     for (i, driver) in drivers.iter().enumerate() {
         let slot = egui::Rect::from_min_size(
-            egui::pos2(216.0, 150.0 + i as f32 * 83.0),
+            egui::pos2(216.0, 258.0 + i as f32 * 83.0),
             egui::vec2(28.0, 25.0),
         );
         assert!(
@@ -124,7 +126,7 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
 #[test]
 fn worked_for_row_toggles_the_turn_fold() {
     let mut harness = harness();
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     let item = |id: &str, kind: &str, minutes_ago: i64, extra: Value| {
         let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": 0,
             "status": "completed", "startedAt": at(minutes_ago), "updatedAt": at(minutes_ago),
@@ -160,7 +162,7 @@ fn double_clicking_a_card_starts_renaming() {
     // egui counts clicks against time since start; let the clock pass the
     // double-click window first.
     harness.run_steps(60);
-    let pos = egui::pos2(60.0, 140.0);
+    let pos = egui::pos2(60.0, 248.0);
     harness.event(egui::Event::PointerMoved(pos));
     harness.run_steps(1);
     for _ in 0..2 {
@@ -187,16 +189,16 @@ fn project_scope_filters_the_thread_list() {
             {"id": "q", "title": "Second", "workspaceRoot": "/fixture/second"}]),
         json!([thread("a", "Newest thread", 5), other]),
     );
-    // Folder button, then the second project row: "All projects" spans
-    // y = 144..172 and project rows (most recent first) follow every 32px.
-    click(&mut harness, egui::pos2(177.0, 76.0));
-    click(&mut harness, egui::pos2(100.0, 220.0));
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    // Scope row, then the second project row: "All projects" spans
+    // y = 252..280 and project rows (most recent first) follow every 32px.
+    click(&mut harness, egui::pos2(40.0, 186.0));
+    click(&mut harness, egui::pos2(100.0, 328.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     assert_eq!(harness.state().selected_thread_id(), Some("c"));
     // Back to all projects: the newest thread leads again.
-    click(&mut harness, egui::pos2(177.0, 76.0));
-    click(&mut harness, egui::pos2(100.0, 158.0));
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(40.0, 186.0));
+    click(&mut harness, egui::pos2(100.0, 266.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     assert_eq!(harness.state().selected_thread_id(), Some("a"));
 }
 
@@ -240,7 +242,7 @@ fn drafts_start_on_their_project_default_model() {
 #[test]
 fn a_bounded_thread_offers_its_earlier_turns() {
     let mut harness = harness();
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     let item = json!({"id": "u", "threadId": "a", "runId": "t", "ordinal": 40,
         "status": "completed", "startedAt": at(10), "updatedAt": at(10),
         "type": "user_message", "messageId": "u", "text": "Hi", "inputIntent": "turn_start",
@@ -300,7 +302,7 @@ fn find_in_thread_marks_and_counts_the_server_matches() {
         "threads": [thread("a", "Newest thread", 5)]}}),
         )
         .unwrap();
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     let item = |id: &str, kind: &str, ordinal: u64, extra: Value| {
         let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": ordinal,
             "status": "completed", "startedAt": at(10), "updatedAt": at(10), "type": kind});
@@ -368,7 +370,7 @@ fn find_in_thread_marks_and_counts_the_server_matches() {
 #[test]
 fn an_opened_tool_call_loads_the_images_it_returned() {
     let mut harness = harness();
-    click(&mut harness, egui::pos2(60.0, 140.0));
+    click(&mut harness, egui::pos2(60.0, 248.0));
     let item = |id: &str, kind: &str, ordinal: u64, extra: Value| {
         let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": ordinal,
             "status": "completed", "startedAt": at(10), "updatedAt": "2026-10-28T12:00:00.000Z",

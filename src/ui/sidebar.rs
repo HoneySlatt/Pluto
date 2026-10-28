@@ -19,7 +19,11 @@ const CARD_HEIGHT: f32 = 78.0; // h-[4.875rem]
 const CARD_SLOT: f32 = 83.0; // card + py-0.5, measured
 const SLIM_HEIGHT: f32 = 36.0; // h-9
 const LIST_GAP: f32 = 1.0; // gap-px between list items
-const LIST_TOP: f32 = 100.0; // header (52) + search block (48)
+// Pluto: header (52), Code | Chat (36 + 12), New and Search (2 × 34), then
+// the project scope row (28 + 8).
+pub(crate) const NEW_TOP: f32 = 100.0;
+const SCOPE_TOP: f32 = 172.0;
+const LIST_TOP: f32 = 208.0;
 const FOOTER_HEIGHT: f32 = 48.0;
 
 fn timestamp_ms(iso: Option<&str>) -> i64 {
@@ -198,10 +202,10 @@ impl App {
         );
         let left = rect.left();
 
-        // Header: sidebar toggle + wordmark.
+        // Header: logo and wordmark, the sidebar toggle at the right.
         let toggle = widgets::icon_button(
             ui,
-            Rect::from_min_size(Pos2::new(left + 13.0, 12.0), Vec2::splat(28.0)),
+            Rect::from_min_size(Pos2::new(rect.right() - 39.0, 12.0), Vec2::splat(28.0)),
             "toggle-sidebar",
             "panel-left-close",
             16.0,
@@ -215,7 +219,7 @@ impl App {
         // Pluto's pixel logo, centered on the toggle's row, then the wordmark.
         crate::ui::pixel_logo::paint(
             ui,
-            Rect::from_center_size(Pos2::new(left + 64.0, 26.0), Vec2::new(24.0, 20.0)),
+            Rect::from_center_size(Pos2::new(left + 26.0, 26.0), Vec2::new(24.0, 20.0)),
             0.0,
         );
         // Pluto's wordmark (in place of T3's mark and "Code"), its baseline
@@ -236,7 +240,7 @@ impl App {
                 .first()
                 .map_or(15.0, |g| g.pos.y);
         painter.galley(
-            Pos2::new(left + 84.0, 30.9 - baseline),
+            Pos2::new(left + 46.0, 30.9 - baseline),
             wordmark,
             theme::sidebar_foreground(),
         );
@@ -360,108 +364,89 @@ impl App {
         let painter = ui.painter().clone();
         let left = rect.left();
 
-        // Search field and project actions.
-        let search_rect = Rect::from_min_size(Pos2::new(left + 8.0, 60.0), Vec2::new(151.0, 32.0));
-        theme::paint_icon(
-            ui,
-            "search",
-            Rect::from_min_size(Pos2::new(left + 16.0, 68.0), Vec2::splat(16.0)),
-            16.0,
-            theme::sidebar_icon(),
+        if self.sidebar_new_and_search(ui, rect, "New thread", "Search threads") {
+            self.start_draft(None);
+        }
+
+        // Project scope: the scoped project (or "All projects") and its menu,
+        // with Add project at the right.
+        let scoped = self.scoped_project().cloned();
+        let label = scoped
+            .as_ref()
+            .map_or("All projects", |p| p.title.as_str())
+            .to_owned();
+        let label_font = font(12.5, Weight::Medium);
+        let room = rect.width() - 1.0 - 20.0 - 36.0;
+        let label_width = widgets::text_width(ui, &label, label_font.clone()).min(room - 50.0);
+        let scope_button = Rect::from_min_size(
+            Pos2::new(left + 10.0, SCOPE_TOP),
+            Vec2::new((label_width + 50.0).min(room), 28.0),
         );
-        let input_rect = Rect::from_min_size(Pos2::new(left + 40.0, 65.5), Vec2::new(111.0, 21.0));
-        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
-        search_ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .font(font(14.0, Weight::Medium))
-                .text_color(theme::sidebar_foreground())
-                .hint_text(
-                    egui::RichText::new("Search")
-                        .font(font(14.0, Weight::Medium))
-                        .color(theme::sidebar_muted()),
-                )
-                .desired_width(111.0),
-        );
-        // Project scope trigger: the scoped project's icon replaces the folder.
-        let scope_button = Rect::from_min_size(Pos2::new(left + 163.0, 62.0), Vec2::splat(28.0));
         let scope_open = self.open_menu.as_deref() == Some(project_scope::MENU_ID);
-        if scope_open {
+        let scope_response = ui
+            .interact(scope_button, ui.id().with("sidebar-scope"), Sense::click())
+            .on_hover_text("Filter threads by project");
+        let lit = scope_open || scope_response.hovered();
+        if lit {
             painter.rect_filled(
                 scope_button,
                 widgets::radius(theme::CONTROL_RADIUS as f32),
                 theme::accent(),
             );
         }
-        let scoped = self.scoped_project().cloned();
-        let tooltip = match &scoped {
-            Some(project) => format!("Filter threads by project: {}", project.title),
-            None => "Filter threads by project".to_owned(),
+        let icon_rect = Rect::from_min_size(
+            Pos2::new(scope_button.left() + 8.0, SCOPE_TOP + 6.0),
+            Vec2::splat(16.0),
+        );
+        match &scoped {
+            Some(project) => project_icon::paint(ui, icon_rect, project),
+            None => theme::paint_icon(ui, "folder", icon_rect, 16.0, theme::sidebar_icon()),
+        }
+        let text_color = if lit {
+            theme::sidebar_foreground()
+        } else {
+            theme::sidebar_muted()
         };
-        let scope_response = match &scoped {
-            Some(project) => {
-                let response = ui
-                    .interact(scope_button, ui.id().with("sidebar-scope"), Sense::click())
-                    .on_hover_text(&tooltip);
-                if response.hovered() && !scope_open {
-                    painter.rect_filled(
-                        scope_button,
-                        widgets::radius(theme::CONTROL_RADIUS as f32),
-                        theme::accent(),
-                    );
-                }
-                project_icon::paint(
-                    ui,
-                    Rect::from_center_size(scope_button.center(), Vec2::splat(16.0)),
-                    project,
-                );
-                response
-            }
-            None => widgets::icon_button(
-                ui,
-                scope_button,
-                "sidebar-scope",
-                "folder",
-                16.0,
-                if scope_open {
-                    theme::foreground()
-                } else {
-                    theme::sidebar_icon()
-                },
-                &tooltip,
+        let text_left = scope_button.left() + 30.0;
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(text_left, SCOPE_TOP),
+                Pos2::new(text_left + label_width + 1.0, SCOPE_TOP + 28.0),
             ),
-        };
+            &label,
+            label_font,
+            text_color,
+        );
+        theme::paint_icon(
+            ui,
+            "chevron-down",
+            Rect::from_min_size(
+                Pos2::new(text_left + label_width + 6.0, SCOPE_TOP + 8.0),
+                Vec2::splat(12.0),
+            ),
+            12.0,
+            text_color,
+        );
         if scope_response.clicked() {
             self.toggle_project_scope_menu();
         }
-        let actions = [("folder-plus", "Add project"), ("square-pen", "New thread")];
-        for (i, (icon, label)) in actions.iter().enumerate() {
-            let button = Rect::from_min_size(
-                Pos2::new(left + 191.0 + 28.0 * i as f32, 62.0),
-                Vec2::splat(28.0),
-            );
-            if widgets::icon_button(
-                ui,
-                button,
-                ("sidebar-action", i),
-                icon,
-                16.0,
-                theme::sidebar_icon(),
-                label,
-            )
-            .clicked()
-            {
-                match *icon {
-                    "square-pen" => self.start_draft(None),
-                    _ => self.toggle_palette(crate::ui::palette::View::AddProject),
-                }
-            }
+        if widgets::icon_button(
+            ui,
+            Rect::from_min_size(Pos2::new(rect.right() - 39.0, SCOPE_TOP), Vec2::splat(28.0)),
+            "sidebar-add-project",
+            "folder-plus",
+            16.0,
+            theme::sidebar_icon(),
+            "Add project",
+        )
+        .clicked()
+        {
+            self.toggle_palette(crate::ui::palette::View::AddProject);
         }
-        // The scope popup opens under the whole search row, buttons included.
         self.project_scope_menu(
             ui,
-            Rect::from_min_size(search_rect.min, Vec2::new(246.0, 32.0)),
+            Rect::from_min_size(scope_button.min, Vec2::new(246.0, 28.0)),
         );
 
         // Thread list.
@@ -470,6 +455,87 @@ impl App {
             Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER_HEIGHT),
         );
         self.thread_list(ui, list_rect);
+    }
+
+    /// Pluto: the New and Search rows under Code | Chat, shared by both
+    /// modes (`hint` names what the search filters); returns whether New was
+    /// clicked.
+    pub(crate) fn sidebar_new_and_search(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        new_label: &str,
+        hint: &str,
+    ) -> bool {
+        let left = rect.left();
+        let width = rect.width() - 1.0 - 16.0;
+        let new_row = Rect::from_min_size(Pos2::new(left + 8.0, NEW_TOP), Vec2::new(width, 34.0));
+        let response = ui.interact(new_row, ui.id().with("sidebar-new"), Sense::click());
+        if response.hovered() {
+            ui.painter()
+                .rect_filled(new_row, widgets::radius(8.0), theme::accent());
+        }
+        theme::paint_icon(
+            ui,
+            "square-pen",
+            Rect::from_min_size(Pos2::new(left + 18.0, NEW_TOP + 9.0), Vec2::splat(16.0)),
+            16.0,
+            theme::sidebar_icon(),
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(left + 44.0, NEW_TOP), new_row.max),
+            new_label,
+            font(14.0, Weight::Medium),
+            theme::sidebar_foreground(),
+        );
+        let bindings = self.state.config["keybindings"].clone();
+        if let Some(shortcut) = crate::ui::shortcuts::effective_shortcut_label(
+            &bindings,
+            "chat.new",
+            &[("isDesktop", true)],
+        ) {
+            let small = font(11.5, Weight::Regular);
+            let shortcut_width = widgets::text_width(ui, &shortcut, small.clone());
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(
+                    Pos2::new(new_row.right() - 10.0 - shortcut_width, NEW_TOP),
+                    Pos2::new(new_row.right() - 9.0, new_row.bottom()),
+                ),
+                &shortcut,
+                small,
+                theme::sidebar_icon(),
+            );
+        }
+
+        let search_top = NEW_TOP + 34.0;
+        theme::paint_icon(
+            ui,
+            "search",
+            Rect::from_min_size(Pos2::new(left + 18.0, search_top + 9.0), Vec2::splat(16.0)),
+            16.0,
+            theme::sidebar_icon(),
+        );
+        let input_rect = Rect::from_min_size(
+            Pos2::new(left + 44.0, search_top + 6.5),
+            Vec2::new(width - 44.0, 21.0),
+        );
+        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
+        search_ui.add(
+            egui::TextEdit::singleline(&mut self.search)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .font(font(14.0, Weight::Medium))
+                .text_color(theme::sidebar_foreground())
+                .hint_text(
+                    egui::RichText::new(hint)
+                        .font(font(14.0, Weight::Medium))
+                        .color(theme::sidebar_muted()),
+                )
+                .desired_width(input_rect.width()),
+        );
+        response.clicked()
     }
 
     /// Footer shortcuts; the usage page swaps them for Back.
@@ -723,34 +789,38 @@ impl App {
             Sense::click(),
         );
         // The snoozed shelf wears the info tone.
-        let (color, line) = if snoozed {
-            (theme::BLUE_400, theme::alpha(theme::BLUE_500, 0.2))
+        let color = if snoozed {
+            theme::BLUE_400
         } else {
-            (
-                theme::alpha(theme::sidebar_muted(), 0.6),
-                theme::overlay(0.047),
-            )
+            theme::sidebar_muted()
         };
-        let x = rect.left() + 8.0;
+        // "Settled (3)": the name, then its count in the icon tone.
+        let (name, count) = label
+            .rsplit_once(" (")
+            .map_or((label, ""), |(name, count)| {
+                (name, count.trim_end_matches(')'))
+            });
+        let heading = font(11.5, Weight::Medium);
+        let x = rect.left() + 10.0;
         let width = widgets::text_in(
             ui,
             Rect::from_min_max(Pos2::new(x, rect.top()), rect.max),
-            label,
-            font(12.0, Weight::Medium),
+            name,
+            heading.clone(),
             color,
         );
-        let line_left = x + width + 8.0;
+        if !count.is_empty() {
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(x + width + 6.0, rect.top()), rect.max),
+                count,
+                heading,
+                theme::sidebar_icon(),
+            );
+        }
         let chevron = Rect::from_center_size(
             Pos2::new(rect.right() - 14.0, rect.center().y),
             Vec2::splat(12.0),
-        );
-        ui.painter().rect_filled(
-            Rect::from_min_max(
-                Pos2::new(line_left, rect.center().y.round()),
-                Pos2::new(chevron.left() - 8.0, rect.center().y.round() + 1.0),
-            ),
-            0.0,
-            line,
         );
         theme::paint_icon(
             ui,
@@ -761,7 +831,11 @@ impl App {
             },
             chevron,
             12.0,
-            color,
+            if response.hovered() {
+                theme::sidebar_foreground()
+            } else {
+                theme::sidebar_icon()
+            },
         );
         response
     }
