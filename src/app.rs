@@ -79,6 +79,11 @@ pub struct App {
     pub(crate) queue: crate::ui::queue::QueueUi,
     /// Every thread's messages searched (`orchestration.searchThreads`).
     pub(crate) thread_search: [crate::ui::thread_search::ThreadSearch; 2],
+    /// Storage cleanup's last report (`server.getStorageCleanupReport`), the
+    /// stream asked, and a manual run in flight.
+    pub(crate) storage_report: Option<serde_json::Value>,
+    pub(crate) storage_stream: bool,
+    pub(crate) storage_running: bool,
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
@@ -447,6 +452,9 @@ impl App {
             tasks_open: false,
             queue: Default::default(),
             thread_search: Default::default(),
+            storage_report: None,
+            storage_stream: false,
+            storage_running: false,
             tasks_thread: None,
             picker_provider: None,
             picker_query: String::new(),
@@ -1632,6 +1640,40 @@ impl App {
         } else if key == "sidebar-terminal-metadata" {
             if let Ok(event) = result {
                 self.terminal_metadata_event(&event);
+            }
+        } else if key == "storage-cleanup-report" {
+            if let Ok(report) = result {
+                self.storage_report = (!report.is_null()).then_some(report);
+            }
+        } else if key == "storage-cleanup-run" {
+            self.storage_running = false;
+            match result {
+                Ok(report) => {
+                    if let Some(failure) = report["entries"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|e| e["outcome"] == "failed")
+                    {
+                        self.toasts.add(
+                            crate::ui::toasts::Toast::new(
+                                crate::ui::toasts::Kind::Error,
+                                "Cleanup failed",
+                            )
+                            .description(failure["reason"].as_str().unwrap_or_default()),
+                        );
+                    }
+                    self.storage_report = Some(report);
+                }
+                Err(error) => {
+                    self.toasts.add(
+                        crate::ui::toasts::Toast::new(
+                            crate::ui::toasts::Kind::Error,
+                            "Could not run cleanup",
+                        )
+                        .description(error),
+                    );
+                }
             }
         } else if key == "discovered-servers" {
             if let Ok(list) = result {

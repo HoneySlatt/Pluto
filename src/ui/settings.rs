@@ -1939,10 +1939,196 @@ impl App {
                 ],
             },
         ]
+        .into_iter()
+        .chain(self.cleanup_sections())
+        .collect()
+    }
+
+    /// Follows the last cleanup report while the server can run one.
+    fn watch_storage_report(&mut self) {
+        if self.storage_stream || !self.connected() || !self.storage_cleanup_supported() {
+            return;
+        }
+        self.storage_stream = true;
+        self.send(crate::protocol::Action::Stream {
+            key: "storage-cleanup-report".into(),
+            method: "server.getStorageCleanupReport",
+            payload: json!({}),
+        });
+    }
+
+    fn storage_cleanup_supported(&self) -> bool {
+        self.state.config["environment"]["capabilities"]["storageCleanupRun"] == true
+    }
+
+    /// `CleanupSection`: "Delete now" with the last run's summary, then the
+    /// last run's entries (`CleanupResults`).
+    fn cleanup_sections(&self) -> Vec<Section> {
+        if !self.storage_cleanup_supported() || self.is_project_scope() {
+            return Vec::new();
+        }
+        let settings = &self.state.config["settings"];
+        let cleanup = &settings["storageCleanup"];
+        let worktree_rules = |rules: &Value| {
+            !rules["worktreeAfterDays"].is_null()
+                || !rules["worktreeSettledAfterDays"].is_null()
+                || rules["worktreeOnMerge"] == true
+                || rules["worktreeOnDelete"] == true
+                || rules["worktreeUnchanged"] == true
+        };
+        let has_rules = !cleanup["browserArtifactsAfterDays"].is_null()
+            || !cleanup["logsAfterDays"].is_null()
+            || worktree_rules(cleanup)
+            || settings["projectSettingsOverrides"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .any(|(_, o)| {
+                    o["worktreeCleanup"]["mode"] == "custom"
+                        && worktree_rules(&o["worktreeCleanup"]["rules"])
+                });
+        let report = self.storage_report.as_ref();
+        let description = if !has_rules {
+            "Turn on a cleanup rule to use this.".to_owned()
+        } else if let Some(report) = report {
+            let failed = report["counts"]["failed"].as_u64().unwrap_or(0);
+            format!(
+                "Last run {}. {} recovered.{}",
+                widgets::relative_time(report["finishedAt"].as_str().unwrap_or_default(), self.now),
+                format_bytes(report["bytesFreed"].as_f64().unwrap_or(0.0)),
+                if failed > 0 {
+                    format!(
+                        " {failed} {} couldn't be removed.",
+                        if failed == 1 { "item" } else { "items" }
+                    )
+                } else {
+                    String::new()
+                }
+            )
+        } else {
+            "Cleanup hasn't run yet.".to_owned()
+        };
+        let row = |id: String, title: String, description: String, control: Control| Row {
+            id,
+            title,
+            description,
+            status: None,
+            layers: false,
+            reset: false,
+            control,
+        };
+        let mut sections = vec![Section {
+            title: "Cleanup".into(),
+            project: None,
+            unavailable: None,
+            rows: vec![row(
+                "storage-delete-now".into(),
+                "Delete now".into(),
+                description,
+                Control::Button(if self.storage_running {
+                    "Deleting…"
+                } else {
+                    "Delete now"
+                }),
+            )],
+        }];
+        if let Some(report) = report {
+            let counts = &report["counts"];
+            let failed = counts["failed"].as_u64().unwrap_or(0);
+            let mut rows = vec![row(
+                "storage-last-run".into(),
+                "Last run".into(),
+                format!(
+                    "{} removed, {} kept{}",
+                    counts["removed"].as_u64().unwrap_or(0),
+                    counts["kept"].as_u64().unwrap_or(0),
+                    if failed > 0 {
+                        format!(", {failed} failed")
+                    } else {
+                        String::new()
+                    }
+                ),
+                Control::None,
+            )];
+            for (index, entry) in report["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                let path = entry["path"].as_str();
+                let name = match entry["kind"].as_str() {
+                    Some("worktree") => path
+                        .and_then(|p| p.rsplit(['/', '\\']).find(|s| !s.is_empty()))
+                        .unwrap_or("Worktrees")
+                        .to_owned(),
+                    Some("logs") => "Rotated logs".to_owned(),
+                    _ => "Browser artifacts".to_owned(),
+                };
+                let title = entry["threadTitle"].as_str().filter(|t| *t != name);
+                let reason = entry["reason"].as_str().unwrap_or_default();
+                let description = match title {
+                    Some(title) => format!("{title}. {reason}"),
+                    None => reason.to_owned(),
+                };
+                let size = (entry["outcome"] == "removed").then(|| {
+                    let files = entry["files"]
+                        .as_u64()
+                        .filter(|_| entry["kind"] != "worktree")
+                        .map(|n| format!("{n} {}", if n == 1 { "file" } else { "files" }));
+                    let bytes = entry["bytes"].as_f64().map(format_bytes);
+                    [files, bytes]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                });
+                rows.push(row(
+                    format!("storage-entry-{index}"),
+                    name,
+                    description,
+                    size.map_or(Control::None, Control::Text),
+                ));
+            }
+            let omitted = report["omittedCount"].as_u64().unwrap_or(0);
+            if omitted > 0 {
+                rows.push(row(
+                    "storage-omitted".into(),
+                    format!("{omitted} more results."),
+                    String::new(),
+                    Control::None,
+                ));
+            } else if rows.len() == 1 {
+                rows.push(row(
+                    "storage-nothing".into(),
+                    "Nothing needed cleanup.".into(),
+                    String::new(),
+                    Control::None,
+                ));
+            }
+            sections.push(Section {
+                title: "Last run".into(),
+                project: None,
+                unavailable: None,
+                rows,
+            });
+        }
+        sections
     }
 
     /// Writes one `storageCleanup` rule; a retention switch turns on at 8 days.
     fn apply_storage(&mut self, key: &str, action: RowAction) {
+        if key == "storage-delete-now" {
+            if matches!(action, RowAction::Click) && !self.storage_running {
+                self.storage_running = true;
+                self.send_request(
+                    "storage-cleanup-run".into(),
+                    "server.runStorageCleanup",
+                    json!({}),
+                );
+            }
+            return;
+        }
         let retention = key.ends_with("Days");
         let value = match action {
             RowAction::Toggle(on) if retention => {
@@ -2343,7 +2529,10 @@ impl App {
         }
         let sections = match page {
             ARCHIVE_PAGE => self.archive_sections(),
-            STORAGE_PAGE => self.storage_sections(),
+            STORAGE_PAGE => {
+                self.watch_storage_report();
+                self.storage_sections()
+            }
             SNAP_SHOT_PAGE => self.snap_shot_sections(),
             CONNECTIONS_PAGE => connections_sections(),
             SOURCE_CONTROL_PAGE => self.source_control_sections(),
@@ -4261,6 +4450,29 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     chunks(a).len().cmp(&chunks(b).len())
 }
 
+/// `formatBytes`: binary units, two significant decimals below 10.
+fn format_bytes(value: f64) -> String {
+    if value < 1024.0 {
+        return format!("{} B", value.round());
+    }
+    let units = ["KB", "MB", "GB", "TB"];
+    let mut next = value;
+    let mut unit = 0;
+    next /= 1024.0;
+    while next >= 1024.0 && unit < units.len() - 1 {
+        next /= 1024.0;
+        unit += 1;
+    }
+    let decimals = if next >= 100.0 {
+        0
+    } else if next >= 10.0 {
+        1
+    } else {
+        2
+    };
+    format!("{next:.decimals$} {}", units[unit])
+}
+
 #[cfg(test)]
 mod natural_tests {
     #[test]
@@ -4269,5 +4481,12 @@ mod natural_tests {
         assert_eq!(super::natural_cmp("0.12.0", "0.9.3"), Greater);
         assert_eq!(super::natural_cmp("1.2", "1.2.1"), Less);
         assert_eq!(super::natural_cmp("2.0", "2.0"), Equal);
+    }
+
+    #[test]
+    fn bytes_read_in_binary_units() {
+        assert_eq!(super::format_bytes(512.0), "512 B");
+        assert_eq!(super::format_bytes(1536.0), "1.50 KB");
+        assert_eq!(super::format_bytes(250.0 * 1024.0 * 1024.0), "250 MB");
     }
 }
