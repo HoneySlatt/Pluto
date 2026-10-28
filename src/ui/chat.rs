@@ -8,11 +8,45 @@ use crate::theme::{self, Weight, font};
 use crate::timeline::Message;
 use crate::timeline::{self, Row, WorkEntry};
 use crate::ui::markdown::Markdown;
+use crate::ui::thread_find::{self, FindPaint};
 use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
 /// The load-earlier button: 12px type with `py-1.5`.
 const HISTORY_BUTTON: f32 = 28.0;
+
+/// A searchable row's id (`data-timeline-row-id`): a message's or a plan's.
+fn row_entry(row: &Row) -> Option<&str> {
+    match row {
+        Row::User(message) | Row::Assistant { message, .. } => Some(&message.id),
+        Row::Plan(plan) => Some(&plan.id),
+        _ => None,
+    }
+}
+
+/// The row id of a find entry: plans are found by their turn item.
+fn find_row_id(detail: &crate::model::Detail, entry_id: &str) -> String {
+    detail
+        .turn_items
+        .iter()
+        .find(|item| item.id == entry_id && item.kind == "proposed_plan")
+        .and_then(|item| item.str("planId"))
+        .unwrap_or(entry_id)
+        .to_owned()
+}
+
+/// The find entry of a row (`row_id`): a plan's newest turn item.
+fn find_entry_id(detail: &crate::model::Detail, row: &Row, row_id: &str) -> String {
+    if !matches!(row, Row::Plan(_)) {
+        return row_id.to_owned();
+    }
+    detail
+        .turn_items
+        .iter()
+        .rev()
+        .find(|item| item.kind == "proposed_plan" && item.str("planId") == Some(row_id))
+        .map_or_else(|| row_id.to_owned(), |item| item.id.clone())
+}
 
 /// The history control's height (`pb-2` below, `gap-1.5` before an error
 /// line); none when there is nothing to load or report.
@@ -90,6 +124,7 @@ impl App {
                 false,
                 &mode,
             );
+            self.thread_find_bar(ui, body);
         } else if let Some(project) = draft_project.clone().filter(|p| self.is_chat_project(p)) {
             // Pluto: a chat project's page (`chat_projects`).
             self.project_page(ui, body, &project, column_left, column);
@@ -640,6 +675,48 @@ impl App {
             }
             self.keep_scroll = true;
         }
+        // Find in thread: the active match's turn opens, or the older turns
+        // holding it are paged in (`useThreadFindNavigation`).
+        let find = self.find.selection();
+        let mut find_key = None;
+        if let Some(selection) = &find {
+            let row_id = find_row_id(&detail, &selection.matched.entry_id);
+            let shown = |rows: &[Row]| rows.iter().any(|r| row_entry(r) == Some(row_id.as_str()));
+            if !shown(&rows) {
+                if let Some(fold) = timeline::fold_containing(&thread, &detail, &row_id) {
+                    self.expansion.turns.insert(fold);
+                    rows = self.timeline_view.rows(
+                        &thread,
+                        &detail,
+                        &self.expansion,
+                        revision,
+                        &images,
+                    );
+                } else if timeline::message_role(&detail, &row_id).is_none()
+                    && row_id == selection.matched.entry_id
+                    && detail.history.has_more
+                    && !detail.history.loading
+                    && detail.history.error.is_none()
+                {
+                    let cursor = detail.history.cursor.clone().unwrap_or("first".into());
+                    if self.find.page_for(selection.navigation_id, &cursor) {
+                        self.load_earlier_history_through(Some(&selection.matched.entry_id));
+                    }
+                }
+            }
+            find_key = rows
+                .iter()
+                .find(|r| row_entry(r) == Some(row_id.as_str()))
+                .map(timeline_view::row_key);
+            self.find_paint = Some(FindPaint {
+                query: selection.query.clone(),
+                row_id,
+                occurrence: selection.matched.occurrence,
+                active_rect: None,
+            });
+        } else {
+            self.find_paint = None;
+        }
         // Pluto: a chat's versions are forks, which it does not announce.
         let fork_card = |row: &Row| matches!(row, Row::Work { entry, .. } if entry.item_type.as_deref() == Some("fork"));
         if self.is_chat_thread(&thread) && rows.iter().any(fork_card) {
@@ -655,6 +732,10 @@ impl App {
         };
         let mut view = std::mem::take(&mut self.timeline_view);
         view.open(&thread.id);
+        // The open search does not follow the live end.
+        if self.find.is_open() {
+            view.follow = false;
+        }
         if !selecting {
             view.pinned.clear();
         }
@@ -709,6 +790,8 @@ impl App {
         let mut shift = 0.0;
         let mut cut_changed = false;
         let mut load_earlier = false;
+        let mut first_entry = None;
+        let mut find_row_rect = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         let output = egui::ScrollArea::vertical()
             .id_salt(("timeline", &thread.id))
@@ -735,7 +818,13 @@ impl App {
                         let revealing = matches!(
                             (row, &reveal),
                             (Row::Assistant { message, .. }, Some(id)) if &message.id == id
-                        );
+                        ) || find_key == Some(*key);
+                        if first_entry.is_none()
+                            && top + guess > viewport.top()
+                            && let Some(entry) = row_entry(row)
+                        {
+                            first_entry = Some(find_entry_id(&detail, row, entry));
+                        }
                         if !(near || select_all || revealing || view.pinned.contains(key)) {
                             ui.add_space(guess);
                             continue;
@@ -743,6 +832,12 @@ impl App {
                         let before = ui.cursor().top();
                         self.row(ui, row, column);
                         let height = ui.cursor().top() - before;
+                        if find_key == Some(*key) {
+                            find_row_rect = Some(Rect::from_min_max(
+                                Pos2::new(column_left, before),
+                                Pos2::new(column_left + column, before + height),
+                            ));
+                        }
                         view.measured(*key, height);
                         drawn.push(*key);
                         if (height - guess).abs() > 0.5 && top < viewport.top() {
@@ -780,6 +875,41 @@ impl App {
         // Show the corrected layout instead of this pass when what is on
         // screen moved: the end left the bottom edge, or a row cut by the
         // top edge changed height.
+        view.first_entry = first_entry;
+        // The active match scrolls just enough into view, above the
+        // composer, once per navigation (a few passes while rows measure).
+        if let Some(selection) = &find
+            && self.find.revealed != Some(selection.navigation_id)
+        {
+            let target = self
+                .find_paint
+                .as_ref()
+                .and_then(|p| p.active_rect)
+                .or(find_row_rect);
+            if let Some(target) = target {
+                let viewport = output.inner_rect;
+                let margin = thread_find::VIEW_MARGIN
+                    .min(((viewport.height() - bottom_padding - target.height()) / 2.0).max(0.0));
+                let top = viewport.top() + margin;
+                let bottom = viewport.bottom() - margin - bottom_padding;
+                let delta = if target.top() < top {
+                    target.top() - top
+                } else if target.bottom() > bottom {
+                    target.bottom() - bottom
+                } else {
+                    0.0
+                };
+                view.follow = false;
+                self.find_attempts += 1;
+                if delta.abs() < 1.0 || self.find_attempts > 6 {
+                    self.find.revealed = Some(selection.navigation_id);
+                    self.find_attempts = 0;
+                } else {
+                    next = (next + delta).clamp(0.0, max);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         let misaligned = view.follow && ((content - view.viewport).max(0.0) - used).abs() > 0.5;
         if misaligned || cut_changed {
             ui.ctx().request_discard("timeline row heights");
@@ -1217,10 +1347,12 @@ impl App {
             )));
             child.set_clip_rect(body.expand2(Vec2::new(2.0, 0.0)).intersect(ui.clip_rect()));
             let workspace = self.workspace_cwd();
+            let marks = self.find_marks(&message.id);
             let mut markdown = Markdown::new(
                 &mut self.highlighter,
                 ui.id().with(("user-text", &message.id)),
             );
+            markdown.find = marks;
             markdown.line_breaks = true;
             markdown.skill_chips = true;
             markdown.text_color = Some(theme::foreground());
@@ -1233,6 +1365,15 @@ impl App {
             let opened_file = markdown.opened_file.take();
             let opened_citation = markdown.opened_citation.take();
             let opened_context = markdown.opened_context.take();
+            let marks = markdown.find.take();
+            // The active match past the fold opens the message (`beforematch`).
+            if let Some(found) = self.found_mark(marks)
+                && collapsed
+                && found.bottom() > body.bottom()
+            {
+                self.expanded_user_messages.insert(message.id.clone());
+                ui.ctx().request_repaint();
+            }
             if collapsed {
                 // `mask-image: linear-gradient(black calc(100% - 1.75rem), transparent)`.
                 let fade = Rect::from_min_max(
@@ -1396,20 +1537,24 @@ impl App {
             let plugin = ui.ctx().plugin::<widgets::CopyCleanup>();
             // The message's text can be cited (`data-assistant-citation-source`).
             plugin.lock().source = Some(message.id.clone());
+            let marks = self.find_marks(&message.id);
             let mut markdown = Markdown::new(
                 &mut self.highlighter,
                 ui.id().with(("markdown", &message.id)),
             );
             markdown.highlight = highlight;
+            markdown.find = marks;
             markdown.media_root = workspace;
             markdown.media_thread = self.selected.clone();
             markdown.show(ui, text, width - 8.0);
+            let marks = markdown.find.take();
             plugin.lock().source = None;
             let opened_file = markdown.opened_file.take();
             let opened_citation = markdown.opened_citation.take();
             let asset_requests = std::mem::take(&mut markdown.asset_requests);
             let opened_media = markdown.opened_media.take();
             let media_menu = markdown.media_menu.take();
+            self.found_mark(marks);
             // Images in the answer: their signed URLs, then a click expands
             // one and a right click opens its menu.
             self.markdown_media(asset_requests, opened_media, media_menu);

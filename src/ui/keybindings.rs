@@ -1066,6 +1066,7 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
     ("mod+shift+o", "chat.new", "!terminalFocus"),
     ("mod+shift+n", "chat.newLocal", "!terminalFocus"),
     ("mod+alt+n", "chat.newWithoutProject", "!terminalFocus"),
+    ("mod+f", "chat.find", "!terminalFocus && !previewFocus"),
     ("mod+shift+m", "modelPicker.toggle", "!terminalFocus"),
     ("mod+shift+h", "composer.host", "!terminalFocus"),
     ("mod+shift+e", "composer.effort", "!terminalFocus"),

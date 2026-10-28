@@ -917,6 +917,137 @@ fn paint_quote_highlight(ui: &Ui, pos: Pos2, galley: &Galley, quote: &str, alpha
     }
 }
 
+/// `foldThreadSearchCase`: lower case where it keeps one character, final
+/// sigma as sigma.
+pub(crate) fn fold_find_case(text: &str) -> Vec<char> {
+    text.chars()
+        .map(|c| {
+            let mut lower = c.to_lowercase();
+            match (lower.next(), lower.next()) {
+                (Some('ς'), None) => 'σ',
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect()
+}
+
+/// `findThreadSearchOccurrences`: where `query` (folded) occurs in `text`,
+/// as char ranges, without overlaps.
+pub(crate) fn find_occurrences(text: &str, query: &[char]) -> Vec<std::ops::Range<usize>> {
+    let text = fold_find_case(text);
+    let mut out = Vec::new();
+    if query.is_empty() {
+        return out;
+    }
+    let mut at = 0;
+    while at + query.len() <= text.len() {
+        if text[at..at + query.len()] == *query {
+            out.push(at..at + query.len());
+            at += query.len();
+        } else {
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Find in thread's marks on one timeline entry (`threadFindHighlights.ts`):
+/// the query's occurrences in each drawn text block, counted in reading
+/// order as the server counts them; `active` is the selected one.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FindMarks {
+    query: Vec<char>,
+    active: Option<usize>,
+    /// Occurrences met so far in the entry.
+    pub(crate) seen: usize,
+    /// Where the active occurrence was drawn.
+    pub(crate) active_rect: Option<Rect>,
+}
+
+/// Rects of one galley's occurrences and whether each is the active one.
+pub(crate) type MarkRects = Vec<(Rect, bool)>;
+
+impl FindMarks {
+    pub(crate) fn new(query: &str, active: Option<usize>) -> Self {
+        Self {
+            query: fold_find_case(query.trim()),
+            active,
+            ..Default::default()
+        }
+    }
+
+    /// Counts `text`'s occurrences without drawing them (text drawn apart
+    /// from a galley, like a plan's title).
+    pub(crate) fn skip(&mut self, text: &str) {
+        self.seen += find_occurrences(text, &self.query).len();
+    }
+
+    /// Paints the backgrounds of the occurrences in `galley` at `pos`
+    /// (`::highlight(t3-thread-find)`, the active one
+    /// `t3-thread-find-active`); `recolor` then repaints their text.
+    pub(crate) fn mark(&mut self, ui: &Ui, pos: Pos2, galley: &Galley) -> MarkRects {
+        let mut marks = Vec::new();
+        for range in find_occurrences(galley.text(), &self.query) {
+            let active = self.active == Some(self.seen);
+            self.seen += 1;
+            let mut char_index = 0usize;
+            for placed in &galley.rows {
+                let mut span: Option<(f32, f32)> = None;
+                for glyph in &placed.row.glyphs {
+                    if range.contains(&char_index) {
+                        let right = glyph.pos.x + glyph.advance_width;
+                        span = Some(span.map_or((glyph.pos.x, right), |(l, _)| (l, right)));
+                    }
+                    char_index += 1;
+                }
+                if placed.ends_with_newline {
+                    char_index += 1;
+                }
+                let Some((left, right)) = span else {
+                    continue;
+                };
+                let row = placed.rect().translate(pos.to_vec2());
+                let rect = Rect::from_min_max(
+                    Pos2::new(pos.x + placed.pos.x + left, row.top()),
+                    Pos2::new(pos.x + placed.pos.x + right, row.bottom()),
+                );
+                if active {
+                    self.active_rect = Some(self.active_rect.map_or(rect, |r| r.union(rect)));
+                }
+                ui.painter().rect_filled(rect, 0.0, find_colors(active).0);
+                marks.push((rect, active));
+            }
+        }
+        marks
+    }
+
+    /// Repaints the marked text in the highlight's text color.
+    pub(crate) fn recolor(ui: &Ui, pos: Pos2, galley: &Arc<Galley>, marks: &MarkRects) {
+        for (rect, active) in marks {
+            ui.painter()
+                .with_clip_rect(rect.intersect(ui.clip_rect()))
+                .galley_with_override_text_color(pos, galley.clone(), find_colors(*active).1);
+        }
+    }
+}
+
+/// The find highlight's background and text (`index.css`'s
+/// `::highlight(t3-thread-find…)`).
+fn find_colors(active: bool) -> (Color32, Color32) {
+    let dark_text = Color32::from_rgb(33, 24, 10); // oklch(0.216164 0.028283 77.423)
+    if active {
+        (Color32::from_rgb(238, 165, 43), dark_text) // oklch(0.774202 0.151946 74.331)
+    } else if theme::palette().dark {
+        (
+            Color32::from_rgb(140, 108, 31),
+            Color32::from_rgb(245, 245, 245),
+        ) // oklch(0.55 0.1 85)
+    } else {
+        (Color32::from_rgb(255, 222, 139), dark_text) // oklch(0.915 0.11 85)
+    }
+}
+
 /// Paints inline text, chip backgrounds and icons, and handles link clicks;
 /// returns a file or citation chip that was clicked.
 fn paint_inlines(
@@ -925,6 +1056,7 @@ fn paint_inlines(
     inlines: &Inlines,
     id: egui::Id,
     highlight: Option<&(String, f32)>,
+    find: Option<&mut FindMarks>,
     copy: Option<(md_copy::Kind, Vec<md_copy::Prefix>)>,
 ) -> Option<ChipRef> {
     if let Some((kind, prefixes)) = copy {
@@ -934,6 +1066,7 @@ fn paint_inlines(
     if let Some((quote, alpha)) = highlight {
         paint_quote_highlight(ui, pos, &inlines.galley, quote, *alpha);
     }
+    let marks = find.map(|find| find.mark(ui, pos, &inlines.galley));
     let sections = char_sections(&inlines.galley);
     let chip_size = inlines.size * 0.86;
     let [chip_border, chip_fill, _] =
@@ -1089,6 +1222,9 @@ fn paint_inlines(
     }
     let response =
         widgets::selectable_galley(ui, id, pos, inlines.galley.clone(), theme::foreground());
+    if let Some(marks) = &marks {
+        FindMarks::recolor(ui, pos, &inlines.galley, marks);
+    }
     // A right click on a link offers Copy Link in the text menu.
     if response.secondary_clicked()
         && let Some(at) = response.interact_pointer_pos()
@@ -1232,6 +1368,8 @@ pub struct Markdown<'a> {
     pub(crate) opened_citation: Option<Citation>,
     /// A cited quote to mark and its strength.
     pub(crate) highlight: Option<(String, f32)>,
+    /// Find in thread's marks on this entry.
+    pub(crate) find: Option<FindMarks>,
     /// The lists and quotes around the block being drawn (copies).
     prefixes: Vec<md_copy::Prefix>,
     /// Parent-folder suffixes of file chips sharing a basename.
@@ -1272,6 +1410,7 @@ impl<'a> Markdown<'a> {
             opened_file: None,
             opened_citation: None,
             highlight: None,
+            find: None,
             prefixes: Vec::new(),
             suffixes: HashMap::new(),
             quoted: false,
@@ -1379,6 +1518,7 @@ impl<'a> Markdown<'a> {
                     &laid,
                     id,
                     self.highlight.as_ref(),
+                    self.find.as_mut(),
                     Some((md_copy::Kind::Paragraph, self.prefixes.clone())),
                 ) {
                     self.open_chip(chip);
@@ -1415,6 +1555,7 @@ impl<'a> Markdown<'a> {
                     &laid,
                     id,
                     self.highlight.as_ref(),
+                    self.find.as_mut(),
                     Some((md_copy::Kind::Heading(*level), self.prefixes.clone())),
                 ) {
                     self.open_chip(chip);
@@ -1765,7 +1906,17 @@ impl<'a> Markdown<'a> {
             || code.to_owned(),
         );
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);
-        widgets::selectable_galley(ui, id.with("code"), pos, galley, theme::foreground());
+        let marks = self.find.as_mut().map(|find| find.mark(ui, pos, &galley));
+        widgets::selectable_galley(
+            ui,
+            id.with("code"),
+            pos,
+            galley.clone(),
+            theme::foreground(),
+        );
+        if let Some(marks) = &marks {
+            FindMarks::recolor(ui, pos, &galley, marks);
+        }
         ui.ctx()
             .plugin::<widgets::CopyCleanup>()
             .lock()
@@ -1799,6 +1950,7 @@ impl<'a> Markdown<'a> {
         let cell_line = 19.5; // 12px × 1.625
         let suffixes = self.suffixes.clone();
         let highlight = self.highlight.clone();
+        let mut find = self.find.take();
         let mut opened = None;
         let measure = |ui: &Ui, inlines: &[Inline], weight| {
             layout_inlines(
@@ -1884,6 +2036,7 @@ impl<'a> Markdown<'a> {
                     cell,
                     id.with(("cell", header, i, rect.top() as i32)),
                     highlight.as_ref(),
+                    find.as_mut(),
                     Some((
                         md_copy::Kind::Cell {
                             table: id,
@@ -1912,6 +2065,7 @@ impl<'a> Markdown<'a> {
         for row in rows {
             paint_row(ui, row, false);
         }
+        self.find = find;
         if let Some(chip) = opened {
             self.open_chip(chip);
         }

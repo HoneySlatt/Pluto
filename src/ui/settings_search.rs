@@ -1320,6 +1320,7 @@ const KEYBINDINGS: &[(&str, &[&str])] = &[
     ("chat.new", &["mod+n", "mod+shift+o"]),
     ("chat.newLocal", &["mod+shift+n"]),
     ("chat.newWithoutProject", &["mod+alt+n"]),
+    ("chat.find", &["mod+f"]),
     ("editor.openFavorite", &["mod+o"]),
     ("usage.cost", &["c"]),
     ("usage.tokens", &["t"]),

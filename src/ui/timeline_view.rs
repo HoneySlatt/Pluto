@@ -37,6 +37,8 @@ pub(crate) struct TimelineView {
     /// rows loaded above move the offset with them.
     pub first: Option<Id>,
     pub header: f32,
+    /// The first message or plan in view (find's reading position).
+    pub first_entry: Option<String>,
 }
 
 struct RowsCache {
@@ -76,6 +78,10 @@ impl TimelineView {
             rows: rows.clone(),
         });
         rows
+    }
+
+    pub fn first_visible_entry(&self) -> Option<String> {
+        self.first_entry.clone()
     }
 
     /// Starts over on another thread: it opens at its end.

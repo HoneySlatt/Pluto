@@ -196,11 +196,22 @@ impl App {
             20.0,
             (actions.left() - 12.0 - title_left).max(1.0),
         );
-        ui.painter().galley(
-            Pos2::new(title_left, header_top + 2.0),
-            galley,
-            theme::foreground(),
-        );
+        // The title is the plan's first searchable text (`searchablePlanSegments`).
+        let mut marks = self.find_marks(&plan.id);
+        let title_pos = Pos2::new(title_left, header_top + 2.0);
+        let title_marks = marks.as_mut().map(|marks| {
+            if galley.text() == title {
+                marks.mark(ui, title_pos, &galley)
+            } else {
+                marks.skip(&title);
+                Vec::new()
+            }
+        });
+        ui.painter()
+            .galley(title_pos, galley.clone(), theme::foreground());
+        if let Some(title_marks) = &title_marks {
+            crate::ui::markdown::FindMarks::recolor(ui, title_pos, &galley, title_marks);
+        }
         let response = ui.interact(
             actions,
             ui.id().with(("plan-actions", &plan.id)),
@@ -262,14 +273,27 @@ impl App {
                 .intersect(ui.clip_rect()),
         );
         let workspace = self.workspace_cwd();
+        let active = self
+            .find_paint
+            .as_ref()
+            .is_some_and(|paint| paint.row_id == plan.id);
         let mut markdown = Markdown::new(&mut self.highlighter, ui.id().with(("plan", &plan.id)));
         markdown.media_root = workspace;
         markdown.media_thread = self.selected.clone();
+        markdown.find = marks;
         let text_height = markdown.show(&mut child, &text, inner_width);
+        let marks = markdown.find.take();
         let opened_file = markdown.opened_file.take();
         let asset_requests = std::mem::take(&mut markdown.asset_requests);
         let opened_media = markdown.opened_media.take();
         let media_menu = markdown.media_menu.take();
+        // The active match outside the preview opens the plan (`beforematch`).
+        let found = self.found_mark(marks);
+        if active && collapsed && found.is_none_or(|rect| rect.bottom() > text_top + visible_height)
+        {
+            self.plans.expanded.insert(plan.id.clone());
+            ui.ctx().request_repaint();
+        }
         self.markdown_media(asset_requests, opened_media, media_menu);
         if let Some(file) = opened_file {
             self.open_markdown_file(&file.path);

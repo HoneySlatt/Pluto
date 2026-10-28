@@ -191,6 +191,10 @@ impl App {
             // With several projects the new-thread shortcut asks where.
             "chat.new" if self.state.projects.len() > 1 => self.toggle_palette(View::NewThreadIn),
             "chat.new" | "chat.newLocal" => self.start_draft(None),
+            // Drafts and servers without thread search leave Mod+F alone.
+            "chat.find" if thread.is_some() && self.state.config["threadFind"] == true => {
+                self.open_thread_find()
+            }
             "sidebar.toggle" => self.toggle_sidebar(),
             "editor.openFavorite" => return self.open_in_favorite(),
             "chat.newWithoutProject" if self.scratch_root().is_some() => {

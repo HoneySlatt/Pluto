@@ -282,3 +282,85 @@ fn a_bounded_thread_offers_its_earlier_turns() {
     );
     assert!(shown.iter().any(|t| t == "Load earlier turns"));
 }
+
+#[test]
+fn find_in_thread_marks_and_counts_the_server_matches() {
+    let mut harness = harness();
+    let config = json!({"type": "snapshot", "config": {"providers": [], "settings": {},
+        "threadFind": true, "threadFindProgressive": true,
+        "keybindings": [{"command": "chat.find", "shortcut": {"key": "f", "modKey": true},
+            "whenAst": {"type": "not", "node": {"type": "identifier", "name": "terminalFocus"}}}]}});
+    harness
+        .state_mut()
+        .load_offline(
+            &config,
+            &json!({"kind": "snapshot", "snapshot": {
+        "snapshotSequence": 1,
+        "projects": [{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}],
+        "threads": [thread("a", "Newest thread", 5)]}}),
+        )
+        .unwrap();
+    click(&mut harness, egui::pos2(60.0, 140.0));
+    let item = |id: &str, kind: &str, ordinal: u64, extra: Value| {
+        let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": ordinal,
+            "status": "completed", "startedAt": at(10), "updatedAt": at(10), "type": kind});
+        for (key, value) in extra.as_object().unwrap() {
+            item[key] = value.clone();
+        }
+        json!({"position": 0, "visibility": "local", "sourceThreadId": "a",
+            "sourceItemId": id, "item": item})
+    };
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "runs": [{"id": "t", "threadId": "a", "ordinal": 1, "providerInstanceId": "codex",
+            "modelSelection": {"instanceId": "codex", "model": "gpt"}, "userMessageId": "u",
+            "status": "completed", "requestedAt": at(10)}],
+        "visibleTurnItems": [
+            item("u", "user_message", 1, json!({"messageId": "u", "text": "Write a plan",
+                "inputIntent": "turn_start", "attachments": []})),
+            item("m", "assistant_message", 2, json!({"messageId": "m",
+                "text": "Here is the plan.", "streaming": false})),
+        ],
+        "updatedAt": at(5)}});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(3);
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        command: true,
+        ..egui::Modifiers::NONE
+    };
+    harness.key_press_modifiers(ctrl, egui::Key::F);
+    harness.run_steps(2);
+    harness.event(egui::Event::Text("plan".into()));
+    // Past the 100ms debounce, the search goes out.
+    harness.run_steps(12);
+    harness.state_mut().load_offline_reply(
+        "thread-find:1",
+        json!({"snapshotSequence": 2, "totalMatches": 2, "activeIndex": 1,
+            "match": {"entryId": "m", "runId": "t", "occurrence": 0},
+            "navigation": [{"entryId": "u", "runId": "t", "startIndex": 0, "count": 1},
+                {"entryId": "m", "runId": "t", "startIndex": 1, "count": 1}]}),
+    );
+    harness.run_steps(3);
+    let output = harness.output();
+    let texts: Vec<String> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.iter().any(|t| t == "2/2"), "{texts:?}");
+    let fills: Vec<egui::Color32> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) => Some(rect.fill),
+            _ => None,
+        })
+        .collect();
+    // The active occurrence and the other one.
+    assert!(fills.contains(&egui::Color32::from_rgb(238, 165, 43)));
+    assert!(fills.contains(&egui::Color32::from_rgb(140, 108, 31)));
+}

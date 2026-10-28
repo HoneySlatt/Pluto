@@ -21,10 +21,12 @@ pub enum Route {
     /// A one-shot request, identified by a caller-chosen key.
     Rpc(String),
     Vcs(String),
-    /// An older page of a thread's timeline, by the cursor that asked for it.
+    /// An older page of a thread's timeline, by the cursor that asked for
+    /// it; a jump's conversation page comes first, not `complete`.
     History {
         thread_id: String,
         cursor: String,
+        complete: bool,
     },
 }
 
@@ -155,32 +157,48 @@ impl Connection {
     }
 
     /// Fetches the timeline page before `cursor` (`threadHistoryHttp.ts`);
-    /// it arrives as `Route::History`.
-    pub fn load_history(&self, thread_id: &str, cursor: &str) {
+    /// it arrives as `Route::History`. A jump to `through` (an entry before
+    /// the page) first loads the conversation rows up to it, then the
+    /// complete page (`loadEarlier`'s two views).
+    pub fn load_history(&self, thread_id: &str, cursor: &str, through: Option<&str>) {
         let (api, outbox, ctx) = (self.api.clone(), self.outbox.clone(), self.ctx.clone());
-        let route = Route::History {
-            thread_id: thread_id.to_owned(),
-            cursor: cursor.to_owned(),
+        let (thread_id, cursor) = (thread_id.to_owned(), cursor.to_owned());
+        let through = through.map(str::to_owned);
+        let failed = Route::History {
+            thread_id: thread_id.clone(),
+            cursor: cursor.clone(),
+            complete: true,
         };
         let spawned = std::thread::Builder::new()
             .name("t3-history".into())
             .spawn(move || {
-                let Route::History { thread_id, cursor } = &route else {
-                    return;
+                let route = |complete| Route::History {
+                    thread_id: thread_id.clone(),
+                    cursor: cursor.clone(),
+                    complete,
                 };
-                let event = match api.history_page(thread_id, cursor) {
-                    Ok(page) => Event::Data(route, page),
-                    Err(error) => Event::Failed(route, error),
+                let views: &[Option<&str>] = if through.is_some() {
+                    &[Some("conversation"), None]
+                } else {
+                    &[None]
                 };
-                let _ = outbox.send(event);
-                ctx.request_repaint();
+                for view in views {
+                    let page = api.history_page(&thread_id, &cursor, through.as_deref(), *view);
+                    let failed = page.is_err();
+                    let event = match page {
+                        Ok(page) => Event::Data(route(view.is_none()), page),
+                        Err(error) => Event::Failed(route(true), error),
+                    };
+                    let _ = outbox.send(event);
+                    ctx.request_repaint();
+                    if failed {
+                        return;
+                    }
+                }
             });
         if spawned.is_err() {
             let _ = self.outbox.send(Event::Failed(
-                Route::History {
-                    thread_id: thread_id.to_owned(),
-                    cursor: cursor.to_owned(),
-                },
+                failed,
                 "Could not load earlier activity.".into(),
             ));
         }
@@ -188,14 +206,30 @@ impl Connection {
 }
 
 impl Api {
-    /// `GET /api/orchestration/threads/:threadId/history?cursor=`.
-    fn history_page(&self, thread_id: &str, cursor: &str) -> Result<Value, String> {
+    /// `GET /api/orchestration/threads/:threadId/history?cursor=`, with the
+    /// optional `throughEntryId` and `view`.
+    fn history_page(
+        &self,
+        thread_id: &str,
+        cursor: &str,
+        through: Option<&str>,
+        view: Option<&str>,
+    ) -> Result<Value, String> {
         let mut url = self.origin.clone();
         url.path_segments_mut()
             .map_err(|_| "Invalid server address")?
             .clear()
             .extend(["api", "orchestration", "threads", thread_id, "history"]);
-        url.query_pairs_mut().append_pair("cursor", cursor);
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("cursor", cursor);
+            if let Some(view) = view {
+                query.append_pair("view", view);
+            }
+            if let Some(through) = through {
+                query.append_pair("throughEntryId", through);
+            }
+        }
         // Sized up front: a reallocation would leave a copy of the token.
         let mut headers = Zeroizing::new(String::with_capacity(self.token.len() + 64));
         if !self.token.trim().is_empty() {
@@ -705,12 +739,14 @@ mod tests {
             origin,
             token: Zeroizing::new("secret".into()),
         };
-        let page = api.history_page("thread:a%3Ab", "abc=").unwrap();
+        let page = api
+            .history_page("thread:a%3Ab", "abc=", Some("m1"), Some("conversation"))
+            .unwrap();
         assert_eq!(page["snapshotSequence"], 4);
         let request = server.join().unwrap();
         assert!(
             request.starts_with(
-                "GET /api/orchestration/threads/thread:a%253Ab/history?cursor=abc%3D HTTP/1.1\r\n"
+                "GET /api/orchestration/threads/thread:a%253Ab/history?cursor=abc%3D&view=conversation&throughEntryId=m1 HTTP/1.1\r\n"
             ),
             "{request}"
         );

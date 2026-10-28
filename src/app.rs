@@ -156,6 +156,11 @@ pub struct App {
     pub(crate) pending_copy: bool,
     /// Citing assistant text (`cite`).
     pub(crate) cite: crate::ui::cite::CiteState,
+    /// Find in thread, this frame's marks, and the passes spent bringing
+    /// the active match into view.
+    pub(crate) find: crate::ui::thread_find::ThreadFind,
+    pub(crate) find_paint: Option<crate::ui::thread_find::FindPaint>,
+    pub(crate) find_attempts: u32,
     /// The Browser surface's preview browser (`ui::preview`).
     pub(crate) preview: crate::ui::preview::PreviewUi,
     pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
@@ -471,6 +476,9 @@ impl App {
             text_menu: None,
             pending_copy: false,
             cite: Default::default(),
+            find: Default::default(),
+            find_paint: None,
+            find_attempts: 0,
             preview: Default::default(),
             html_renders: Default::default(),
             design: Default::default(),
@@ -629,13 +637,25 @@ impl App {
                         self.turn_command_done(&id, true);
                     }
                     Route::Rpc(key) => self.rpc_result(key, Ok(value)),
-                    Route::History { thread_id, cursor } => {
-                        if let Err(error) = self.state.history_page(&thread_id, &cursor, &value) {
+                    Route::History {
+                        thread_id,
+                        cursor,
+                        complete,
+                    } => {
+                        if let Err(error) = self
+                            .state
+                            .history_page(&thread_id, &cursor, &value, complete)
+                        {
                             self.state.history_failed(&thread_id, &cursor, error);
                         }
                     }
                 },
-                Event::Failed(Route::History { thread_id, cursor }, message) => {
+                Event::Failed(
+                    Route::History {
+                        thread_id, cursor, ..
+                    },
+                    message,
+                ) => {
                     self.state.history_failed(&thread_id, &cursor, message);
                 }
                 Event::Failed(Route::Vcs(_), _) => self.vcs = None,
@@ -906,6 +926,12 @@ impl App {
 
     /// Loads the open thread's turns before its loaded window.
     pub(crate) fn load_earlier_history(&mut self) {
+        self.load_earlier_history_through(None);
+    }
+
+    /// Loads older turns, through `entry` (a message or plan) when it is
+    /// further back than one page.
+    pub(crate) fn load_earlier_history_through(&mut self, entry: Option<&str>) {
         let Some(id) = self.selected.clone() else {
             return;
         };
@@ -913,7 +939,7 @@ impl App {
             return;
         };
         match &self.connection {
-            Some(connection) => connection.load_history(&id, &cursor),
+            Some(connection) => connection.load_history(&id, &cursor, entry),
             None => self
                 .state
                 .history_failed(&id, &cursor, "Environment is not connected.".into()),
@@ -1043,6 +1069,7 @@ impl eframe::App for App {
         }
         self.now = chrono::Utc::now();
         self.poll_events();
+        self.poll_thread_find(ui.ctx());
         self.thread_notifications(ui.ctx());
         self.egui_ctx = Some(ui.ctx().clone());
         self.apply_typography(ui.ctx());
@@ -1370,6 +1397,11 @@ impl App {
         Ok(())
     }
 
+    /// Answers an RPC request without a server (`key` as the client asked).
+    pub fn load_offline_reply(&mut self, key: &str, value: Value) {
+        self.rpc_result(key.to_owned(), Ok(value));
+    }
+
     /// Applies a thread stream item for the selected thread without a server.
     pub fn load_offline_thread(&mut self, item: &Value) -> Result<(), String> {
         let selected = self.selected.clone().unwrap_or_default();
@@ -1456,7 +1488,8 @@ impl App {
     }
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
-        if self.turn_send_result(&key, &result)
+        if self.thread_find_result(&key, &result)
+            || self.turn_send_result(&key, &result)
             || self.scratch_result(&key, &result)
             || self.open_in_result(&key, &result)
             || self.git_result(&key, &result)

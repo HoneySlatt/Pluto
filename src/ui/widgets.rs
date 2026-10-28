@@ -738,10 +738,10 @@ impl<'a> MenuItem<'a> {
     }
 }
 
-fn menu_surface() -> Color32 {
+pub(crate) fn menu_surface() -> Color32 {
     theme::popover()
 }
-fn menu_outline() -> Color32 {
+pub(crate) fn menu_outline() -> Color32 {
     theme::stock_or(Color32::from_rgba_premultiplied(25, 25, 25, 26), |_| {
         theme::overlay(0.1)
     })

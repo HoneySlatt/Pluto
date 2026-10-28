@@ -1386,12 +1386,14 @@ impl State {
     }
 
     /// Merges an `OrchestrationV2ThreadHistoryPage`, unless a newer snapshot
-    /// replaced the cursor that requested it.
+    /// replaced the cursor that requested it. Only a `complete` page
+    /// advances the cursor and ends the load.
     pub fn history_page(
         &mut self,
         thread_id: &str,
         cursor: &str,
         page: &Value,
+        complete: bool,
     ) -> Result<(), String> {
         let Some(detail) = self
             .detail
@@ -1403,6 +1405,10 @@ impl State {
         let rows: Vec<VisibleItem> = decode(&page["items"])?;
         let detail = Arc::make_mut(detail);
         detail.merge_older(rows.into_iter().filter(|row| row.item.is_known()).collect());
+        if !complete {
+            self.revision += 1;
+            return Ok(());
+        }
         detail.history.cursor = page["nextCursor"].as_str().map(str::to_owned);
         detail.history.has_more = page["hasMoreHistory"].as_bool().unwrap_or(false);
         detail.history.loading = false;
@@ -1595,9 +1601,9 @@ mod tests {
             row(item("c", "assistant_message", 3, Some("r2"), json!({"messageId":"m","text":"stale"}))),
         ]});
         // A page for a replaced cursor changes nothing.
-        state.history_page("t", "cursor-0", &page).unwrap();
+        state.history_page("t", "cursor-0", &page, true).unwrap();
         assert_eq!(visible(&state), ["c"]);
-        state.history_page("t", "cursor-1", &page).unwrap();
+        state.history_page("t", "cursor-1", &page, true).unwrap();
         assert_eq!(visible(&state), ["a", "b", "c"]);
         let detail = state.detail.as_ref().unwrap();
         // The live row wins over the page's copy.
