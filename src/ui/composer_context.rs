@@ -530,6 +530,7 @@ pub(crate) fn kind_icon(kind: &str) -> &'static str {
         "review-comment" => "message-square",
         // Pluto: a chat's deep research request (`chat_research`).
         "research" => "file-search",
+        "image-request" => "image",
         _ => "paperclip",
     }
 }

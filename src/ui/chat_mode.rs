@@ -94,6 +94,10 @@ pub(crate) struct ChatMode {
     search: ChatSearch,
     /// The next message is a research request (`chat_research`).
     pub(crate) research: bool,
+    /// The next message asks for an image (`chat_image`).
+    pub(crate) image: bool,
+    /// Threads an image moved to Codex: the model to come back to.
+    pub(crate) image_return: std::collections::HashMap<String, Value>,
 }
 
 /// The sidebar's message search.

@@ -47,7 +47,14 @@ impl App {
     }
 
     /// The chat composer's Research toggle at `x`.
-    pub(crate) fn research_toggle(&mut self, ui: &mut Ui, x: f32, top: f32, icon_only: bool) {
+    /// Returns its right edge.
+    pub(crate) fn research_toggle(
+        &mut self,
+        ui: &mut Ui,
+        x: f32,
+        top: f32,
+        icon_only: bool,
+    ) -> f32 {
         let on = self.chat_mode.research;
         let label_font = font(14.0, Weight::Medium);
         let width = if icon_only {
@@ -102,7 +109,12 @@ impl App {
         }
         if response.clicked() {
             self.chat_mode.research = !on;
+            // One tool per message.
+            if self.chat_mode.research {
+                self.chat_mode.image = false;
+            }
         }
+        rect.right()
     }
 }
 

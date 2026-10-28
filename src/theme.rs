@@ -1033,6 +1033,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "message-square",
         "message-square-dashed",
         "file-search",
+        "image",
         "text-search",
         "folder-git-2",
         "palette",

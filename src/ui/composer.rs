@@ -428,6 +428,7 @@ impl App {
                 "Type your own answer, or leave this blank to use the selected option"
             }
             // Pluto: a chat asks like the chat sites do.
+            Mode::Normal if self.image_on(draft) => "Describe the image to make",
             Mode::Normal if self.research_on(draft) => "What should I research?",
             Mode::Normal if self.chat_context(draft) => "Ask anything",
             Mode::Normal => "Ask for changes, send follow-ups, or attach images",
@@ -613,8 +614,12 @@ impl App {
                 7.0 + labelled(true, runtime_text) + toggle(false),
                 7.0 + ICON_PICKER + toggle(true),
             ));
-        } else if research {
-            let label = widgets::text_width(ui, "Research", label_font.clone());
+        } else {
+            if research {
+                let label = widgets::text_width(ui, "Research", label_font.clone());
+                blocks.push((7.0 + toggle_width(label), 7.0 + ICON_TOGGLE));
+            }
+            let label = widgets::text_width(ui, "Image", label_font.clone());
             blocks.push((7.0 + toggle_width(label), 7.0 + ICON_TOGGLE));
         }
         let fit = fit_controls(
@@ -683,14 +688,18 @@ impl App {
             }
             self.runtime_menu(ui, runtime_rect, draft);
         }
-        if research {
+        if chat {
+            let mut x = x;
+            // The Image toggle is the last block; Research comes before it.
+            let mut index = mode_index - usize::from(research);
+            if research {
+                self.separator(ui, x, bar_top);
+                x = self.research_toggle(ui, x + 7.0, bar_top, icon_only(index) || fit.mode_hidden)
+                    + 6.0;
+                index += 1;
+            }
             self.separator(ui, x, bar_top);
-            self.research_toggle(
-                ui,
-                x + 7.0,
-                bar_top,
-                icon_only(mode_index) || fit.mode_hidden,
-            );
+            self.image_toggle(ui, x + 7.0, bar_top, icon_only(index) || fit.mode_hidden);
         }
         self.model_picker(ui, model_rect, draft);
         if let Some(rect) = traits_rect {
@@ -1557,12 +1566,34 @@ impl App {
             &self.composer_images,
             &self.composer_files,
         );
-        let model = self.composer_model_json(draft);
+        // Pluto: after an image, a chat comes back to its own model.
+        let mut chosen = self.composer_model_json(draft);
+        if !draft
+            && let Some(thread) = self.current_thread()
+            && let Some(back) = self.model_after_image(&thread.id, draft)
+        {
+            chosen = back;
+        }
+        // Pluto: an image request goes to Codex (`chat_image`).
+        let image = self.image_on(draft);
+        let model = if image {
+            match self.image_model() {
+                Some(model) => model,
+                None => {
+                    self.status = Some("Image generation needs Codex (a ChatGPT login)".into());
+                    return;
+                }
+            }
+        } else {
+            chosen.clone()
+        };
         let interaction = self.composer_interaction_mode(draft);
         let uploads = crate::ui::attachments::upload_payload(&self.composer_images);
         let inline = self.inline_message_context();
-        // Pluto: a chat's Research toggle leads the message with its chip.
-        let (text, contexts) = if self.research_on(draft) {
+        // Pluto: a chat's Research or Image toggle leads the message with its chip.
+        let (text, contexts) = if image {
+            crate::ui::chat_image::image_message(&text, &self.composer_contexts)
+        } else if self.research_on(draft) {
             crate::ui::chat_research::research_message(&text, &self.composer_contexts)
         } else {
             (text, self.composer_contexts.clone())
@@ -1573,12 +1604,13 @@ impl App {
             };
             // Pluto: the chat space keeps the last chat model as its default,
             // so Chat mode has its own default model.
-            if self.is_chats(&project) && project.default_model_selection.as_ref() != Some(&model) {
+            if self.is_chats(&project) && project.default_model_selection.as_ref() != Some(&chosen)
+            {
                 self.dispatch(json!({
                     "type": "project.update",
                     "commandId": uuid::Uuid::new_v4().to_string(),
                     "projectId": project.id,
-                    "defaultModelSelection": model,
+                    "defaultModelSelection": chosen,
                 }));
             }
             let thread_id = uuid::Uuid::new_v4().to_string();
@@ -1622,12 +1654,18 @@ impl App {
         let mut send = send;
         send.set_attachments(json!(files));
         let thread_id = send.thread_id.clone();
+        if image && model != chosen {
+            self.chat_mode
+                .image_return
+                .insert(thread_id.clone(), chosen);
+        }
         self.start_turn(send);
         self.composer.clear();
         self.composer_images.clear();
         self.composer_files.clear();
         self.composer_contexts.clear();
         self.chat_mode.research = false;
+        self.chat_mode.image = false;
         if draft {
             self.select_thread(Some(thread_id));
         }
