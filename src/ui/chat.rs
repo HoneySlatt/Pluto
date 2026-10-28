@@ -1131,6 +1131,10 @@ impl App {
                 self.html_render_row(ui, &page.render, width);
                 ui.add_space(8.0);
             }
+            Row::McpApp(app) => {
+                self.mcp_app_row(ui, app, width);
+                ui.add_space(8.0);
+            }
         }
     }
 

@@ -144,6 +144,19 @@ enum Request {
         tab: u64,
         html: String,
     },
+    /// A render tab whose document at `url` is `html`, served by the
+    /// browser itself (`Fetch.fulfillRequest`), so the page takes `url`'s
+    /// origin: an MCP app's host page.
+    OpenApp {
+        tab: u64,
+        url: String,
+        html: String,
+    },
+    /// Runs a script in the page (an MCP app host's message to its app).
+    Evaluate {
+        tab: u64,
+        expression: String,
+    },
     /// The element at a point, for the Design surface's comments.
     Inspect {
         tab: u64,
@@ -185,6 +198,9 @@ pub struct TabState {
     pub inspected: Option<Value>,
     /// Elements clicked while commenting, for the client to take.
     pub picked: Vec<Value>,
+    /// Messages an MCP app posted to its host (`APP_BINDING`), for the
+    /// client to take.
+    pub app_messages: Vec<Value>,
 }
 
 /// The running preview browser.
@@ -259,6 +275,25 @@ impl Preview {
             .and_then(|mut tabs| {
                 tabs.get_mut(&tab)
                     .map(|state| std::mem::take(&mut state.picked))
+            })
+            .unwrap_or_default()
+    }
+    /// A render tab showing `html` as the document at `url`.
+    pub fn open_app(&self, tab: u64, url: String, html: String) {
+        self.send(Request::OpenApp { tab, url, html });
+    }
+    /// Runs `expression` in the tab's page.
+    pub fn evaluate(&self, tab: u64, expression: String) {
+        self.send(Request::Evaluate { tab, expression });
+    }
+    /// The messages an MCP app posted since the last call.
+    pub fn take_app_messages(&self, tab: u64) -> Vec<Value> {
+        self.tabs
+            .lock()
+            .ok()
+            .and_then(|mut tabs| {
+                tabs.get_mut(&tab)
+                    .map(|state| std::mem::take(&mut state.app_messages))
             })
             .unwrap_or_default()
     }
@@ -344,6 +379,10 @@ const ELEMENT_SCRIPT: &str = r#"(function(x,y){var el=document.elementFromPoint(
 
 /// The binding a render tab's page reports its content height through.
 const HEIGHT_BINDING: &str = "__plutoContentHeight";
+
+/// The binding an MCP app's host page relays the app's messages through
+/// (`crate::ui::mcp_apps`).
+pub const APP_BINDING: &str = "__plutoMcpApp";
 
 /// Reports the content height as the server measures it and as the
 /// render bootstrap reports it to a framed client (`size-changed`): the
@@ -537,6 +576,8 @@ fn run(
     let mut pages: HashMap<u64, Page> = HashMap::new();
     // Windows a render tab's page opened, by target, with the tab.
     let mut popups: HashMap<String, u64> = HashMap::new();
+    // MCP app host pages: their URL and document, by tab.
+    let mut app_pages: HashMap<u64, (String, String)> = HashMap::new();
     let update = |tab: u64, f: &mut dyn FnMut(&mut TabState)| {
         if let Ok(mut tabs) = tabs.lock() {
             f(tabs.entry(tab).or_default());
@@ -554,6 +595,20 @@ fn run(
                     pages.get(&tab).map(|p| p.session.clone())
                 };
                 match command {
+                    Request::OpenApp { tab, url, html } => {
+                        app_pages.insert(tab, (url.clone(), html));
+                        update(tab, &mut |state| state.loading = true);
+                        devtools.send(
+                            None,
+                            "Target.createTarget",
+                            json!({"url": "about:blank"}),
+                            Pending::Created {
+                                tab,
+                                url: Some(url),
+                                render: true,
+                            },
+                        )?;
+                    }
                     Request::Open { tab, url, render } => {
                         update(tab, &mut |state| state.loading = url.is_some());
                         devtools.send(
@@ -727,6 +782,16 @@ fn run(
                             )?;
                         }
                     }
+                    Request::Evaluate { tab, expression } => {
+                        if let Some(session) = session_of(&pages, tab) {
+                            devtools.send(
+                                Some(&session),
+                                "Runtime.evaluate",
+                                json!({"expression": expression}),
+                                Pending::Ignore,
+                            )?;
+                        }
+                    }
                     Request::Inspect { tab, x, y, pick } => {
                         if let Some(session) = session_of(&pages, tab) {
                             devtools.send(
@@ -738,6 +803,7 @@ fn run(
                         }
                     }
                     Request::Close { tab } => {
+                        app_pages.remove(&tab);
                         if let Some(page) = pages.remove(&tab) {
                             devtools.send(
                                 None,
@@ -827,6 +893,21 @@ fn run(
                             json!({"name": HEIGHT_BINDING}),
                             Pending::Ignore,
                         )?;
+                        devtools.send(
+                            Some(&session),
+                            "Runtime.addBinding",
+                            json!({"name": APP_BINDING}),
+                            Pending::Ignore,
+                        )?;
+                        // An app's host page answers its own URL.
+                        if let Some((url, _)) = app_pages.get(&tab) {
+                            devtools.send(
+                                Some(&session),
+                                "Fetch.enable",
+                                json!({"patterns": [{"urlPattern": url, "requestStage": "Request"}]}),
+                                Pending::Ignore,
+                            )?;
+                        }
                         devtools.send(
                             Some(&session),
                             "Page.addScriptToEvaluateOnNewDocument",
@@ -988,6 +1069,42 @@ fn run(
                     .filter(|h| h.is_finite() && *h > 0.0);
                 if let (Some(tab), Some(height)) = (tab_of(session), height) {
                     update(tab, &mut |state| state.content_height = Some(height));
+                }
+            }
+            "Fetch.requestPaused" => {
+                let request = params["requestId"].clone();
+                let host = tab_of(session).and_then(|tab| app_pages.get(&tab));
+                match host {
+                    Some((url, html))
+                        if params["request"]["url"].as_str() == Some(url.as_str()) =>
+                    {
+                        devtools.send(
+                            session,
+                            "Fetch.fulfillRequest",
+                            json!({
+                                "requestId": request,
+                                "responseCode": 200,
+                                "responseHeaders": [{"name": "Content-Type", "value": "text/html; charset=utf-8"}],
+                                "body": base64::engine::general_purpose::STANDARD.encode(html),
+                            }),
+                            Pending::Ignore,
+                        )?;
+                    }
+                    _ => devtools.send(
+                        session,
+                        "Fetch.continueRequest",
+                        json!({"requestId": request}),
+                        Pending::Ignore,
+                    )?,
+                }
+            }
+            "Runtime.bindingCalled" if params["name"] == APP_BINDING => {
+                let message = params["payload"]
+                    .as_str()
+                    .and_then(|p| serde_json::from_str::<Value>(p).ok());
+                if let (Some(tab), Some(message)) = (tab_of(session), message) {
+                    update(tab, &mut |state| state.app_messages.push(message.clone()));
+                    ctx.request_repaint();
                 }
             }
             // A render tab's page opening a window: the client gets its

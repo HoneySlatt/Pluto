@@ -125,6 +125,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::GeneratedImage { image } => Id::new(("generated", &image.path)),
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
         Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
+        Row::McpApp(app) => Id::new(("mcp-app", &app.id)),
         Row::Event { id, .. } => Id::new(("event", id)),
         // One live row whether it shows a tool or "Thinking".
         Row::LiveWork {
@@ -184,6 +185,7 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::GeneratedImage { .. } => width.min(384.0) * 0.75 + 16.0,
         // The frame (`px-1`) at its measured height, then `pb-2`.
         Row::HtmlRender(page) => page.render.frame_height(width - 8.0, None) + 8.0,
+        Row::McpApp(_) => crate::mcp_app::DEFAULT_HEIGHT + 8.0,
         // The card: padding, header, its text (a long plan folded to 26rem
         // and the Expand button) and the row's space.
         Row::Plan(plan) => {

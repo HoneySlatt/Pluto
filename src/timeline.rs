@@ -79,7 +79,20 @@ enum Entry {
     Message(Message),
     Plan(ProposedPlan),
     HtmlRender(HtmlRenderEntry),
+    McpApp(McpAppEntry),
     Work(WorkEntry),
+}
+
+/// An MCP app a tool call returned, where the call happened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct McpAppEntry {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub created_at: String,
+    /// The thread that produced the app, which its requests run against.
+    pub source_thread_id: String,
+    pub item: Arc<TurnItem>,
+    pub app: crate::mcp_app::McpApp,
 }
 
 /// A page an agent published, where its call happened.
@@ -97,6 +110,7 @@ impl Entry {
             Entry::Message(m) => &m.id,
             Entry::Plan(p) => &p.id,
             Entry::HtmlRender(h) => &h.id,
+            Entry::McpApp(a) => &a.id,
             Entry::Work(w) => &w.id,
         }
     }
@@ -106,6 +120,7 @@ impl Entry {
             Entry::Message(m) => &m.created_at,
             Entry::Plan(p) => &p.created_at,
             Entry::HtmlRender(h) => &h.created_at,
+            Entry::McpApp(a) => &a.created_at,
             Entry::Work(w) => &w.created_at,
         }
     }
@@ -117,6 +132,7 @@ impl Entry {
             Entry::Message(_) => None,
             Entry::Plan(p) => p.run_id.as_deref(),
             Entry::HtmlRender(h) => h.run_id.as_deref(),
+            Entry::McpApp(a) => a.run_id.as_deref(),
             Entry::Work(w) => w.run_id.as_deref(),
         }
     }
@@ -133,7 +149,7 @@ impl Entry {
                     )
             }
             Entry::Work(w) => w.item_type.as_deref() == Some("notification"),
-            Entry::Plan(_) | Entry::HtmlRender(_) => false,
+            Entry::Plan(_) | Entry::HtmlRender(_) | Entry::McpApp(_) => false,
         }
     }
 
@@ -142,7 +158,7 @@ impl Entry {
         match self {
             Entry::Message(m) => m.run_id.as_deref(),
             Entry::Work(w) => w.run_id.as_deref(),
-            Entry::Plan(_) | Entry::HtmlRender(_) => None,
+            Entry::Plan(_) | Entry::HtmlRender(_) | Entry::McpApp(_) => None,
         }
     }
 
@@ -243,6 +259,8 @@ pub enum Row {
     Plan(Box<ProposedPlan>),
     /// A page an agent published (`HtmlRenderTimelineRow`).
     HtmlRender(Box<HtmlRenderEntry>),
+    /// An MCP app (`McpAppTimelineRow`).
+    McpApp(Box<McpAppEntry>),
     /// A lifecycle card (`V2LifecycleRow`): an interrupt, a handoff, a fork
     /// or a subagent; adjacent subagents of one provider turn share a row.
     Event {
@@ -1000,7 +1018,7 @@ fn attempt_folds(
         let kept = complete_attempts.contains(attempt.id.as_str())
             || failed.contains(&attempt.run_id)
             || matches!(entry, Entry::Message(m) if m.role == "user")
-            || matches!(entry, Entry::HtmlRender(_))
+            || matches!(entry, Entry::HtmlRender(_) | Entry::McpApp(_))
             || matches!(entry, Entry::Work(w) if persistent_card(w)
                 || w.item_type.as_deref() == Some("system_notice"))
             || live.contains(entry.id());
@@ -1136,6 +1154,17 @@ fn entries(detail: &Detail) -> Vec<Entry> {
                 run_id: item.run_id.clone(),
                 created_at,
                 render,
+            }));
+            continue;
+        }
+        if let Some(app) = crate::mcp_app::from_tool_item(item) {
+            out.push(Entry::McpApp(McpAppEntry {
+                id: item.id.clone(),
+                run_id: item.run_id.clone(),
+                created_at,
+                source_thread_id: row.source_thread_id.clone(),
+                item: item.clone(),
+                app,
             }));
             continue;
         }
@@ -2134,6 +2163,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             }
             Entry::Plan(plan) => out.push(Row::Plan(Box::new(plan.clone()))),
             Entry::HtmlRender(page) => out.push(Row::HtmlRender(Box::new(page.clone()))),
+            Entry::McpApp(app) => out.push(Row::McpApp(Box::new(app.clone()))),
         }
         index += 1;
     }
@@ -2509,6 +2539,27 @@ mod tests {
             open.iter()
                 .any(|r| matches!(r, Row::AttemptFold { expanded: true, .. }))
         );
+    }
+
+    #[test]
+    fn mcp_apps_show_where_their_call_happened() {
+        let (thread, mut detail) = settled();
+        detail.visible.insert(
+            3,
+            item(
+                "app",
+                "dynamic_tool",
+                "2026-01-01T00:02:30.000Z",
+                Some("run"),
+                json!({"toolName": "weather.forecast", "output": {"t3McpApp": {
+                    "attachmentId": "att", "server": "weather", "tool": "forecast",
+                    "resourceUri": "ui://weather/forecast"}}}),
+            ),
+        );
+        let rows = rows(&thread, &detail, &Expansion::default());
+        // Folded turns keep the app out, like a published page.
+        assert!(rows.iter().any(|r| matches!(r, Row::TurnFold { .. })));
+        assert!(rows.iter().any(|r| matches!(r, Row::McpApp(app) if app.app.server == "weather")));
     }
 
     #[test]

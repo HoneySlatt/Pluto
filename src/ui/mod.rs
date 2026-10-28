@@ -40,6 +40,7 @@ pub mod lightbox;
 pub mod live_activity;
 pub mod lucide;
 pub mod markdown;
+pub mod mcp_apps;
 pub mod md_copy;
 pub mod md_links;
 pub mod media;

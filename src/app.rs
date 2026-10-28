@@ -77,6 +77,8 @@ pub struct App {
     pub(crate) tasks_open: bool,
     /// The queued messages' banner above the composer.
     pub(crate) queue: crate::ui::queue::QueueUi,
+    /// MCP apps hosted in the chat.
+    pub(crate) mcp_apps: crate::ui::mcp_apps::McpApps,
     /// The thread details card's paging and folds.
     pub(crate) thread_details: crate::ui::thread_details::DetailsState,
     /// Every thread's messages searched (`orchestration.searchThreads`).
@@ -455,6 +457,7 @@ impl App {
             user_text_sizes: Default::default(),
             tasks_open: false,
             queue: Default::default(),
+            mcp_apps: Default::default(),
             thread_details: Default::default(),
             thread_search: Default::default(),
             storage_report: None,
@@ -1247,6 +1250,7 @@ impl eframe::App for App {
                 self.bubble_context_popover(ui);
                 self.preview_end_frame();
                 self.html_renders_end_frame(ui.input(|i| i.time));
+                self.mcp_apps_end_frame(ui.input(|i| i.time));
                 self.design_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
@@ -1553,6 +1557,7 @@ impl App {
             || self.publish_result(&key, &result)
             || self.command_menu_result(&key, &result)
             || self.html_render_url_result(&key, &result)
+            || self.mcp_app_result(&key, &result)
             || self.design_home_result(&key, &result)
             || self.design_result(&key, &result)
             || self.chat_project_result(&key, &result)

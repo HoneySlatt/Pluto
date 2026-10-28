@@ -4,6 +4,7 @@ pub mod generated_images;
 pub mod highlight;
 pub mod html_render;
 pub mod http;
+pub mod mcp_app;
 pub mod model;
 pub mod preview;
 pub mod protocol;
