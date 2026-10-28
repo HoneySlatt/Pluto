@@ -767,6 +767,24 @@ impl App {
             rect.height()
         };
         let keys: Vec<egui::Id> = rows.iter().map(timeline_view::row_key).collect();
+        // Pluto: the first reply of each turn opens with the logo and the
+        // thread's model.
+        let reply_header = self.model_label(&thread.model_selection).0;
+        let mut turn_answered = false;
+        let turn_openers: std::collections::HashSet<&str> = rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::User(_) => {
+                    turn_answered = false;
+                    None
+                }
+                Row::Assistant { message, .. } if !turn_answered => {
+                    turn_answered = true;
+                    Some(message.id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
         let guesses: Vec<f32> = rows
             .iter()
             .zip(&keys)
@@ -852,7 +870,15 @@ impl App {
                             continue;
                         }
                         let before = ui.cursor().top();
-                        self.row(ui, row, column);
+                        let header = match row {
+                            Row::Assistant { message, .. }
+                                if turn_openers.contains(message.id.as_str()) =>
+                            {
+                                Some(reply_header.as_str())
+                            }
+                            _ => None,
+                        };
+                        self.row(ui, row, column, header);
                         let height = ui.cursor().top() - before;
                         if find_key == Some(*key) {
                             find_row_rect = Some(Rect::from_min_max(
@@ -987,7 +1013,7 @@ impl App {
         clicked
     }
 
-    fn row(&mut self, ui: &mut Ui, row: &Row, width: f32) {
+    fn row(&mut self, ui: &mut Ui, row: &Row, width: f32, header: Option<&str>) {
         match row {
             Row::User(message) => {
                 self.user_row(ui, message, width);
@@ -998,7 +1024,7 @@ impl App {
                 show_meta,
                 changes,
             } => {
-                self.assistant_row(ui, message, *show_meta, changes.as_ref(), width);
+                self.assistant_row(ui, message, header, *show_meta, changes.as_ref(), width);
                 ui.add_space(if *show_meta { 16.0 } else { 8.0 });
             }
             Row::TurnFold {
@@ -1537,12 +1563,34 @@ impl App {
         &mut self,
         ui: &mut Ui,
         message: &Message,
+        header: Option<&str>,
         show_meta: bool,
         changes: Option<&(String, Vec<crate::model::CheckpointFile>)>,
         width: f32,
     ) {
         let top = ui.cursor().top();
         let left = ui.cursor().left();
+        // Pluto: the logo and the model over a turn's first reply.
+        if let Some(label) = header {
+            ui.add_space(4.0);
+            let (row, _) = ui.allocate_exact_size(Vec2::new(width, 18.0), Sense::hover());
+            crate::ui::pixel_logo::paint(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(row.left() + 4.0, row.top() + 1.5),
+                    Vec2::new(18.0, 15.0),
+                ),
+                0.0,
+            );
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(row.left() + 30.0, row.top()), row.max),
+                label,
+                font(12.0, Weight::Medium),
+                theme::muted_foreground(),
+            );
+            ui.add_space(8.0);
+        }
         let text = if message.text.is_empty() && !message.streaming {
             "(empty response)"
         } else {
