@@ -80,19 +80,32 @@ fn driver_selects(driver: &str) -> &'static [SelectField] {
             &[("zai", "Z.ai"), ("bigmodel", "BigModel")],
             "zai",
         )],
-        "ollama" => &[(
-            "contextLength",
-            "Context length",
-            "Tokens of conversation each model keeps, capped at the model's own limit. Longer contexts take more GPU memory.",
-            &[
-                ("8192", "8K"),
-                ("16384", "16K"),
-                ("32768", "32K"),
-                ("65536", "64K"),
-                ("131072", "128K"),
-            ],
-            "32768",
-        )],
+        "ollama" => &[
+            (
+                "contextLength",
+                "Context length",
+                "Tokens of conversation each model keeps, capped at the model's own limit. Longer contexts take more GPU memory.",
+                &[
+                    ("8192", "8K"),
+                    ("16384", "16K"),
+                    ("32768", "32K"),
+                    ("65536", "64K"),
+                    ("131072", "128K"),
+                ],
+                "32768",
+            ),
+            (
+                "webSearch",
+                "Web search",
+                "Where local models search the web: a SearXNG instance, or Brave's Search API with a key.",
+                &[
+                    ("searxng", "SearXNG"),
+                    ("brave", "Brave Search API"),
+                    ("off", "Off"),
+                ],
+                "searxng",
+            ),
+        ],
         _ => &[],
     }
 }
@@ -107,6 +120,12 @@ fn driver_secrets(driver: &str) -> &'static [Field] {
             "API key",
             "GLM Coding Plan API key. Stored separately on the host.",
             "Required",
+        )],
+        "ollama" => &[(
+            "braveApiKey",
+            "Brave Search API key",
+            "Key from api-dashboard.search.brave.com. Stored separately on the host.",
+            "For Brave Search",
         )],
         _ => &[],
     }
@@ -264,12 +283,20 @@ fn driver_fields(driver: &str) -> &'static [Field] {
             "Path to the Z Code desktop app on this environment. Pluto runs the agent it bundles.",
             "zcode",
         )],
-        "ollama" => &[(
-            "baseUrl",
-            "Server URL",
-            "Address of the Ollama server, as seen from this environment.",
-            "http://127.0.0.1:11434",
-        )],
+        "ollama" => &[
+            (
+                "baseUrl",
+                "Server URL",
+                "Address of the Ollama server, as seen from this environment.",
+                "http://127.0.0.1:11434",
+            ),
+            (
+                "searxngUrl",
+                "SearXNG URL",
+                "Address of the SearXNG instance, with its JSON format turned on.",
+                "http://127.0.0.1:8888",
+            ),
+        ],
         _ => &[],
     }
 }
