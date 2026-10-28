@@ -16,6 +16,7 @@ mod drawer;
 mod home;
 mod icons;
 mod licenses;
+mod lucide;
 mod markdown;
 mod memory;
 mod nav;

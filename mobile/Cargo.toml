@@ -11,6 +11,7 @@ name = "Pluto"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # The phone renders through the Android WebView; elsewhere the crate builds
 # without a renderer so its unit tests run on the computer.
@@ -21,6 +22,7 @@ iana-time-zone = "0.1"
 pluto-core = { path = "../crates/pluto-core" }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde_json = "1"
+url = "2"
 tokio = { version = "1", features = ["time"] }
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1"

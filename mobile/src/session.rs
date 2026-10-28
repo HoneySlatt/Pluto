@@ -88,6 +88,9 @@ pub struct Session {
     serial: u64,
     /// The open thread to follow again once the shell lists it.
     resubscribe: Option<String>,
+    /// Project favicons asked for, by project id: a data URL once fetched,
+    /// `None` while asked or when the project has none.
+    pub favicons: HashMap<String, Option<String>>,
 }
 
 impl Default for Session {
@@ -111,6 +114,7 @@ impl Default for Session {
             toast: None,
             serial: 0,
             resubscribe: None,
+            favicons: HashMap::new(),
         }
     }
 }
@@ -421,12 +425,70 @@ impl Ctx {
             {
                 session.resubscribe = Some(id);
             }
+            Event::Data(Route::Rpc(key), value) if key.starts_with("favicon:") => {
+                let server = session.server.clone();
+                drop(session);
+                self.fetch_favicon(&key["favicon:".len()..], &server, &value);
+            }
             Event::Data(Route::Rpc(key), value) => rpc_result(&mut session, key, Ok(value)),
             Event::Failed(Route::Rpc(key), message) => rpc_result(&mut session, key, Err(message)),
             Event::Failed(Route::Command(_), message) => session.show_toast(message),
             Event::Failed(_, message) => session.show_toast(message),
             Event::Data(..) | Event::Disconnected(_) => {}
         }
+    }
+
+    /// A project's favicon (`favicon.rs`): `assets.createUrl` with a
+    /// `project-favicon` resource, once per project. The WebView may not load
+    /// plain http from the network, so the image is fetched here and shown
+    /// as a data URL.
+    pub fn favicon(mut self, project: &Project) -> Option<String> {
+        if let Some(found) = self.session.peek().favicons.get(&project.id) {
+            return found.clone();
+        }
+        if project.project_icon.is_some() || !self.session.peek().net.online() {
+            return None;
+        }
+        self.session
+            .write()
+            .favicons
+            .insert(project.id.clone(), None);
+        let mut resource = json!({"_tag": "project-favicon", "cwd": project.workspace_root});
+        if let Some(path) = &project.favicon_path {
+            resource["path"] = json!(path);
+        }
+        self.link.send(Action::Request {
+            key: format!("favicon:{}", project.id),
+            method: "assets.createUrl",
+            payload: json!({"resource": resource}),
+        });
+        None
+    }
+
+    fn fetch_favicon(self, project: &str, server: &str, reply: &Value) {
+        let url = reply["relativeUrl"]
+            .as_str()
+            .and_then(|relative| url::Url::parse(server.trim()).ok()?.join(relative).ok());
+        // The server's marker for a project without one keeps the monogram.
+        let Some(url) = url.filter(|u| {
+            u.path_segments()
+                .and_then(|mut s| s.next_back())
+                .is_some_and(|name| name != "project-favicon-missing")
+        }) else {
+            return;
+        };
+        let (done, fetched) = futures_channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(pluto_core::http::get(&url));
+        });
+        let (mut session, project) = (self.session, project.to_owned());
+        dioxus::core::spawn_forever(async move {
+            if let Ok(Some(bytes)) = fetched.await
+                && let Some(data) = crate::badge::data_url(&bytes)
+            {
+                session.write().favicons.insert(project, Some(data));
+            }
+        });
     }
 
     /// "Reconnected" stays for a moment, then the bar leaves.

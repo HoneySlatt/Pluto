@@ -180,7 +180,9 @@ for a turn or the whole thread, unified, file chips, collapsible files after
 the server's new-thread model, permissions and workspace, response streaming,
 the phone's time format, whitespace, diff state and delete confirmation,
 Forget token, Disconnect, the server version); Projects and a project page
-(threads, its New threads overrides in `projectSettingsOverrides`, removal);
+(project icons like the desktop's: the chosen Lucide icon, emoji or monogram,
+else the favicon from `assets.createUrl`, fetched by the app since the
+WebView may not load plain http, else the derived monogram; threads, its New threads overrides in `projectSettingsOverrides`, removal);
 Scheduled tasks (the live list, pause, Run now, Edit, Delete, the editor saved
 with `scheduledTasks.upsert` and the desktop's checks); Usage (Limits from the
 providers' quota windows, refreshed with `server.refreshProviders`; Cost and
