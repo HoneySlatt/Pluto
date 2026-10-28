@@ -18,6 +18,7 @@ use crate::theme::{self, Weight, font};
 use crate::ui::context_menu;
 use crate::ui::memory_settings::MEMORY_PAGE;
 use crate::ui::projects_page::PROJECT_PAGE;
+use crate::ui::scheduled_tasks::SCHEDULED_TASKS_PAGE;
 use crate::ui::widgets::{self, MenuEntry, MenuItem};
 
 /// `SETTINGS_SECTION_LABELS` with their icons (`SETTINGS_SECTION_ICONS`).
@@ -296,6 +297,8 @@ pub(crate) enum Control {
         switch: Option<bool>,
     },
     Button(&'static str),
+    /// A switch, then the row's actions menu button (`MoreHorizontalIcon`).
+    SwitchMenu(bool),
     /// `Button variant="outline" size="sm"` with a leading icon.
     OutlineIcon {
         label: &'static str,
@@ -2344,6 +2347,7 @@ impl App {
         self.settings_model_picker(ui);
         self.settings_sidebar(ui, sidebar, page);
         self.archive_context_menu(ui);
+        self.scheduled_context_menu(ui);
     }
 
     fn settings_sidebar(&mut self, ui: &mut Ui, rect: Rect, page: usize) {
@@ -2366,6 +2370,15 @@ impl App {
             .position(|(index, _)| *index == PROVIDERS_PAGE)
             .map_or(entries.len(), |at| at + 1);
         entries.insert(providers, (MEMORY_PAGE, ("Personalization", "user-round")));
+        // Scheduled Tasks follows Integrations.
+        let integrations = entries
+            .iter()
+            .position(|(index, _)| *index == INTEGRATIONS_PAGE)
+            .map_or(entries.len(), |at| at + 1);
+        entries.insert(
+            integrations,
+            (SCHEDULED_TASKS_PAGE, ("Scheduled Tasks", "calendar-clock")),
+        );
         for (slot, (index, (label, icon))) in entries.into_iter().enumerate().filter(|_| !searching)
         {
             let item = Rect::from_min_size(
@@ -2441,6 +2454,7 @@ impl App {
         let label = match page {
             PROJECT_PAGE => "Project",
             MEMORY_PAGE => "Personalization",
+            SCHEDULED_TASKS_PAGE => "Scheduled Tasks",
             _ => PAGES[page].0,
         };
         // Header: "Settings / Page", and Restore device defaults on General.
@@ -2514,7 +2528,11 @@ impl App {
         }
 
         let body = Rect::from_min_max(Pos2::new(main.left(), theme::TOPBAR_HEIGHT), main.max);
-        if !PORTED_PAGES.contains(&page) && page != PROJECT_PAGE && page != MEMORY_PAGE {
+        if !PORTED_PAGES.contains(&page)
+            && page != PROJECT_PAGE
+            && page != MEMORY_PAGE
+            && page != SCHEDULED_TASKS_PAGE
+        {
             let note = "This settings page is not ported to the native client yet.";
             let width = widgets::text_width(ui, note, font(14.0, Weight::Regular));
             widgets::text(
@@ -2538,6 +2556,7 @@ impl App {
             SOURCE_CONTROL_PAGE => self.source_control_sections(),
             INTEGRATIONS_PAGE => self.integrations_sections(),
             MEMORY_PAGE => self.memory_sections(),
+            SCHEDULED_TASKS_PAGE => self.scheduled_tasks_sections(),
             crate::ui::typography::APPEARANCE_PAGE => self.appearance_sections(),
             _ => self.general_sections(),
         };
@@ -2793,6 +2812,7 @@ impl App {
                 SOURCE_CONTROL_PAGE => self.apply_source_control(&id, action),
                 INTEGRATIONS_PAGE => self.apply_integrations(&id, action),
                 MEMORY_PAGE => self.apply_memory(&id, action),
+                SCHEDULED_TASKS_PAGE => self.apply_scheduled(&id, action),
                 _ => self.apply_general(&id, action),
             }
         }
@@ -3016,6 +3036,26 @@ impl App {
         match &row.control {
             Control::Switch(on) => {
                 switch(ui, right, center_y, *on, &row.id).then_some(RowAction::Toggle(!on))
+            }
+            Control::SwitchMenu(on) => {
+                let button = Rect::from_min_size(
+                    Pos2::new(right - 28.0, center_y - 14.0),
+                    Vec2::splat(28.0),
+                );
+                let response = widgets::icon_button(
+                    ui,
+                    button,
+                    ("settings-row-menu", &row.id),
+                    "ellipsis",
+                    16.0,
+                    theme::foreground(),
+                    &format!("Actions for {}", row.title),
+                );
+                if response.clicked() {
+                    return Some(RowAction::Menu(button.left_bottom()));
+                }
+                switch(ui, button.left() - 8.0, center_y, *on, &row.id)
+                    .then_some(RowAction::Toggle(!on))
             }
             Control::Retention(days) => {
                 if switch(ui, right, center_y, days.is_some(), &row.id) {
@@ -3640,6 +3680,7 @@ fn text_input(
 fn control_width(ui: &Ui, control: &Control) -> f32 {
     match control {
         Control::Switch(_) => 30.0,
+        Control::SwitchMenu(_) => 30.0 + 8.0 + 28.0,
         Control::Select { width, .. } => select_width(ui, control).unwrap_or(*width),
         Control::Number(_) => 96.0,
         Control::Retention(None) => {

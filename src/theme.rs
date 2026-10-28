@@ -1195,6 +1195,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "git-fork",
         "square-menu",
         "corner-left-up",
+        "calendar-clock",
     )
 }
 

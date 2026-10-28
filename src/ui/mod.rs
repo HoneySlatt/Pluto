@@ -63,6 +63,7 @@ pub mod publish;
 pub mod pull_requests;
 pub mod queue;
 pub mod requests_panel;
+pub mod scheduled_tasks;
 pub mod scratch;
 pub mod script_import;
 pub mod setting_inheritance;

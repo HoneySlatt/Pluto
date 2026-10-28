@@ -84,6 +84,8 @@ pub struct App {
     /// Storage cleanup's last report (`server.getStorageCleanupReport`), the
     /// stream asked, and a manual run in flight.
     pub(crate) storage_report: Option<serde_json::Value>,
+    /// Settings → Scheduled Tasks.
+    pub(crate) scheduled: crate::ui::scheduled_tasks::ScheduledTasks,
     pub(crate) storage_stream: bool,
     pub(crate) storage_running: bool,
     pub(crate) tasks_thread: Option<String>,
@@ -456,6 +458,7 @@ impl App {
             thread_details: Default::default(),
             thread_search: Default::default(),
             storage_report: None,
+            scheduled: Default::default(),
             storage_stream: false,
             storage_running: false,
             tasks_thread: None,
@@ -1553,6 +1556,7 @@ impl App {
             || self.chat_project_result(&key, &result)
             || self.chat_mode_result(&key, &result)
             || self.thread_search_result(&key, &result)
+            || self.scheduled_result(&key, &result)
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)
             || self.file_upload_result(&key, &result)
