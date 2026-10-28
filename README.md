@@ -55,63 +55,14 @@ for its images), the server resolves steering and queueing
 `runtime-request.respond`, Stop sends `run.interrupt`, projects change through
 `projects.mutate`, and visits are tracked on the server when it does.
 
-Not ported from v0.1.0 yet:
-
-- timeline rows: an MCP app's full screen, downloads (refused) and theme
-  style variables, and the "Compacting…" header of a manual `/compact`; the live activity row's question answers, thread-read targets and
-  markdown thought labels (it reads them as plain text), and the full
-  `resolveWorkEntryToolPresentation` names (commands read as their program); secret requests show as standalone work rows
-  with their upstream labels, and subagent cards lack their hover card;
-  Codex's generated images are not found from turn items;
-- the queue banner: the grip's arrow keys, rows for messages still on their
-  way to the server, and changing a queued message's attachments (an edit
-  saves its text and keeps them);
-- Stop does not end a settled run's background work or pull request watches;
-- new threads: t3.json's `defaultThreadEnvMode` (the project and
-  environment settings decide), and the ref picker's "Checkout pull
-  request" item;
-- the sidebar's working duration and v0.1.0's status colors (Waiting and
-  Limited are shown with v0.0.45's styling);
-- v0.1.0's new features: a webhook task's deliveries, endpoint and
-  signature fields, the ACP registry (Pluto prefers native drivers),
-  workflow scripts; the thread details card's workspace pickers, scripts
-  and git controls (the header keeps them), its inline placement beside a
-  wide canvas, subagent hover cards, a workflow row's phases,
-  and "Disconnect agent session";
-- find in thread: the skill labels sent with the query, and a new query
-  starts from the first entry in view rather than its first occurrence in
-  view.
+What is not ported yet is listed in `docs/parity/`, an inventory made
+against v0.1.0's client sources, one report per area (chat and composer,
+settings, pull requests, surfaces, shell), each gap with its upstream files
+and its size; `docs/release-backlog.md` orders them for the first release.
+Buttons for features not ported show a "not implemented" notice.
 
 The fixture (`scripts/fixture-server.sh`) seeds protocol 1 events through a
 v0.0.45 server and lets v0.1.0 import them, so its threads hold messages only.
-
-Not ported yet (buttons for these show a "not implemented" notice):
-
-- settings: the Appearance page's theme library, contrast, glass opacity,
-  environment identification and motion rows, word wrap in code
-  blocks and tables, the managed ChatGPT account sign-in,
-  usage limit hubs, provider update installs and setup flows,
-  the keybindings.json file action, device
-  setup (enabling the hub or agent access, adding hosts), a second
-  terminal when the active one is busy and the script environment variables
-  when running actions, Storage's
-  project worktree mode (its rows are inert at a project scope), and
-  the Connections administration (pairing links, client sessions, network
-  access, adding remote environments);
-- usage: limit sources, reset credits,
-  the environment filter's selection (one environment is always selected) and the model suggestions in Model prices;
-- the pull request detail and right panels, searching on the hosts (the
-  search filters loaded rows), author and label filters, line-count backfill,
-  paging past 99 rows per repository and avatars (initials are shown);
-- the surfaces other than Diff, Files, Terminal, Agents and Browser (pull requests,
-  device), the Agents workflow script viewer (populated Agents rows are ported from source but not compared with the reference: the fixture has no subagents), file editing, video, audio, PDF and HTML previews, and terminal
-  persisting the bottom drawer's groups, the terminal's file-path links (URLs open in the browser rather than a preview);
-- the composer's `/usage-limits` and `/compact`, and the exact-number lookup of a "#" reference missing from the 99 recent pull requests (`pullRequests.detail`);
-- non-image files, downscaling images over 10 MiB, inline image chips in the prompt, attachments in answers to agent questions (a paste with both text and an image keeps the text, where upstream keeps the image), videos and snap-shot details in the expanded preview, file attachments in user messages and context kinds other than terminal excerpts (images, files, elements, preview annotations, review comments), palette
-  sub-actions (themes, git clone; "Go to file" and content search from a
-  draft without a thread), and "New thread on <branch>"
-  branch carry-over (it opens a draft in the thread's project on its current
-  checkout).
 
 Environment themes map their colors onto the app tokens like the web client's
 `html[data-theme-id]` rule. Surfaces measured as white tints of the stock dark

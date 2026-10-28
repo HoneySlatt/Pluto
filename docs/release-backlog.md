@@ -13,6 +13,19 @@ what it touched, and the README's parity sections brought up to date.
 
 ## 1. Bugs and wrong behavior
 
+Done: drafts per thread, saved for the next run (`drafts.rs`); refused or
+lost messages back in their composer; automatic reconnection; the thread's
+error banner; the streaming modes and default keybindings of v0.1.0;
+navigation back and forward, copy reference, the model picker, the
+composer's controls, the drawer's terminal keys and project action
+shortcuts; the Send shortcut, Time format and "Open preview automatically"
+settings; provider instance mutations; the palette's keys and Project
+settings; each PR host's mark; typed toasts; the connection card's name;
+the README's gap lists replaced by `docs/parity/`. Moved to later
+milestones: raw HTML in answers (2, upstream parses sanitized HTML there),
+`.avif` and stale open files (4), `thread.undo` and `view.reopenClosed` (2),
+the preview keys (4), the composer settings tied to the rich editor (2).
+
 - Composer drafts are global: the text, images and files follow the user to
   the next thread, and nothing survives a restart (chat.md).
 - A refused send clears the composer; the thread's `lastError` is never shown
