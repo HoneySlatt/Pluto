@@ -6,12 +6,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod commands;
 pub mod generated_images;
 pub mod html_render;
 pub mod http;
 pub mod mcp_app;
 pub mod model;
 pub mod protocol;
+pub mod spaces;
 pub mod timeline;
 
 /// Asks the client's interface to redraw, now or after a delay; the

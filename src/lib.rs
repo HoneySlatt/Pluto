@@ -9,7 +9,9 @@ pub mod terminal;
 pub mod theme;
 pub mod ui;
 
-pub use pluto_core::{generated_images, html_render, http, mcp_app, model, protocol, timeline};
+pub use pluto_core::{
+    commands, generated_images, html_render, http, mcp_app, model, protocol, timeline,
+};
 
 /// The core's redraw requests, answered by egui.
 pub fn repaint(ctx: &eframe::egui::Context) -> pluto_core::Repaint {
