@@ -289,7 +289,9 @@ impl Palette {
             row_active: pick("sidebarRowActive", mix(canvas, text, 0.11)),
             code_foreground: pick("codeForeground", text),
             overlay: text,
-            brand_logo: theme["logo"] == "brand",
+            // `colors.logo`: the server keeps the open colors record but drops
+            // top-level keys it does not know, so a published theme says it there.
+            brand_logo: theme["logo"] == "brand" || colors["logo"] == "brand",
             glow: theme["glow"] == true,
         })
     }
@@ -1227,7 +1229,8 @@ mod palette_tests {
 
     #[test]
     fn a_theme_can_keep_the_brand_logo() {
-        let theme = serde_json::json!({"canvas": "#191724", "accent": "#c4a7e7", "logo": "brand"});
+        let theme = serde_json::json!({"canvas": "#191724", "accent": "#c4a7e7",
+                                       "colors": {"logo": "brand"}});
         let palette = Palette::from_theme(&theme).expect("palette");
         assert!(palette.brand_logo && !palette.glow);
         assert_eq!(
