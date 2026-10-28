@@ -72,12 +72,7 @@ impl App {
             .interact(rect, ui.id().with("research-toggle"), Sense::click())
             .on_hover_text(tip);
         if on {
-            let fill = if response.hovered() {
-                theme::alpha(theme::accent(), 0.8)
-            } else {
-                theme::accent()
-            };
-            ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+            crate::ui::backdrop::paint_toggle_on(ui, rect, response.hovered());
         } else if response.hovered() {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(8), theme::accent());
@@ -93,7 +88,7 @@ impl App {
             Rect::from_min_size(Pos2::new(x + 10.0, top + 6.0), Vec2::splat(16.0)),
             16.0,
             if on {
-                theme::foreground()
+                theme::primary()
             } else {
                 theme::muted_foreground()
             },

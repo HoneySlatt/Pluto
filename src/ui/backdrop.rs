@@ -1,7 +1,8 @@
 //! Pluto's backdrop and action fills: the violet glow of Pluto stock behind
 //! the main area, the pixel stars around a draft's hero, and the primary
 //! action buttons (send, Implement, Refine), in a vertical gradient on Pluto
-//! stock. The gradients are meshes with per-vertex colors.
+//! stock, and the composer toggles that are on. The gradients are meshes with
+//! per-vertex colors.
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use eframe::egui::{self, Color32, CornerRadius, Mesh, Pos2, Rect, Ui, Vec2};
@@ -169,4 +170,17 @@ pub fn fill_action(
     }
     ui.painter().add(egui::Shape::mesh(mesh));
     label
+}
+
+/// A composer toggle that is on (Research, Image): tinted with the accent and
+/// outlined in it, so it reads apart from a hovered toggle.
+pub fn paint_toggle_on(ui: &Ui, rect: Rect, hovered: bool) {
+    let fill = theme::alpha(theme::primary(), if hovered { 0.2 } else { 0.14 });
+    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+    ui.painter().rect_stroke(
+        rect.shrink(0.5),
+        CornerRadius::same(8),
+        egui::Stroke::new(1.0, theme::alpha(theme::primary(), 0.45)),
+        egui::StrokeKind::Inside,
+    );
 }

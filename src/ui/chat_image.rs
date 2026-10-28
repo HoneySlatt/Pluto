@@ -90,12 +90,7 @@ impl App {
             .interact(rect, ui.id().with("image-toggle"), Sense::click())
             .on_hover_text(tip);
         if on {
-            let fill = if response.hovered() {
-                theme::alpha(theme::accent(), 0.8)
-            } else {
-                theme::accent()
-            };
-            ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+            crate::ui::backdrop::paint_toggle_on(ui, rect, response.hovered());
         } else if response.hovered() && available {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(8), theme::accent());
@@ -113,7 +108,7 @@ impl App {
             16.0,
             theme::alpha(
                 if on {
-                    theme::foreground()
+                    theme::primary()
                 } else {
                     theme::muted_foreground()
                 },
