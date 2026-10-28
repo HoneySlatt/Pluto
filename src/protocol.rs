@@ -209,6 +209,30 @@ impl Api {
     }
 }
 
+#[cfg(test)]
+impl Connection {
+    /// A connection to no server: the test reads what the app sends and
+    /// feeds the events.
+    pub(crate) fn fake(
+        ctx: egui::Context,
+    ) -> (Self, mpsc::Receiver<Action>, mpsc::SyncSender<Event>) {
+        let (actions, inbox) = mpsc::channel();
+        let (outbox, events) = mpsc::sync_channel(128);
+        let connection = Self {
+            actions,
+            events,
+            wake: Arc::new(Wake::new().expect("eventfd")),
+            api: Arc::new(Api {
+                origin: url::Url::parse("http://127.0.0.1:1").expect("url"),
+                token: Zeroizing::new(String::new()),
+            }),
+            outbox: outbox.clone(),
+            ctx,
+        };
+        (connection, inbox, outbox)
+    }
+}
+
 impl Drop for Connection {
     /// The worker notices the closed channel and ends.
     fn drop(&mut self) {
@@ -409,7 +433,7 @@ fn run(
                                 &mut pending,
                                 Route::Thread(id.clone()),
                                 "orchestration.subscribeThread",
-                                json!({"threadId":id,"acceptBoundedSnapshot":true}),
+                                json!({"threadId":id,"acceptBoundedSnapshot":true,"acceptCompactTurnItems":true}),
                                 true,
                             )?;
                         }

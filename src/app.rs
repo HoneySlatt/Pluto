@@ -16,6 +16,10 @@ pub struct App {
     connection: Option<Connection>,
     pub(crate) state: State,
     pub(crate) selected: Option<String>,
+    /// The open thread, when its subscription failed before the server had
+    /// created it (a launch and its subscription race), with the attempts
+    /// made and whether a new one is due once the shell lists the thread.
+    thread_retry: Option<(String, u8, bool)>,
     /// Project of the open new-thread draft; `None` follows the latest project.
     pub(crate) draft_project_id: Option<String>,
     pub(crate) composer: String,
@@ -388,6 +392,7 @@ impl App {
             connection: None,
             state: State::default(),
             selected: None,
+            thread_retry: None,
             draft_project_id: None,
             composer: String::new(),
             composer_images: Vec::new(),
@@ -607,6 +612,13 @@ impl App {
                         }
                     }
                     Route::Thread(id) => {
+                        if self
+                            .thread_retry
+                            .as_ref()
+                            .is_some_and(|(retry, ..)| *retry == id)
+                        {
+                            self.thread_retry = None;
+                        }
                         if let Err(error) = self.state.thread(&id, &value) {
                             self.status = Some(error);
                         }
@@ -633,8 +645,32 @@ impl App {
                     self.turn_command_done(&id, false);
                     self.status = Some(message);
                 }
+                Event::Failed(Route::Thread(id), message) => {
+                    let attempts = match &self.thread_retry {
+                        Some((retry, attempts, _)) if *retry == id => *attempts,
+                        _ => 0,
+                    };
+                    // `orchestration.launchThread` and the new thread's
+                    // subscription go out together, and the server can load
+                    // the thread before it has created it: subscribe again
+                    // once the shell lists it.
+                    if self.selected.as_deref() == Some(id.as_str()) && attempts < 3 {
+                        self.thread_retry = Some((id, attempts + 1, true));
+                    } else {
+                        self.status = Some(message);
+                    }
+                }
                 Event::Failed(_, message) => self.status = Some(message),
                 Event::Disconnected(message) => disconnected = Some(message),
+            }
+        }
+        if let Some((id, _, due)) = &mut self.thread_retry {
+            if self.selected.as_deref() != Some(id.as_str()) {
+                self.thread_retry = None;
+            } else if *due && self.state.threads.iter().any(|thread| thread.id == *id) {
+                *due = false;
+                let id = id.clone();
+                self.send(Action::Select(Some(id)));
             }
         }
         self.poll_scratch();
@@ -1638,4 +1674,52 @@ fn load_visits(settings: Option<&std::path::Path>) -> std::collections::HashMap<
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod thread_retry_tests {
+    use super::*;
+    use crate::protocol::{Action, Connection, Event, Route};
+
+    #[test]
+    fn a_launched_thread_is_subscribed_again_once_the_server_lists_it() {
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+        let ctx = harness.ctx.clone();
+        let (connection, actions, events) = Connection::fake(ctx);
+        let app = harness.state_mut();
+        app.connection = Some(connection);
+        app.select_thread(Some("new".into()));
+        assert!(matches!(actions.try_recv(), Ok(Action::Select(Some(id))) if id == "new"));
+
+        // The subscription failed: the server had not created the thread yet.
+        events
+            .send(Event::Failed(
+                Route::Thread("new".into()),
+                "Failed to load orchestration V2 thread new".into(),
+            ))
+            .unwrap();
+        app.poll_events();
+        assert!(app.status.is_none());
+        assert!(actions.try_recv().is_err());
+
+        // The shell lists it: one new subscription.
+        app.state.threads.push(Arc::new(crate::model::Thread {
+            id: "new".into(),
+            ..Default::default()
+        }));
+        app.poll_events();
+        assert!(matches!(actions.try_recv(), Ok(Action::Select(Some(id))) if id == "new"));
+        app.poll_events();
+        assert!(actions.try_recv().is_err());
+    }
 }
