@@ -4,3 +4,7 @@ name = "Pluto"
 [bundle]
 identifier = "app.pluto.mobile"
 publisher = "Pluto"
+
+[android.application]
+# The app's window stays dark (AppCompat's dark theme: black status bar).
+theme = "@style/Theme.AppCompat.NoActionBar"

@@ -29,6 +29,17 @@ fn App() -> Element {
             session::connect(session, link, server, token);
         }
     });
+    // Android's back gesture walks the WebView's history: opening a thread
+    // pushes an entry, and going back to it closes the thread.
+    use_hook(move || {
+        spawn(async move {
+            let mut back =
+                document::eval("window.addEventListener('popstate', () => dioxus.send(true));");
+            while back.recv::<bool>().await.is_ok() {
+                session::select(session, &link, None);
+            }
+        });
+    });
     let connected = session.read().status == Status::Connected;
     let open = session.read().selected.clone();
     rsx! {
@@ -130,7 +141,7 @@ type ListRow = (String, String, bool, String);
 fn ThreadList() -> Element {
     let mut session = use_context::<Signal<Session>>();
     let link = use_context::<Link>();
-    let (chat, groups, notice) = {
+    let (chat, groups, notice, listed) = {
         let session = session.read();
         let now = chrono_now();
         let mut groups: Vec<(String, Vec<ListRow>)> = Vec::new();
@@ -155,7 +166,7 @@ fn ThreadList() -> Element {
                 None => groups.push((group, vec![row])),
             }
         }
-        (session.chat, groups, session.notice.clone())
+        (session.chat, groups, session.notice.clone(), session.listed)
     };
     rsx! {
         div { class: "screen",
@@ -177,7 +188,9 @@ fn ThreadList() -> Element {
                 div { class: "notice", "{notice}" }
             }
             div { class: "list",
-                if groups.is_empty() {
+                if !listed {
+                    div { class: "empty", "Loading…" }
+                } else if groups.is_empty() {
                     div { class: "empty",
                         if chat { "No chats yet" } else { "No threads yet" }
                     }
@@ -188,7 +201,11 @@ fn ThreadList() -> Element {
                         button {
                             class: "row",
                             key: "{id}",
-                            onclick: move |_| session::select(session, &link, Some(id.clone())),
+                            onclick: move |_| {
+                                // The back gesture returns here.
+                                document::eval("history.pushState({ thread: true }, '');");
+                                session::select(session, &link, Some(id.clone()));
+                            },
                             if running {
                                 span { class: "dot" }
                             }
@@ -219,7 +236,10 @@ fn ThreadView(id: String) -> Element {
         };
         (title, rows, detail.is_some(), session.notice.clone())
     };
-    let back = move |_| session::select(session, &link, None);
+    // Back through the history, like the gesture.
+    let back = move |_| {
+        document::eval("history.back();");
+    };
     let send = move |_| {
         let text = draft.read().clone();
         if !text.trim().is_empty() {

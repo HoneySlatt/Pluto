@@ -29,6 +29,8 @@ pub struct Session {
     pub expansion: Expansion,
     /// The last failure a command or request reported.
     pub notice: Option<String>,
+    /// The shell's first snapshot arrived.
+    pub listed: bool,
 }
 
 impl Default for Session {
@@ -40,6 +42,7 @@ impl Default for Session {
             selected: None,
             expansion: Expansion::default(),
             notice: None,
+            listed: false,
         }
     }
 }
@@ -146,11 +149,10 @@ fn apply(session: &mut Session, event: Event) -> bool {
             session.state.config_event(&value);
             session.status = Status::Connected;
         }
-        Event::Data(Route::Shell, value) => {
-            if let Err(error) = session.state.shell(&value) {
-                session.notice = Some(error);
-            }
-        }
+        Event::Data(Route::Shell, value) => match session.state.shell(&value) {
+            Ok(()) => session.listed = true,
+            Err(error) => session.notice = Some(error),
+        },
         Event::Data(Route::Thread(id), value) => {
             if let Err(error) = session.state.thread(&id, &value) {
                 session.notice = Some(error);
