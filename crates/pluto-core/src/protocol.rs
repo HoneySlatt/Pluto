@@ -284,8 +284,8 @@ pub fn socket_url(server: &str) -> Result<url::Url, String> {
         "https" | "wss" => "wss",
         _ => return Err("The server URL must use HTTP(S) or WS(S)".into()),
     };
-    if scheme == "ws" && !matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")) {
-        return Err("Use HTTPS for a server outside this computer".into());
+    if scheme == "ws" && !url.host().is_some_and(|host| plain_allowed(&host)) {
+        return Err("Use HTTPS for a server outside this computer or its local network".into());
     }
     url.set_scheme(scheme).map_err(|_| "Invalid URL scheme")?;
     if !matches!(url.path(), "" | "/" | "/ws") {
@@ -294,6 +294,26 @@ pub fn socket_url(server: &str) -> Result<url::Url, String> {
     url.set_path("/ws");
     url.set_query(Some("orchestrationProtocol=2"));
     Ok(url)
+}
+
+/// Plain HTTP stays on this computer or a private network: loopback, the
+/// home network's private ranges, link-local, and the 100.64.0.0/10 range
+/// overlay networks such as Tailscale use. The token crosses it unencrypted.
+fn plain_allowed(host: &url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(name) => *name == "localhost",
+        url::Host::Ipv4(ip) => {
+            let [a, b, ..] = ip.octets();
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || (a == 100 && (64..128).contains(&b))
+        }
+        url::Host::Ipv6(ip) => {
+            let first = ip.segments()[0];
+            ip.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 pub fn request(id: u64, method: &str, payload: Value) -> Value {
@@ -702,6 +722,28 @@ fn remote_error(exit: &Value) -> String {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn plain_http_stays_on_private_networks() {
+        for ok in [
+            "http://127.0.0.1:3774",
+            "http://localhost:3774",
+            "http://192.168.1.74:3774",
+            "http://10.0.0.2:3774",
+            "http://100.101.102.103:3774",
+            "http://[fd00::1]:3774",
+        ] {
+            assert!(socket_url(ok).is_ok(), "{ok}");
+        }
+        for refused in [
+            "http://example.com",
+            "http://8.8.8.8:3774",
+            "http://[2001:db8::1]",
+        ] {
+            assert!(socket_url(refused).is_err(), "{refused}");
+        }
+        assert!(socket_url("https://example.com").is_ok());
+    }
 
     #[test]
     fn history_pages_are_read_from_the_http_api() {
