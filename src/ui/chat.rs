@@ -1741,6 +1741,25 @@ impl App {
                     }
                     after = regenerate.right();
                 }
+                // `AssistantForkButton`: a new thread from this answer.
+                if let Some(run) = self.forkable_run(&message.id) {
+                    let fork =
+                        Rect::from_min_size(Pos2::new(after + 4.0, meta.top()), Vec2::splat(24.0));
+                    if widgets::icon_button(
+                        ui,
+                        fork,
+                        ("fork", &message.id),
+                        "git-fork",
+                        12.0,
+                        theme::muted_foreground(),
+                        "Fork from this response",
+                    )
+                    .clicked()
+                    {
+                        self.fork_from_run(&run);
+                    }
+                    after = fork.right();
+                }
                 if !message.streaming {
                     let time = widgets::clock_time(&message.updated_at, self.now);
                     widgets::text_in(
@@ -2104,6 +2123,60 @@ impl App {
             muted,
         );
         response
+    }
+
+    /// `canForkProjectedAssistantItem`: a completed answer's run, when its
+    /// provider can fork from it (natively, or by handing the whole thread
+    /// over); history without a session record may always fork. Pluto's
+    /// chats branch through their versions instead.
+    fn forkable_run(&self, message_id: &str) -> Option<(String, String)> {
+        let thread = self.current_thread()?;
+        if self.is_chat_thread(&thread) {
+            return None;
+        }
+        let detail = self.current_detail()?;
+        let row = detail.visible.iter().find(|row| {
+            row.item.kind == "assistant_message" && row.item.str("messageId") == Some(message_id)
+        })?;
+        let item = &row.item;
+        if item.status != "completed" {
+            return None;
+        }
+        // An inherited answer forks from the thread that holds it.
+        let run = (row.source_thread_id.clone(), item.run_id.clone()?);
+        let session = item
+            .provider_thread_id
+            .as_deref()
+            .and_then(|id| detail.provider_threads.iter().find(|t| t["id"] == id))
+            .and_then(|t| t["providerSessionId"].as_str())
+            .and_then(|id| detail.provider_sessions.iter().find(|s| s["id"] == id));
+        let Some(capabilities) = session.map(|s| &s["capabilities"]) else {
+            return Some(run);
+        };
+        let threads = &capabilities["threads"];
+        let native = threads["canForkThread"] == true
+            && threads["canForkFromTurn"] == true
+            && capabilities["identity"]["nativeThreadIds"] == "strong";
+        (native || capabilities["context"]["supportsFullThreadHandoff"] == true).then_some(run)
+    }
+
+    /// `forkThreadFromRun`: the fork opens as "<title> fork".
+    fn fork_from_run(&mut self, (source, run): &(String, String)) {
+        let Some(thread) = self.current_thread() else {
+            return;
+        };
+        let target = uuid::Uuid::new_v4().to_string();
+        self.dispatch(serde_json::json!({
+            "type": "thread.fork",
+            "commandId": uuid::Uuid::new_v4().to_string(),
+            "createdBy": "user",
+            "creationSource": "web",
+            "sourceThreadId": source,
+            "targetThreadId": target,
+            "sourcePoint": {"type": "run", "runId": run},
+            "title": format!("{} fork", thread.title),
+        }));
+        self.select_thread(Some(target));
     }
 
     /// The failed run a workspace preparation error can retry.
