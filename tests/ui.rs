@@ -124,6 +124,51 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
 }
 
 #[test]
+fn dragging_the_sidebar_edge_resizes_it() {
+    let mut harness = harness();
+    assert_eq!(harness.state().sidebar_width(), 256.0);
+    // The handle straddles the edge at x = 256; drag it 64px right.
+    harness.event(egui::Event::PointerMoved(egui::pos2(257.0, 400.0)));
+    harness.run_steps(1);
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(257.0, 400.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(1);
+    for x in [280.0, 300.0, 320.0] {
+        harness.event(egui::Event::PointerMoved(egui::pos2(x, 400.0)));
+        harness.run_steps(1);
+    }
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(320.0, 400.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    assert_eq!(harness.state().sidebar_width(), 320.0);
+    // Past the maximum it stops at 420px.
+    harness.event(egui::Event::PointerMoved(egui::pos2(321.0, 400.0)));
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: egui::pos2(321.0, 400.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        if pressed {
+            harness.run_steps(1);
+            harness.event(egui::Event::PointerMoved(egui::pos2(700.0, 400.0)));
+        }
+        harness.run_steps(1);
+    }
+    assert_eq!(harness.state().sidebar_width(), 420.0);
+}
+
+#[test]
 fn worked_for_row_toggles_the_turn_fold() {
     let mut harness = harness();
     click(&mut harness, egui::pos2(60.0, 248.0));

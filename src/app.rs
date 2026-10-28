@@ -1132,7 +1132,7 @@ impl eframe::App for App {
                 }
                 let docked = self.sidebar_docked();
                 let sidebar =
-                    Rect::from_min_size(rect.min, Vec2::new(theme::SIDEBAR_WIDTH, rect.height()));
+                    Rect::from_min_size(rect.min, Vec2::new(self.sidebar_width(), rect.height()));
                 let workspace = if docked {
                     Rect::from_min_max(Pos2::new(sidebar.right(), rect.top()), rect.max)
                 } else {
@@ -1203,6 +1203,7 @@ impl eframe::App for App {
                 }
                 if docked {
                     self.sidebar(ui, sidebar);
+                    self.sidebar_resize_handle(ui, sidebar);
                 } else {
                     self.sidebar_sheet(ui, rect, sidebar);
                 }

@@ -80,8 +80,9 @@ pub fn default_client_settings() -> Value {
 }
 
 /// Pluto's client state kept with the settings but not a setting: the
-/// Code | Chat mode. Loaded back, left alone by Restore device defaults.
-const KEPT_STATE: [&str; 1] = ["plutoMode"];
+/// Code | Chat mode and the sidebar's width. Loaded back, left alone by
+/// Restore device defaults.
+const KEPT_STATE: [&str; 2] = ["plutoMode", "plutoSidebarWidth"];
 
 /// Client settings saved at `path`, over the defaults; unknown or
 /// unreadable files fall back to the defaults.

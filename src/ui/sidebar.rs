@@ -24,6 +24,9 @@ const LIST_GAP: f32 = 1.0; // gap-px between list items
 pub(crate) const NEW_TOP: f32 = 100.0;
 const SCOPE_TOP: f32 = 172.0;
 const LIST_TOP: f32 = 208.0;
+/// The range the sidebar can be dragged to.
+const SIDEBAR_MIN_WIDTH: f32 = 220.0;
+const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 const FOOTER_HEIGHT: f32 = 48.0;
 
 fn timestamp_ms(iso: Option<&str>) -> i64 {
@@ -252,7 +255,7 @@ impl App {
         let left = rect.left();
         let back = Rect::from_min_size(
             Pos2::new(left + 8.0, rect.bottom() - 36.0),
-            Vec2::new(239.0, 32.0),
+            Vec2::new(rect.width() - 17.0, 32.0),
         );
         let response = ui.interact(back, ui.id().with(id), Sense::click());
         if response.hovered() {
@@ -289,6 +292,66 @@ impl App {
             back_text,
         );
         response.clicked()
+    }
+
+    /// Pluto: the sidebar's width, dragged by its right edge and kept with
+    /// the client settings; the legacy sidebar keeps the fixed width its
+    /// layout is drawn for.
+    pub fn sidebar_width(&self) -> f32 {
+        if self.client_setting("legacySidebarEnabled") == true {
+            return theme::SIDEBAR_WIDTH;
+        }
+        self.client_settings["plutoSidebarWidth"]
+            .as_f64()
+            .map_or(theme::SIDEBAR_WIDTH, |w| {
+                (w as f32).clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+            })
+    }
+
+    /// The docked sidebar's right edge: dragging it resizes the sidebar,
+    /// a double click brings back the default width.
+    pub(crate) fn sidebar_resize_handle(&mut self, ui: &mut Ui, sidebar: Rect) {
+        if self.client_setting("legacySidebarEnabled") == true {
+            return;
+        }
+        // Mostly outside the sidebar, clear of its list's scroll bar.
+        let handle = Rect::from_min_max(
+            Pos2::new(sidebar.right() - 2.0, sidebar.top()),
+            Pos2::new(sidebar.right() + 4.0, sidebar.bottom()),
+        );
+        let response = ui.interact(
+            handle,
+            ui.id().with("sidebar-resize"),
+            Sense::click_and_drag(),
+        );
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ui.painter().rect_filled(
+                Rect::from_min_max(
+                    Pos2::new(sidebar.right() - 1.0, sidebar.top()),
+                    Pos2::new(sidebar.right() + 1.0, sidebar.bottom()),
+                ),
+                0.0,
+                theme::alpha(theme::primary(), 0.5),
+            );
+        }
+        if response.dragged()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let width = (pointer.x - sidebar.left())
+                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+                .round();
+            self.client_settings["plutoSidebarWidth"] = serde_json::json!(width);
+        }
+        if response.drag_stopped() {
+            self.save_client_settings();
+        }
+        if response.double_clicked() {
+            if let Some(settings) = self.client_settings.as_object_mut() {
+                settings.remove("plutoSidebarWidth");
+            }
+            self.save_client_settings();
+        }
     }
 
     /// Whether the sidebar takes its column in the layout.
