@@ -306,7 +306,8 @@ pub(crate) fn relative_label(value: Option<&str>, now: chrono::DateTime<chrono::
 
 impl App {
     /// The page's rows, following the list once connected.
-    pub(crate) fn scheduled_tasks_sections(&mut self) -> Vec<Section> {
+    /// Follows the environment's tasks (`scheduledTasksLive`) once connected.
+    pub(crate) fn watch_scheduled_tasks(&mut self) {
         if !self.scheduled.streaming && self.connected() {
             self.scheduled.streaming = true;
             self.send(crate::protocol::Action::Stream {
@@ -315,6 +316,24 @@ impl App {
                 payload: json!({}),
             });
         }
+    }
+
+    /// The live list, once it arrived.
+    pub(crate) fn scheduled_task_list(&self) -> Option<&Result<Vec<Value>, String>> {
+        self.scheduled.tasks.as_ref()
+    }
+
+    /// `scheduledTasks.setEnabled` or `scheduledTasks.runNow` for `task`.
+    pub(crate) fn scheduled_task_action(&mut self, task: &str, method: &'static str, extra: Value) {
+        let mut input = json!({"id": task});
+        if let (Some(input), Some(extra)) = (input.as_object_mut(), extra.as_object()) {
+            input.extend(extra.clone());
+        }
+        self.send_request(format!("scheduled-mutation:{task}"), method, input);
+    }
+
+    pub(crate) fn scheduled_tasks_sections(&mut self) -> Vec<Section> {
+        self.watch_scheduled_tasks();
         let row =
             |id: String, title: String, description: String, status: Option<String>, control| Row {
                 id,
@@ -489,7 +508,7 @@ impl App {
         self.scheduled.editor = Some(Draft::new(project.map(|p| p.id).unwrap_or_default(), model));
     }
 
-    fn edit_scheduled_task(&mut self, id: &str) {
+    pub(crate) fn edit_scheduled_task(&mut self, id: &str) {
         let task = self
             .scheduled
             .tasks

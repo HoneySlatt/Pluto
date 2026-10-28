@@ -8,9 +8,13 @@
 //! pairs its parent's row with "Merge back" (`thread.merge_back` from its
 //! latest finished run).
 //!
+//! The automations bound to the thread (`ThreadAutomationsPanel.tsx`) come
+//! first: each scheduled task's schedule and next run, Edit (Settings), Run
+//! now and its pause switch.
+//!
 //! Not ported: the workspace section's pickers, scripts, editor and git
 //! controls (the header keeps them), the inline card beside a wide canvas,
-//! automations, the subagent hover cards, a workflow row's phases, and
+//! the subagent hover cards, a workflow row's phases, and
 //! "Disconnect agent session". A working subagent's row stops it on hover
 //! (`subagent.stop`, or its thread's run), a running workflow's stops the
 //! workflow (`orchestration.stopWorkflow`).
@@ -362,6 +366,10 @@ pub(crate) struct DetailsState {
 /// One drawn lineage row's action.
 enum Pick {
     Open(String),
+    ManageTasks,
+    EditTask(String),
+    RunTask(String),
+    ToggleTask(String, bool),
     Stop(String, Stop),
     Merge(String),
     More(&'static str),
@@ -423,6 +431,22 @@ impl App {
                 .unwrap_or(INITIAL)
                 .min(len)
         };
+        // `ThreadAutomationsPanel`: the tasks bound to this thread.
+        self.watch_scheduled_tasks();
+        let (automations, automation_error): (Vec<serde_json::Value>, Option<String>) =
+            match self.scheduled_task_list() {
+                Some(Ok(tasks)) => (
+                    tasks
+                        .iter()
+                        .filter(|t| t["threadId"] == thread.id.as_str())
+                        .cloned()
+                        .collect(),
+                    None,
+                ),
+                Some(Err(error)) => (Vec::new(), Some(error.clone())),
+                None => (Vec::new(), None),
+            };
+        let automations_shown = !automations.is_empty() || automation_error.is_some();
         let lineage = !rows.is_empty() || running > 0;
         // Heights: the workspace rows, then the lineage heading, its groups
         // and their "Show more" rows.
@@ -431,6 +455,12 @@ impl App {
         };
         let workspace = 8.0 + 2.0 * ROW + 10.0;
         let mut height = workspace;
+        if automations_shown {
+            height += 1.0 + 8.0 + 32.0 + 4.0 + automations.len() as f32 * AUTOMATION_ROW + 10.0;
+            if automation_error.is_some() {
+                height += 24.0;
+            }
+        }
         if lineage {
             height += 1.0 + 8.0 + 32.0 + 4.0;
             for (group, list) in [("related", &related), ("active", &active)] {
@@ -461,6 +491,7 @@ impl App {
         let mut pick: Option<Pick> = None;
         let current = thread.id.clone();
         let threads = self.state.threads.clone();
+        let now = self.now;
         let branch = thread.branch.clone();
         let worktree = thread.worktree_path.clone();
         let mark_of = |instance: &str| {
@@ -529,16 +560,67 @@ impl App {
                             );
                         }
                         y += ROW + 10.0;
+                        if automations_shown {
+                            section_rule(ui, clip, y);
+                            y += 1.0 + 8.0;
+                            let heading =
+                                Rect::from_min_size(Pos2::new(left, y), Vec2::new(width, 32.0));
+                            widgets::text_in(
+                                ui,
+                                Rect::from_min_max(
+                                    Pos2::new(left + 6.0, y),
+                                    Pos2::new(heading.right() - 32.0, heading.bottom()),
+                                ),
+                                "Automations",
+                                font(11.0, Weight::Medium),
+                                theme::muted_foreground(),
+                            );
+                            let manage = Rect::from_center_size(
+                                Pos2::new(heading.right() - 6.0 - 12.0, heading.center().y),
+                                Vec2::splat(24.0),
+                            );
+                            if widgets::icon_button(
+                                ui,
+                                manage,
+                                "automations-manage",
+                                "settings-2",
+                                14.0,
+                                theme::muted_foreground(),
+                                "Manage scheduled tasks",
+                            )
+                            .clicked()
+                            {
+                                pick = Some(Pick::ManageTasks);
+                            }
+                            y += 32.0 + 4.0;
+                            if let Some(error) = &automation_error {
+                                widgets::text_in(
+                                    ui,
+                                    Rect::from_min_size(
+                                        Pos2::new(left + 10.0, y),
+                                        Vec2::new(width - 20.0, 24.0),
+                                    ),
+                                    &format!("Could not load automations: {error}"),
+                                    font(11.0, Weight::Regular),
+                                    Color32::from_rgb(251, 65, 74),
+                                );
+                                y += 24.0;
+                            }
+                            for task in &automations {
+                                let rect = Rect::from_min_size(
+                                    Pos2::new(left, y),
+                                    Vec2::new(width, AUTOMATION_ROW),
+                                );
+                                if let Some(p) = automation_row(ui, rect, task, now) {
+                                    pick = Some(p);
+                                }
+                                y += AUTOMATION_ROW;
+                            }
+                            y += 10.0;
+                        }
                         if lineage {
                             // `ThreadDetailsSection`: `border-t`, then the heading.
-                            ui.painter().rect_filled(
-                                Rect::from_min_size(
-                                    Pos2::new(clip.left(), y),
-                                    Vec2::new(clip.width(), 1.0),
-                                ),
-                                0.0,
-                                theme::alpha(theme::border(), 0.65),
-                            );
+                            section_rule(ui, clip, y);
                             y += 1.0 + 8.0;
                             let title = if running > 0 {
                                 format!("Lineage · {running} running")
@@ -680,6 +762,27 @@ impl App {
                     );
                 }
             },
+            Some(Pick::ManageTasks) => {
+                self.open_menu = None;
+                self.open_settings();
+                self.open_settings_page(crate::ui::scheduled_tasks::SCHEDULED_TASKS_PAGE);
+            }
+            Some(Pick::EditTask(id)) => {
+                self.open_menu = None;
+                self.open_settings();
+                self.open_settings_page(crate::ui::scheduled_tasks::SCHEDULED_TASKS_PAGE);
+                self.edit_scheduled_task(&id);
+            }
+            Some(Pick::RunTask(id)) => {
+                self.scheduled_task_action(&id, "scheduledTasks.runNow", json!({}));
+            }
+            Some(Pick::ToggleTask(id, on)) => {
+                self.scheduled_task_action(
+                    &id,
+                    "scheduledTasks.setEnabled",
+                    json!({"enabled": on}),
+                );
+            }
             Some(Pick::More(group)) => {
                 let visible = self.thread_details.visible.entry(group).or_insert(INITIAL);
                 *visible += PAGE;
@@ -690,6 +793,130 @@ impl App {
             None => {}
         }
     }
+}
+
+/// An automation row: `py-1.5` around a 14px title and an 11px schedule.
+const AUTOMATION_ROW: f32 = 48.0;
+
+/// `ThreadDetailsSection`'s `border-t`.
+fn section_rule(ui: &Ui, clip: Rect, y: f32) {
+    ui.painter().rect_filled(
+        Rect::from_min_size(Pos2::new(clip.left(), y), Vec2::new(clip.width(), 1.0)),
+        0.0,
+        theme::alpha(theme::border(), 0.65),
+    );
+}
+
+/// A bound task: its calendar icon with the last outcome's dot, title and
+/// schedule, Edit, Run now (not for webhooks) and the pause switch.
+fn automation_row(
+    ui: &mut Ui,
+    rect: Rect,
+    task: &serde_json::Value,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<Pick> {
+    let id = task["id"].as_str().unwrap_or_default().to_owned();
+    let muted = theme::muted_foreground();
+    let icon_center = Pos2::new(rect.left() + 10.0 + 8.0, rect.center().y);
+    theme::paint_icon(
+        ui,
+        "calendar-clock",
+        Rect::from_center_size(icon_center, Vec2::splat(16.0)),
+        16.0,
+        muted,
+    );
+    let dot = match task["lastRunStatus"].as_str() {
+        Some("running") => Color32::from_rgb(14, 165, 233),
+        Some("succeeded") => Color32::from_rgb(16, 185, 129),
+        Some("failed") => Color32::from_rgb(251, 65, 74),
+        _ => theme::alpha(muted, 0.4),
+    };
+    ui.painter()
+        .circle_filled(icon_center + Vec2::new(7.0, -7.0), 3.0, dot);
+    let enabled = task["enabled"] == true;
+    let mut right = rect.right() - 10.0;
+    let mut pick = None;
+    if crate::ui::settings::switch(
+        ui,
+        right,
+        rect.center().y,
+        enabled,
+        &format!("automation-{id}"),
+    ) {
+        pick = Some(Pick::ToggleTask(id.clone(), !enabled));
+    }
+    right -= 30.0 + 6.0;
+    if task["schedule"]["type"] != "webhook" {
+        let run =
+            Rect::from_center_size(Pos2::new(right - 12.0, rect.center().y), Vec2::splat(24.0));
+        let running = task["lastRunStatus"] == "running";
+        let tint = theme::alpha(muted, if running { 0.64 } else { 1.0 });
+        if widgets::icon_button(
+            ui,
+            run,
+            ("automation-run", &id),
+            "play",
+            14.0,
+            tint,
+            "Run now",
+        )
+        .clicked()
+            && !running
+        {
+            pick = Some(Pick::RunTask(id.clone()));
+        }
+        right = run.left() - 2.0;
+    }
+    let edit = Rect::from_center_size(Pos2::new(right - 12.0, rect.center().y), Vec2::splat(24.0));
+    if widgets::icon_button(
+        ui,
+        edit,
+        ("automation-edit", &id),
+        "pencil",
+        14.0,
+        muted,
+        "Edit automation",
+    )
+    .clicked()
+    {
+        pick = Some(Pick::EditTask(id.clone()));
+    }
+    right = edit.left() - 6.0;
+    let text_left = rect.left() + 10.0 + 16.0 + 10.0;
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(
+            Pos2::new(text_left, rect.top() + 6.0),
+            Pos2::new(right, rect.top() + 26.0),
+        ),
+        task["title"].as_str().unwrap_or_default(),
+        font(14.0, Weight::Medium),
+        theme::alpha(theme::foreground(), 0.8),
+    );
+    let next = task["nextRunAt"].as_str();
+    let detail = format!(
+        "{}{}",
+        crate::ui::scheduled_tasks::schedule_label(&task["schedule"]),
+        match (enabled, next) {
+            (true, Some(at)) => format!(
+                " · next {}",
+                crate::ui::scheduled_tasks::relative_label(Some(at), now)
+            ),
+            (true, None) => String::new(),
+            (false, _) => " · paused".to_owned(),
+        }
+    );
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(
+            Pos2::new(text_left, rect.top() + 26.0),
+            Pos2::new(right, rect.top() + 42.0),
+        ),
+        &detail,
+        font(11.0, Weight::Regular),
+        muted,
+    );
+    pick
 }
 
 /// A workspace row: the icon, then the label (`THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS`).
