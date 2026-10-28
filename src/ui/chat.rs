@@ -1252,7 +1252,10 @@ impl App {
             }
             None => match self.preferred_editor() {
                 Some(editor) => self.open_in_editor(path, editor),
-                None => self.status = Some("No installed editors found".into()),
+                None => self.notify(
+                    crate::ui::toasts::Kind::Warning,
+                    "No installed editors found",
+                ),
             },
         }
     }

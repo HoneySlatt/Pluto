@@ -130,7 +130,10 @@ impl App {
                 });
             }
         } else {
-            self.status = Some(format!("The {label} surface is not implemented yet"));
+            self.notify(
+                crate::ui::toasts::Kind::Info,
+                format!("The {label} surface is not implemented yet"),
+            );
         }
     }
 

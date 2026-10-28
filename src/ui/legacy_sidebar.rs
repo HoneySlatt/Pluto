@@ -645,7 +645,10 @@ impl App {
             }
             "copy-path" => {
                 ui.ctx().copy_text(project.workspace_root.clone());
-                self.status = Some(format!("Path copied: {}", project.workspace_root));
+                self.notify(
+                    crate::ui::toasts::Kind::Success,
+                    format!("Path copied: {}", project.workspace_root),
+                );
             }
             "delete" => self.confirm_legacy_remove(&project),
             _ => {}
@@ -1173,7 +1176,10 @@ impl App {
                 // `submitProjectRename`: a trimmed, non-empty, changed title.
                 let trimmed = title.trim().to_owned();
                 if trimmed.is_empty() {
-                    self.status = Some("Project title cannot be empty".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Warning,
+                        "Project title cannot be empty",
+                    );
                     self.legacy_project_rename = Some((project_id, title, true));
                     return;
                 }

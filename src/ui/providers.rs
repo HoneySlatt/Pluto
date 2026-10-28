@@ -955,7 +955,10 @@ impl App {
             theme::foreground(),
         );
         if response.clicked() {
-            self.status = Some("Usage limit hubs are not implemented yet".into());
+            self.notify(
+                crate::ui::toasts::Kind::Info,
+                "Usage limit hubs are not implemented yet",
+            );
         }
         let hubs = Rect::from_min_size(Pos2::new(left, y + 38.0), Vec2::new(WIDTH, 46.0));
         paint_card(ui, hubs);
@@ -1291,7 +1294,10 @@ impl App {
             )
             .clicked()
             {
-                self.status = Some("Provider updates are not implemented yet".into());
+                self.notify(
+                    crate::ui::toasts::Kind::Info,
+                    "Provider updates are not implemented yet",
+                );
             }
             x = button.left();
         }

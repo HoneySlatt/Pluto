@@ -1177,9 +1177,10 @@ impl App {
                     server(self, "backgroundActivity", activity);
                 }
             }
-            (_, Click) | ("default-model", _) | ("text-generation-model", _) => {
-                self.status = Some("This settings control is not implemented yet".into())
-            }
+            (_, Click) | ("default-model", _) | ("text-generation-model", _) => self.notify(
+                crate::ui::toasts::Kind::Info,
+                "This settings control is not implemented yet",
+            ),
             (_, action) => {
                 if let Some(key) = client_key {
                     let value = match action {
@@ -1650,9 +1651,10 @@ impl App {
                 self.update_setting(Store::Server, "enableAgentBrowserAccess", json!(true))
             }
             // Turning the hub on installs device tools on the server; not ported.
-            ("device-hub" | "agent-device-access" | "device-hosts", _) => {
-                self.status = Some("Device setup is not implemented yet".into())
-            }
+            ("device-hub" | "agent-device-access" | "device-hosts", _) => self.notify(
+                crate::ui::toasts::Kind::Info,
+                "Device setup is not implemented yet",
+            ),
             _ => {}
         }
     }
@@ -1707,7 +1709,10 @@ impl App {
             color,
         );
         if response.clicked() {
-            self.status = Some("Adding environments is not implemented yet".into());
+            self.notify(
+                crate::ui::toasts::Kind::Info,
+                "Adding environments is not implemented yet",
+            );
         }
 
         let card = Rect::from_min_size(Pos2::new(left, top + 38.0), Vec2::new(width, 234.0));
@@ -4190,7 +4195,10 @@ impl App {
                         self.keybinding_search = Some(String::new());
                         self.keybinding_search_focus = true;
                     }
-                    _ => self.status = Some(format!("{tip} is not implemented yet")),
+                    _ => self.notify(
+                        crate::ui::toasts::Kind::Info,
+                        format!("{tip} is not implemented yet"),
+                    ),
                 }
             }
         }

@@ -298,7 +298,10 @@ impl App {
             }
             "chat-memory:write" => {
                 if let Err(error) = result {
-                    self.status = Some(format!("Could not save the memories: {error}"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("Could not save the memories: {error}"),
+                    );
                     self.request_memory();
                 }
                 true
@@ -329,7 +332,10 @@ impl App {
             }
             key if key.starts_with("chat-instructions:write:") => {
                 if let Err(error) = result {
-                    self.status = Some(format!("Could not save the custom instructions: {error}"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("Could not save the custom instructions: {error}"),
+                    );
                 }
                 true
             }
@@ -635,7 +641,10 @@ impl App {
         };
         match decision {
             Some(text) if text.is_empty() => {
-                self.status = Some("A memory needs some text; use Forget to remove it".into());
+                self.notify(
+                    crate::ui::toasts::Kind::Warning,
+                    "A memory needs some text; use Forget to remove it",
+                );
                 self.memory.editing = Some(edit);
             }
             text => self.apply_memory_edit(&edit.scope, &edit.id, text.as_deref()),

@@ -249,7 +249,10 @@ impl App {
     /// Creates a chat project named `name` and opens its page.
     fn create_chat_project(&mut self, name: &str) {
         let Some(root) = self.chat_projects_root() else {
-            self.status = Some("Projects need a connected server with a Scratch folder".into());
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Projects need a connected server with a Scratch folder",
+            );
             return;
         };
         let folder = format!("{root}/{}", uuid::Uuid::new_v4());
@@ -408,7 +411,7 @@ impl App {
                             "contents": data, "encoding": "base64"}),
                     );
                 }
-                Err(error) => self.status = Some(error),
+                Err(error) => self.notify(crate::ui::toasts::Kind::Error, error),
             }
         }
     }
@@ -445,7 +448,10 @@ impl App {
                     self.share_instructions(&folder);
                     self.chat_projects.open_root = Some(folder);
                 }
-                Err(error) => self.status = Some(format!("Could not create the project: {error}")),
+                Err(error) => self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not create the project: {error}"),
+                ),
             }
             return true;
         }
@@ -532,7 +538,10 @@ impl App {
                     page.uploading.remove(name);
                 }
                 if let Err(error) = result {
-                    self.status = Some(format!("Could not add {name} to the project: {error}"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("Could not add {name} to the project: {error}"),
+                    );
                 }
                 if let Some(project) = self.state.project(project_id).cloned() {
                     self.list_project_files(&project);
@@ -553,7 +562,10 @@ impl App {
             }
             "save" | "profile" | "setup" | "file-delete" | "memory-save" => {
                 if let Err(error) = result {
-                    self.status = Some(format!("Could not update the project: {error}"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("Could not update the project: {error}"),
+                    );
                 }
             }
             _ => return false,
@@ -783,7 +795,7 @@ impl App {
         let trimmed = name.trim().to_owned();
         match decision {
             Some(true) if trimmed.is_empty() => {
-                self.status = Some("A project needs a name".into());
+                self.notify(crate::ui::toasts::Kind::Warning, "A project needs a name");
                 self.chat_projects.dialog = Some((project_id, name, true));
             }
             Some(true) => {

@@ -1682,7 +1682,7 @@ impl App {
         let files = match self.file_attachments() {
             Ok(files) => files,
             Err(reason) => {
-                self.status = Some(reason);
+                self.notify(crate::ui::toasts::Kind::Warning, reason);
                 return;
             }
         };
@@ -1707,7 +1707,10 @@ impl App {
             match self.image_model() {
                 Some(model) => model,
                 None => {
-                    self.status = Some("Image generation needs Codex (a ChatGPT login)".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Warning,
+                        "Image generation needs Codex (a ChatGPT login)",
+                    );
                     return;
                 }
             }
@@ -1761,8 +1764,10 @@ impl App {
             let workspace = self.draft_workspace().cloned().unwrap_or_default();
             if self.draft_env_mode() == "worktree" && self.workspace_is_repo() {
                 let Some(branch) = self.draft_worktree_base() else {
-                    self.status =
-                        Some("Select a base branch before sending in New worktree mode.".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Warning,
+                        "Select a base branch before sending in New worktree mode.",
+                    );
                     return;
                 };
                 input["workspaceStrategy"] = json!({"type": "worktree", "baseRef": branch});
@@ -1853,7 +1858,10 @@ impl App {
     /// then the message (`startThreadTurn`).
     pub(crate) fn start_turn(&mut self, mut send: TurnSend) {
         if self.blocks_turn_starts() {
-            self.status = Some("Turn starts are blocked in this run".into());
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Turn starts are blocked in this run",
+            );
             return;
         }
         if !send.uploads.is_empty() {
@@ -1922,11 +1930,12 @@ impl App {
         if key.starts_with("launch:") && self.selected.as_deref() == Some(thread) {
             self.select_thread(None);
         }
-        self.status = Some(if self.give_back(key) {
+        let text = if self.give_back(key) {
             format!("{error} Your text is back in the composer.")
         } else {
             error.to_owned()
-        });
+        };
+        self.notify(crate::ui::toasts::Kind::Error, text);
     }
 
     /// A command a message waited on was received: the message goes on, or

@@ -1035,7 +1035,10 @@ impl App {
                             panel.maximized = !panel.maximized;
                         }
                     }
-                    _ => self.status = Some(format!("{tip} is not implemented yet")),
+                    _ => self.notify(
+                        crate::ui::toasts::Kind::Info,
+                        format!("{tip} is not implemented yet"),
+                    ),
                 }
             }
         }

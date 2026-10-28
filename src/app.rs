@@ -79,7 +79,8 @@ pub struct App {
     /// The drafts of the composers not open, and of the messages on their way.
     pub(crate) drafts: crate::ui::drafts::Drafts,
     block_turn_starts: bool,
-    pub(crate) status: Option<String>,
+    /// The next toast: its kind and text (`notify`).
+    pub(crate) status: Option<(crate::ui::toasts::Kind, String)>,
     pub(crate) expansion: Expansion,
     pub(crate) settled_expanded: bool,
     pub(crate) snoozed_expanded: bool,
@@ -686,6 +687,11 @@ impl App {
         app
     }
 
+    /// Shows `text` as the next toast, of `kind` (success, warning, error…).
+    pub(crate) fn notify(&mut self, kind: crate::ui::toasts::Kind, text: impl Into<String>) {
+        self.status = Some((kind, text.into()));
+    }
+
     pub(crate) fn connected(&self) -> bool {
         self.connection.is_some() && self.synced && self.screen == Screen::Main
     }
@@ -718,7 +724,7 @@ impl App {
                     }
                     Route::Shell => {
                         if let Err(error) = self.state.shell(&value) {
-                            self.status = Some(error);
+                            self.notify(crate::ui::toasts::Kind::Error, error);
                         }
                     }
                     Route::Thread(id) => {
@@ -730,7 +736,7 @@ impl App {
                             self.thread_retry = None;
                         }
                         if let Err(error) = self.state.thread(&id, &value) {
-                            self.status = Some(error);
+                            self.notify(crate::ui::toasts::Kind::Error, error);
                         }
                     }
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
@@ -770,11 +776,12 @@ impl App {
                 Event::Failed(Route::Command(id), message) => {
                     self.finish_reply(&id);
                     let waiting = self.turn_command_done(&id, false);
-                    self.status = Some(if waiting || self.give_back(&format!("command:{id}")) {
+                    let text = if waiting || self.give_back(&format!("command:{id}")) {
                         format!("Message not sent: {message} Your text is back in the composer.")
                     } else {
                         message
-                    });
+                    };
+                    self.notify(crate::ui::toasts::Kind::Error, text);
                 }
                 Event::Failed(Route::Thread(id), message) => {
                     let attempts = match &self.thread_retry {
@@ -788,10 +795,10 @@ impl App {
                     if self.selected.as_deref() == Some(id.as_str()) && attempts < 3 {
                         self.thread_retry = Some((id, attempts + 1, true));
                     } else {
-                        self.status = Some(message);
+                        self.notify(crate::ui::toasts::Kind::Error, message);
                     }
                 }
-                Event::Failed(_, message) => self.status = Some(message),
+                Event::Failed(_, message) => self.notify(crate::ui::toasts::Kind::Error, message),
                 Event::Disconnected(message) => disconnected = Some(message),
             }
         }
@@ -809,8 +816,8 @@ impl App {
         if let Some(message) = disconnected {
             // What was on its way may not have arrived: it comes back.
             if self.give_back_all() > 0 {
-                self.status = Some(
-                    "The connection dropped while sending: your message is back in the composer. Check the thread before sending it again.".into(),
+                self.notify(crate::ui::toasts::Kind::Warning,
+                    "The connection dropped while sending: your message is back in the composer. Check the thread before sending it again.",
                 );
             }
             self.connection = None;
@@ -1130,7 +1137,10 @@ impl App {
     /// commands to `orchestration.dispatchCommand`.
     pub(crate) fn dispatch(&mut self, command: Value) {
         if self.block_turn_starts && command["type"] == "message.dispatch" {
-            self.status = Some("Turn starts are blocked in this run".into());
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Turn starts are blocked in this run",
+            );
             return;
         }
         if command["type"]
@@ -1316,8 +1326,8 @@ impl App {
 
     /// Status messages join the toasts, which draw at the top right.
     fn status_toast(&mut self, ui: &mut egui::Ui, rect: Rect) {
-        if let Some(message) = self.status.take() {
-            self.toasts.status(message);
+        if let Some((kind, message)) = self.status.take() {
+            self.toasts.notice(kind, message);
         }
         self.tick_git_toast(ui.ctx());
         match self.toasts.show(ui, rect) {
@@ -1853,7 +1863,7 @@ impl App {
             }
         } else if key.starts_with("project-mutation:") {
             if let Err(error) = result {
-                self.status = Some(error);
+                self.notify(crate::ui::toasts::Kind::Error, error);
             }
         } else if key == "usage-limits" {
             self.usage.now = chrono::Utc::now();
@@ -1872,7 +1882,10 @@ impl App {
             self.diff_contents.insert(key, lines);
         } else if key.starts_with("keybinding-") {
             if let Err(error) = result {
-                self.status = Some(format!("Could not save the keybinding: {error}"));
+                self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not save the keybinding: {error}"),
+                );
             }
         } else if key.starts_with("content-search:") {
             self.content_search.receive(&key, result);
@@ -1952,7 +1965,10 @@ impl App {
             match result {
                 // Re-subscribe so the header picks up the new repository.
                 Ok(_) => self.watched_vcs = None,
-                Err(error) => self.status = Some(format!("Could not initialize Git: {error}")),
+                Err(error) => self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not initialize Git: {error}"),
+                ),
             }
         }
     }
@@ -2156,8 +2172,8 @@ mod thread_retry_tests {
         assert_eq!(app.composer, "hello");
         assert!(
             app.status
-                .as_deref()
-                .is_some_and(|s| s.contains("back in the composer"))
+                .as_ref()
+                .is_some_and(|(_, s)| s.contains("back in the composer"))
         );
 
         // A stream is open, then the connection drops.

@@ -98,7 +98,10 @@ impl App {
             return false;
         }
         if let Err(error) = result {
-            self.status = Some(format!("Could not open in editor: {error}"));
+            self.notify(
+                crate::ui::toasts::Kind::Error,
+                format!("Could not open in editor: {error}"),
+            );
         }
         true
     }

@@ -77,7 +77,10 @@ impl App {
             },
             Err(error) => {
                 self.scratch = None;
-                self.status = Some(format!("Could not start without a project: {error}"));
+                self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not start without a project: {error}"),
+                );
             }
         }
         true

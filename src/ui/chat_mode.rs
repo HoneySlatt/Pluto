@@ -288,7 +288,10 @@ impl App {
     /// Opens a new chat in `space`, creating it the first time.
     fn open_space(&mut self, space: Space) {
         let Some(root) = self.space_root(space) else {
-            self.status = Some("Chats need a connected server with a Scratch folder".into());
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Chats need a connected server with a Scratch folder",
+            );
             return;
         };
         match self.space_project(space) {
@@ -409,7 +412,10 @@ impl App {
                 {
                     state.profile_written = false;
                 }
-                self.status = Some(format!("Could not prepare the chat space: {error}"));
+                self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not prepare the chat space: {error}"),
+                );
             }
             return true;
         }
@@ -431,7 +437,10 @@ impl App {
             }
             Err(error) => {
                 state.pending_draft = false;
-                self.status = Some(format!("Could not create the chat space: {error}"));
+                self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not create the chat space: {error}"),
+                );
             }
         }
         true

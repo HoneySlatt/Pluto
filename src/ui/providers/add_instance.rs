@@ -307,7 +307,10 @@ impl App {
             close = true;
         }
         if chatgpt {
-            self.status = Some("Signing in a ChatGPT account is not implemented yet".into());
+            self.notify(
+                crate::ui::toasts::Kind::Info,
+                "Signing in a ChatGPT account is not implemented yet",
+            );
         }
         if save {
             dialog.attempted = true;
@@ -338,7 +341,7 @@ impl App {
                     "instanceId": instance_id,
                     "instance": Value::Object(instance),
                 }));
-                self.status = Some("Provider instance added".into());
+                self.notify(crate::ui::toasts::Kind::Success, "Provider instance added");
                 return;
             }
         }

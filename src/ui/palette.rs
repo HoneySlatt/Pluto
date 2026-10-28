@@ -739,7 +739,10 @@ impl App {
                     return;
                 }
                 Ok(None) => {}
-                Err(error) => self.status = Some(format!("Could not open image picker: {error}")),
+                Err(error) => self.notify(
+                    crate::ui::toasts::Kind::Error,
+                    format!("Could not open image picker: {error}"),
+                ),
             }
         }
         // The root view also finds threads by their messages.
@@ -1260,7 +1263,10 @@ impl App {
             }
             Action::Missing(what) => {
                 self.palette = PaletteState::default();
-                self.status = Some(format!("{what} is not implemented yet"));
+                self.notify(
+                    crate::ui::toasts::Kind::Info,
+                    format!("{what} is not implemented yet"),
+                );
             }
         }
     }

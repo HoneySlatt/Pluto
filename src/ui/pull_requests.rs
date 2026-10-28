@@ -451,7 +451,10 @@ impl App {
         )
         .clicked()
         {
-            self.status = Some("The pull request panel is not implemented yet".into());
+            self.notify(
+                crate::ui::toasts::Kind::Info,
+                "The pull request panel is not implemented yet",
+            );
         }
         self.request_pull_requests(false);
 
@@ -690,8 +693,10 @@ impl App {
             y = pull_request_group_header(ui, group, left, y, width);
             for entry in &group.entries {
                 if self.pull_request_row(ui, entry, left, y, width, multiple_hosts) {
-                    self.status =
-                        Some("The pull request detail panel is not implemented yet".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Info,
+                        "The pull request detail panel is not implemented yet",
+                    );
                 }
                 y += 56.0 + 2.0;
             }

@@ -378,7 +378,10 @@ impl App {
             BranchPoint::Start(root) => {
                 // Writing before the file is read would lose its links.
                 let Some(roots) = &mut self.chat_versions.roots else {
-                    self.status = Some("Chat versions are still loading; try again".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Warning,
+                        "Chat versions are still loading; try again",
+                    );
                     return;
                 };
                 roots.insert(version.clone(), root);
@@ -480,7 +483,10 @@ impl App {
             }
             "chat-versions:write" => {
                 if let Err(error) = result {
-                    self.status = Some(format!("Could not save the chat versions: {error}"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("Could not save the chat versions: {error}"),
+                    );
                 }
                 true
             }

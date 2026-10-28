@@ -668,7 +668,10 @@ impl App {
                 .iter()
                 .any(|t| t.id == citation.thread_id);
         if !known {
-            self.status = Some("Could not open the cited response".into());
+            self.notify(
+                crate::ui::toasts::Kind::Error,
+                "Could not open the cited response",
+            );
             return;
         }
         if self.selected.as_deref() != Some(citation.thread_id.as_str()) {

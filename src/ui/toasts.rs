@@ -98,14 +98,20 @@ impl Toasts {
 
     /// A status message, once: repeating the newest one restarts its timer.
     pub(crate) fn status(&mut self, message: String) {
+        self.notice(Kind::Plain, message);
+    }
+
+    /// A message of `kind`, once: repeating the newest one restarts its
+    /// timer.
+    pub(crate) fn notice(&mut self, kind: Kind, message: String) {
         if let Some((_, last)) = self.list.last_mut()
-            && last.kind == Kind::Plain
+            && last.kind == kind
             && last.title == message
         {
             last.timeout = Some(DEFAULT_TIMEOUT);
             return;
         }
-        self.add(Toast::new(Kind::Plain, message));
+        self.add(Toast::new(kind, message));
     }
 
     /// Draws the stack in `area`; returns the action clicked.

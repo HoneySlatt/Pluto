@@ -427,7 +427,10 @@ impl App {
             ("project-name", RowAction::Text(title)) => {
                 let title = title.trim().to_owned();
                 if title.is_empty() {
-                    self.status = Some("Project title cannot be empty".into());
+                    self.notify(
+                        crate::ui::toasts::Kind::Warning,
+                        "Project title cannot be empty",
+                    );
                 } else if title != project.title {
                     self.dispatch(json!({
                         "type": "project.update",

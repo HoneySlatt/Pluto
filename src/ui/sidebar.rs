@@ -625,7 +625,10 @@ impl App {
                 } else if *icon == "palette" {
                     self.open_design_home();
                 } else {
-                    self.status = Some(format!("{label} is not implemented yet"));
+                    self.notify(
+                        crate::ui::toasts::Kind::Info,
+                        format!("{label} is not implemented yet"),
+                    );
                 }
             }
         }

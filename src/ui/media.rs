@@ -358,7 +358,7 @@ impl App {
             }
             Some(MediaState::Failed) => {
                 self.media_pending = None;
-                self.status = Some("Unable to open file".into());
+                self.notify(crate::ui::toasts::Kind::Error, "Unable to open file");
             }
             _ => {}
         }
@@ -372,7 +372,12 @@ impl App {
     /// The open image menu, and the toasts of finished saves and copies.
     pub(crate) fn media_menu(&mut self, ui: &mut Ui) {
         if let Some(notice) = NOTICES.lock().ok().and_then(|mut n| n.pop()) {
-            self.status = Some(notice);
+            let kind = if notice.starts_with("Could not") {
+                crate::ui::toasts::Kind::Error
+            } else {
+                crate::ui::toasts::Kind::Success
+            };
+            self.notify(kind, notice);
         }
         let Some((source, state)) = self.media_menu.take() else {
             return;
@@ -415,19 +420,19 @@ impl App {
             Some("copy-full-path") => {
                 if let Some(Reference::File { path, .. }) = &source.reference {
                     ctx.copy_text(path.clone());
-                    self.status = Some("Path copied".into());
+                    self.notify(crate::ui::toasts::Kind::Success, "Path copied");
                 }
             }
             Some("copy-relative-path") => {
                 if let Some(relative) = relative {
                     ctx.copy_text(relative);
-                    self.status = Some("Path copied".into());
+                    self.notify(crate::ui::toasts::Kind::Success, "Path copied");
                 }
             }
             Some("copy-url") => {
                 if let Some(Reference::Url(url)) = &source.reference {
                     ctx.copy_text(url.clone());
-                    self.status = Some("URL copied".into());
+                    self.notify(crate::ui::toasts::Kind::Success, "URL copied");
                 }
             }
             Some("open-file") => {

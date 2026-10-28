@@ -834,9 +834,10 @@ impl App {
                     if self.composer_images.len() + self.composer_files.len()
                         >= MAX_ATTACHMENTS =>
                 {
-                    self.status = Some(format!(
-                        "You can attach up to {MAX_ATTACHMENTS} files per message."
-                    ));
+                    self.notify(
+                        crate::ui::toasts::Kind::Error,
+                        format!("You can attach up to {MAX_ATTACHMENTS} files per message."),
+                    );
                 }
                 Ok(Attached::Image(image)) => self.composer_images.push(image),
                 Ok(Attached::File(file)) => {
@@ -849,7 +850,7 @@ impl App {
                     );
                     self.composer_files.push(file);
                 }
-                Err(error) => self.status = Some(error),
+                Err(error) => self.notify(crate::ui::toasts::Kind::Error, error),
             }
         }
         let finished: Vec<_> = match self.file_uploads.lock() {
