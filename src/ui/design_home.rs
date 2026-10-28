@@ -21,6 +21,7 @@ use crate::ui::widgets;
 
 const WIDTH: f32 = 720.0;
 const MODEL_MENU: &str = "design-home-model";
+const TRAITS_MENU: &str = "design-home-traits";
 const KIND_MENU: &str = "design-home-kind";
 const PROFILE_PATH: &str = ".pluto/design.json";
 
@@ -326,9 +327,19 @@ impl App {
             16.0,
             theme::primary_foreground(),
         );
+        // The model's thinking level (`TraitsPicker`), left of the button.
+        let traits_label = self.traits_label(&selection);
+        let traits_button = traits_label.as_ref().map(|label| {
+            let width = widgets::text_width(ui, label, font(13.0, Weight::Medium)) + 34.0;
+            Rect::from_min_size(
+                Pos2::new(create.left() - 8.0 - width, row_y),
+                Vec2::new(width, 30.0),
+            )
+        });
+        let agent_right = traits_button.map_or(create.left() - 8.0, |rect| rect.left() - 4.0);
         // The agent: the model picker, below the button.
         let model_button = Rect::from_min_size(
-            Pos2::new(create.left() - 8.0 - (label_width + 46.0), row_y),
+            Pos2::new(agent_right - (label_width + 46.0), row_y),
             Vec2::new(label_width + 46.0, 30.0),
         );
         let model_response =
@@ -380,6 +391,40 @@ impl App {
             self.model_picker_popup(ui, model_button, MODEL_MENU, selection.clone(), true, false)
         {
             self.design_home.model = Some(chosen);
+        }
+        if let (Some(rect), Some(label)) = (traits_button, &traits_label) {
+            let response = ui.interact(rect, ui.id().with("design-traits"), Sense::click());
+            if response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::same(8), theme::accent());
+            }
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(rect.left() + 10.0, rect.top()), rect.max),
+                label,
+                font(13.0, Weight::Medium),
+                theme::foreground(),
+            );
+            theme::paint_icon(
+                ui,
+                "chevron-down",
+                Rect::from_min_size(
+                    Pos2::new(rect.right() - 18.0, rect.center().y - 6.0),
+                    Vec2::splat(12.0),
+                ),
+                12.0,
+                theme::muted_foreground(),
+            );
+            if response.clicked() {
+                self.open_menu = if self.open_menu.as_deref() == Some(TRAITS_MENU) {
+                    None
+                } else {
+                    Some(TRAITS_MENU.into())
+                };
+            }
+            if let Some(next) = self.traits_menu_popup(ui, rect, TRAITS_MENU, &selection, false) {
+                self.design_home.model = Some(next);
+            }
         }
         let submit = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
         if ready && (create_response.clicked() || submit) {
