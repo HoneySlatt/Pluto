@@ -137,6 +137,72 @@ sits about 2px right, and "↻" (missing from Geist) comes from egui's fallback
 font, smaller than the browser's. Scrollbars stay visible at rest; upstream
 fades them in on hover or scroll, and fades the overflowing edge of the question card's options. The usage chart readout has no backdrop blur.
 
+## Android app (`mobile/`)
+
+A Dioxus app over `crates/pluto-core` (the connection, model, timeline,
+requests, diff, context references and Chat | Code spaces the desktop client
+uses too), laid out after the validated mobile prototype (Grok's Android
+layout, Pluto stock theme). Build it in the Nix shell:
+
+```sh
+nix develop .#mobile
+cd mobile && dx bundle --platform android --release --target aarch64-linux-android
+# installable APK: target/dx/Pluto/release/android/app/app/build/outputs/apk/debug/app-debug.apk
+```
+
+`nix develop .#emulator` provides a headless x86_64 emulator for looking at
+the app on the computer (build with `--target x86_64-linux-android`; the
+computer's loopback is `10.0.2.2` there).
+
+Wired to the server: the connection screen (plain http for private and
+Tailscale addresses only, the token sealed with an Android Keystore key when
+"Remember on this phone" is on, show and paste, the token command), the
+launch with a remembered server (a splash, then "Can't reach your server" with
+Try again and Change server), reconnection after a lost connection (three
+attempts, the floating bar, Retry; Send, Stop and the request cards wait while
+offline); the Chat | Code tabs (Chat first); the home drafts (Code: the project
+sheet, Local checkout or New worktree with its base ref from `vcs.listRefs`,
+Continue; Chat: Research and Image chats, temporary chats, Continue), launched
+with `orchestration.launchThread`; the drawer (the server header, the menu,
+Code's Needs you (pending approval or input), Threads with project, branch and
+state, Settled, Chat's chats by day, live search, Settings and New, the edge
+swipe and pull to refresh); the thread view (the core timeline: user bubbles
+with their context chips, work folds and rows, markdown, plans, the
+changed-files card, live work, Working for, earlier turns), approvals and
+questions answered with `runtime-request.respond`, follow-ups and Stop
+(`run.interrupt`); the model sheet (the server's models by provider, the
+model's effort trait, Code's Build | Plan and access, sent with the message);
+the thread actions (rename, pin, fork, changed files, copy the thread ID,
+settle, delete with the confirmation setting); the branch sheet on a thread
+(`vcs.switchRef`, `vcs.createRef`); the diff page (`orchestration.getTurnDiff`
+for a turn or the whole thread, unified, file chips, collapsible files after
+"Default diff file state", wrap); Settings (the chat space's default model,
+the server's new-thread model, permissions and workspace, response streaming,
+the phone's time format, whitespace, diff state and delete confirmation,
+Forget token, Disconnect, the server version); Projects and a project page
+(threads, its New threads overrides in `projectSettingsOverrides`, removal);
+Scheduled tasks (the live list, pause, Run now, Edit, Delete, the editor saved
+with `scheduledTasks.upsert` and the desktop's checks); Usage (Limits from the
+providers' quota windows, refreshed with `server.refreshProviders`; Cost and
+Tokens from `server.getUsageSummary` with the bar chart and the split by
+provider). Android's back gesture closes the top layer (sheet, drawer, page,
+thread).
+
+Not wired yet: attachments (the Attach sheet's Photos, Camera and Files show a
+notice), Memory (it points to the computer), thread notifications and a
+background connection (the Settings row is hidden until they exist), creating
+the chat space from the phone (Chat needs it created once on the computer),
+the "ask" line of Needs you (it reads "Waiting for your approval" or "Waiting
+for your answer", not the request's text), unread state, snoozed threads
+(listed with the others), published pages, MCP apps and generated images in
+the timeline (a note points to the computer), the code blocks' copy button
+and syntax colors, the drawer's refresh (the shell is live; a refresh only
+reconnects an offline session), https servers (the app finds no Android root
+certificates yet), and the licenses page. Checked in the emulator against a
+disposable server (connection, drafts, drawer, sheets, Settings, projects,
+tasks, usage, reconnection); a thread's timeline, the request cards and the
+diff were not seen there, since a thread needs a provider turn.
+
 ## Development
 
 ```sh

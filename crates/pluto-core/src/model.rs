@@ -22,7 +22,7 @@ pub struct ModelSelection {
 }
 
 /// `OrchestrationProjectShell`.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Project {
     pub id: String,

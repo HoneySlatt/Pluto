@@ -23,13 +23,25 @@ pub fn forget() {
     imp::forget();
 }
 
+/// Forgets the token but keeps the address for the connection screen.
+pub fn forget_token() {
+    imp::forget_token();
+}
+
+/// The app's private files, where the preferences are kept too.
+pub fn files_dir() -> Option<std::path::PathBuf> {
+    imp::files_dir()
+}
+
 /// A sealed token: the IV and the ciphertext.
 type Sealed = (Vec<u8>, Vec<u8>);
 
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn unhex(text: &str) -> Option<Vec<u8>> {
     let text = text.trim();
     if !text.len().is_multiple_of(2) {
@@ -68,6 +80,11 @@ mod imp {
     }
 
     fn path() -> Option<PathBuf> {
+        files_dir().map(|dir| dir.join(FILE))
+    }
+
+    /// The app's private files (`Context.getFilesDir`).
+    pub fn files_dir() -> Option<PathBuf> {
         with_env(|env, activity| {
             let dir = env
                 .call_method(activity, "getFilesDir", "()Ljava/io/File;", &[])?
@@ -76,7 +93,7 @@ mod imp {
                 .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
                 .l()?;
             let path: String = env.get_string(&path.into())?.into();
-            Ok(PathBuf::from(path).join(FILE))
+            Ok(PathBuf::from(path))
         })
         .ok()
     }
@@ -263,6 +280,13 @@ mod imp {
             let _ = std::fs::remove_file(path);
         }
     }
+
+    /// Keeps the address, drops the sealed token.
+    pub fn forget_token() {
+        if let (Some(path), Some((server, _))) = (path(), read()) {
+            let _ = std::fs::write(path, format!("{server}\n"));
+        }
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -282,6 +306,12 @@ mod imp {
     }
 
     pub fn forget() {}
+
+    pub fn forget_token() {}
+
+    pub fn files_dir() -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 #[cfg(test)]

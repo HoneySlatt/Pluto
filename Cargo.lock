@@ -4899,11 +4899,14 @@ dependencies = [
  "dioxus",
  "futures-channel",
  "futures-util",
+ "iana-time-zone",
  "jni 0.21.1",
  "ndk-context",
  "pluto-core",
  "pulldown-cmark",
  "serde_json",
+ "tokio",
+ "uuid",
  "zeroize",
 ]
 
