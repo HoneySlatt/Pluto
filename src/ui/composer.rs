@@ -1407,6 +1407,10 @@ impl App {
         {
             return selection;
         }
+        // Without a default, the last model picked (`applyStickyState`).
+        if let Some(selection) = self.sticky_model(draft) {
+            return selection;
+        }
         for provider in self.providers() {
             if provider["status"] != "ready" {
                 continue;

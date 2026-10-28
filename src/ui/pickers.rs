@@ -83,6 +83,14 @@ pub(crate) fn is_ollama_companion(providers: &[Value], provider: &Value) -> bool
             })
 }
 
+/// A space's remembered models: one per provider, and the provider last picked.
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct StickyModel {
+    pub by_provider: std::collections::HashMap<String, ModelSelection>,
+    pub active: Option<String>,
+}
+
 const PICKER_WIDTH: f32 = 362.0;
 const PICKER_HEIGHT: f32 = 348.0;
 const SIDEBAR_WIDTH: f32 = 44.0;
@@ -98,8 +106,53 @@ impl App {
     }
 
     fn set_selection(&mut self, draft: bool, selection: ModelSelection) {
+        self.remember_model(draft, &selection);
         let key = self.composer_key(draft);
         self.composer_selection.insert(key, selection);
+    }
+
+    /// `setStickyModelSelection`: the pick becomes the model new drafts
+    /// start on; a model-only pick keeps the provider's last options.
+    fn remember_model(&mut self, draft: bool, selection: &ModelSelection) {
+        if selection.instance_id.is_empty() || selection.model.is_empty() {
+            return;
+        }
+        let space = if self.chat_context(draft) {
+            "chat"
+        } else {
+            "code"
+        };
+        let sticky = self.sticky_models.entry(space.to_owned()).or_default();
+        let mut next = selection.clone();
+        if next.options.is_none() {
+            next.options = sticky
+                .by_provider
+                .get(&selection.instance_id)
+                .and_then(|s| s.options.clone());
+        }
+        let changed = sticky.by_provider.get(&next.instance_id) != Some(&next)
+            || sticky.active.as_deref() != Some(next.instance_id.as_str());
+        sticky.active = Some(next.instance_id.clone());
+        sticky.by_provider.insert(next.instance_id.clone(), next);
+        if changed {
+            crate::app::save_ui_state(self);
+        }
+    }
+
+    /// The last model picked in the draft's space, while its provider is
+    /// still offered.
+    pub(crate) fn sticky_model(&self, draft: bool) -> Option<ModelSelection> {
+        let space = if self.chat_context(draft) {
+            "chat"
+        } else {
+            "code"
+        };
+        let sticky = self.sticky_models.get(space)?;
+        let selection = sticky.by_provider.get(sticky.active.as_deref()?)?;
+        self.providers()
+            .iter()
+            .any(|p| p["instanceId"] == selection.instance_id.as_str() && p["enabled"] != false)
+            .then(|| selection.clone())
     }
 
     pub(crate) fn traits_menu(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
@@ -1146,5 +1199,76 @@ mod tests {
             provider_status_message(&provider),
             "Open provider setup to install Opencode on this environment."
         );
+    }
+
+    #[test]
+    fn new_drafts_start_on_the_last_model_picked_in_their_space() {
+        use crate::app::{App, Options};
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+        let model = |slug: &str| json!({"instanceId": "codex", "model": slug});
+        let config = json!({"type": "snapshot", "config": {
+            "providers": [{"instanceId": "codex", "driver": "codex", "enabled": true,
+                "status": "ready", "models": [{"slug": "first", "isDefault": true}]},
+                {"instanceId": "grok", "driver": "grok", "enabled": true, "status": "ready"}],
+            "settings": {"projectSettingsOverrides":
+                {"overridden": {"defaultModelSelection": model("override")}}}}});
+        let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
+            "projects": [
+                {"id": "plain", "title": "Plain", "workspaceRoot": "/fixture/plain"},
+                {"id": "overridden", "title": "Overridden", "workspaceRoot": "/fixture/overridden"}],
+            "threads": []}});
+        let app = harness.state_mut();
+        app.load_offline(&config, &shell).unwrap();
+        assert_eq!(app.draft_model_in("plain"), "codex/first");
+        // A pick in a chat does not move code drafts.
+        app.sticky_models.insert(
+            "chat".into(),
+            StickyModel {
+                by_provider: [(
+                    "grok".to_owned(),
+                    ModelSelection {
+                        instance_id: "grok".into(),
+                        model: "grok-4.7".into(),
+                        options: None,
+                    },
+                )]
+                .into(),
+                active: Some("grok".into()),
+            },
+        );
+        assert_eq!(app.draft_model_in("plain"), "codex/first");
+        app.set_selection(
+            true,
+            ModelSelection {
+                instance_id: "codex".into(),
+                model: "picked".into(),
+                options: Some(json!([{"id": "effort", "value": "high"}])),
+            },
+        );
+        assert_eq!(app.draft_model_in("plain"), "codex/picked");
+        // A project's default still wins.
+        assert_eq!(app.draft_model_in("overridden"), "codex/override");
+        // A model-only pick keeps the provider's options.
+        app.set_selection(
+            true,
+            ModelSelection {
+                instance_id: "codex".into(),
+                model: "other".into(),
+                options: None,
+            },
+        );
+        let sticky = app.sticky_model(true).unwrap();
+        assert_eq!(sticky.model, "other");
+        assert!(sticky.options.is_some());
     }
 }

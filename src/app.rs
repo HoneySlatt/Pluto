@@ -54,6 +54,9 @@ pub struct App {
     /// The window is narrower than `md` (768px, `useIsMobile`).
     pub(crate) mobile: bool,
     pub(crate) composer_selection: std::collections::HashMap<String, crate::model::ModelSelection>,
+    /// The last models picked, for new drafts (`stickyModelSelectionByProvider`
+    /// and `stickyActiveProvider`), by space: `code`, or Pluto's `chat`.
+    pub(crate) sticky_models: std::collections::HashMap<String, crate::ui::pickers::StickyModel>,
     pub(crate) composer_runtime: std::collections::HashMap<String, String>,
     /// The composer's interaction mode (plan or default) by composer key.
     pub(crate) composer_interaction: std::collections::HashMap<String, String>,
@@ -420,6 +423,10 @@ impl App {
             sidebar_sheet_open: false,
             mobile: false,
             composer_selection: Default::default(),
+            sticky_models: serde_json::from_value(
+                read_ui_state(options.client_settings_path.as_deref())["stickyModels"].clone(),
+            )
+            .unwrap_or_default(),
             composer_runtime: Default::default(),
             composer_interaction: Default::default(),
             command_menu: Default::default(),
@@ -877,6 +884,9 @@ impl App {
             .or_else(|| self.draft_project().map(|p| p.id));
         self.select_thread(None);
         self.draft_project_id = project_id;
+        // A new draft starts from its project's default or the last model
+        // picked (`applyStickyState`), not from the last draft's pick.
+        self.composer_selection.remove("draft");
     }
 
     /// Dispatches a request reply; the request stays "responding" until the
@@ -1694,6 +1704,7 @@ pub(crate) fn save_ui_state(app: &App) {
         "lastEditor": app.last_editor,
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
+        "stickyModels": app.sticky_models,
     });
     let temp = path.with_extension("json.tmp");
     if std::fs::write(&temp, value.to_string()).is_ok() {

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ModelSelection {
     pub instance_id: String,
