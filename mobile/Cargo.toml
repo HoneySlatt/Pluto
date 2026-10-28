@@ -1,0 +1,20 @@
+[package]
+name = "pluto-mobile"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Pluto on Android: the Code and Chat spaces of a Pluto server."
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dioxus = { version = "0.7", features = ["mobile"] }
+futures-channel = "0.3"
+futures-util = "0.3"
+pluto-core = { path = "../crates/pluto-core" }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+serde_json = "1"
+zeroize = "1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

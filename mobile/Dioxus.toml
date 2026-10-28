@@ -1,0 +1,6 @@
+[application]
+name = "Pluto"
+
+[bundle]
+identifier = "app.pluto.mobile"
+publisher = "Pluto"

@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace]
-members = [".", "crates/pluto-core"]
+members = [".", "crates/pluto-core", "mobile"]
 
 [dependencies]
 pluto-core = { path = "crates/pluto-core" }
