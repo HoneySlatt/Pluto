@@ -735,3 +735,57 @@ fn a_failed_workspace_preparation_offers_a_retry() {
         .collect();
     assert!(shown.iter().any(|t| t == "Retry"), "{shown:?}");
 }
+
+#[test]
+fn a_thread_error_shows_until_dismissed() {
+    let mut failed = thread("a", "Newest thread", 5);
+    failed["status"] = json!("failed");
+    failed["latestRunId"] = json!("r");
+    failed["lastError"] = json!("Synthetic provider failure");
+    let mut harness = harness_with(
+        json!([{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}]),
+        json!([failed]),
+    );
+    click(&mut harness, egui::pos2(60.0, 248.0));
+    let shown = |harness: &Harness<'static, App>| -> Vec<String> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(
+        shown(&harness)
+            .iter()
+            .any(|t| t == "Synthetic provider failure"),
+        "{:?}",
+        shown(&harness)
+    );
+    // The dismiss button sits on the banner's first line, at its right end:
+    // walk left along that line until a click hides the banner.
+    let y = harness
+        .output()
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Synthetic provider failure" => {
+                Some(text.pos.y)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let dismissed = (0..90).any(|step| {
+        click(
+            &mut harness,
+            egui::pos2(1440.0 - step as f32 * 12.0, y + 2.0),
+        );
+        !shown(&harness)
+            .iter()
+            .any(|t| t == "Synthetic provider failure")
+    });
+    assert!(dismissed);
+}

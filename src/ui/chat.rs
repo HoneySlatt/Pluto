@@ -128,6 +128,7 @@ impl App {
                 &mode,
             );
             self.thread_find_bar(ui, body);
+            self.thread_error_banner(ui, body);
         } else if let Some(project) = draft_project.clone().filter(|p| self.is_chat_project(p)) {
             // Pluto: a chat project's page (`chat_projects`).
             self.project_page(ui, body, &project, column_left, column);

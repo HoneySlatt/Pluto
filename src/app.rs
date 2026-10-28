@@ -142,6 +142,8 @@ pub struct App {
     pub(crate) nav_back: Vec<Option<String>>,
     pub(crate) nav_forward: Vec<Option<String>>,
     pub(crate) navigating: bool,
+    /// Thread errors dismissed for the run, by thread and message.
+    pub(crate) dismissed_thread_errors: std::collections::HashSet<String>,
     pub(crate) favorite_models: std::collections::BTreeSet<String>,
     /// Right panel per thread (`rightPanelStore.ts`, in memory).
     pub(crate) panels: std::collections::HashMap<String, Panel>,
@@ -525,6 +527,7 @@ impl App {
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
             navigating: false,
+            dismissed_thread_errors: Default::default(),
             favorite_models: Default::default(),
             panels: Default::default(),
             launcher_highlight: None,
