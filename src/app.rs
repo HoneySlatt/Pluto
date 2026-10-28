@@ -868,6 +868,22 @@ impl App {
         self.send(Action::Dispatch(command));
     }
 
+    /// Loads the open thread's turns before its loaded window.
+    pub(crate) fn load_earlier_history(&mut self) {
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        let Some(cursor) = self.state.begin_history_load(&id) else {
+            return;
+        };
+        match &self.connection {
+            Some(connection) => connection.load_history(&id, &cursor),
+            None => self
+                .state
+                .history_failed(&id, &cursor, "Environment is not connected.".into()),
+        }
+    }
+
     pub(crate) fn send(&mut self, action: Action) {
         if let Some(connection) = &self.connection {
             connection.send(action);

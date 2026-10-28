@@ -5,8 +5,9 @@
 //! (`presentThreadShell`) and kept like `state/shellReducer.ts`; the open
 //! thread's projection takes events like `state/orchestrationV2Projection.ts`,
 //! with the turn item visibility of `shared/orchestrationV2Timeline.ts`.
-//! Bounded (progressive history) snapshots are not requested, so the timeline
-//! is always complete.
+//! Threads open on a bounded snapshot (the recent turns) and page in older
+//! turns on demand, like `state/threads.ts` and `state/threadHistoryMerge.ts`;
+//! the `throughEntryId` jump of find and citations is not ported.
 use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer};
@@ -651,7 +652,34 @@ pub struct Detail {
     #[serde(rename = "visibleTurnItems")]
     pub visible: Vec<VisibleItem>,
     pub updated_at: String,
+    /// Progressive history of a bounded snapshot; empty for a full one.
+    #[serde(skip)]
+    pub history: History,
 }
+
+/// `ThreadHistoryMeta`: where older turns resume and whether there are any.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct History {
+    /// Opaque cursor of the next older page.
+    pub cursor: Option<String>,
+    pub has_more: bool,
+    /// Max local turn ordinal of the full projection: a turn item update
+    /// at or below it belongs to unloaded history.
+    pub latest_local_ordinal: Option<u64>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl History {
+    /// An incomplete progressive window (`partialTimeline`).
+    pub fn partial(&self) -> bool {
+        self.has_more || self.cursor.is_some()
+    }
+}
+
+/// Runs whose items are new rather than unloaded history.
+const UNFINISHED_RUN_STATUSES: [&str; 5] =
+    ["preparing", "queued", "starting", "running", "waiting"];
 
 impl Detail {
     pub fn id(&self) -> &str {
@@ -812,6 +840,16 @@ impl Detail {
                 if !item.is_known() {
                     return Ok(());
                 }
+                let partial = self.history.partial();
+                // An update of an item outside the loaded window is
+                // history, not a new row at the end.
+                if partial
+                    && !self.turn_items.iter().any(|i| i.id == item.id)
+                    && self.drop_missing_partial_item(&item)
+                {
+                    return Ok(());
+                }
+                let ordinal = item.ordinal;
                 let item = Arc::new(item);
                 let was_interrupt = self
                     .turn_items
@@ -832,6 +870,14 @@ impl Detail {
                 {
                     self.visible.remove(index);
                     renumber(&mut self.visible);
+                }
+                if partial
+                    && self
+                        .history
+                        .latest_local_ordinal
+                        .is_none_or(|w| ordinal > w)
+                {
+                    self.history.latest_local_ordinal = Some(ordinal);
                 }
             }
             "checkpoint-scope.created" => {
@@ -904,13 +950,115 @@ impl Detail {
         }
     }
 
-    /// `upsertVisibleTurnItem`: a local row by ordinal, then id.
-    fn upsert_visible(&mut self, item: Arc<TurnItem>) {
-        if let Some(index) = self
+    /// `shouldDropMissingPartialTurnItem`.
+    fn drop_missing_partial_item(&self, item: &TurnItem) -> bool {
+        if self.visible.iter().any(|row| row.source_item_id == item.id) {
+            return false;
+        }
+        let Some(run_id) = &item.run_id else {
+            return self.below_partial_window(item);
+        };
+        // A queued run keeps the ordinal it got when queued, so a steer sent
+        // later can raise the watermark past it. Items of a run that has not
+        // finished are new, not unloaded history.
+        if self
+            .runs
+            .iter()
+            .any(|run| &run.id == run_id && UNFINISHED_RUN_STATUSES.contains(&run.status.as_str()))
+        {
+            return false;
+        }
+        // Later items of a run already in the window can raise the watermark first.
+        if self.visible.iter().any(|row| {
+            row.visibility == "local"
+                && row.item.run_id.as_ref() == Some(run_id)
+                && row.item.ordinal <= item.ordinal
+        }) {
+            return false;
+        }
+        self.below_partial_window(item)
+    }
+
+    /// `isBelowPartialWindow`.
+    fn below_partial_window(&self, item: &TurnItem) -> bool {
+        if self
+            .history
+            .latest_local_ordinal
+            .is_some_and(|w| item.ordinal <= w)
+        {
+            return true;
+        }
+        let oldest = self
             .visible
             .iter()
-            .position(|r| r.source_item_id == item.id)
-        {
+            .filter(|row| row.visibility == "local")
+            .map(|row| row.item.ordinal)
+            .min();
+        oldest.is_some_and(|oldest| item.ordinal < oldest)
+    }
+
+    /// `mergeOlderHistoryIntoProjection`: an older page goes before the
+    /// rows already loaded, deduplicated by source; live values win and
+    /// hidden live items stay hidden.
+    fn merge_older(&mut self, older: Vec<VisibleItem>) -> bool {
+        let key = |row: &VisibleItem| (row.source_thread_id.clone(), row.source_item_id.clone());
+        let current: std::collections::HashMap<_, _> =
+            self.visible.iter().map(|row| (key(row), row)).collect();
+        let thread_id = self.id().to_owned();
+        let mut seen = std::collections::HashSet::new();
+        let mut page = Vec::new();
+        let mut added = Vec::new();
+        for page_row in older {
+            let row_key = key(&page_row);
+            if seen.contains(&row_key) {
+                continue;
+            }
+            let mut row = current.get(&row_key).map_or(page_row, |row| (*row).clone());
+            let local = row.visibility == "local" || row.source_thread_id == thread_id;
+            if !current.contains_key(&row_key) && local {
+                let known = self.turn_items.iter().find(|i| i.id == row.source_item_id);
+                // Cold snapshots retain interrupt requests outside the
+                // window; paging may reveal those requests.
+                if let Some(known) = known {
+                    if known.kind != "run_interrupt_request" || !self.item_visible(known) {
+                        continue;
+                    }
+                    row.item = known.clone();
+                }
+            }
+            if local && !self.turn_items.iter().any(|i| i.id == row.source_item_id) {
+                added.push(row.item.clone());
+            }
+            seen.insert(row_key);
+            page.push(row);
+        }
+        if page.is_empty() {
+            return false;
+        }
+        let rest = std::mem::take(&mut self.visible)
+            .into_iter()
+            .filter(|row| !seen.contains(&key(row)));
+        page.extend(rest);
+        self.visible = page;
+        renumber(&mut self.visible);
+        for item in added {
+            if !self.turn_items.iter().any(|i| i.id == item.id) {
+                self.turn_items.push(item);
+            }
+        }
+        true
+    }
+
+    /// `upsertVisibleTurnItem`: a local row by ordinal, then id.
+    fn upsert_visible(&mut self, item: Arc<TurnItem>) {
+        let index = self
+            .visible
+            .iter()
+            .position(|r| r.source_item_id == item.id);
+        if index.is_none() && self.history.partial() && self.drop_missing_partial_item(&item) {
+            return;
+        }
+        if let Some(index) = index {
             self.visible.remove(index);
         }
         let at = self
@@ -1162,7 +1310,17 @@ impl State {
             Some("snapshot") => {
                 let projection = &item["projection"];
                 if projection["thread"]["id"] == selected {
-                    self.detail = Some(Arc::new(Detail::decode(projection)?));
+                    let mut detail = Detail::decode(projection)?;
+                    // A bounded snapshot carries its cursor; a full one
+                    // replaces progressive state.
+                    detail.history = History {
+                        cursor: item["historyCursor"].as_str().map(str::to_owned),
+                        has_more: item["hasMoreHistory"].as_bool().unwrap_or(false),
+                        latest_local_ordinal: item["latestLocalTurnOrdinal"].as_u64(),
+                        loading: false,
+                        error: None,
+                    };
+                    self.detail = Some(Arc::new(detail));
                     self.revision += 1;
                     self.thread_sequence = item["snapshotSequence"].as_u64();
                 }
@@ -1187,6 +1345,62 @@ impl State {
         Arc::make_mut(detail).apply(event)?;
         self.revision += 1;
         Ok(())
+    }
+
+    /// Starts loading older turns of the open thread: the cursor to request,
+    /// or `None` when there is nothing to load or a load is under way.
+    pub fn begin_history_load(&mut self, thread_id: &str) -> Option<String> {
+        let detail = self.detail.as_mut().filter(|d| d.id() == thread_id)?;
+        let history = &detail.history;
+        if !history.has_more || history.loading {
+            return None;
+        }
+        let cursor = history.cursor.clone()?;
+        let history = &mut Arc::make_mut(detail).history;
+        history.loading = true;
+        history.error = None;
+        self.revision += 1;
+        Some(cursor)
+    }
+
+    /// Merges an `OrchestrationV2ThreadHistoryPage`, unless a newer snapshot
+    /// replaced the cursor that requested it.
+    pub fn history_page(
+        &mut self,
+        thread_id: &str,
+        cursor: &str,
+        page: &Value,
+    ) -> Result<(), String> {
+        let Some(detail) = self
+            .detail
+            .as_mut()
+            .filter(|d| d.id() == thread_id && d.history.cursor.as_deref() == Some(cursor))
+        else {
+            return Ok(());
+        };
+        let rows: Vec<VisibleItem> = decode(&page["items"])?;
+        let detail = Arc::make_mut(detail);
+        detail.merge_older(rows.into_iter().filter(|row| row.item.is_known()).collect());
+        detail.history.cursor = page["nextCursor"].as_str().map(str::to_owned);
+        detail.history.has_more = page["hasMoreHistory"].as_bool().unwrap_or(false);
+        detail.history.loading = false;
+        detail.history.error = None;
+        self.revision += 1;
+        Ok(())
+    }
+
+    pub fn history_failed(&mut self, thread_id: &str, cursor: &str, message: String) {
+        let Some(detail) = self
+            .detail
+            .as_mut()
+            .filter(|d| d.id() == thread_id && d.history.cursor.as_deref() == Some(cursor))
+        else {
+            return;
+        };
+        let history = &mut Arc::make_mut(detail).history;
+        history.loading = false;
+        history.error = Some(message);
+        self.revision += 1;
     }
 }
 
@@ -1272,6 +1486,115 @@ mod tests {
     fn visible(state: &State) -> Vec<String> {
         let detail = state.detail.as_ref().unwrap();
         detail.visible.iter().map(|r| r.item.id.clone()).collect()
+    }
+
+    /// A bounded snapshot whose window holds `c` (ordinal 3, run `r2`)
+    /// while the full projection's newest local item has ordinal 3.
+    fn bounded() -> State {
+        let mut state = State::default();
+        let text = json!({"messageId":"m","text":"hi","streaming":false});
+        let c = item("c", "assistant_message", 3, Some("r2"), text);
+        let snapshot = json!({"kind":"snapshot","snapshotSequence":1,"projection":{
+            "thread":{"id":"t","projectId":"p","title":"T"},
+            "runs":[run("r1", "completed"), run("r2", "completed")],"attempts":[],"nodes":[],
+            "subagents":[],"providerSessions":[],"providerThreads":[],"providerTurns":[],
+            "runtimeRequests":[],"messages":[],"plans":[],"turnItems":[c],"checkpointScopes":[],
+            "checkpoints":[],"contextHandoffs":[],"contextTransfers":[],
+            "visibleTurnItems":[{"position":0,"visibility":"local","sourceThreadId":"t",
+                "sourceItemId":"c","item":c}],
+            "updatedAt":AT},
+            "historyCursor":"cursor-1","hasMoreHistory":true,"latestLocalTurnOrdinal":3});
+        state.thread("t", &snapshot).unwrap();
+        state
+    }
+
+    fn row(item: Value) -> Value {
+        json!({"position":0,"visibility":"local","sourceThreadId":"t",
+            "sourceItemId":item["id"],"item":item})
+    }
+
+    #[test]
+    fn a_bounded_window_keeps_unloaded_history_out_of_its_end() {
+        let mut state = bounded();
+        let text = json!({"messageId":"m","text":"old","streaming":false});
+        // An update of an older, finished run's item is unloaded history.
+        state
+            .thread(
+                "t",
+                &event(
+                    2,
+                    "turn-item.updated",
+                    item("a", "assistant_message", 1, Some("r1"), text.clone()),
+                ),
+            )
+            .unwrap();
+        assert_eq!(visible(&state), ["c"]);
+        // A new item lands at the end and raises the watermark.
+        state
+            .thread(
+                "t",
+                &event(
+                    3,
+                    "turn-item.updated",
+                    item("d", "assistant_message", 4, None, text.clone()),
+                ),
+            )
+            .unwrap();
+        assert_eq!(visible(&state), ["c", "d"]);
+        let detail = state.detail.as_ref().unwrap();
+        assert_eq!(detail.history.latest_local_ordinal, Some(4));
+        // A running run's item is new even below the watermark.
+        state
+            .thread("t", &event(4, "run.created", run("r3", "running")))
+            .unwrap();
+        state
+            .thread(
+                "t",
+                &event(
+                    5,
+                    "turn-item.updated",
+                    item("e", "assistant_message", 2, Some("r3"), text),
+                ),
+            )
+            .unwrap();
+        assert_eq!(visible(&state), ["e", "c", "d"]);
+    }
+
+    #[test]
+    fn an_older_page_goes_before_the_loaded_window() {
+        let mut state = bounded();
+        assert_eq!(state.begin_history_load("t").as_deref(), Some("cursor-1"));
+        // One load at a time.
+        assert_eq!(state.begin_history_load("t"), None);
+        let text = json!({"messageId":"m","text":"old","streaming":false});
+        let page = json!({"snapshotSequence":1,"nextCursor":null,"hasMoreHistory":false,"items":[
+            row(item("a", "user_message", 1, Some("r1"), json!({"messageId":"u","text":"q"}))),
+            row(item("b", "assistant_message", 2, Some("r1"), text)),
+            row(item("c", "assistant_message", 3, Some("r2"), json!({"messageId":"m","text":"stale"}))),
+        ]});
+        // A page for a replaced cursor changes nothing.
+        state.history_page("t", "cursor-0", &page).unwrap();
+        assert_eq!(visible(&state), ["c"]);
+        state.history_page("t", "cursor-1", &page).unwrap();
+        assert_eq!(visible(&state), ["a", "b", "c"]);
+        let detail = state.detail.as_ref().unwrap();
+        // The live row wins over the page's copy.
+        assert_eq!(detail.visible[2].item.text(), "hi");
+        assert_eq!(detail.visible[2].position, 2);
+        assert_eq!(detail.turn_items.len(), 3);
+        assert!(!detail.history.partial());
+        assert!(!detail.history.loading);
+    }
+
+    #[test]
+    fn a_failed_load_can_be_retried() {
+        let mut state = bounded();
+        let cursor = state.begin_history_load("t").unwrap();
+        state.history_failed("t", &cursor, "The server answered 500.".into());
+        let history = &state.detail.as_ref().unwrap().history;
+        assert_eq!(history.error.as_deref(), Some("The server answered 500."));
+        assert_eq!(state.begin_history_load("t").as_deref(), Some("cursor-1"));
+        assert_eq!(state.detail.as_ref().unwrap().history.error, None);
     }
 
     #[test]

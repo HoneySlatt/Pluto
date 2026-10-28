@@ -21,6 +21,11 @@ pub enum Route {
     /// A one-shot request, identified by a caller-chosen key.
     Rpc(String),
     Vcs(String),
+    /// An older page of a thread's timeline, by the cursor that asked for it.
+    History {
+        thread_id: String,
+        cursor: String,
+    },
 }
 
 pub enum Action {
@@ -54,6 +59,17 @@ pub struct Connection {
     actions: mpsc::Sender<Action>,
     pub events: mpsc::Receiver<Event>,
     wake: Arc<Wake>,
+    /// The HTTP API answers outside the socket (older thread history).
+    api: Arc<Api>,
+    outbox: mpsc::SyncSender<Event>,
+    ctx: egui::Context,
+}
+
+/// The server's HTTP origin and the credential its API requires; the
+/// credential stays in memory only.
+struct Api {
+    origin: url::Url,
+    token: Zeroizing<String>,
 }
 
 /// Wakes the connection worker, which otherwise sleeps until the server
@@ -89,13 +105,29 @@ impl Connection {
         ctx: egui::Context,
     ) -> Result<Self, String> {
         let url = socket_url(server)?;
+        let mut origin = url.clone();
+        origin
+            .set_scheme(if url.scheme() == "wss" {
+                "https"
+            } else {
+                "http"
+            })
+            .map_err(|_| "Invalid URL scheme")?;
+        origin.set_query(None);
+        let api = Arc::new(Api {
+            origin,
+            token: token.clone(),
+        });
         let (actions, inbox) = mpsc::channel();
         let (outbox, events) = mpsc::sync_channel(128);
         let wake = Arc::new(Wake::new()?);
         let worker_wake = wake.clone();
+        let worker_outbox = outbox.clone();
+        let worker_ctx = ctx.clone();
         std::thread::Builder::new()
             .name("t3-connection".into())
             .spawn(move || {
+                let (outbox, ctx) = (worker_outbox, worker_ctx);
                 let emit = |event| {
                     let sent = outbox.send(event).is_ok();
                     ctx.request_repaint();
@@ -110,6 +142,9 @@ impl Connection {
             actions,
             events,
             wake,
+            api,
+            outbox,
+            ctx,
         })
     }
 
@@ -117,6 +152,60 @@ impl Connection {
         if self.actions.send(action).is_ok() {
             self.wake.notify();
         }
+    }
+
+    /// Fetches the timeline page before `cursor` (`threadHistoryHttp.ts`);
+    /// it arrives as `Route::History`.
+    pub fn load_history(&self, thread_id: &str, cursor: &str) {
+        let (api, outbox, ctx) = (self.api.clone(), self.outbox.clone(), self.ctx.clone());
+        let route = Route::History {
+            thread_id: thread_id.to_owned(),
+            cursor: cursor.to_owned(),
+        };
+        let spawned = std::thread::Builder::new()
+            .name("t3-history".into())
+            .spawn(move || {
+                let Route::History { thread_id, cursor } = &route else {
+                    return;
+                };
+                let event = match api.history_page(thread_id, cursor) {
+                    Ok(page) => Event::Data(route, page),
+                    Err(error) => Event::Failed(route, error),
+                };
+                let _ = outbox.send(event);
+                ctx.request_repaint();
+            });
+        if spawned.is_err() {
+            let _ = self.outbox.send(Event::Failed(
+                Route::History {
+                    thread_id: thread_id.to_owned(),
+                    cursor: cursor.to_owned(),
+                },
+                "Could not load earlier activity.".into(),
+            ));
+        }
+    }
+}
+
+impl Api {
+    /// `GET /api/orchestration/threads/:threadId/history?cursor=`.
+    fn history_page(&self, thread_id: &str, cursor: &str) -> Result<Value, String> {
+        let mut url = self.origin.clone();
+        url.path_segments_mut()
+            .map_err(|_| "Invalid server address")?
+            .clear()
+            .extend(["api", "orchestration", "threads", thread_id, "history"]);
+        url.query_pairs_mut().append_pair("cursor", cursor);
+        // Sized up front: a reallocation would leave a copy of the token.
+        let mut headers = Zeroizing::new(String::with_capacity(self.token.len() + 64));
+        if !self.token.trim().is_empty() {
+            headers.push_str("Authorization: Bearer ");
+            headers.push_str(self.token.trim());
+            headers.push_str("\r\n");
+        }
+        headers.push_str("x-t3-orchestration-protocol: 2\r\n");
+        let body = crate::http::get_with_headers(&url, &headers)?;
+        serde_json::from_slice(&body).map_err(|_| "Could not load earlier activity.".into())
     }
 }
 
@@ -247,7 +336,12 @@ fn connect(url: &url::Url, token: &str) -> Result<Socket, String> {
         value.set_sensitive(true);
         request.headers_mut().insert("authorization", value);
     }
-    let (socket, _) = tungstenite::client_tls_with_config(request, tcp, None, None).map_err(|error| match error {
+    // A snapshot is one frame: a full projection (a server without bounded
+    // snapshots) outgrows tungstenite's default 16 MiB limit on long threads.
+    let config = tungstenite::protocol::WebSocketConfig::default()
+        .max_frame_size(Some(256 << 20))
+        .max_message_size(Some(256 << 20));
+    let (socket, _) = tungstenite::client_tls_with_config(request, tcp, Some(config), None).map_err(|error| match error {
         tungstenite::handshake::HandshakeError::Failure(tungstenite::Error::Http(response)) => format!("Server refused the connection (HTTP {}). Check authentication and server compatibility.",response.status().as_u16()),
         _ => "WebSocket connection failed. Check the server address and TLS certificate.".into(),
     })?;
@@ -315,7 +409,7 @@ fn run(
                                 &mut pending,
                                 Route::Thread(id.clone()),
                                 "orchestration.subscribeThread",
-                                json!({"threadId":id}),
+                                json!({"threadId":id,"acceptBoundedSnapshot":true}),
                                 true,
                             )?;
                         }
@@ -531,10 +625,10 @@ fn run(
                 let heartbeat_due = Duration::from_secs(15).saturating_sub(heartbeat.elapsed());
                 wait(&socket, wake, heartbeat_due.min(Duration::from_secs(1)));
             }
-            Err(_) => {
-                return Err(
-                    "Connection lost. Reconnect to reload authoritative server state.".into(),
-                );
+            Err(error) => {
+                return Err(format!(
+                    "Connection lost ({error}). Reconnect to reload authoritative server state."
+                ));
             }
         }
     }
@@ -550,4 +644,53 @@ fn remote_error(exit: &Value) -> String {
         })
         .unwrap_or("The server rejected the request")
         .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn history_pages_are_read_from_the_http_api() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                request.extend_from_slice(&buffer[..read]);
+            }
+            let body =
+                r#"{"snapshotSequence":4,"items":[],"nextCursor":null,"hasMoreHistory":false}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let url = socket_url(&format!("http://127.0.0.1:{port}")).unwrap();
+        let mut origin = url.clone();
+        origin.set_scheme("http").unwrap();
+        origin.set_query(None);
+        let api = Api {
+            origin,
+            token: Zeroizing::new("secret".into()),
+        };
+        let page = api.history_page("thread:a%3Ab", "abc=").unwrap();
+        assert_eq!(page["snapshotSequence"], 4);
+        let request = server.join().unwrap();
+        assert!(
+            request.starts_with(
+                "GET /api/orchestration/threads/thread:a%253Ab/history?cursor=abc%3D HTTP/1.1\r\n"
+            ),
+            "{request}"
+        );
+        assert!(request.contains("\r\nAuthorization: Bearer secret\r\n"));
+        assert!(request.contains("\r\nx-t3-orchestration-protocol: 2\r\n"));
+    }
 }

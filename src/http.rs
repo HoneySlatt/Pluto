@@ -2,7 +2,8 @@
 //! TLS (rustls with the system's root certificates). GET follows up to five
 //! redirects and joins chunked bodies; it serves project favicons, image
 //! attachments and link favicons. POST sends file attachments to the
-//! server's signed upload URLs.
+//! server's signed upload URLs. An authorized GET reads the server's
+//! orchestration API (older thread history).
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -31,8 +32,13 @@ fn tls_config() -> Option<Arc<rustls::ClientConfig>> {
 }
 
 /// One request: the status, the raw headers and the body. `upload` is a
-/// POST body with its content type.
-fn request(url: &url::Url, upload: Option<(&str, &[u8])>) -> Option<(u16, String, Vec<u8>)> {
+/// POST body with its content type; `headers` are extra header lines, each
+/// ending in CRLF.
+fn request(
+    url: &url::Url,
+    upload: Option<(&str, &[u8])>,
+    headers: &str,
+) -> Option<(u16, String, Vec<u8>)> {
     let host = url.host_str()?.trim_matches(['[', ']']).to_owned();
     let port = url.port_or_known_default()?;
     let address = (host.as_str(), port).to_socket_addrs().ok()?.next()?;
@@ -48,16 +54,18 @@ fn request(url: &url::Url, upload: Option<(&str, &[u8])>) -> Option<(u16, String
         Some(query) => format!("{}?{query}", url.path()),
         None => url.path().to_owned(),
     };
-    let mut request = match upload {
+    let request = match upload {
         None => format!(
-            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\n{headers}Connection: close\r\n\r\n"
         ),
         Some((content_type, body)) => format!(
-            "POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
             body.len()
         ),
     }
     .into_bytes();
+    // The extra headers may carry a credential.
+    let mut request = zeroize::Zeroizing::new(request);
     if let Some((_, body)) = upload {
         request.extend_from_slice(body);
     }
@@ -95,7 +103,7 @@ fn request(url: &url::Url, upload: Option<(&str, &[u8])>) -> Option<(u16, String
 pub fn get(url: &url::Url) -> Option<Vec<u8>> {
     let mut url = url.clone();
     for _ in 0..5 {
-        let (status, head, body) = request(&url, None)?;
+        let (status, head, body) = request(&url, None, "")?;
         match status {
             200 => return Some(body),
             301 | 302 | 303 | 307 | 308 => {
@@ -110,7 +118,7 @@ pub fn get(url: &url::Url) -> Option<Vec<u8>> {
 /// POSTs `body` to `url`; Ok on a 2xx answer, else the server's reason.
 pub fn post(url: &url::Url, content_type: &str, body: &[u8]) -> Result<(), String> {
     let (status, _, answer) =
-        request(url, Some((content_type, body))).ok_or("The server could not be reached.")?;
+        request(url, Some((content_type, body)), "").ok_or("The server could not be reached.")?;
     if (200..300).contains(&status) {
         Ok(())
     } else {
@@ -120,6 +128,18 @@ pub fn post(url: &url::Url, content_type: &str, body: &[u8]) -> Result<(), Strin
         } else {
             reason
         })
+    }
+}
+
+/// The body of a 2xx answer to a GET with extra `headers` (no redirects),
+/// else why it failed.
+pub fn get_with_headers(url: &url::Url, headers: &str) -> Result<Vec<u8>, String> {
+    let (status, _, body) =
+        request(url, None, headers).ok_or("The server could not be reached.")?;
+    if (200..300).contains(&status) {
+        Ok(body)
+    } else {
+        Err(format!("The server answered {status}."))
     }
 }
 

@@ -236,3 +236,49 @@ fn drafts_start_on_their_project_default_model() {
     assert_eq!(app.draft_model_in("overridden"), "codex/override");
     assert_eq!(app.draft_model_in("legacy"), "codex/legacy");
 }
+
+#[test]
+fn a_bounded_thread_offers_its_earlier_turns() {
+    let mut harness = harness();
+    click(&mut harness, egui::pos2(60.0, 140.0));
+    let item = json!({"id": "u", "threadId": "a", "runId": "t", "ordinal": 40,
+        "status": "completed", "startedAt": at(10), "updatedAt": at(10),
+        "type": "user_message", "messageId": "u", "text": "Hi", "inputIntent": "turn_start",
+        "attachments": []});
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "turnItems": [item],
+        "visibleTurnItems": [{"position": 0, "visibility": "local", "sourceThreadId": "a",
+            "sourceItemId": "u", "item": item}],
+        "updatedAt": at(5)},
+        "historyCursor": "c1", "hasMoreHistory": true, "latestLocalTurnOrdinal": 40});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(3);
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    let (_, button) = texts(&harness)
+        .into_iter()
+        .find(|(text, _)| text == "Load earlier turns")
+        .expect("the load-earlier control is drawn");
+    // Offline, the load fails and says why; the control stays to retry.
+    click(&mut harness, button.center());
+    harness.run_steps(2);
+    let shown: Vec<String> = texts(&harness).into_iter().map(|(text, _)| text).collect();
+    assert!(
+        shown.iter().any(|t| t == "Environment is not connected."),
+        "{shown:?}"
+    );
+    assert!(shown.iter().any(|t| t == "Load earlier turns"));
+}

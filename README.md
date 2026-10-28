@@ -43,7 +43,7 @@ reads it from a file at startup instead; it is kept in memory only.
 | Usage | Header with the metric and period groups and refresh; the Cost and Tokens views (`server.getUsageSummary` merged like upstream: provider summary, daily or hourly chart with hover readout, totals, model and period breakdowns); the Limits view (provider quota windows pooled per driver, share left, pace, reset countdown, `server.refreshProviders`); segment popovers (account with its redacted email, plan, environment, share left, reset time and the share it restores); the environments breadcrumb menu and the Model prices dialog (`usagePriceOverrides` edited per cell, reset to automatic, saved as a settings patch) |
 | Pull requests | The page with search, sort, filters (state, involvement, draft, review, checks, project) and provider menus; `pullRequests.list` grouped by involvement and sorted like upstream; rows with state, conflict, checks and review glyphs, line counts, author, repository, labels and update time; loading, empty and error states |
 | Provider instances | Instance display names; provider logos stay unobstructed in the sidebar, composer, model picker and settings, without overlaid account initials |
-| State | Protocol 2 shell and thread subscriptions: shell rows presented like `presentThreadShell` (latest run, runtime, pending requests, subagent requests carried by their parents) and kept like `shellReducer.ts` (archived rows leave the shell); the open thread's projection takes events like `orchestrationV2Projection.ts` (full snapshots, not bounded ones); threads left in the last five minutes reopen at once from their kept projection while the new subscription catches up (`threadRetention.ts`; upstream's thread cache persisted across restarts is not ported) |
+| State | Protocol 2 shell and thread subscriptions: shell rows presented like `presentThreadShell` (latest run, runtime, pending requests, subagent requests carried by their parents) and kept like `shellReducer.ts` (archived rows leave the shell); the open thread's projection takes events like `orchestrationV2Projection.ts`; threads open on a bounded snapshot (`acceptBoundedSnapshot`: the last ten user turns), and "Load earlier turns" at the top of the timeline (`TimelineHistoryControl`) pages older turns in over `GET /api/orchestration/threads/:id/history`, merged like `threadHistoryMerge.ts` with the view kept on what it showed, and updates to unloaded items kept out of the window's end (`partialTimeline`); ported from source, checked against a fake HTTP server only, since the fixture cannot be rebuilt; threads left in the last five minutes reopen at once from their kept projection while the new subscription catches up (`threadRetention.ts`; upstream's thread cache persisted across restarts is not ported) |
 
 ## Protocol 2
 
@@ -71,7 +71,10 @@ Not ported from v0.1.0 yet:
   Limited are shown with v0.0.45's styling);
 - v0.1.0's new features: scheduled tasks, MCP apps, the ACP registry,
   workflows (stop, scripts), forks and merge back, provider handoff,
-  workspace preparation retry, storage cleanup, thread search.
+  workspace preparation retry, storage cleanup, thread search;
+- progressive history: compact bounded snapshots (`acceptCompactTurnItems`)
+  and the `throughEntryId` jump that loads up to a found or cited entry;
+  find in thread, citations and chat export only see the loaded turns.
 
 The fixture (`scripts/fixture-server.sh`) seeds protocol 1 events through a
 v0.0.45 server and lets v0.1.0 import them, so its threads hold messages only.

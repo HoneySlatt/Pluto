@@ -3,7 +3,7 @@
 use eframe::egui::{self, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::app::App;
-use crate::model::Project;
+use crate::model::{History, Project};
 use crate::theme::{self, Weight, font};
 use crate::timeline::Message;
 use crate::timeline::{self, Row, WorkEntry};
@@ -11,6 +11,29 @@ use crate::ui::markdown::Markdown;
 use crate::ui::{attachments, project_icon, timeline_view, widgets};
 
 const MESSAGE_LINE: f32 = 22.75;
+/// The load-earlier button: 12px type with `py-1.5`.
+const HISTORY_BUTTON: f32 = 28.0;
+
+/// The history control's height (`pb-2` below, `gap-1.5` before an error
+/// line); none when there is nothing to load or report.
+fn history_control_height(history: &History) -> f32 {
+    let button = if history.has_more {
+        HISTORY_BUTTON
+    } else {
+        0.0
+    };
+    let error = if history.error.is_some() { 16.0 } else { 0.0 };
+    let gap = if button > 0.0 && error > 0.0 {
+        6.0
+    } else {
+        0.0
+    };
+    if button + error > 0.0 {
+        button + gap + error + 8.0
+    } else {
+        0.0
+    }
+}
 
 /// A header split button: where it starts, and which half was clicked.
 struct Split {
@@ -641,7 +664,22 @@ impl App {
             .zip(&keys)
             .map(|(row, key)| view.height(*key, row, column))
             .collect();
-        let content_height = 24.0 + guesses.iter().sum::<f32>() + view.tail + bottom_padding;
+        let history_height = history_control_height(&detail.history);
+        let content_height =
+            24.0 + history_height + guesses.iter().sum::<f32>() + view.tail + bottom_padding;
+        // Older turns loaded above keep what is on screen in place
+        // (`maintainVisibleContentPosition`).
+        if !view.follow {
+            let first = view
+                .first
+                .and_then(|first| keys.iter().position(|key| *key == first));
+            if let Some(index) = first {
+                view.offset += guesses[..index].iter().sum::<f32>();
+            }
+            view.offset += history_height - view.header;
+        }
+        view.first = keys.first().copied();
+        view.header = history_height;
         // The wheel moves the view in this pass; egui would apply it after
         // drawing, a frame late.
         let mut offset = view.offset;
@@ -665,6 +703,7 @@ impl App {
         // by its top edge changed (what is on screen moved).
         let mut shift = 0.0;
         let mut cut_changed = false;
+        let mut load_earlier = false;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         let output = egui::ScrollArea::vertical()
             .id_salt(("timeline", &thread.id))
@@ -681,6 +720,9 @@ impl App {
                     Vec2::new(column, f32::INFINITY),
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+                    if history_height > 0.0 && self.history_control(ui, &detail.history, column) {
+                        load_earlier = true;
+                    }
                     for ((row, key), guess) in rows.iter().zip(&keys).zip(guesses.iter().copied()) {
                         let top = ui.cursor().top() - origin;
                         let near = top + guess >= viewport.top() - overscan
@@ -739,6 +781,53 @@ impl App {
         }
         view.offset = next;
         self.timeline_view = view;
+        if load_earlier {
+            self.load_earlier_history();
+        }
+    }
+
+    /// `TimelineHistoryControl`: loads the turns before the bounded window,
+    /// and says why the last load failed. True when clicked.
+    fn history_control(&mut self, ui: &mut Ui, history: &History, width: f32) -> bool {
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(width, history_control_height(history)),
+            Sense::hover(),
+        );
+        let label = font(12.0, Weight::Regular);
+        let mut clicked = false;
+        let mut top = rect.top();
+        if history.has_more {
+            let button = Rect::from_min_size(rect.min, Vec2::new(width, HISTORY_BUTTON));
+            let sense = if history.loading {
+                Sense::hover()
+            } else {
+                Sense::click()
+            };
+            let response = ui.interact(button, ui.id().with("load-earlier-turns"), sense);
+            let color = if response.hovered() && !history.loading {
+                theme::foreground()
+            } else {
+                theme::alpha(theme::muted_foreground(), 0.6)
+            };
+            let text = if history.loading {
+                "Loading earlier turns…"
+            } else {
+                "Load earlier turns"
+            };
+            let text_width = widgets::text_width(ui, text, label.clone());
+            let at =
+                Rect::from_center_size(button.center(), Vec2::new(text_width, button.height()));
+            widgets::text_in(ui, at, text, label.clone(), color);
+            clicked = response.clicked();
+            top = button.bottom() + 6.0;
+        }
+        if let Some(error) = &history.error {
+            let line = Rect::from_min_size(Pos2::new(rect.left(), top), Vec2::new(width, 16.0));
+            let text_width = widgets::text_width(ui, error, label.clone()).min(width);
+            let at = Rect::from_center_size(line.center(), Vec2::new(text_width, 16.0));
+            widgets::text_in(ui, at, error, label, theme::muted_foreground());
+        }
+        clicked
     }
 
     fn row(&mut self, ui: &mut Ui, row: &Row, width: f32) {

@@ -33,6 +33,10 @@ pub(crate) struct TimelineView {
     /// The wheel or the scroll bar moved the view this pass (the wheel
     /// delta is used up by then).
     pub scrolled: bool,
+    /// The first row and the history control's height of the last pass:
+    /// rows loaded above move the offset with them.
+    pub first: Option<Id>,
+    pub header: f32,
 }
 
 struct RowsCache {
@@ -82,6 +86,8 @@ impl TimelineView {
         self.thread_id = thread_id.to_owned();
         self.follow = true;
         self.pinned.clear();
+        self.first = None;
+        self.header = 0.0;
         // Heights are kept by message and turn ids, so threads opened again
         // come back measured; the map is dropped once it grows large.
         if self.heights.len() > 5000 {
