@@ -1644,6 +1644,13 @@ impl App {
             if let Ok(event) = result {
                 self.terminal_metadata_event(&event);
             }
+        } else if key.starts_with("stop-workflow:") {
+            if result.is_err() {
+                self.toasts.add(crate::ui::toasts::Toast::new(
+                    crate::ui::toasts::Kind::Error,
+                    "Could not stop workflow",
+                ));
+            }
         } else if key == "storage-cleanup-report" {
             if let Ok(report) = result {
                 self.storage_report = (!report.is_null()).then_some(report);

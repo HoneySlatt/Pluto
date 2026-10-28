@@ -10,8 +10,10 @@
 //!
 //! Not ported: the workspace section's pickers, scripts, editor and git
 //! controls (the header keeps them), the inline card beside a wide canvas,
-//! automations, the subagent hover cards, stopping a subagent or workflow
-//! from its row, and "Disconnect agent session".
+//! automations, the subagent hover cards, a workflow row's phases, and
+//! "Disconnect agent session". A working subagent's row stops it on hover
+//! (`subagent.stop`, or its thread's run), a running workflow's stops the
+//! workflow (`orchestration.stopWorkflow`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -61,6 +63,73 @@ struct Related {
     edge: Edge,
     /// The thread's shell, when this client has it.
     shell: Option<(String, String)>,
+    /// How the row's working child stops, when it can.
+    stop: Option<Stop>,
+}
+
+/// `canStop` and `canStopWorkflow`.
+#[derive(Clone, Debug, PartialEq)]
+enum Stop {
+    /// A provider's own child (`subagent.stop`).
+    Native {
+        thread_id: String,
+        run_id: String,
+        subagent_id: String,
+    },
+    /// An app-owned child: its thread's active run.
+    Thread { run_id: String },
+    /// A running workflow (`orchestration.stopWorkflow`).
+    Workflow { subagent_id: String },
+}
+
+fn active(status: &str) -> bool {
+    matches!(status, "pending" | "running" | "waiting")
+}
+
+/// How a child subagent row stops (`canStop`, `canStopWorkflow`).
+fn stop_of(detail: &Detail, child: &str, threads: &HashMap<&str, &Thread>) -> Option<Stop> {
+    let agent = detail
+        .subagents
+        .iter()
+        .find(|a| a.child_thread_id.as_deref() == Some(child))?;
+    if agent.workflow.is_some() {
+        let running = agent
+            .workflow
+            .as_ref()
+            .is_some_and(|w| w["status"] == "running")
+            || agent.status == "running";
+        return (running && agent.origin == "provider_native" && agent.driver == "claudeAgent")
+            .then(|| Stop::Workflow {
+                subagent_id: agent.id.clone(),
+            });
+    }
+    // The child's own thread tells whether newer work runs there.
+    let shell = threads.get(child);
+    let status = shell
+        .and_then(|t| t.activity_run_status.clone().flatten())
+        .unwrap_or_else(|| agent.status.clone());
+    if agent.started_at.is_none() || !active(&status) {
+        return None;
+    }
+    let reference = agent.native_task_ref.as_ref();
+    match agent.origin.as_str() {
+        "app_owned" => shell
+            .and_then(|t| t.active_run_id.clone())
+            .map(|run_id| Stop::Thread { run_id }),
+        "provider_native"
+            if agent.driver == "claudeAgent"
+                && active(&agent.status)
+                && reference
+                    .is_some_and(|r| r["strength"] == "strong" && !r["nativeId"].is_null()) =>
+        {
+            Some(Stop::Native {
+                thread_id: detail.id().to_owned(),
+                run_id: agent.run_id.clone()?,
+                subagent_id: agent.id.clone(),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn shell_status(thread: &Thread) -> String {
@@ -168,10 +237,13 @@ fn relationships(
             let shell = by_id
                 .get(other.as_str())
                 .map(|t| (t.title.clone(), t.created_at.clone()));
+            let child = edge.kind == Kind::Subagent && edge.source == current;
+            let stop = child.then(|| stop_of(detail, &other, &by_id)).flatten();
             Some(Related {
                 thread_id: other,
                 edge,
                 shell,
+                stop,
             })
         })
         .collect()
@@ -290,6 +362,7 @@ pub(crate) struct DetailsState {
 /// One drawn lineage row's action.
 enum Pick {
     Open(String),
+    Stop(String, Stop),
     Merge(String),
     More(&'static str),
     TogglePrevious,
@@ -582,6 +655,31 @@ impl App {
                     self.select_thread(Some(target));
                 }
             }
+            Some(Pick::Stop(child, stop)) => match stop {
+                Stop::Native {
+                    thread_id,
+                    run_id,
+                    subagent_id,
+                } => {
+                    let mut command = crate::model::command("subagent.stop", &thread_id);
+                    command["runId"] = json!(run_id);
+                    command["subagentId"] = json!(subagent_id);
+                    self.dispatch(command);
+                }
+                Stop::Thread { run_id } => {
+                    let mut command = crate::model::command("run.interrupt", &child);
+                    command["runId"] = json!(run_id);
+                    command["holdQueue"] = json!(true);
+                    self.dispatch(command);
+                }
+                Stop::Workflow { subagent_id } => {
+                    self.send_request(
+                        format!("stop-workflow:{subagent_id}"),
+                        "orchestration.stopWorkflow",
+                        json!({"threadId": current, "subagentId": subagent_id}),
+                    );
+                }
+            },
             Some(Pick::More(group)) => {
                 let visible = self.thread_details.visible.entry(group).or_insert(INITIAL);
                 *visible += PAGE;
@@ -683,7 +781,43 @@ fn lineage_row(
     let label = status_label(status);
     let label_font = font(11.0, Weight::Regular);
     let mut text_right = open_rect.right() - 10.0;
-    if merge.is_none() {
+    // A working child's stop button takes the status's place on hover.
+    let stopping = row.stop.is_some() && ui.rect_contains_pointer(rect);
+    if stopping {
+        let button = Rect::from_center_size(
+            Pos2::new(rect.right() - 4.0 - 12.0, rect.center().y),
+            Vec2::splat(24.0),
+        );
+        let tip = if matches!(row.stop, Some(Stop::Workflow { .. })) {
+            "Stop workflow"
+        } else {
+            "Stop subagent"
+        };
+        let response = ui
+            .interact(
+                button,
+                ui.id().with(("lineage-stop", &row.thread_id)),
+                Sense::click(),
+            )
+            .on_hover_text(tip);
+        if response.hovered() {
+            ui.painter()
+                .rect_filled(button, CornerRadius::same(6), hover_fill);
+        }
+        theme::paint_icon(
+            ui,
+            "stop-square",
+            button,
+            12.0,
+            Color32::from_rgb(251, 65, 74),
+        );
+        if response.clicked()
+            && let Some(stop) = &row.stop
+        {
+            return Some(Pick::Stop(row.thread_id.clone(), stop.clone()));
+        }
+        text_right = button.left() - 6.0;
+    } else if merge.is_none() {
         let width = widgets::text_width(ui, label, label_font.clone());
         widgets::text_in(
             ui,
@@ -886,6 +1020,42 @@ mod tests {
         assert_eq!(ids, ["root", "new", "old"]);
         assert!(is_parent(&rows[0].edge, "me"));
         assert_eq!(rows[1].edge.kind, Kind::Subagent);
+    }
+
+    #[test]
+    fn working_children_stop_their_own_way() {
+        let detail: Detail = serde_json::from_value(json!({"thread": {"id": "me"}, "subagents": [
+            {"id": "n1", "runId": "r", "origin": "provider_native", "driver": "claudeAgent",
+                "childThreadId": "c1", "status": "running", "startedAt": "2026-01-01T00:00:00Z",
+                "nativeTaskRef": {"strength": "strong", "nativeId": "task"}},
+            {"id": "n2", "runId": "r", "origin": "provider_native", "driver": "codex",
+                "childThreadId": "c2", "status": "running", "startedAt": "2026-01-01T00:00:00Z"},
+            {"id": "n3", "runId": "r", "origin": "app_owned", "driver": "codex",
+                "childThreadId": "c3", "status": "completed", "startedAt": "2026-01-01T00:00:00Z"},
+        ]}))
+        .unwrap();
+        let mut child =
+            (*thread("c3", Some(("me", "subagent")), "2026-01-01T00:00:00.000Z")).clone();
+        child.activity_run_status = Some(Some("running".into()));
+        child.active_run_id = Some("cr".into());
+        let shells: HashMap<&str, &Thread> = [("c3", &child)].into_iter().collect();
+        assert_eq!(
+            stop_of(&detail, "c1", &shells),
+            Some(Stop::Native {
+                thread_id: "me".into(),
+                run_id: "r".into(),
+                subagent_id: "n1".into(),
+            })
+        );
+        // Codex's own children cannot be stopped one by one.
+        assert_eq!(stop_of(&detail, "c2", &shells), None);
+        // An app-owned child stops through the run its thread works on.
+        assert_eq!(
+            stop_of(&detail, "c3", &shells),
+            Some(Stop::Thread {
+                run_id: "cr".into()
+            })
+        );
     }
 
     #[test]

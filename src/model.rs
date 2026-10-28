@@ -463,6 +463,8 @@ pub struct Subagent {
     pub progress: Option<String>,
     /// `OrchestrationV2SubagentWorkflow`, kept as sent.
     pub workflow: Option<Value>,
+    /// `nativeTaskRef` (`{strength, nativeId}`), kept as sent.
+    pub native_task_ref: Option<Value>,
     pub result: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
