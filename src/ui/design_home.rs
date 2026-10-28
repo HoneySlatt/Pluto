@@ -426,6 +426,70 @@ impl App {
                 self.design_home.model = Some(next);
             }
         }
+        // How the agent may act (`RuntimeModePicker`), left of the model: the
+        // draft composer's mode, which the launch takes.
+        let runtime = self.composer_runtime_mode(true);
+        let (_, runtime_label, runtime_icon, _) = crate::ui::pickers::RUNTIME_MODES
+            .iter()
+            .find(|(mode, ..)| *mode == runtime)
+            .copied()
+            .unwrap_or(crate::ui::pickers::RUNTIME_MODES[0]);
+        let runtime_width =
+            widgets::text_width(ui, runtime_label, font(13.0, Weight::Medium)) + 54.0;
+        let runtime_button = Rect::from_min_size(
+            Pos2::new(model_button.left() - 4.0 - runtime_width, row_y),
+            Vec2::new(runtime_width, 30.0),
+        );
+        let runtime_response = ui.interact(
+            runtime_button,
+            ui.id().with("design-runtime"),
+            Sense::click(),
+        );
+        if runtime_response.hovered() {
+            ui.painter()
+                .rect_filled(runtime_button, CornerRadius::same(8), theme::accent());
+        }
+        theme::paint_icon(
+            ui,
+            runtime_icon,
+            Rect::from_min_size(
+                Pos2::new(runtime_button.left() + 8.0, runtime_button.center().y - 8.0),
+                Vec2::splat(16.0),
+            ),
+            16.0,
+            theme::foreground(),
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(runtime_button.left() + 30.0, runtime_button.top()),
+                runtime_button.max,
+            ),
+            runtime_label,
+            font(13.0, Weight::Medium),
+            theme::foreground(),
+        );
+        theme::paint_icon(
+            ui,
+            "chevron-down",
+            Rect::from_min_size(
+                Pos2::new(
+                    runtime_button.right() - 18.0,
+                    runtime_button.center().y - 6.0,
+                ),
+                Vec2::splat(12.0),
+            ),
+            12.0,
+            theme::muted_foreground(),
+        );
+        if runtime_response.clicked() {
+            self.open_menu = if self.open_menu.as_deref() == Some("runtime-picker") {
+                None
+            } else {
+                Some("runtime-picker".into())
+            };
+        }
+        self.runtime_menu(ui, runtime_button, true);
         let submit = ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
         if ready && (create_response.clicked() || submit) {
             self.create_design(&selection);
