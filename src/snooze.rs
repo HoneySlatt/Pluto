@@ -26,7 +26,7 @@ pub fn until_iso(preset: &Preset) -> String {
 }
 
 fn time_of_day(date: DateTime<Local>) -> String {
-    date.format("%-I:%M %p").to_string()
+    crate::ui::widgets::hour_minute(date)
 }
 
 /// Local `hour:00` on the day of `base`, `days` calendar days later.

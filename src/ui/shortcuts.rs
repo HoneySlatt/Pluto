@@ -4,10 +4,14 @@
 //! when clauses evaluated against this window's state.
 //!
 //! Handled: the palette modes, Usage and its metric and period keys, new
-//! threads, the terminal drawer, the right panel and diff toggles, closing a surface, thread
-//! traversal and jumps, settle and pin, steering and editing queued
-//! messages. Other commands (the terminal drawer,
-//! previews, composer controls, themes) are not ported and fall through.
+//! threads, the terminal drawer and its split, new and close, the right
+//! panel and diff toggles, closing a surface, thread traversal, jumps and
+//! the history (back, forward), settle, pin and copying the thread's
+//! reference, steering and editing queued messages, the model picker and
+//! the composer's mode, effort, workspace, branch and previous worktree.
+//! Not ported yet, they fall through: reopening a closed view, undo,
+//! previews' keys, a right-panel terminal's split, new and close, themes,
+//! stash and the alternate sends.
 use eframe::egui::{self, Key, Modifiers, Ui};
 use serde_json::{Value, json};
 
@@ -136,11 +140,26 @@ impl App {
             .open_menu
             .as_deref()
             .is_some_and(|menu| menu.contains("model"));
+        let thread = self.current_thread();
+        let terminal_open = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.drawers.get(id))
+            .is_some_and(|drawer| drawer.open);
+        let panel_open = thread.is_some() && self.panel_open();
+        let preview_open =
+            panel_open && matches!(self.panel().active_tab(), Some(PanelTab::Browser { .. }));
         let context = [
             ("terminalFocus", terminal_focus),
-            ("terminalOpen", false),
-            ("previewFocus", false),
-            ("previewOpen", false),
+            ("terminalOpen", terminal_open),
+            ("previewFocus", preview_open && editable),
+            ("previewOpen", preview_open),
+            ("rightPanelOpen", panel_open),
+            (
+                "turnRunning",
+                thread.as_ref().is_some_and(|t| t.is_running()),
+            ),
+            ("draftThreadRoute", self.selected.is_none()),
             ("isWeb", false),
             ("isDesktop", true),
             ("editableFocus", editable),
@@ -264,6 +283,83 @@ impl App {
                 };
                 self.select_thread(Some(target));
             }
+            "navigation.back" | "navigation.forward" => {
+                let back = command == "navigation.back";
+                let (from, to) = if back {
+                    (&mut self.nav_back, &mut self.nav_forward)
+                } else {
+                    (&mut self.nav_forward, &mut self.nav_back)
+                };
+                let Some(target) = from.pop() else {
+                    return false;
+                };
+                to.push(self.selected.clone());
+                self.navigating = true;
+                self.select_thread(target);
+                self.navigating = false;
+            }
+            "thread.copyReference" => {
+                // `resolveThreadReferenceCopyTarget`: the thread's pull
+                // request link, else its id.
+                let Some(thread) = thread else {
+                    return false;
+                };
+                let link = crate::ui::thread_pull_requests::current_link(&thread.pull_requests)
+                    .and_then(|l| l["url"].as_str())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        thread
+                            .linked_pull_request
+                            .as_ref()
+                            .or(thread.branch_pull_request.as_ref())
+                            .and_then(|pr| pr["url"].as_str().map(str::to_owned))
+                    });
+                let (value, title) = match link {
+                    Some(url) => (url, "PR link copied"),
+                    None => (thread.id.clone(), "Thread ID copied"),
+                };
+                if let Some(ctx) = &self.egui_ctx {
+                    ctx.copy_text(value.clone());
+                }
+                self.toasts.add(
+                    crate::ui::toasts::Toast::new(crate::ui::toasts::Kind::Success, title)
+                        .description(value),
+                );
+            }
+            "modelPicker.toggle" => self.toggle_menu("model-picker"),
+            "composer.mode" | "composer.effort" => {
+                let menu = if command == "composer.mode" {
+                    self.composer_controls.0
+                } else {
+                    self.composer_controls.1
+                };
+                let Some(menu) = menu else {
+                    return false;
+                };
+                self.toggle_menu(menu);
+            }
+            "composer.workspace" if self.selected.is_none() => {
+                self.toggle_menu("composer-workspace")
+            }
+            "composer.branch" => self.toggle_menu(crate::ui::branch_picker::MENU),
+            "composer.previousWorktree" if self.selected.is_none() => {
+                let current = self.draft_workspace().and_then(|w| w.worktree.clone());
+                let Some((branch, path)) = self.draft_project().and_then(|project| {
+                    crate::ui::branch_picker::previous_worktree(
+                        &self.state.threads,
+                        &project.id,
+                        current.as_deref(),
+                    )
+                }) else {
+                    return false;
+                };
+                self.use_previous_worktree(branch, path);
+            }
+            "terminal.split" | "terminal.splitVertical" | "terminal.new" | "terminal.close"
+                if thread.is_some() =>
+            {
+                return self.terminal_command(command);
+            }
             "modelPicker.previousProvider" => self.picker_cycle = Some(-1),
             "modelPicker.nextProvider" => self.picker_cycle = Some(1),
             jump if jump.starts_with("modelPicker.jump.") => {
@@ -331,6 +427,15 @@ impl App {
             _ => return false,
         }
         true
+    }
+
+    /// Opens a menu, or closes it when it is the open one.
+    fn toggle_menu(&mut self, menu: &str) {
+        self.open_menu = if self.open_menu.as_deref() == Some(menu) {
+            None
+        } else {
+            Some(menu.to_owned())
+        };
     }
 
     /// `orderedThreads`: pinned, active, then the shelves as rendered.

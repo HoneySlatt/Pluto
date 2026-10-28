@@ -456,9 +456,14 @@ impl App {
         }
         // Ctrl+Enter in a citation's comment editor sends too.
         // Ctrl or Cmd+Enter sends the other way during a turn.
+        // `composerRequiresModifier`: the Send shortcut setting decides
+        // whether a plain Enter sends or starts a new line.
+        let shortcut = self.client_setting("sendShortcut");
+        let modifier = shortcut == "mod-enter"
+            || (shortcut == "mod-enter-multiline" && self.composer.contains('\n'));
         let submit = (focused
             && ui.input_mut(|i| {
-                i.consume_key(Modifiers::NONE, Key::Enter)
+                (!modifier && i.consume_key(Modifiers::NONE, Key::Enter))
                     || i.consume_key(Modifiers::COMMAND, Key::Enter)
             }))
             || std::mem::take(&mut self.cite.send);
@@ -643,6 +648,15 @@ impl App {
             traits_rect = Some(rect);
         }
         let mode_index = blocks.len().saturating_sub(1);
+        // What `composer.mode` and `composer.effort` open (`openControl`).
+        self.composer_controls = (
+            (!chat).then_some(if fit.mode_hidden {
+                "composer-overflow"
+            } else {
+                "runtime-picker"
+            }),
+            trait_label.as_ref().map(|_| "traits-picker"),
+        );
         if !chat && fit.mode_hidden {
             self.separator(ui, x, bar_top);
             x += 7.0;

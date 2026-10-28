@@ -150,7 +150,8 @@ const TIMESTAMP_FORMATS: [(&str, &str); 3] = [
     ("12-hour", "12-hour"),
     ("24-hour", "24-hour"),
 ];
-const RESPONSE_STREAMING: [(&str, &str, &str); 3] = [
+/// `ResponseStreamingMode` (v0.1.0 dropped v0.0.45's `token`).
+const RESPONSE_STREAMING: [(&str, &str, &str); 2] = [
     (
         "turn",
         "Wait for the full response",
@@ -160,11 +161,6 @@ const RESPONSE_STREAMING: [(&str, &str, &str); 3] = [
         "paragraph",
         "Show finished paragraphs",
         "Each paragraph or code block appears as soon as it is complete.",
-    ),
-    (
-        "token",
-        "Token by token (legacy)",
-        "Every token repaints the answer as it arrives. Slower and harder to read. Thinking traces still arrive a paragraph at a time.",
     ),
 ];
 const DIFF_FILE_STATES: [(&str, &str); 2] = [("expanded", "Expanded"), ("collapsed", "Collapsed")];

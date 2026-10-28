@@ -905,14 +905,19 @@ pub(crate) fn upcoming_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> St
     };
     let local = date.with_timezone(&chrono::Local);
     let today = now.with_timezone(&chrono::Local).date_naive();
-    let time = local.format("%-I:%M %p").to_string();
+    let time = crate::ui::widgets::hour_minute(local);
     match (local.date_naive() - today).num_days() {
-        days if days <= 0 => time,
+        days if days < 0 => crate::ui::widgets::clock_time(iso, now),
+        0 => time,
         1 => format!("tomorrow at {time}"),
-        _ if chrono::Datelike::year(&local.date_naive()) == chrono::Datelike::year(&today) => {
-            format!("{} {time}", local.format("%-m/%-d"))
+        _ => {
+            let same_year =
+                chrono::Datelike::year(&local.date_naive()) == chrono::Datelike::year(&today);
+            format!(
+                "{} {time}",
+                crate::ui::widgets::numeric_date(local, !same_year)
+            )
         }
-        _ => format!("{} {time}", local.format("%-m/%-d/%Y")),
     }
 }
 

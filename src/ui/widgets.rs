@@ -583,18 +583,82 @@ pub fn relative_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     format!("{}d", hours / 24)
 }
 
-/// `formatDayAwareTimestamp` with the default locale 12-hour format.
+/// The Time format setting (`timestampFormat`), set every frame: 0 the
+/// system's locale, 1 12-hour, 2 24-hour.
+static TIME_FORMAT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_time_format(setting: &str) {
+    let value = match setting {
+        "12-hour" => 1,
+        "24-hour" => 2,
+        _ => 0,
+    };
+    TIME_FORMAT.store(value, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The system's time locale (`LC_ALL`, `LC_TIME`, `LANG`), read once.
+fn time_locale() -> &'static str {
+    static LOCALE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LOCALE.get_or_init(|| {
+        ["LC_ALL", "LC_TIME", "LANG"]
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|value| !value.is_empty())
+            .unwrap_or_default()
+    })
+}
+
+/// Regions whose clock and numeric dates read like en-US's (12-hour,
+/// month first); elsewhere 24-hour and day first, as `Intl` would format
+/// them for the system's locale.
+fn us_style() -> bool {
+    let tag = time_locale().split(['.', '@']).next().unwrap_or_default();
+    matches!(tag, "" | "C" | "POSIX" | "en_US" | "en_PH" | "es_US")
+}
+
+/// A wall-clock time in the Time format setting (`getTimestampFormatter`).
+pub fn hour_minute(local: chrono::DateTime<chrono::Local>) -> String {
+    let twelve = match TIME_FORMAT.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => us_style(),
+    };
+    if twelve {
+        local.format("%-I:%M %p").to_string()
+    } else {
+        local.format("%H:%M").to_string()
+    }
+}
+
+/// A numeric date (`numericDateFormatter`, with the year when it is not
+/// this year's).
+pub fn numeric_date(local: chrono::DateTime<chrono::Local>, with_year: bool) -> String {
+    let format = match (us_style(), with_year) {
+        (true, false) => "%-m/%-d",
+        (true, true) => "%-m/%-d/%Y",
+        (false, false) => "%d/%m",
+        (false, true) => "%d/%m/%Y",
+    };
+    local.format(format).to_string()
+}
+
+/// `formatDayAwareTimestamp`: the time today, "yesterday at" it, else the
+/// numeric date before it.
 pub fn clock_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(date) = crate::timeline::parse_time(iso) else {
         return String::new();
     };
     let local = date.with_timezone(&chrono::Local);
     let today = now.with_timezone(&chrono::Local).date_naive();
-    let time = local.format("%-I:%M %p").to_string();
-    if local.date_naive() == today {
-        time
-    } else {
-        format!("{} {time}", local.format("%b %-d"))
+    let time = hour_minute(local);
+    match (today - local.date_naive()).num_days() {
+        ..=0 => time,
+        1 => format!("yesterday at {time}"),
+        _ => {
+            let same_year =
+                chrono::Datelike::year(&local.date_naive()) == chrono::Datelike::year(&today);
+            format!("{} {time}", numeric_date(local, !same_year))
+        }
     }
 }
 

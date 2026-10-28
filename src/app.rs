@@ -134,6 +134,14 @@ pub struct App {
     pub(crate) picker_jump: Option<usize>,
     /// A `modelPicker.previousProvider` (-1) or `nextProvider` (1) press.
     pub(crate) picker_cycle: Option<i32>,
+    /// The composer's mode and effort controls as last drawn (their menu
+    /// ids), for `composer.mode` and `composer.effort`.
+    pub(crate) composer_controls: (Option<&'static str>, Option<&'static str>),
+    /// The threads opened before and after the open one (`navigation.back`
+    /// and `navigation.forward`, the browser history upstream).
+    pub(crate) nav_back: Vec<Option<String>>,
+    pub(crate) nav_forward: Vec<Option<String>>,
+    pub(crate) navigating: bool,
     pub(crate) favorite_models: std::collections::BTreeSet<String>,
     /// Right panel per thread (`rightPanelStore.ts`, in memory).
     pub(crate) panels: std::collections::HashMap<String, Panel>,
@@ -513,6 +521,10 @@ impl App {
             picker_legacy_open: false,
             picker_jump: None,
             picker_cycle: None,
+            composer_controls: (None, None),
+            nav_back: Vec::new(),
+            nav_forward: Vec::new(),
+            navigating: false,
             favorite_models: Default::default(),
             panels: Default::default(),
             launcher_highlight: None,
@@ -930,6 +942,14 @@ impl App {
         if self.selected == id {
             return;
         }
+        // Opening another thread is a step the history can go back over.
+        if !self.navigating {
+            self.nav_back.push(self.selected.clone());
+            if self.nav_back.len() > 100 {
+                self.nav_back.remove(0);
+            }
+            self.nav_forward.clear();
+        }
         // The composer keeps each thread's draft.
         let from = self.composer_key(false);
         self.swap_drafts(&from, id.as_deref().unwrap_or("draft"));
@@ -1324,6 +1344,11 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         theme::set_blue_orange_diffs(self.client_setting("diffColorScheme") == "blue-orange");
+        crate::ui::widgets::set_time_format(
+            self.client_setting("timestampFormat")
+                .as_str()
+                .unwrap_or("locale"),
+        );
         // The text menu's Copy lands as a copy event for this pass.
         if std::mem::take(&mut self.pending_copy) {
             ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));

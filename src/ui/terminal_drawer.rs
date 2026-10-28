@@ -399,6 +399,33 @@ impl App {
         action
     }
 
+    /// `terminal.split`, `terminal.splitVertical`, `terminal.new` and
+    /// `terminal.close` on the drawer, which opens for the first three.
+    pub(crate) fn terminal_command(&mut self, command: &str) -> bool {
+        let Some(thread) = self.selected.clone() else {
+            return false;
+        };
+        let open = self.drawers.get(&thread).is_some_and(|d| d.open);
+        let action = match command {
+            "terminal.close" => {
+                if !open {
+                    return false;
+                }
+                match self.drawers.get(&thread) {
+                    Some(drawer) => DrawerAction::Close(drawer.active.clone()),
+                    None => return false,
+                }
+            }
+            "terminal.new" => DrawerAction::New,
+            vertical => DrawerAction::Split(vertical == "terminal.splitVertical"),
+        };
+        if !open {
+            self.open_terminal_drawer(&thread);
+        }
+        self.drawer_action(&thread, action);
+        true
+    }
+
     fn drawer_action(&mut self, thread: &str, action: DrawerAction) {
         let next = next_terminal_id(&self.used_terminal_ids());
         let Some(drawer) = self.drawers.get_mut(thread) else {
