@@ -28,18 +28,42 @@ fn timestamp_ms(iso: Option<&str>) -> i64 {
         .unwrap_or(0)
 }
 
-/// `sortActiveThreadsByOrderKey`: unkeyed threads first by anchor time, then keyed ones.
-/// Keys are computed once per thread: parsing timestamps in every
-/// comparison added up every frame.
+/// Pluto: when `thread` last worked, the latest of its creation, its
+/// return from the settled shelf, the user's last message, the last reply
+/// and the end of its last run. The card shows it.
+pub(crate) fn activity_at(thread: &Thread) -> &str {
+    [
+        thread.unsettled_at.as_deref(),
+        thread.latest_user_message_at.as_deref(),
+        thread
+            .latest_visible_message
+            .as_ref()
+            .map(|message| message.updated_at.as_str()),
+        thread
+            .latest_run
+            .as_ref()
+            .and_then(|run| run.completed_at.as_deref()),
+    ]
+    .into_iter()
+    .flatten()
+    .fold(thread.created_at.as_str(), |latest, at| {
+        if timestamp_ms(Some(at)) > timestamp_ms(Some(latest)) {
+            at
+        } else {
+            latest
+        }
+    })
+}
+
+/// Pluto, after Claude Code rather than `sortActiveThreadsByOrderKey`: the
+/// threads working now first, then the latest to have worked. Keys are
+/// computed once per thread: parsing timestamps in every comparison added
+/// up every frame.
 pub fn sort_active(threads: &mut [&Thread]) {
     threads.sort_by_cached_key(|&t| {
-        let anchor = match t.active_order_key {
-            Some(_) => 0,
-            None => timestamp_ms(Some(&t.created_at)).max(timestamp_ms(t.unsettled_at.as_deref())),
-        };
         (
-            t.active_order_key.as_deref(),
-            std::cmp::Reverse(anchor),
+            t.active_run_id.is_none(),
+            std::cmp::Reverse(timestamp_ms(Some(activity_at(t)))),
             t.id.as_str(),
         )
     });
@@ -899,13 +923,7 @@ impl App {
                 }
             }
         } else if !(hovered || snooze_open) {
-            let time = widgets::relative_time(
-                thread
-                    .latest_user_message_at
-                    .as_deref()
-                    .unwrap_or(&thread.updated_at),
-                self.now,
-            );
+            let time = widgets::relative_time(activity_at(thread), self.now);
             let width = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
             widgets::text_in(
                 ui,
@@ -1253,15 +1271,25 @@ mod tests {
     }
 
     #[test]
-    fn active_threads_lead_with_newest_unkeyed() {
-        let a = thread("a", "2026-01-01T00:00:00.000Z");
-        let b = thread("b", "2026-01-02T00:00:00.000Z");
-        let mut c = thread("c", "2026-01-03T00:00:00.000Z");
-        c.active_order_key = Some("a0".into());
-        let mut list = vec![&a, &c, &b];
+    fn active_threads_lead_with_the_working_then_the_latest_to_work() {
+        let old = thread("old", "2026-01-01T00:00:00.000Z");
+        let new = thread("new", "2026-01-05T00:00:00.000Z");
+        // Created first, but the user wrote in it last.
+        let mut talked = thread("talked", "2026-01-02T00:00:00.000Z");
+        talked.latest_user_message_at = Some("2026-01-06T00:00:00.000Z".into());
+        // Its run finished after that message.
+        let mut ran = thread("ran", "2026-01-03T00:00:00.000Z");
+        ran.latest_run = Some(crate::model::RunSummary {
+            completed_at: Some("2026-01-07T00:00:00.000Z".into()),
+            ..Default::default()
+        });
+        let mut working = thread("working", "2026-01-01T12:00:00.000Z");
+        working.active_run_id = Some("run".into());
+        let mut list = vec![&old, &new, &talked, &ran, &working];
         sort_active(&mut list);
         let ids: Vec<&str> = list.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["b", "a", "c"]);
+        assert_eq!(ids, ["working", "ran", "talked", "new", "old"]);
+        assert_eq!(activity_at(&ran), "2026-01-07T00:00:00.000Z");
     }
 
     #[test]
