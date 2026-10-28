@@ -364,3 +364,78 @@ fn find_in_thread_marks_and_counts_the_server_matches() {
     assert!(fills.contains(&egui::Color32::from_rgb(238, 165, 43)));
     assert!(fills.contains(&egui::Color32::from_rgb(140, 108, 31)));
 }
+
+#[test]
+fn an_opened_tool_call_loads_the_images_it_returned() {
+    let mut harness = harness();
+    click(&mut harness, egui::pos2(60.0, 140.0));
+    let item = |id: &str, kind: &str, ordinal: u64, extra: Value| {
+        let mut item = json!({"id": id, "threadId": "a", "runId": "t", "ordinal": ordinal,
+            "status": "completed", "startedAt": at(10), "updatedAt": "2026-10-28T12:00:00.000Z",
+            "type": kind});
+        for (key, value) in extra.as_object().unwrap() {
+            item[key] = value.clone();
+        }
+        json!({"position": 0, "visibility": "local", "sourceThreadId": "a",
+            "sourceItemId": id, "item": item})
+    };
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "visibleTurnItems": [
+            item("u", "user_message", 1, json!({"messageId": "u", "text": "Look",
+                "inputIntent": "turn_start", "attachments": []})),
+            item("x", "dynamic_tool", 2, json!({"toolName": "mcp__t3-code__preview_snapshot",
+                "title": "Preview snapshot", "input": {}, "outputOmitted": true})),
+            item("m", "assistant_message", 3, json!({"messageId": "m", "text": "Done",
+                "streaming": false})),
+        ],
+        "updatedAt": at(5)}});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(3);
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    // The turn is folded under its "Worked for" row.
+    let (_, fold) = texts(&harness)
+        .into_iter()
+        .find(|(text, _)| text.starts_with("Worked"))
+        .unwrap_or_else(|| panic!("fold row in {:?}", texts(&harness)));
+    click(&mut harness, fold.center());
+    let (_, call) = texts(&harness)
+        .into_iter()
+        .find(|(text, _)| text.to_lowercase().contains("snapshot"))
+        .unwrap_or_else(|| panic!("tool row in {:?}", texts(&harness)));
+    click(&mut harness, call.center());
+    harness.run_steps(2);
+    let shown: Vec<String> = texts(&harness).into_iter().map(|(t, _)| t).collect();
+    assert!(shown.iter().any(|t| t == "Loading output…"), "{shown:?}");
+    harness.state_mut().load_offline_reply(
+        "turn-item:x@2026-10-28T12:00:00.000Z",
+        json!({"item": {"id": "x", "type": "dynamic_tool",
+            "output": {"content": [{"type": "image", "mimeType": "image/png"},
+                {"type": "text", "text": "{}"}]}}}),
+    );
+    harness.run_steps(3);
+    let shown: Vec<String> = texts(&harness).into_iter().map(|(t, _)| t).collect();
+    assert!(!shown.iter().any(|t| t == "Loading output…"), "{shown:?}");
+    // The image's slot (still loading without a server): a 180px tall frame.
+    assert!(
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|shape| matches!(&shape.shape,
+        egui::Shape::Rect(rect) if (rect.rect.height() - 180.0).abs() < 0.5))
+    );
+}

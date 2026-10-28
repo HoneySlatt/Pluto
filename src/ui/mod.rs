@@ -79,6 +79,7 @@ pub mod thread_notifications;
 pub mod thread_pull_requests;
 pub mod timeline_view;
 pub mod toasts;
+pub mod tool_images;
 pub mod typography;
 pub mod usage;
 pub mod usage_prices;

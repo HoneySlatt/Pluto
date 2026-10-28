@@ -1756,8 +1756,15 @@ impl App {
         let destructive =
             failed && (entry.tone == "error" && entry.item_type.is_none() || !tool_like);
         let body = expanded_body(entry, label);
-        let can_expand =
-            entry.question.is_some() || (failed && !label.trim().is_empty()) || body.is_some();
+        // A call whose output the timeline withheld opens to fetch it.
+        let withheld = entry
+            .item
+            .as_deref()
+            .is_some_and(crate::ui::tool_images::has_withheld_output);
+        let can_expand = entry.question.is_some()
+            || (failed && !label.trim().is_empty())
+            || body.is_some()
+            || withheld;
         // Measured row boxes: 32px standalone, 28px inside an expanded group.
         let pad = if in_group { 2.625 } else { 4.625 };
         let (rect, _) =
@@ -1882,6 +1889,12 @@ impl App {
                 galley,
                 theme::secondary_label(),
             );
+        }
+        if expanded && let Some(item) = entry.item.clone() {
+            let left = rect.left() + 2.0 + 28.0;
+            if self.tool_output_images(ui, &item, left, width - 30.0) {
+                ui.add_space(4.0);
+            }
         }
     }
 

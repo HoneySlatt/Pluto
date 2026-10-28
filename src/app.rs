@@ -164,6 +164,8 @@ pub struct App {
     pub(crate) find: crate::ui::thread_find::ThreadFind,
     pub(crate) find_paint: Option<crate::ui::thread_find::FindPaint>,
     pub(crate) find_attempts: u32,
+    /// Opened tool calls' fetched images, by item and revision.
+    pub(crate) tool_outputs: std::collections::HashMap<String, crate::ui::tool_images::ToolOutput>,
     /// The Browser surface's preview browser (`ui::preview`).
     pub(crate) preview: crate::ui::preview::PreviewUi,
     pub(crate) html_renders: crate::ui::html_render::HtmlRenders,
@@ -486,6 +488,7 @@ impl App {
             find: Default::default(),
             find_paint: None,
             find_attempts: 0,
+            tool_outputs: Default::default(),
             preview: Default::default(),
             html_renders: Default::default(),
             design: Default::default(),
@@ -1499,6 +1502,7 @@ impl App {
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
         if self.thread_find_result(&key, &result)
+            || self.turn_item_result(&key, &result)
             || self.turn_send_result(&key, &result)
             || self.scratch_result(&key, &result)
             || self.open_in_result(&key, &result)
