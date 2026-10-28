@@ -272,7 +272,9 @@ impl Ctx {
         if let Some(id) = self.session.peek().selected.clone() {
             connection.send(Action::Select(Some(id)));
         }
-        spawn(async move {
+        // The session outlives the screen that started it (the connection
+        // screen unmounts once connected).
+        dioxus::core::spawn_forever(async move {
             while woken.next().await.is_some() {
                 if self.session.peek().generation != generation {
                     return;
@@ -319,7 +321,9 @@ impl Ctx {
             return;
         }
         self.session.write().net = Net::Reconnecting(attempt);
-        spawn(async move {
+        // The session outlives the screen that started it (the connection
+        // screen unmounts once connected).
+        dioxus::core::spawn_forever(async move {
             tokio::time::sleep(RETRY_DELAY).await;
             if self.session.peek().net == Net::Reconnecting(attempt) {
                 self.open(false);
@@ -427,7 +431,9 @@ impl Ctx {
 
     /// "Reconnected" stays for a moment, then the bar leaves.
     fn settle_back(mut self) {
-        spawn(async move {
+        // The session outlives the screen that started it (the connection
+        // screen unmounts once connected).
+        dioxus::core::spawn_forever(async move {
             tokio::time::sleep(Duration::from_millis(1400)).await;
             if self.session.peek().net == Net::Back {
                 self.session.write().net = Net::Connected;

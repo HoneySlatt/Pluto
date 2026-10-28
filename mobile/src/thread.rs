@@ -63,6 +63,19 @@ fn work_code(entry: &WorkEntry) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
+/// Keeps the top-most timeline at its end unless the user scrolled away.
+const STICK: &str = "requestAnimationFrame(() => {
+  const all = document.querySelectorAll('.timeline'), t = all[all.length - 1];
+  if (!t) return;
+  if (!t.dataset.watch) {
+    t.dataset.watch = '1';
+    t.addEventListener('scroll', () => {
+      t.dataset.stick = t.scrollHeight - t.scrollTop - t.clientHeight < 80 ? '1' : '0';
+    }, { passive: true });
+  }
+  if (t.dataset.stick !== '0') t.scrollTop = t.scrollHeight;
+});";
+
 /// "6m 40s" from seconds.
 fn elapsed(seconds: i64) -> String {
     let seconds = seconds.max(0);
@@ -106,18 +119,11 @@ pub fn ThreadView(id: String, page: bool) -> Element {
             tick += 1;
         }
     });
-    // The view follows the end of the timeline while it changes.
+    // A thread opens at its end and follows it while it changes, until the
+    // user scrolls up; back near the end, it follows again.
     use_effect(move || {
         let _ = session.read().state.revision;
-        document::eval(
-            "requestAnimationFrame(() => { const t = document.querySelector('.view .timeline');
-               if (t && t.scrollHeight - t.scrollTop - t.clientHeight < 240) t.scrollTop = t.scrollHeight; });",
-        );
-    });
-    use_hook(|| {
-        document::eval(
-            "setTimeout(() => { const t = document.querySelector('.timeline'); if (t) t.scrollTop = t.scrollHeight; }, 60);",
-        );
+        document::eval(STICK);
     });
     let now = {
         let _ = tick.read();
