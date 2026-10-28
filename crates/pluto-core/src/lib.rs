@@ -6,13 +6,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod chat_requests;
 pub mod commands;
+pub mod context;
+pub mod diff;
 pub mod generated_images;
 pub mod html_render;
 pub mod http;
 pub mod mcp_app;
 pub mod model;
 pub mod protocol;
+pub mod requests;
 pub mod spaces;
 pub mod timeline;
 

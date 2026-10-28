@@ -1,8 +1,6 @@
 pub mod app;
-pub mod diff;
 pub mod highlight;
 pub mod preview;
-pub mod requests;
 pub mod snooze;
 pub mod subagents;
 pub mod terminal;
@@ -10,7 +8,8 @@ pub mod theme;
 pub mod ui;
 
 pub use pluto_core::{
-    commands, generated_images, html_render, http, mcp_app, model, protocol, timeline,
+    commands, diff, generated_images, html_render, http, mcp_app, model, protocol, requests,
+    timeline,
 };
 
 /// The core's redraw requests, answered by egui.

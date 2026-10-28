@@ -14,7 +14,7 @@ const LABEL_MAX: usize = 200;
 
 /// One inline reference in a text.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Reference {
+pub struct Reference {
     pub kind: String,
     pub context_id: String,
     pub label: String,
@@ -37,7 +37,7 @@ fn valid_id(id: &str) -> bool {
 }
 
 /// `sanitizeComposerContextLabel`: one line, no brackets, bounded, never empty.
-pub(crate) fn sanitize_label(label: &str, kind: &str) -> String {
+pub fn sanitize_label(label: &str, kind: &str) -> String {
     let cleaned: String = label
         .chars()
         .map(|c| {
@@ -63,7 +63,7 @@ pub(crate) fn sanitize_label(label: &str, kind: &str) -> String {
 }
 
 /// `formatComposerContextReference`.
-pub(crate) fn format_reference(kind: &str, context_id: &str, label: &str) -> String {
+pub fn format_reference(kind: &str, context_id: &str, label: &str) -> String {
     let image = if kind == "image" { "!" } else { "" };
     format!(
         "{image}[{}]({HREF_PREFIX}{kind}/{context_id})",
@@ -72,7 +72,7 @@ pub(crate) fn format_reference(kind: &str, context_id: &str, label: &str) -> Str
 }
 
 /// `collectComposerContextReferences`.
-pub(crate) fn collect(text: &str) -> Vec<Reference> {
+pub fn collect(text: &str) -> Vec<Reference> {
     let mut out = Vec::new();
     if !text.contains("](t3-context:") {
         return out;
@@ -124,7 +124,7 @@ pub(crate) fn collect(text: &str) -> Vec<Reference> {
 }
 
 /// `formatTerminalContextLabel`: "Terminal 1 line 4" / "Terminal 1 lines 4-9".
-pub(crate) fn terminal_label(terminal_label: &str, line_start: u64, line_end: u64) -> String {
+pub fn terminal_label(terminal_label: &str, line_start: u64, line_end: u64) -> String {
     if line_start == line_end {
         format!("{terminal_label} line {line_start}")
     } else {
@@ -134,7 +134,7 @@ pub(crate) fn terminal_label(terminal_label: &str, line_start: u64, line_end: u6
 
 /// `terminalContextRecord` for a selection (`normalizeTerminalContextSelection`):
 /// None when the excerpt is blank.
-pub(crate) fn terminal_record(
+pub fn terminal_record(
     terminal_id: &str,
     label: &str,
     line_start: u64,
@@ -164,7 +164,7 @@ pub(crate) fn terminal_record(
 
 /// `insertInlineContextReference`: the link at byte `cursor`, a space before
 /// it when a word would join, one after it (absorbing a space already there).
-pub(crate) fn insert_reference(prompt: &str, cursor: usize, reference: &str) -> (String, usize) {
+pub fn insert_reference(prompt: &str, cursor: usize, reference: &str) -> (String, usize) {
     let cursor = cursor.min(prompt.len());
     let lead = !prompt[..cursor]
         .chars()
@@ -260,7 +260,7 @@ fn inline_label(record: &Value) -> String {
 }
 
 /// `serializeLegacyContextMessage` (terminal excerpts and review comments).
-pub(crate) fn legacy_text(text: &str, records: &[Value]) -> String {
+pub fn legacy_text(text: &str, records: &[Value]) -> String {
     let mut out = text.to_owned();
     let mut used: Vec<String> = Vec::new();
     for reference in collect(text).into_iter().rev() {
@@ -366,7 +366,7 @@ fn fnv1a64(value: &str) -> String {
 
 /// `toKindScopedComposerContextId`: `kind_<producer id>`, folded into a slug
 /// and a hash when it holds characters a context id cannot.
-pub(crate) fn kind_scoped_id(kind: &str, producer_id: &str) -> String {
+pub fn kind_scoped_id(kind: &str, producer_id: &str) -> String {
     let id = format!("{kind}_{producer_id}");
     if valid_id(&id) {
         return id;
@@ -405,7 +405,7 @@ fn bounded_field(value: &str) -> String {
 
 /// `buildPullRequestReferenceContext` as its `reviewCommentContextRecord`:
 /// the composer's reference to a pull request (`#42`).
-pub(crate) fn pull_request_record(entry: &Value) -> Value {
+pub fn pull_request_record(entry: &Value) -> Value {
     let number = entry["number"].as_u64().unwrap_or(0);
     let field = |key: &str| bounded_field(entry[key].as_str().unwrap_or_default());
     let text = [
@@ -449,7 +449,7 @@ pub(crate) fn pull_request_record(entry: &Value) -> Value {
 
 /// The chip kind a context shows as: a pull request reference by its state
 /// (`pullRequestContextDisplayState`), else its own kind.
-pub(crate) fn display_kind(kind: &str, record: Option<&Value>) -> String {
+pub fn display_kind(kind: &str, record: Option<&Value>) -> String {
     if kind == "review-comment"
         && let Some(pr) = record.map(|r| &r["pullRequest"]).filter(|p| p.is_object())
     {
@@ -465,7 +465,7 @@ pub(crate) fn display_kind(kind: &str, record: Option<&Value>) -> String {
 }
 
 /// The records `text` references, once each, in order.
-pub(crate) fn referenced(text: &str, records: &[Value]) -> Vec<Value> {
+pub fn referenced(text: &str, records: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     for reference in collect(text) {
         if let Some(record) = records
@@ -480,11 +480,7 @@ pub(crate) fn referenced(text: &str, records: &[Value]) -> Vec<Value> {
 }
 
 /// What a message sends: its text and context records, or the legacy text.
-pub(crate) fn message_payload(
-    text: &str,
-    records: &[Value],
-    inline: bool,
-) -> (String, Option<Value>) {
+pub fn message_payload(text: &str, records: &[Value], inline: bool) -> (String, Option<Value>) {
     let records = referenced(text, records);
     if records.is_empty() {
         return (text.to_owned(), None);
@@ -500,7 +496,7 @@ pub(crate) fn message_payload(
 }
 
 /// A chip's accent (`contextChipVariants`): `oklch(0.62 chroma hue)`.
-pub(crate) fn kind_accent(kind: &str) -> (f32, f32) {
+pub fn kind_accent(kind: &str) -> (f32, f32) {
     match kind {
         "image" => (0.16, 16.0),
         "video" => (0.16, 48.0),
@@ -518,7 +514,7 @@ pub(crate) fn kind_accent(kind: &str) -> (f32, f32) {
 }
 
 /// A chip's icon by kind.
-pub(crate) fn kind_icon(kind: &str) -> &'static str {
+pub fn kind_icon(kind: &str) -> &'static str {
     match kind {
         "pr-open" | "pull-request" => "git-pull-request-arrow",
         "pr-draft" => "git-pull-request-draft",
@@ -537,7 +533,7 @@ pub(crate) fn kind_icon(kind: &str) -> &'static str {
 
 /// Sets a message's text and context records: a `message.dispatch`, or a
 /// launch's `initialMessage`.
-pub(crate) fn apply(message: &mut Value, text: &str, records: &[Value], inline: bool) {
+pub fn apply(message: &mut Value, text: &str, records: &[Value], inline: bool) {
     let (text, context) = message_payload(text, records, inline);
     message["text"] = json!(text);
     if let Some(context) = context {

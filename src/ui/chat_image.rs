@@ -14,26 +14,8 @@ use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::widgets;
 
-const LABEL: &str = "Image";
-
-const IMAGE_REQUEST: &str = "Image requested: create the image the user describes with your image generation tool, not with code, SVG or HTML. If the description is too vague to make something good, ask one short question first. After generating, reply in one short sentence in the user's language.";
-
-/// The text and context records of an image message: `text` led by the
-/// Image chip, and `records` with its record.
-pub(crate) fn image_message(text: &str, records: &[Value]) -> (String, Vec<Value>) {
-    let id = format!("image_{}", uuid::Uuid::new_v4().simple());
-    let record = json!({
-        "version": 1,
-        "contextId": id,
-        "kind": "image-request",
-        "label": LABEL,
-        "payload": {"request": IMAGE_REQUEST},
-    });
-    let chip = crate::ui::composer_context::format_reference("image-request", &id, LABEL);
-    let mut records = records.to_vec();
-    records.push(record);
-    (format!("{chip} {text}"), records)
-}
+use pluto_core::chat_requests::IMAGE_LABEL as LABEL;
+pub(crate) use pluto_core::chat_requests::image_message;
 
 impl App {
     /// Codex's default model, when a Codex provider is ready.
