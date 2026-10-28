@@ -1081,7 +1081,7 @@ impl App {
         self.connect.error = None;
         self.connect.busy = true;
         let token = self.connect.token.clone();
-        match Connection::open(&self.connect.server, token, ctx.clone()) {
+        match Connection::open(&self.connect.server, token, crate::repaint(ctx)) {
             Ok(connection) => self.connection = Some(connection),
             Err(error) => {
                 self.connect.error = Some(error);
@@ -1842,7 +1842,7 @@ mod thread_retry_tests {
             )
         });
         let ctx = harness.ctx.clone();
-        let (connection, actions, events) = Connection::fake(ctx);
+        let (connection, actions, events) = Connection::fake(crate::repaint(&ctx));
         let app = harness.state_mut();
         app.connection = Some(connection);
         app.select_thread(Some("new".into()));

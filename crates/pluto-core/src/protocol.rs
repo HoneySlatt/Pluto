@@ -1,6 +1,6 @@
 //! T3 v0.1.0 uses Effect RPC JSON envelopes, not JSON-RPC 2.0, and
 //! orchestration protocol 2 (`ORCHESTRATION_PROTOCOL_QUERY_PARAM`).
-use eframe::egui;
+use crate::Repaint;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -64,7 +64,7 @@ pub struct Connection {
     /// The HTTP API answers outside the socket (older thread history).
     api: Arc<Api>,
     outbox: mpsc::SyncSender<Event>,
-    ctx: egui::Context,
+    repaint: Repaint,
 }
 
 /// The server's HTTP origin and the credential its API requires; the
@@ -101,11 +101,7 @@ impl Wake {
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
 impl Connection {
-    pub fn open(
-        server: &str,
-        token: Zeroizing<String>,
-        ctx: egui::Context,
-    ) -> Result<Self, String> {
+    pub fn open(server: &str, token: Zeroizing<String>, repaint: Repaint) -> Result<Self, String> {
         let url = socket_url(server)?;
         let mut origin = url.clone();
         origin
@@ -125,14 +121,14 @@ impl Connection {
         let wake = Arc::new(Wake::new()?);
         let worker_wake = wake.clone();
         let worker_outbox = outbox.clone();
-        let worker_ctx = ctx.clone();
+        let worker_repaint = repaint.clone();
         std::thread::Builder::new()
             .name("t3-connection".into())
             .spawn(move || {
-                let (outbox, ctx) = (worker_outbox, worker_ctx);
+                let (outbox, repaint) = (worker_outbox, worker_repaint);
                 let emit = |event| {
                     let sent = outbox.send(event).is_ok();
-                    ctx.request_repaint();
+                    repaint.now();
                     sent
                 };
                 if let Err(error) = run(url, token, inbox, &worker_wake, &emit) {
@@ -146,7 +142,7 @@ impl Connection {
             wake,
             api,
             outbox,
-            ctx,
+            repaint,
         })
     }
 
@@ -161,7 +157,7 @@ impl Connection {
     /// the page) first loads the conversation rows up to it, then the
     /// complete page (`loadEarlier`'s two views).
     pub fn load_history(&self, thread_id: &str, cursor: &str, through: Option<&str>) {
-        let (api, outbox, ctx) = (self.api.clone(), self.outbox.clone(), self.ctx.clone());
+        let (api, outbox, repaint) = (self.api.clone(), self.outbox.clone(), self.repaint.clone());
         let (thread_id, cursor) = (thread_id.to_owned(), cursor.to_owned());
         let through = through.map(str::to_owned);
         let failed = Route::History {
@@ -190,7 +186,7 @@ impl Connection {
                         Err(error) => Event::Failed(route(true), error),
                     };
                     let _ = outbox.send(event);
-                    ctx.request_repaint();
+                    repaint.now();
                     if failed {
                         return;
                     }
@@ -243,13 +239,11 @@ impl Api {
     }
 }
 
-#[cfg(test)]
 impl Connection {
     /// A connection to no server: the test reads what the app sends and
     /// feeds the events.
-    pub(crate) fn fake(
-        ctx: egui::Context,
-    ) -> (Self, mpsc::Receiver<Action>, mpsc::SyncSender<Event>) {
+    #[doc(hidden)]
+    pub fn fake(repaint: Repaint) -> (Self, mpsc::Receiver<Action>, mpsc::SyncSender<Event>) {
         let (actions, inbox) = mpsc::channel();
         let (outbox, events) = mpsc::sync_channel(128);
         let connection = Self {
@@ -261,7 +255,7 @@ impl Connection {
                 token: Zeroizing::new(String::new()),
             }),
             outbox: outbox.clone(),
-            ctx,
+            repaint,
         };
         (connection, inbox, outbox)
     }

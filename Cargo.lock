@@ -2829,6 +2829,7 @@ dependencies = [
  "iana-time-zone",
  "image",
  "libc",
+ "pluto-core",
  "pulldown-cmark",
  "rfd",
  "rustls",
@@ -2842,6 +2843,23 @@ dependencies = [
  "url",
  "uuid",
  "vte",
+ "zeroize",
+]
+
+[[package]]
+name = "pluto-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "image",
+ "libc",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "tungstenite",
+ "url",
+ "uuid",
  "zeroize",
 ]
 

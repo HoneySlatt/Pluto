@@ -2193,7 +2193,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
 
 /// Keep recovered images after their response and outside its work fold,
 /// before the next prompt written after the file was saved.
-pub(crate) fn insert_generated_images(
+pub fn insert_generated_images(
     rows: &mut Vec<Row>,
     images: &[crate::generated_images::GeneratedImage],
 ) {
@@ -2559,7 +2559,10 @@ mod tests {
         let rows = rows(&thread, &detail, &Expansion::default());
         // Folded turns keep the app out, like a published page.
         assert!(rows.iter().any(|r| matches!(r, Row::TurnFold { .. })));
-        assert!(rows.iter().any(|r| matches!(r, Row::McpApp(app) if app.app.server == "weather")));
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::McpApp(app) if app.app.server == "weather"))
+        );
     }
 
     #[test]

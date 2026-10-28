@@ -7,20 +7,20 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use eframe::egui;
+use crate::Repaint;
 
 use crate::model::Detail;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeneratedImage {
-    pub(crate) path: PathBuf,
-    pub(crate) modified: SystemTime,
-    pub(crate) bytes: u64,
+    pub path: PathBuf,
+    pub modified: SystemTime,
+    pub bytes: u64,
 }
 
 impl GeneratedImage {
     /// A completed write retries a file first seen while it was still saving.
-    pub(crate) fn key(&self) -> String {
+    pub fn key(&self) -> String {
         format!(
             "generated:{}:{:?}:{}",
             self.path.display(),
@@ -73,7 +73,7 @@ struct Directory {
 
 /// Poll only this conversation's native Codex directories, including when a
 /// native image generation produced no server event to invalidate the timeline.
-pub(crate) fn images(detail: &Detail, ctx: &egui::Context) -> Vec<GeneratedImage> {
+pub fn images(detail: &Detail, repaint: &Repaint) -> Vec<GeneratedImage> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Directory>>> = OnceLock::new();
     const INTERVAL: Duration = Duration::from_secs(1);
     let cache = CACHE.get_or_init(Default::default);
@@ -83,7 +83,7 @@ pub(crate) fn images(detail: &Detail, ctx: &egui::Context) -> Vec<GeneratedImage
     let Some(home) = home else { return Vec::new() };
     let mut out = Vec::new();
     for path in directories(detail, &home) {
-        ctx.request_repaint_after(INTERVAL);
+        repaint.after(INTERVAL);
         let Ok(mut cache_guard) = cache.lock() else {
             continue;
         };
@@ -93,7 +93,7 @@ pub(crate) fn images(detail: &Detail, ctx: &egui::Context) -> Vec<GeneratedImage
             continue;
         }
         entry.scanning = true;
-        let ctx = ctx.clone();
+        let repaint = repaint.clone();
         std::thread::spawn(move || {
             let images = scan(&path);
             if let Ok(mut cache) = cache.lock() {
@@ -106,7 +106,7 @@ pub(crate) fn images(detail: &Detail, ctx: &egui::Context) -> Vec<GeneratedImage
                     },
                 );
             }
-            ctx.request_repaint();
+            repaint.now();
         });
     }
     out.sort_by(|a, b| (&a.modified, &a.path).cmp(&(&b.modified, &b.path)));

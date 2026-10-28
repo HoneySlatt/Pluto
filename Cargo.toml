@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+[workspace]
+members = [".", "crates/pluto-core"]
+
 [dependencies]
+pluto-core = { path = "crates/pluto-core" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 iana-time-zone = "0.1"
 libc = "0.2"

@@ -9,7 +9,7 @@ fn main() {
     let out = std::path::PathBuf::from(&args[3]);
     std::fs::create_dir_all(&out).unwrap();
     let ctx = eframe::egui::Context::default();
-    let connection = Connection::open(&args[1], token, ctx).expect("connect");
+    let connection = Connection::open(&args[1], token, pluto::repaint(&ctx)).expect("connect");
     let started = std::time::Instant::now();
     let mut selected = false;
     let mut count = 0;
