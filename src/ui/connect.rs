@@ -27,7 +27,7 @@ impl App {
         );
         eyebrow.extra_letter_spacing = 2.2;
         let mut job = egui::text::LayoutJob::default();
-        job.append("T3 CODE (ALPHA)", 0.0, eyebrow);
+        job.append("PLUTO", 0.0, eyebrow);
         let galley = ui.fonts_mut(|f| f.layout_job(job));
         ui.painter().galley(
             Pos2::new(x, card.top() + 32.0),

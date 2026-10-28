@@ -95,6 +95,7 @@ enum Action {
     SetFavicon(String, String),
     OpenSetting(usize, String),
     Call(fn(&mut App)),
+    ProjectSettings(String),
     Missing(&'static str),
 }
 
@@ -402,7 +403,7 @@ impl App {
                     let mut settings = Item::new(
                         "folder",
                         "Project settings",
-                        Action::Missing("Project settings"),
+                        Action::ProjectSettings(project.id.clone()),
                     );
                     settings.subtitle = Some(project.title.clone());
                     actions.push(settings);
@@ -764,11 +765,18 @@ impl App {
                 i.key_pressed(Key::Backspace),
             )
         });
+        // A cleared highlight (after typing or entering a submenu): the
+        // first ArrowDown lands on the first row.
+        let cleared = !self.palette.keyboard_moved;
         if (up || down) && count > 0 {
             self.palette.keyboard_moved = true;
         }
         if down && count > 0 {
-            self.palette.highlight = (self.palette.highlight + 1) % count;
+            self.palette.highlight = if cleared {
+                0
+            } else {
+                (self.palette.highlight + 1) % count
+            };
         }
         if up && count > 0 {
             self.palette.highlight = (self.palette.highlight + count - 1) % count;
@@ -782,6 +790,16 @@ impl App {
             }
         }
         let in_submenu = !self.palette.stack.is_empty() && !self.palette.in_mode();
+        // Escape in a mode (files, content) goes back to the commands
+        // (`toggleMode("command")`); otherwise it closes.
+        if escape && self.palette.in_mode() {
+            self.palette.stack.clear();
+            self.palette.query.clear();
+            self.palette.highlight = 0;
+            self.palette.keyboard_moved = false;
+            self.palette.focus = true;
+            return;
+        }
         if escape {
             self.palette = PaletteState::default();
             return;
@@ -1011,7 +1029,8 @@ impl App {
                                 // Typed queries keep their first result unmarked
                                 // (Enter still runs it) until the arrows move.
                                 let unmarked = matches!(view, View::Browse | View::Files)
-                                    || view == View::Root && !query.trim().is_empty();
+                                    || view == View::Root && !query.trim().is_empty()
+                                    || view != View::Root && !matches!(view, View::Content);
                                 if index == highlight && (!unmarked || keyboard_moved) {
                                     ui.painter().rect_filled(
                                         row,
@@ -1199,11 +1218,16 @@ impl App {
                 }
                 self.palette.stack.push(view);
                 self.palette.highlight = 0;
+                self.palette.keyboard_moved = false;
                 self.palette.focus = true;
             }
             Action::OpenThread(id) => {
                 self.palette = PaletteState::default();
                 self.select_thread(Some(id));
+            }
+            Action::ProjectSettings(project) => {
+                self.palette = PaletteState::default();
+                self.open_project_settings(&project);
             }
             Action::BrowseInto(path) => {
                 self.palette.query = path;

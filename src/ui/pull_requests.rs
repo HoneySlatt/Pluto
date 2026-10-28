@@ -862,13 +862,7 @@ impl App {
         let meta_right = inner_right - time_width - 6.0;
         let mut x = text_left;
         if show_provider {
-            let icon = match str_field(entry, "provider") {
-                "gitlab" => "sc-gitlab",
-                "azure-devops" => "sc-azure-devops",
-                "bitbucket" => "sc-bitbucket",
-                "forgejo" => "sc-forgejo",
-                _ => "sc-github",
-            };
+            let icon = provider_icon(str_field(entry, "provider"));
             theme::paint_icon(
                 ui,
                 icon,
@@ -1060,24 +1054,31 @@ impl App {
         let items: Vec<Item> = match which {
             "sort" => radio("sort", &SORTS, self.prs.sort),
             "host" => {
-                let mut hosts: Vec<String> = self
+                // Each host with its source control provider's mark.
+                let mut hosts: Vec<(String, &'static str)> = self
                     .prs
                     .results
                     .values()
                     .filter_map(|r| r.as_ref().ok())
                     .flat_map(|v| v["providers"].as_array().cloned().unwrap_or_default())
-                    .filter_map(|p| p["host"].as_str().map(str::to_owned))
+                    .filter_map(|p| {
+                        let kind = p["provider"]
+                            .as_str()
+                            .or(p["kind"].as_str())
+                            .unwrap_or_default();
+                        Some((p["host"].as_str()?.to_owned(), provider_icon(kind)))
+                    })
                     .collect();
                 hosts.sort();
-                hosts.dedup();
+                hosts.dedup_by(|a, b| a.0 == b.0);
                 let current = self.prs.host.clone().unwrap_or_default();
                 let mut items = vec![Item {
                     selected: current.is_empty(),
                     ..Item::new("host:", "All").icon("plug-2")
                 }];
-                items.extend(hosts.into_iter().map(|host| Item {
+                items.extend(hosts.into_iter().map(|(host, icon)| Item {
                     selected: host == current,
-                    ..Item::new(format!("host:{host}"), host.clone()).icon("sc-github")
+                    ..Item::new(format!("host:{host}"), host.clone()).icon(icon)
                 }));
                 items
             }
@@ -1306,6 +1307,17 @@ fn paint_branch_mark(ui: &Ui, rect: Rect) {
         4.0 * scale,
         stroke(theme::alpha(base, 0.45)),
     );
+}
+
+/// A source control provider's mark.
+fn provider_icon(provider: &str) -> &'static str {
+    match provider {
+        "gitlab" => "sc-gitlab",
+        "azure-devops" => "sc-azure-devops",
+        "bitbucket" => "sc-bitbucket",
+        "forgejo" => "sc-forgejo",
+        _ => "sc-github",
+    }
 }
 
 #[cfg(test)]

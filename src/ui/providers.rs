@@ -696,20 +696,20 @@ impl App {
             .cloned()
     }
 
-    /// Saves one instance (`buildProviderInstanceUpdatePatch`). The server
-    /// replaces `providerInstances` wholesale, so the patch carries every
-    /// instance, with this one updated.
+    /// Saves one instance (`usePersistEnvironmentProviderInstanceMutation`):
+    /// an `upsert` the server applies to its latest settings, so edits made
+    /// elsewhere meanwhile stay.
     fn save_instance(&mut self, row: &InstanceRow, instance: Value) {
-        let mut instances = self.provider_instances_map();
-        instances.insert(row.id.clone(), instance);
-        self.replace_provider_instances(instances);
+        self.mutate_provider_instance(json!({
+            "operation": "upsert",
+            "instanceId": row.id,
+            "instance": instance,
+        }));
     }
 
-    /// `deleteProviderInstance`: every instance but this one.
+    /// `deleteProviderInstance`: the instance's `remove`.
     fn delete_instance(&mut self, id: &str) {
-        let mut instances = self.provider_instances_map();
-        instances.remove(id);
-        self.replace_provider_instances(instances);
+        self.mutate_provider_instance(json!({"operation": "remove", "instanceId": id}));
     }
 
     fn provider_instances_map(&self) -> serde_json::Map<String, Value> {
@@ -719,14 +719,30 @@ impl App {
             .unwrap_or_default()
     }
 
-    fn replace_provider_instances(&mut self, instances: serde_json::Map<String, Value>) {
-        // Replace locally first: the settings patch merges, and would keep
-        // removed instances or keys until the server's echo.
+    /// One instance's `create`, `upsert` or `remove`, applied here at once
+    /// and sent as `server.updateSettings`' `providerInstanceMutation`.
+    pub(crate) fn mutate_provider_instance(&mut self, mutation: Value) {
+        let mut instances = self.provider_instances_map();
+        let id = mutation["instanceId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        if mutation["operation"] == "remove" {
+            instances.remove(&id);
+        } else {
+            instances.insert(id.clone(), mutation["instance"].clone());
+        }
+        // Replace locally first: the settings merge would keep removed
+        // instances or keys until the server's echo.
         if !self.state.config["settings"].is_object() {
             self.state.config["settings"] = json!({});
         }
-        self.state.config["settings"]["providerInstances"] = Value::Object(instances.clone());
-        self.patch_server_settings(json!({"providerInstances": instances}));
+        self.state.config["settings"]["providerInstances"] = Value::Object(instances);
+        self.send_request(
+            format!("settings:providerInstances:{id}"),
+            "server.updateSettings",
+            json!({"patch": {}, "providerInstanceMutation": mutation}),
+        );
     }
 
     /// `updateAccentColor`: set when valid, otherwise dropped from the instance.

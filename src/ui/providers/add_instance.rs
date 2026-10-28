@@ -333,9 +333,11 @@ impl App {
                 if !config.is_empty() {
                     instance.insert("config".into(), Value::Object(config));
                 }
-                let mut instances = self.provider_instances_map();
-                instances.insert(instance_id.clone(), Value::Object(instance));
-                self.replace_provider_instances(instances);
+                self.mutate_provider_instance(serde_json::json!({
+                    "operation": "create",
+                    "instanceId": instance_id,
+                    "instance": Value::Object(instance),
+                }));
                 self.status = Some("Provider instance added".into());
                 return;
             }
