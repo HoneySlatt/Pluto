@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-146 -157 805 805">
+  <!-- The adaptive icon's background: icon.svg's gradient and glow, full bleed. -->
+  <defs>
+    <linearGradient id="bg" x1="72" y1="48" x2="442" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#180C30"/>
+      <stop offset="0.52" stop-color="#3B0764"/>
+      <stop offset="1" stop-color="#7E22CE"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(256 245) rotate(90) scale(220)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A855F7" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="-146" y="-157" width="805" height="805" fill="url(#bg)"/>
+  <circle cx="256" cy="245" r="220" fill="url(#glow)"/>
+</svg>

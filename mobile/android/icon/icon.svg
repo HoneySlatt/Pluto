@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Pluto Pixel Leaning Slime</title>
+  <desc id="desc">The classic pixel planet with a restrained off-center droplet silhouette.</desc>
+  <defs>
+    <linearGradient id="bg" x1="72" y1="48" x2="442" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#180C30"/>
+      <stop offset="0.52" stop-color="#3B0764"/>
+      <stop offset="1" stop-color="#7E22CE"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(256 256) rotate(90) scale(220)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A855F7" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="256" cy="256" r="220" fill="url(#glow)"/>
+  <path d="M88 256v-24h24v-24h48v-24h48v-24h80v24h48v24h48v24h24v48h-24v24h-48v24h-48v24h-80v-24h-48v-24h-48v-24H88v-48Z" fill="none" stroke="#A78BFA" stroke-width="18"/>
+  <path d="M192 120h128v24h24v24h24v24h24v24h24v80h-24v24h-24v24h-24v24h-24v24H192v-24h-24v-24h-24v-24h-24v-24h-24v-80h24v-24h24v-24h24v-24h24v-24Z" fill="#EDE9FE"/>
+  <path d="M208 80h40v24h-40ZM192 104h80v24h-80Z" fill="#EDE9FE"/>
+  <path d="M120 288h24v24h24v24h24v24h128v-24h24v-24h24v-24h24v-24H120Z" fill="#A78BFA"/>
+  <path d="M184 192h48v24h-48Zm128 88h48v24h-48Z" fill="#A78BFA"/>
+  <path d="M168 160h48v16h-48Zm-24 24h24v24h-24Zm72-88h16v16h-16Z" fill="#FFFFFF"/>
+  <path d="M88 256v48h24v24h48v24h48v24h80v-24h48v-24h48v-24h24v-48" fill="none" stroke="#6D28D9" stroke-width="20"/>
+  <rect x="392" y="144" width="28" height="28" fill="#F5F3FF"/>
+</svg>
