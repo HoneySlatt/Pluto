@@ -77,6 +77,8 @@ pub struct App {
     pub(crate) tasks_open: bool,
     /// The queued messages' banner above the composer.
     pub(crate) queue: crate::ui::queue::QueueUi,
+    /// Every thread's messages searched (`orchestration.searchThreads`).
+    pub(crate) thread_search: [crate::ui::thread_search::ThreadSearch; 2],
     pub(crate) tasks_thread: Option<String>,
     pub(crate) picker_provider: Option<String>,
     pub(crate) picker_query: String,
@@ -444,6 +446,7 @@ impl App {
             user_text_sizes: Default::default(),
             tasks_open: false,
             queue: Default::default(),
+            thread_search: Default::default(),
             tasks_thread: None,
             picker_provider: None,
             picker_query: String::new(),
@@ -1538,6 +1541,7 @@ impl App {
             || self.design_result(&key, &result)
             || self.chat_project_result(&key, &result)
             || self.chat_mode_result(&key, &result)
+            || self.thread_search_result(&key, &result)
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)
             || self.file_upload_result(&key, &result)

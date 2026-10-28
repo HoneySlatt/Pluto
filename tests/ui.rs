@@ -600,3 +600,44 @@ fn a_draft_can_start_in_a_new_worktree() {
     assert!(find(&harness, "Current checkout").is_none());
     assert!(find(&harness, "New worktree").is_some());
 }
+
+#[test]
+fn the_sidebar_search_finds_threads_by_their_messages() {
+    let mut harness = harness();
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    let (_, field) = texts(&harness)
+        .into_iter()
+        .find(|(text, _)| text == "Search threads")
+        .unwrap_or_else(|| panic!("{:?}", texts(&harness)));
+    click(&mut harness, field.center());
+    harness.event(egui::Event::Text("parser".into()));
+    // Past the 200ms pause, the server is asked.
+    harness.run_steps(20);
+    harness.state_mut().load_offline_reply(
+        "thread-search:0:parser",
+        json!({"matches": [{"threadId": "b", "projectId": "p", "source": "user",
+            "snippet": "fix the parser first", "messageCreatedAt": null}]}),
+    );
+    harness.run_steps(3);
+    let shown: Vec<String> = texts(&harness).into_iter().map(|(t, _)| t).collect();
+    assert!(shown.iter().any(|t| t == "Older thread"), "{shown:?}");
+    assert!(!shown.iter().any(|t| t == "Newest thread"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "You:"), "{shown:?}");
+    assert!(
+        shown.iter().any(|t| t == "fix the parser first"),
+        "{shown:?}"
+    );
+}

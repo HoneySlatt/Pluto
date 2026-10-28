@@ -82,6 +82,7 @@ pub mod thread_find;
 pub mod thread_menu;
 pub mod thread_notifications;
 pub mod thread_pull_requests;
+pub mod thread_search;
 pub mod timeline_view;
 pub mod toasts;
 pub mod tool_images;

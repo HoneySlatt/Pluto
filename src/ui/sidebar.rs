@@ -634,15 +634,23 @@ impl App {
     fn thread_list(&mut self, ui: &mut Ui, rect: Rect) {
         let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
-        let threads: Vec<std::sync::Arc<Thread>> = self
+        // `searchSidebarThreads`: title matches, then message matches.
+        let search = self.search.clone();
+        let found = self.thread_search(ui.ctx(), crate::ui::thread_search::Slot::Sidebar, &search);
+        let mut threads: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
-            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
+            .filter(|t| {
+                query.is_empty()
+                    || t.title.to_lowercase().contains(&query)
+                    || found.contains_key(&t.id)
+            })
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
             .filter(|t| !self.is_chat_thread(t))
             .cloned()
             .collect();
+        threads.sort_by_key(|t| !query.is_empty() && !t.title.to_lowercase().contains(&query));
         let sections = sections(threads.iter().map(std::sync::Arc::as_ref), self.now);
         let cards: Vec<&Thread> = sections
             .pinned
@@ -1111,7 +1119,14 @@ impl App {
         let row3 = Rect::from_min_max(Pos2::new(x, top + 46.0), Pos2::new(right, top + 62.0));
         // Upstream `latestTurnDiff` is a seam that always returns null for shells.
         let branch_right = right - 20.0;
-        if let Some(branch) = &thread.branch {
+        // A search found by its messages shows the matching one instead.
+        if let Some(found) = self.sidebar_excerpt(thread) {
+            crate::ui::thread_search::paint_excerpt(
+                ui,
+                Rect::from_min_max(row3.min, Pos2::new(branch_right, row3.bottom())),
+                found,
+            );
+        } else if let Some(branch) = &thread.branch {
             widgets::text_in(
                 ui,
                 Rect::from_min_max(row3.min, Pos2::new(branch_right, row3.bottom())),

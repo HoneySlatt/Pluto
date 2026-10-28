@@ -59,6 +59,8 @@ pub struct PaletteState {
     /// The native image chooser opened from the favicon picker, while it is
     /// open: the chosen file, `None` on cancel, or why it could not open.
     picking_favicon: Option<Receiver<PickedFavicon>>,
+    /// Threads whose messages match the query, by id.
+    matches: std::collections::HashMap<String, crate::ui::thread_search::Match>,
 }
 
 impl PaletteState {
@@ -121,6 +123,8 @@ struct Item {
     fuzzy: Option<String>,
     /// Sorts after every other match (keybinding settings).
     secondary: bool,
+    /// The thread's message that matches the query (`threadContentMatch`).
+    excerpt: Option<crate::ui::thread_search::Match>,
     action: Action,
 }
 
@@ -140,12 +144,15 @@ impl Item {
             terms: vec![title.to_lowercase()],
             fuzzy: None,
             secondary: false,
+            excerpt: None,
             action,
         }
     }
 
     fn height(&self) -> f32 {
-        if self.thread.is_some() {
+        if self.thread.is_some() && self.excerpt.is_some() {
+            ROW_TALL + 16.0
+        } else if self.thread.is_some() {
             ROW_TALL
         } else if self.subtitle.is_some() {
             ROW_DESCRIBED
@@ -219,6 +226,7 @@ impl App {
             focus: true,
             keyboard_moved: false,
             picking_favicon: None,
+            matches: Default::default(),
         };
     }
 
@@ -277,6 +285,10 @@ impl App {
                 ));
                 item.terms.extend(project.map(|p| normalize(&p.title)));
                 item.terms.extend(thread.branch.as_deref().map(normalize));
+                if let Some(found) = self.palette.matches.get(&thread.id) {
+                    item.terms.push(normalize(&found.snippet));
+                    item.excerpt = Some(found.clone());
+                }
                 item.terms.push(thread.id.clone());
                 item
             })
@@ -729,6 +741,14 @@ impl App {
                 Err(error) => self.status = Some(format!("Could not open image picker: {error}")),
             }
         }
+        // The root view also finds threads by their messages.
+        let query = if self.palette.view() == View::Root && !self.palette.query.starts_with('>') {
+            self.palette.query.clone()
+        } else {
+            String::new()
+        };
+        self.palette.matches =
+            self.thread_search(ui.ctx(), crate::ui::thread_search::Slot::Palette, &query);
         let (groups, empty) = self.palette_groups();
         let rows: Vec<&Item> = groups.iter().flat_map(|g| g.items.iter()).collect();
         let count = rows.len();
@@ -1415,8 +1435,19 @@ fn paint_item(ui: &Ui, row: Rect, item: &Item) {
             theme::warning_foreground(),
         );
     }
-    let sub_top = title_top + 20.0;
+    let mut sub_top = title_top + 20.0;
     let muted = theme::alpha(theme::muted_foreground(), 0.7);
+    if let Some(found) = item.excerpt.as_ref().filter(|_| item.thread.is_some()) {
+        crate::ui::thread_search::paint_excerpt(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(row.left() + 32.0, sub_top),
+                Pos2::new(right, sub_top + 16.0),
+            ),
+            found,
+        );
+        sub_top += 16.0;
+    }
     if let Some(meta) = &item.thread {
         // Project · Local · branch · provider glyph (`ThreadCommandSubtitle`).
         let small = font(12.0, Weight::Regular);
