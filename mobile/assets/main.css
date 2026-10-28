@@ -890,3 +890,40 @@ label.set { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .timeline { scroll-behavior: auto !important; }
 }
+
+/* Motion: layers come in on a long deceleration and leave quicker on an
+   accelerating curve; the drawer and the view behind it move together on
+   the compositor, and the finger drives both while it drags. */
+:root {
+  --enter: cubic-bezier(.32, .72, 0, 1);
+  --exit: cubic-bezier(.4, 0, .7, .2);
+}
+.drawer { will-change: transform; transition: transform 260ms var(--exit); }
+.app.drawer-open .drawer { transition: transform 420ms var(--enter); }
+/* Closed, the drawer stays painted beside the screen (inert, `drawer.rs`):
+   its first opening then has nothing left to draw. */
+.drawer, .app.drawer-open .drawer { visibility: visible; }
+.drawer { pointer-events: none; }
+.app.drawer-open .drawer { pointer-events: auto; }
+.view { will-change: transform; transition: transform 260ms var(--exit), opacity 260ms var(--exit); }
+.app.drawer-open .view { transition: transform 420ms var(--enter), opacity 420ms var(--enter); }
+.app.dragging .drawer, .app.dragging .view { transition: none; }
+.page { animation: page-in 380ms var(--enter); }
+.page.fade { animation: fade-in 220ms; }
+.leaving > .page { animation: page-out 240ms var(--exit) forwards; }
+.sheet { animation: sheet-in 380ms var(--enter); }
+.sheet.on { transition: transform 300ms var(--enter); }
+.sheet.leave { animation: sheet-out 220ms var(--exit) forwards; }
+.scrim { transition: opacity 300ms var(--enter); }
+.scrim.on { animation: fade-in 300ms var(--enter); }
+.scrim.leave { animation: fade-out 220ms var(--exit); }
+/* Pages slide over a dimmed view, like the drawer's. */
+@keyframes page-in { from { transform: translateX(100%); box-shadow: none; } }
+.page { box-shadow: -24px 0 48px rgb(0 0 0 / .35); }
+.toast { transition: opacity 220ms var(--enter), transform 320ms var(--enter); }
+/* Rows answer the touch at once. */
+.trow:active, .srow:active, .set:active, .prow:active { background: var(--row-active); transition: none; }
+.tab { transition: color 200ms var(--enter); }
+/* The grab is a 4px line: the finger gets a wider strip around it. */
+.sheet .grab { position: relative; }
+.sheet .grab::before { content: ""; position: absolute; inset: -14px -80px; }

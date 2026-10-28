@@ -58,13 +58,34 @@ const GESTURES: &str = r#"
   } catch (_) {}
   const app = () => document.querySelector('.app');
   const drawer = () => document.querySelector('.drawer');
-  // The drawer follows a horizontal swipe from the left edge, or back.
-  let x0 = null, y0 = 0, opening = false, dragging = false, last = 0, at = 0;
+  // The drawer follows a horizontal swipe from the left edge, or back, and
+  // the view behind it moves and dims with it; let go, both finish the move
+  // from where the finger left them (the app's class catches up after).
+  const view = () => document.querySelector('.app > .view');
+  let x0 = null, y0 = 0, opening = false, dragging = false, w = 1, last = 0, at = 0, speed = 0;
+  const place = progress => {
+    const d = drawer(), v = view();
+    d.style.transform = `translateX(${(progress - 1) * 100}%)`;
+    d.style.visibility = 'visible';
+    if (v) { v.style.transform = `translateX(${progress * 18}%)`; v.style.opacity = 1 - progress * .6; }
+  };
+  let clearing = null;
+  const settle = open => {
+    const a = app(), d = drawer(), v = view();
+    a.classList.remove('dragging');
+    place(open ? 1 : 0);
+    clearTimeout(clearing);
+    clearing = setTimeout(() => {
+      d.style.transform = ''; d.style.visibility = '';
+      if (v) { v.style.transform = ''; v.style.opacity = ''; }
+    }, 420);
+  };
   document.addEventListener('touchstart', e => {
     const a = app(); if (!a || document.querySelector('.sheet:not(.leave)') || document.querySelector('.app > .pagewrap')) return;
     const t = e.touches[0], open = a.classList.contains('drawer-open');
     if ((!open && t.clientX - a.getBoundingClientRect().left < 28) || open) {
-      x0 = t.clientX; y0 = t.clientY; opening = !open; dragging = false; last = t.clientX; at = e.timeStamp;
+      x0 = t.clientX; y0 = t.clientY; opening = !open; dragging = false;
+      last = t.clientX; at = e.timeStamp; speed = 0;
     }
   }, { passive: true });
   document.addEventListener('touchmove', e => {
@@ -73,42 +94,57 @@ const GESTURES: &str = r#"
     if (!dragging) {
       if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { x0 = null; return; }
       if (Math.abs(dx) < 10 || !d) return;
-      dragging = true; d.classList.add('dragging');
+      dragging = true; w = d.offsetWidth || 1; app().classList.add('dragging');
+      clearTimeout(clearing);
     }
-    const w = d.offsetWidth, offset = opening ? Math.min(0, dx - w) : Math.min(0, dx);
-    d.style.transform = `translateX(${offset}px)`; d.style.visibility = 'visible';
+    const progress = Math.min(1, Math.max(0, opening ? dx / w : 1 + dx / w));
+    place(progress);
+    const dt = Math.max(1, e.timeStamp - at);
+    speed = .8 * ((t.clientX - last) / dt) + .2 * speed;
     last = t.clientX; at = e.timeStamp;
   }, { passive: true });
-  document.addEventListener('touchend', e => {
+  const release = () => {
     if (x0 === null) return;
-    const t = e.changedTouches[0], dx = t.clientX - x0, d = drawer();
-    const speed = (t.clientX - last) / Math.max(1, e.timeStamp - at);
-    if (dragging && d) { d.classList.remove('dragging'); d.style.transform = ''; d.style.visibility = ''; }
-    const far = Math.abs(dx) > (d ? d.offsetWidth * .3 : 60) || Math.abs(speed) > .4;
-    if (opening && dx > 0 && far) dioxus.send('drawer');
-    if (!opening && dx < 0 && far) dioxus.send('close');
+    // The last place the finger was seen (a cancelled touch has none).
+    const dx = last - x0;
+    if (dragging) {
+      // A flick decides, else where the drawer is.
+      const progress = opening ? dx / w : 1 + dx / w;
+      const open = Math.abs(speed) > .35 ? speed > 0 : progress > .5;
+      settle(open);
+      if (open && opening) dioxus.send('drawer');
+      if (!open && !opening) dioxus.send('close');
+    }
     x0 = null; dragging = false;
-  });
-  // A sheet pulled down by its grab or title closes.
-  let s0 = null, sheet = null;
+  };
+  document.addEventListener('touchend', release);
+  document.addEventListener('touchcancel', release);
+  // A sheet pulled down by its grab or title closes; a flick down does too.
+  let s0 = null, sheet = null, sy = 0, st = 0, sv = 0;
   document.addEventListener('touchstart', e => {
     const top = e.target.closest && e.target.closest('.sheet .grab, .sheet h2');
     if (!top) return;
-    sheet = top.closest('.sheet'); s0 = e.touches[0].clientY; sheet.classList.add('dragging');
+    sheet = top.closest('.sheet'); s0 = sy = e.touches[0].clientY; st = e.timeStamp; sv = 0;
+    sheet.classList.add('dragging');
   }, { passive: true });
   document.addEventListener('touchmove', e => {
     if (s0 === null) return;
-    const dy = Math.max(0, e.touches[0].clientY - s0);
-    sheet.style.transform = `translateY(${dy}px)`;
+    const y = e.touches[0].clientY, dy = y - s0;
+    // Up, it resists instead of leaving its place.
+    sheet.style.transform = `translateY(${dy > 0 ? dy : dy / 4}px)`;
+    sv = .8 * ((y - sy) / Math.max(1, e.timeStamp - st)) + .2 * sv;
+    sy = y; st = e.timeStamp;
   }, { passive: true });
-  document.addEventListener('touchend', e => {
+  const drop = () => {
     if (s0 === null) return;
-    const dy = e.changedTouches[0].clientY - s0;
+    const dy = sy - s0;
     sheet.classList.remove('dragging');
     // Closing, the sheet leaves from where the finger let it go.
-    if (dy > 90) dioxus.send('sheet-close'); else sheet.style.transform = '';
+    if (dy > 90 || (dy > 20 && sv > .5)) dioxus.send('sheet-close'); else sheet.style.transform = '';
     s0 = null; sheet = null;
-  });
+  };
+  document.addEventListener('touchend', drop);
+  document.addEventListener('touchcancel', drop);
   const LIMIT = 64;
   let p0 = null, pull = 0, busy = false;
   const parts = () => [document.querySelector('.dscroll'), document.querySelector('.ptr')];
@@ -156,10 +192,15 @@ const GESTURES: &str = r#"
       t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px';
     });
   }
-  window.plutoModal = kind => requestAnimationFrame(() => {
+  // Opening, it waits for the layer's slide: making the rest inert restyles
+  // the whole page, which would cost the animation its first frames.
+  let modal = null;
+  window.plutoModal = kind => { clearTimeout(modal); modal = setTimeout(() => requestAnimationFrame(() => {
     const a = app(); if (!a) return;
     const top = kind === 'sheet' ? a.querySelector('.sheet:not(.leave)') : kind === 'drawer' ? drawer() : null;
     for (const el of a.children) {
+      // A closed drawer is inert on its own (drawer.rs).
+      if (el.matches('.drawer') && !kind) continue;
       const keep = !top || el === top || el.matches('.toast, .netbar') || (kind === 'sheet' && el.matches('.scrim'));
       el.inert = !keep;
     }
@@ -171,7 +212,7 @@ const GESTURES: &str = r#"
       const r = window.plutoReturn; window.plutoReturn = null;
       if (document.contains(r) && !r.matches('input, textarea')) r.focus({ preventScroll: true });
     }
-  });
+  }), kind ? 360 : 0); };
 })();
 "#;
 

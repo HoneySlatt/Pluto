@@ -61,21 +61,35 @@ struct RowData {
 #[component]
 pub fn Drawer() -> Element {
     let ui = use_context::<Ui>();
-    // The list lives while the drawer shows (and through its closing).
-    let mut shown = use_signal(|| false);
-    use_effect(move || {
-        let open = ui.nav.read().drawer;
-        if open {
-            shown.set(true);
-            return;
-        }
-        spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(320)).await;
-            if !ui.nav.peek().drawer {
-                shown.set(false);
+    // The list stays mounted, so opening only updates it while the drawer
+    // slides in. Closed, it does not follow every event: it catches up every
+    // couple of seconds when something changed, so it is current when it
+    // opens.
+    let open = ui.nav.read().drawer;
+    let mut catch_up = use_signal(|| 0u64);
+    use_future(move || async move {
+        let mut seen = None;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            if ui.nav.peek().drawer {
+                continue;
             }
-        });
+            let now = {
+                let session = ui.ctx.session.peek();
+                (
+                    session.state.revision,
+                    session.chat,
+                    session.listed,
+                    session.net.clone(),
+                )
+            };
+            if seen.as_ref() != Some(&now) {
+                seen = Some(now);
+                catch_up += 1;
+            }
+        }
     });
+    let _ = catch_up.read();
     // The times move on while it is open.
     let mut minute = use_signal(|| 0u64);
     use_future(move || async move {
@@ -87,16 +101,15 @@ pub fn Drawer() -> Element {
         }
     });
     let _ = minute.read();
-    if !shown() {
-        return rsx! {
-            aside { class: "drawer", "aria-label": "Threads" }
-        };
-    }
     let mut query = use_signal(String::new);
     let mut open_attention = use_signal(|| true);
     let mut open_threads = use_signal(|| true);
     let mut open_settled = use_signal(|| false);
-    let session = ui.ctx.session.read();
+    let session = if open {
+        ui.ctx.session.read()
+    } else {
+        ui.ctx.session.peek()
+    };
     let chat = session.chat;
     let now = chrono::Utc::now();
     let time_format = session
@@ -246,7 +259,14 @@ pub fn Drawer() -> Element {
         }
     };
     rsx! {
-        aside { class: "drawer", "aria-label": "Threads", role: "dialog", "aria-modal": "true", tabindex: "-1",
+        aside {
+            class: "drawer",
+            "aria-label": "Threads",
+            role: "dialog",
+            "aria-modal": "true",
+            tabindex: "-1",
+            // Painted while closed (main.css), but out of reach.
+            inert: if !open { "true" },
             header { class: "dhead",
                 crate::Avatar {}
                 div { class: "who",
