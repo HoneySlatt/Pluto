@@ -44,6 +44,7 @@ pub mod mentions;
 pub mod open_in;
 pub mod palette;
 pub mod pickers;
+pub mod pixel_logo;
 pub mod plan_card;
 pub mod preview;
 pub mod project_actions;

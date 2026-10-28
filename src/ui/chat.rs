@@ -375,6 +375,18 @@ impl App {
         );
     }
 
+    /// Pluto: the pixel logo 22px above the hero's headline at `top`, its
+    /// moon stepping.
+    fn hero_logo(&self, ui: &Ui, left: f32, width: f32, top: f32) {
+        let size = Vec2::new(72.0, 60.0);
+        let rect = Rect::from_min_size(
+            Pos2::new(left + (width - size.x) / 2.0, top - 22.0 - size.y),
+            size,
+        );
+        let moon = crate::ui::pixel_logo::moon_phase(ui);
+        crate::ui::pixel_logo::paint(ui, rect, moon);
+    }
+
     fn draft_hero(
         &mut self,
         ui: &mut Ui,
@@ -395,6 +407,7 @@ impl App {
             let hero = font(30.0, Weight::Regular);
             let text_width = widgets::text_width(ui, text, hero.clone());
             let top = composer_top - if temporary { 100.0 } else { 72.0 };
+            self.hero_logo(ui, left, width, top);
             widgets::text_in(
                 ui,
                 Rect::from_min_size(
@@ -443,6 +456,7 @@ impl App {
         }
         let galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
         let top = composer_top - 100.0;
+        self.hero_logo(ui, left, width, top);
         let pos = Pos2::new(left + (width - galley.size().x) / 2.0, top);
         ui.painter().galley(pos, galley, theme::foreground());
         // The project picker (`InlineButton tone="picker"`): in the question,

@@ -212,6 +212,12 @@ impl App {
         if toggle.clicked() && self.settings_page.is_none() {
             self.toggle_sidebar();
         }
+        // Pluto's pixel logo, centered on the toggle's row, then the wordmark.
+        crate::ui::pixel_logo::paint(
+            ui,
+            Rect::from_center_size(Pos2::new(left + 64.0, 26.0), Vec2::new(24.0, 20.0)),
+            0.0,
+        );
         // Pluto's wordmark (in place of T3's mark and "Code"), its baseline
         // where T3's wordmark sat.
         let wordmark = widgets::galley(
@@ -230,7 +236,7 @@ impl App {
                 .first()
                 .map_or(15.0, |g| g.pos.y);
         painter.galley(
-            Pos2::new(left + 52.0, 30.9 - baseline),
+            Pos2::new(left + 84.0, 30.9 - baseline),
             wordmark,
             theme::sidebar_foreground(),
         );
