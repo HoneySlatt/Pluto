@@ -9,6 +9,7 @@
 //! the history (back, forward), settle, pin and copying the thread's
 //! reference, steering and editing queued messages, the model picker and
 //! the composer's mode, effort, workspace, branch and previous worktree.
+//! A project action's shortcut (`script.<id>.run`) runs it.
 //! Not ported yet, they fall through: reopening a closed view, undo,
 //! previews' keys, a right-panel terminal's split, new and close, themes,
 //! stash and the alternate sends.
@@ -359,6 +360,22 @@ impl App {
                 if thread.is_some() =>
             {
                 return self.terminal_command(command);
+            }
+            // `projectScriptIdFromCommand`: an action's shortcut runs it in
+            // the open thread's project.
+            script if script.starts_with("script.") && script.ends_with(".run") => {
+                let id = &script["script.".len()..script.len() - ".run".len()];
+                let Some(project) = thread.as_ref().map(|t| t.project_id.clone()) else {
+                    return false;
+                };
+                let Some(entry) = self
+                    .project_scripts(&project)
+                    .into_iter()
+                    .find(|s| s["id"] == id)
+                else {
+                    return false;
+                };
+                self.run_project_script(&project, &entry);
             }
             "modelPicker.previousProvider" => self.picker_cycle = Some(-1),
             "modelPicker.nextProvider" => self.picker_cycle = Some(1),

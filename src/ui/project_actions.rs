@@ -466,6 +466,16 @@ impl App {
         let terminal = self.open_terminal_drawer(&thread);
         let command = script["command"].as_str().unwrap_or_default();
         self.queue_terminal_input(&thread, &terminal, format!("{command}\r"));
+        // "Open preview automatically": the action's preview URL opens in a
+        // Browser tab.
+        if script["autoOpenPreview"] == true
+            && let Some(url) = script["previewUrl"]
+                .as_str()
+                .filter(|u| !u.trim().is_empty())
+            && let Some(ctx) = self.egui_ctx.clone()
+        {
+            self.open_browser_tab(&ctx, Some(url.trim().to_owned()));
+        }
     }
 }
 
