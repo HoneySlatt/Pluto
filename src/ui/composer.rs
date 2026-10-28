@@ -208,7 +208,7 @@ impl TurnSend {
 
     /// Adds attachments to the message (its files, then its persisted
     /// images).
-    fn set_attachments(&mut self, attachments: Value) {
+    pub(crate) fn set_attachments(&mut self, attachments: Value) {
         let slot = if self.launch {
             &mut self.message["initialMessage"]["attachments"]
         } else {

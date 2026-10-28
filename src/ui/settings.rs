@@ -79,6 +79,10 @@ pub fn default_client_settings() -> Value {
     })
 }
 
+/// Pluto's client state kept with the settings but not a setting: the
+/// Code | Chat mode. Loaded back, left alone by Restore device defaults.
+const KEPT_STATE: [&str; 1] = ["plutoMode"];
+
 /// Client settings saved at `path`, over the defaults; unknown or
 /// unreadable files fall back to the defaults.
 pub fn load_client_settings(path: Option<&std::path::Path>) -> Value {
@@ -88,7 +92,7 @@ pub fn load_client_settings(path: Option<&std::path::Path>) -> Value {
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
     if let (Some(Value::Object(saved)), Some(defaults)) = (saved, settings.as_object_mut()) {
         for (key, value) in saved {
-            if defaults.contains_key(&key) {
+            if defaults.contains_key(&key) || KEPT_STATE.contains(&key.as_str()) {
                 defaults.insert(key, value);
             }
         }
@@ -2268,10 +2272,11 @@ impl App {
             x += width + 12.0;
         }
         if page == 0 {
-            let changed = self
-                .client_settings
-                .as_object()
-                .is_some_and(|o| o.iter().any(|(k, v)| default_client_settings()[k] != *v));
+            let changed = self.client_settings.as_object().is_some_and(|o| {
+                o.iter().any(|(k, v)| {
+                    !KEPT_STATE.contains(&k.as_str()) && default_client_settings()[k] != *v
+                })
+            });
             let width =
                 (widgets::text_width(ui, "Restore device defaults", font(12.0, Weight::Medium))
                     + 30.0)
@@ -2304,7 +2309,13 @@ impl App {
                 theme::alpha(theme::foreground(), alpha),
             );
             if response.clicked() && changed {
-                self.client_settings = default_client_settings();
+                let mut defaults = default_client_settings();
+                for key in KEPT_STATE {
+                    if let Some(value) = self.client_settings.get(key) {
+                        defaults[key] = value.clone();
+                    }
+                }
+                self.client_settings = defaults;
                 self.save_client_settings();
                 self.diff_ignore_whitespace = true;
                 self.diff_split = false;
@@ -4201,10 +4212,16 @@ mod tests {
     fn saved_client_settings_override_defaults_and_drop_unknown_keys() {
         let path =
             std::env::temp_dir().join(format!("t3-client-settings-{}.json", std::process::id()));
-        std::fs::write(&path, r#"{"diffLayout":"split","bogus":1}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"diffLayout":"split","bogus":1,"plutoMode":"chat"}"#,
+        )
+        .unwrap();
         let settings = load_client_settings(Some(&path));
         std::fs::remove_file(&path).ok();
         assert_eq!(settings["diffLayout"], "split");
+        // Pluto's Code | Chat mode comes back too.
+        assert_eq!(settings["plutoMode"], "chat");
         assert_eq!(settings["confirmThreadDelete"], true);
         assert!(settings.get("bogus").is_none());
         assert_eq!(load_client_settings(None), default_client_settings());

@@ -1218,9 +1218,15 @@ impl App {
         let meta_top = bubble.bottom() + 4.0;
         // Pluto: a chat message's versions, and its Edit button.
         let mut meta_right = row_rect.right() - 4.0;
-        if let Some((versions, at)) = self.message_versions(&message.id) {
-            meta_right =
-                self.version_switcher(ui, meta_right, meta_top, &message.id, &versions, at) - 4.0;
+        if let Some((versions, at, original)) = self.message_versions(&message.id) {
+            meta_right = self.version_switcher(
+                ui,
+                meta_right,
+                meta_top,
+                &message.id,
+                (&versions, at),
+                original.as_deref(),
+            ) - 4.0;
         }
         if response.hovered() || ui.rect_contains_pointer(row_rect) {
             if self.can_branch(&message.id) {

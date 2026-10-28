@@ -179,13 +179,27 @@ impl App {
 
     /// "Delete all", once confirmed.
     pub(crate) fn clear_project_memory(&mut self, project_id: &str) {
-        if let Some(project) = self.state.project(project_id).cloned() {
-            self.forget_project_memory(&project, None);
-        }
+        self.forget_project_memory(project_id, None);
     }
 
     /// Forgets one of a project's memories, or all of them (`None`).
-    fn forget_project_memory(&mut self, project: &Project, memory_id: Option<&str>) {
+    fn forget_project_memory(&mut self, project_id: &str, memory_id: Option<&str>) {
+        self.change_project_memory(project_id, |memory| {
+            if let Some(entries) = memory["memories"].as_array_mut() {
+                entries.retain(|entry| memory_id.is_some_and(|id| entry["id"] != id));
+            }
+        });
+    }
+
+    /// Changes a project's loaded memory and writes it back.
+    pub(crate) fn change_project_memory(
+        &mut self,
+        project_id: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        let Some(project) = self.state.project(project_id).cloned() else {
+            return;
+        };
         let Some(Some(Ok(memory))) = self
             .chat_projects
             .pages
@@ -194,9 +208,7 @@ impl App {
         else {
             return;
         };
-        if let Some(entries) = memory["memories"].as_array_mut() {
-            entries.retain(|entry| memory_id.is_some_and(|id| entry["id"] != id));
-        }
+        change(memory);
         let contents = format!(
             "{}\n",
             serde_json::to_string_pretty(memory).unwrap_or_default()
@@ -1145,6 +1157,7 @@ impl App {
             );
         }
         let mut forget = None;
+        let mut edit = None;
         for entry in entries.iter().rev() {
             let id = entry["id"].as_str().unwrap_or_default().to_owned();
             let text = entry["text"].as_str().unwrap_or_default();
@@ -1161,8 +1174,24 @@ impl App {
             );
             let text_rect = Rect::from_min_max(
                 Pos2::new(row.left() + 26.0, row.top()),
-                Pos2::new(row.right() - 32.0, row.bottom()),
+                Pos2::new(row.right() - 60.0, row.bottom()),
             );
+            if widgets::icon_button(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(row.right() - 54.0, row.center().y - 12.0),
+                    Vec2::splat(24.0),
+                ),
+                ("project-memory-edit", &project.id, &id),
+                "pencil",
+                14.0,
+                theme::muted_foreground(),
+                "Edit",
+            )
+            .clicked()
+            {
+                edit = Some((id.clone(), text.to_owned()));
+            }
             widgets::text_in(
                 ui,
                 text_rect,
@@ -1196,7 +1225,14 @@ impl App {
             y += 36.0;
         }
         if let Some(id) = forget {
-            self.forget_project_memory(project, Some(&id));
+            self.forget_project_memory(&project.id, Some(&id));
+        }
+        if let Some((id, text)) = edit {
+            self.edit_memory(
+                crate::ui::memory_settings::MemoryScope::Project(project.id.clone()),
+                &id,
+                &text,
+            );
         }
         card.bottom()
     }

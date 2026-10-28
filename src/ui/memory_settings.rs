@@ -41,8 +41,25 @@ const INSTRUCTION_FIELDS: [(&str, &str, &str); 2] = [
 /// "Delete all"'s confirmation command: handled here, never dispatched.
 pub(crate) const CLEAR_COMMAND: &str = "pluto.memory.clear";
 
+/// Whose memory a memory is: the chat space's, or a chat project's.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MemoryScope {
+    Main,
+    Project(String),
+}
+
+/// A memory open in the editor: whose, its id, the text, and whether the
+/// editor takes the focus.
+pub(crate) struct MemoryEdit {
+    scope: MemoryScope,
+    id: String,
+    text: String,
+    focus: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct MemorySettings {
+    pub(crate) editing: Option<MemoryEdit>,
     /// The memory file: `None` while it loads, an error when it holds
     /// something else than memory JSON (the page then changes nothing).
     loaded: Option<Result<Value, String>>,
@@ -409,8 +426,8 @@ impl App {
                         layers: false,
                         reset: false,
                         control: Control::OutlineXs {
-                            label: "Delete",
-                            icon: "trash-2",
+                            label: "Edit",
+                            icon: "pencil",
                         },
                     }
                 })
@@ -440,14 +457,146 @@ impl App {
             }
             RowAction::Click => {
                 if let Some(memory_id) = id.strip_prefix("memory:") {
-                    self.change_memory(|memory| {
-                        if let Some(entries) = memory["memories"].as_array_mut() {
-                            entries.retain(|entry| entry["id"] != memory_id);
-                        }
-                    });
+                    let text = match &self.memory.loaded {
+                        Some(Ok(memory)) => memory["memories"]
+                            .as_array()
+                            .and_then(|entries| entries.iter().find(|e| e["id"] == memory_id))
+                            .and_then(|entry| entry["text"].as_str())
+                            .unwrap_or_default()
+                            .to_owned(),
+                        _ => return,
+                    };
+                    self.edit_memory(MemoryScope::Main, memory_id, &text);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Opens a memory in the editor.
+    pub(crate) fn edit_memory(&mut self, scope: MemoryScope, id: &str, text: &str) {
+        self.memory.editing = Some(MemoryEdit {
+            scope,
+            id: id.to_owned(),
+            text: text.to_owned(),
+            focus: true,
+        });
+    }
+
+    /// Saves a memory's new text (`Some`) or forgets it (`None`).
+    fn apply_memory_edit(&mut self, scope: &MemoryScope, id: &str, text: Option<&str>) {
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let change = |memory: &mut Value| {
+            let Some(entries) = memory["memories"].as_array_mut() else {
+                return;
+            };
+            match text {
+                Some(text) => {
+                    for entry in entries.iter_mut().filter(|e| e["id"] == id) {
+                        entry["text"] = json!(text);
+                        entry["updatedAt"] = json!(now);
+                    }
+                }
+                None => entries.retain(|entry| entry["id"] != id),
+            }
+        };
+        match scope {
+            MemoryScope::Main => self.change_memory(change),
+            MemoryScope::Project(project) => self.change_project_memory(project, change),
+        }
+    }
+
+    /// The memory editor: the text, Delete, Cancel and Save.
+    pub(crate) fn memory_edit_dialog(&mut self, ui: &mut Ui, screen: Rect) {
+        let Some(edit) = &mut self.memory.editing else {
+            return;
+        };
+        let mut decision: Option<Option<String>> = None;
+        let mut close = false;
+        let dialog = Rect::from_center_size(screen.center(), Vec2::new(560.0, 290.0));
+        let focus = std::mem::take(&mut edit.focus);
+        egui::Area::new(ui.id().with("memory-edit-dialog"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ui.ctx(), |ui| {
+                let (backdrop, response) = ui.allocate_exact_size(screen.size(), Sense::click());
+                ui.painter().rect_filled(
+                    backdrop,
+                    0.0,
+                    theme::alpha(theme::background(), 200.0 / 255.0),
+                );
+                if response.clicked() && !ui.rect_contains_pointer(dialog) {
+                    close = true;
+                }
+                ui.painter().rect(
+                    dialog,
+                    CornerRadius::same(18),
+                    theme::shade(12),
+                    Stroke::new(1.0, theme::input()),
+                    StrokeKind::Inside,
+                );
+                let left = dialog.left() + 25.0;
+                widgets::text(
+                    ui,
+                    Pos2::new(left, dialog.top() + 25.0),
+                    "Edit memory",
+                    font(20.0, Weight::SemiBold),
+                    theme::foreground(),
+                    20.0,
+                );
+                let field = Rect::from_min_size(
+                    Pos2::new(left, dialog.top() + 64.0),
+                    Vec2::new(dialog.width() - 50.0, 140.0),
+                );
+                let response = crate::ui::action_editor::input(
+                    ui,
+                    field,
+                    "memory-edit-text",
+                    &mut edit.text,
+                    "What to remember",
+                    true,
+                );
+                if focus {
+                    response.request_focus();
+                }
+                use crate::ui::action_editor::{Kind, footer_button, footer_rect};
+                let top = dialog.bottom() - 25.0 - 32.0;
+                let save = footer_rect(ui, dialog.right() - 25.0, top, "Save");
+                let cancel = footer_rect(ui, save.left() - 8.0, top, "Cancel");
+                let delete = footer_rect(
+                    ui,
+                    left + widgets::text_width(ui, "Forget", font(14.0, Weight::Medium)) + 24.0,
+                    top,
+                    "Forget",
+                );
+                if footer_button(ui, save, "Save", Kind::Primary) {
+                    decision = Some(Some(edit.text.trim().to_owned()));
+                }
+                if footer_button(ui, cancel, "Cancel", Kind::Outline)
+                    || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    close = true;
+                }
+                if footer_button(ui, delete, "Forget", Kind::Destructive) {
+                    decision = Some(None);
+                }
+            });
+        if close {
+            self.memory.editing = None;
+            return;
+        }
+        let Some(decision) = decision else {
+            return;
+        };
+        let Some(edit) = self.memory.editing.take() else {
+            return;
+        };
+        match decision {
+            Some(text) if text.is_empty() => {
+                self.status = Some("A memory needs some text; use Forget to remove it".into());
+                self.memory.editing = Some(edit);
+            }
+            text => self.apply_memory_edit(&edit.scope, &edit.id, text.as_deref()),
         }
     }
 

@@ -232,7 +232,10 @@ impl App {
 
     /// The versions of the open chat's message `message_id` and the one
     /// shown, when there are several.
-    pub(crate) fn message_versions(&self, message_id: &str) -> Option<(Vec<String>, usize)> {
+    pub(crate) fn message_versions(
+        &self,
+        message_id: &str,
+    ) -> Option<(Vec<String>, usize, Option<String>)> {
         if !self
             .current_thread()
             .is_some_and(|t| self.is_chat_thread(&t))
@@ -243,7 +246,13 @@ impl App {
         let (point, shown) = self.branch_point(&detail, message_id)?;
         let versions = self.versions_at(&point, &shown);
         let at = versions.iter().position(|id| *id == shown)?;
-        (versions.len() > 1).then_some((versions, at))
+        // The thread that owns the run before the message goes on past it
+        // itself; its later forks branch elsewhere.
+        let original = match point {
+            BranchPoint::After { thread, .. } => Some(thread),
+            BranchPoint::Start(_) => None,
+        };
+        (versions.len() > 1).then_some((versions, at, original))
     }
 
     /// Whether the open chat's message `message_id` can be edited or
@@ -266,6 +275,42 @@ impl App {
             && self
                 .current_detail()
                 .is_some_and(|detail| starts_turn(&detail))
+    }
+
+    /// The thread to open for `version`: the version itself when it is the
+    /// original, else the one used last among it and the versions forked
+    /// from it, as ChatGPT opens a branch where it was left.
+    fn latest_in_branch(&self, version: &str, original: Option<&str>) -> String {
+        if original == Some(version) {
+            return version.to_owned();
+        }
+        let threads = self.thread_index();
+        let descends = |id: &str| {
+            let mut current = id.to_owned();
+            for _ in 0..256 {
+                if current == version {
+                    return true;
+                }
+                match threads
+                    .get(current.as_str())
+                    .and_then(|t| self.version_parent(t))
+                {
+                    Some(parent) => current = parent,
+                    None => return false,
+                }
+            }
+            false
+        };
+        let last = |t: &Thread| {
+            t.latest_user_message_at
+                .clone()
+                .unwrap_or_else(|| t.updated_at.clone())
+        };
+        threads
+            .values()
+            .filter(|t| self.is_chat_thread(t) && descends(&t.id))
+            .max_by(|a, b| last(a).cmp(&last(b)))
+            .map_or_else(|| version.to_owned(), |t| t.id.clone())
     }
 
     /// The user message that started the open chat's last answer, if that
@@ -306,6 +351,11 @@ impl App {
         let Some((point, _)) = self.branch_point(&detail, message_id) else {
             return;
         };
+        // The new version carries the message's files and context records:
+        // the server takes attachments a thread already holds as they are.
+        let original = user_message_index(&detail, message_id).map(|i| &detail.visible[i].item);
+        let attachments = original.map_or(Value::Null, |item| item.get("attachments").clone());
+        let context = original.map_or(Value::Null, |item| item.get("context").clone());
         let model = self.composer_model_json(false);
         let version = uuid::Uuid::new_v4().to_string();
         let send = match point {
@@ -353,6 +403,15 @@ impl App {
                 }
             }
         };
+        let mut send = send;
+        send.set_attachments(attachments);
+        if context.is_object() {
+            if send.launch {
+                send.message["initialMessage"]["context"] = context;
+            } else {
+                send.message["context"] = context;
+            }
+        }
         self.chat_versions.editing = None;
         self.start_turn(send);
         self.select_thread(Some(version));
@@ -439,8 +498,8 @@ impl App {
         right: f32,
         top: f32,
         message_id: &str,
-        versions: &[String],
-        at: usize,
+        (versions, at): (&[String], usize),
+        original: Option<&str>,
     ) -> f32 {
         let label = format!("{}/{}", at + 1, versions.len());
         let label_font = font(12.0, Weight::Medium);
@@ -482,9 +541,10 @@ impl App {
                 open = Some(versions[target].clone());
             }
         }
-        if let Some(id) = open {
+        if let Some(version) = open {
             self.chat_versions.editing = None;
-            self.select_thread(Some(id));
+            let thread = self.latest_in_branch(&version, original);
+            self.select_thread(Some(thread));
         }
         previous.left()
     }

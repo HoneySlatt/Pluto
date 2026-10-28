@@ -989,6 +989,7 @@ impl eframe::App for App {
             Screen::Main if self.settings_page.is_some() => {
                 self.settings_screen(ui, rect);
                 self.status_toast(ui, rect);
+                self.memory_edit_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
@@ -1104,6 +1105,7 @@ impl eframe::App for App {
                 self.legacy_rename_dialog(ui, rect);
                 self.legacy_grouping_dialog(ui, rect);
                 self.chat_project_dialog(ui, rect);
+                self.memory_edit_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
