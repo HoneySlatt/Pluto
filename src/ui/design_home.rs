@@ -12,7 +12,10 @@
 //! turn and the Design surface can show earlier versions; a folder the user
 //! chose is left as it is. References (images and files,
 //! pasted, dropped or picked) go with the brief, through the composer's
-//! attachments and launch (`start_turn`).
+//! attachments and launch (`start_turn`). A design session opened from a
+//! thread (its menu's "New design session") works the same way in
+//! `design/<name>` of that thread's directory, in its project, and its brief
+//! points the agent at the thread, which can then implement the design.
 
 use std::sync::mpsc::Receiver;
 
@@ -78,6 +81,17 @@ pub(crate) struct DesignHome {
     picking: Option<Receiver<Option<String>>>,
     creating: Option<Creating>,
     error: Option<String>,
+    /// The thread the session was opened from.
+    source: Option<Source>,
+}
+
+/// The thread a design session was opened from.
+struct Source {
+    thread_id: String,
+    title: String,
+    project_id: String,
+    /// The thread's directory, which gets the `design/` folder.
+    root: String,
 }
 
 /// A design being created, waiting on `stage`.
@@ -133,6 +147,31 @@ fn expand_home(path: &str) -> String {
 }
 
 impl App {
+    /// The New design screen for a session beside `thread`: it works in
+    /// `design/` of the thread's directory, and its brief points at the thread.
+    pub(crate) fn open_linked_design(&mut self, thread: &crate::model::Thread) {
+        let root = thread.worktree_path.clone().or_else(|| {
+            self.state
+                .projects
+                .iter()
+                .find(|p| p.id == thread.project_id)
+                .map(|p| p.workspace_root.clone())
+        });
+        let Some(root) = root else {
+            return;
+        };
+        self.design_home = DesignHome {
+            source: Some(Source {
+                thread_id: thread.id.clone(),
+                title: thread.title.clone(),
+                project_id: thread.project_id.clone(),
+                root: root.trim_end_matches('/').to_owned(),
+            }),
+            ..DesignHome::default()
+        };
+        self.open_design_home();
+    }
+
     pub(crate) fn open_design_home(&mut self) {
         self.design_home.open = true;
         self.design_home.error = None;
@@ -154,7 +193,11 @@ impl App {
             }
         }
         if !self.design_home.folder_edited {
-            self.design_home.folder = format!("~/Designs/{}", slug(&self.design_home.brief));
+            let name = slug(&self.design_home.brief);
+            self.design_home.folder = match &self.design_home.source {
+                Some(source) => format!("{}/design/{name}", source.root),
+                None => format!("~/Designs/{name}"),
+            };
         }
         let width = WIDTH.min(area.width() - 48.0);
         let left = (area.center().x - width / 2.0).round();
@@ -176,8 +219,15 @@ impl App {
             theme::foreground(),
         );
         y += 40.0;
-        let subtitle =
-            "Describe it. The agent designs it in a folder of HTML files you watch live.";
+        let linked = self.design_home.source.as_ref().map(|source| {
+            format!(
+                "Linked to “{}”: the agent can read that thread, and designs in its design/ folder.",
+                source.title
+            )
+        });
+        let subtitle = linked.as_deref().unwrap_or(
+            "Describe it. The agent designs it in a folder of HTML files you watch live.",
+        );
         let sub_width = widgets::text_width(ui, subtitle, font(14.0, Weight::Regular));
         widgets::text_in(
             ui,
@@ -719,14 +769,44 @@ impl App {
         };
         let mut cwd = cwd;
         let mut existing = project_at(&cwd);
+        // A session opened from a thread works in that thread's project.
+        let linked = home
+            .source
+            .as_ref()
+            .filter(|source| {
+                cwd.strip_prefix(&format!("{}/", source.root))
+                    .is_some_and(|rest| !rest.is_empty())
+            })
+            .map(|source| {
+                (
+                    source.project_id.clone(),
+                    source.root.clone(),
+                    format!(
+                        "This design session was started from the thread \"{}\" (thread id {}), which works in {}. Read that thread with t3_thread_read to learn what is being built and what was decided, then design. Keep the design's files in this folder: that thread will implement them from here.",
+                        source.title, source.thread_id, source.root
+                    ),
+                )
+            });
+        let brief = match &linked {
+            Some((_, _, intro)) => format!("{intro}\n\n{brief}"),
+            None => brief,
+        };
         // A folder under Designs works there, in the Designs project; the
         // proposed one skips the folders other designs already use.
         let designs = expand_home(DESIGNS_ROOT);
-        let within = if existing.is_none()
-            && cwd
-                .strip_prefix(&format!("{designs}/"))
-                .is_some_and(|rest| !rest.is_empty())
-        {
+        // The project root a design works within, and that project if known.
+        let parent = match &linked {
+            Some((project_id, root, _)) => Some((root.clone(), Some(project_id.clone()))),
+            None if existing.is_none()
+                && cwd
+                    .strip_prefix(&format!("{designs}/"))
+                    .is_some_and(|rest| !rest.is_empty()) =>
+            {
+                Some((designs.clone(), project_at(&designs)))
+            }
+            None => None,
+        };
+        let within = if let Some((root, project)) = parent {
             if proposed {
                 let used = |path: &str| {
                     self.state
@@ -741,9 +821,9 @@ impl App {
                     n += 1;
                 }
             }
-            existing = project_at(&designs);
-            let rest = cwd[designs.len() + 1..].to_owned();
-            Some((designs.clone(), rest))
+            existing = project;
+            let rest = cwd[root.len() + 1..].to_owned();
+            Some((root, rest))
         } else {
             None
         };
@@ -763,7 +843,8 @@ impl App {
             Some(project_id) => {
                 // A new folder in Designs is versioned; a folder that already
                 // is a project is left as it is.
-                let init_git = proposed && within.is_some();
+                // A linked session works inside its project's own checkout.
+                let init_git = proposed && within.is_some() && linked.is_none();
                 self.design_home.creating = Some(creating(project_id, Stage::Profile, init_git));
                 self.write_design_profile();
             }

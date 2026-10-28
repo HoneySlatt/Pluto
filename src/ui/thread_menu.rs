@@ -83,6 +83,10 @@ impl App {
                     .icon("message-square-plus"),
             );
         }
+        // Pluto: a design session beside a code thread (`design_home`).
+        if !self.is_chat_thread(thread) {
+            items.push(Item::new("new-design-session", "New design session").icon("palette"));
+        }
         if self.capability("threadPinning") {
             items.push(if pinned {
                 Item::new("unpin", "Unpin thread").icon("pin-off")
@@ -219,6 +223,7 @@ impl App {
             // Branch and worktree carry-over is not ported: the draft opens
             // in the thread's project on its current checkout.
             "new-thread-on-branch" => self.start_draft(Some(thread.project_id.clone())),
+            "new-design-session" => self.open_linked_design(&thread),
             // Pluto: a chat's versions are pinned together (`chat_versions`).
             "pin" | "unpin" => {
                 let pinned = self.chat_family(id).into_iter().filter(|version| {
