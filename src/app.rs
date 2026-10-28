@@ -1235,7 +1235,7 @@ impl App {
             .active_theme()
             .as_ref()
             .and_then(crate::theme::Palette::from_theme)
-            .unwrap_or(crate::theme::DARK);
+            .unwrap_or_else(crate::theme::pluto_stock);
         if crate::theme::set_palette(palette) {
             crate::theme::apply_palette(ctx);
             ctx.request_repaint();

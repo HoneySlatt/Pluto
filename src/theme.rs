@@ -8,7 +8,8 @@ use eframe::egui::{
 //
 // An environment theme (`t3 theme set`, published over the config stream as
 // `environmentThemesUpdated`) replaces the palette at runtime; the stock dark
-// palette below is the default and stays pixel-exact.
+// palette below stays pixel-exact. Pluto: without a theme the client shows
+// `pluto_stock()`, the violet theme of its logo, rather than `DARK`.
 pub const DIFF_ADDITION: Color32 = Color32::from_rgb(0, 212, 146); // --diff-addition-foreground
 pub const DIFF_DELETION: Color32 = Color32::from_rgb(255, 100, 103); // --diff-deletion-foreground
 const BLUE_400_DIFF: Color32 = Color32::from_rgb(81, 162, 255);
@@ -108,6 +109,12 @@ pub struct Palette {
     /// The base of `overlay` tints: white on the stock palette, the text
     /// color in a theme (so light themes darken where dark ones lighten).
     pub overlay: Color32,
+    /// Pluto: the logo keeps its own violets (`"logo": "brand"`) instead of
+    /// taking the palette's colors.
+    pub brand_logo: bool,
+    /// Pluto: the violet glow behind the draft hero and the gradient on the
+    /// send button (`"glow": true`, `pluto_stock()` only).
+    pub glow: bool,
 }
 
 /// The stock dark palette.
@@ -140,6 +147,8 @@ pub const DARK: Palette = Palette {
     row_active: Color32::from_rgba_premultiplied(27, 27, 27, 28), // rgba(241,243,247,.11)
     code_foreground: Color32::from_rgb(250, 250, 250),
     overlay: Color32::WHITE,
+    brand_logo: false,
+    glow: false,
 };
 
 static PALETTE: std::sync::RwLock<Palette> = std::sync::RwLock::new(DARK);
@@ -280,8 +289,80 @@ impl Palette {
             row_active: pick("sidebarRowActive", mix(canvas, text, 0.11)),
             code_foreground: pick("codeForeground", text),
             overlay: text,
+            brand_logo: theme["logo"] == "brand",
+            glow: theme["glow"] == true,
         })
     }
+}
+
+/// Pluto's own theme, shown when no environment theme is set: near-black
+/// tinted toward the logo, its violet as the accent, the logo in its own
+/// colors and the glow. A theme rather than an edit of `DARK`, so every
+/// derived tint (`overlay`, `shade`, `stock_or`) follows it.
+pub fn pluto_stock() -> Palette {
+    static STOCK: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+    *STOCK.get_or_init(|| {
+        let theme = serde_json::json!({
+            "name": "Pluto", "appearance": "dark", "logo": "brand", "glow": true,
+            "canvas": "#0b0a0f", "accent": "#a78bfa",
+            "colors": {
+                "canvas": "#0b0a0f", "sidebar": "#07060a", "surface": "#121018",
+                "surfaceOverlay": "#16141d", "text": "#f3f1f8", "sidebarForeground": "#f1eff7",
+                "mutedForeground": "#8f8a9c", "secondaryLabel": "#8f8a9c",
+                "sidebarMutedForeground": "#a6a1b3", "iconMuted": "#625d70",
+                "sidebarBorder": "#1c1a23", "border": "#1b1a20", "input": "#26252c",
+                "accentSurface": "#16151b", "muted": "#141319", "messageSurface": "#19171d",
+                "sidebarRowActive": "#1f1d29", "messageAction": "#a78bfa",
+                "messageActionHover": "#c4b5fd", "messageActionForeground": "#1a1426",
+                "codeForeground": "#f3f1f8"
+            }
+        });
+        Palette::from_theme(&theme).unwrap_or(DARK)
+    })
+}
+
+/// The pixel logo's colors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LogoColors {
+    pub ring: Color32,
+    pub planet: Color32,
+    pub band: Color32,
+    pub front: Color32,
+    pub highlight: Color32,
+    pub moon: Color32,
+}
+
+impl LogoColors {
+    /// The logo in `palette`: its own violets for a brand theme, else the
+    /// planet in the text color and the rings in the accent mixed toward the
+    /// canvas, which keeps them apart from the planet when the accent is
+    /// white (Carbonfox).
+    pub fn for_palette(palette: &Palette) -> LogoColors {
+        if palette.brand_logo {
+            let violet = Color32::from_rgb(0xa7, 0x8b, 0xfa);
+            return LogoColors {
+                ring: violet,
+                planet: Color32::from_rgb(0xed, 0xe9, 0xfe),
+                band: violet,
+                front: Color32::from_rgb(0x6d, 0x28, 0xd9),
+                highlight: Color32::WHITE,
+                moon: Color32::from_rgb(0xf5, 0xf3, 0xff),
+            };
+        }
+        let ring = mix(palette.primary, palette.background, 0.3);
+        LogoColors {
+            ring,
+            planet: palette.foreground,
+            band: ring,
+            front: mix(palette.primary, palette.background, 0.6),
+            highlight: palette.foreground,
+            moon: palette.foreground,
+        }
+    }
+}
+
+pub fn logo_colors() -> LogoColors {
+    LogoColors::for_palette(&palette())
 }
 
 /// WCAG relative luminance (`themeRelativeLuminance`).
@@ -1140,7 +1221,46 @@ mod palette_tests {
         assert_eq!(palette.primary, Color32::from_rgb(0xe0, 0x48, 0x6b));
         // Missing roles fall back: the sidebar text takes the text color.
         assert_eq!(palette.sidebar_foreground, palette.foreground);
+        assert!(!palette.brand_logo && !palette.glow);
         assert!(Palette::from_theme(&serde_json::json!({"colors": {}})).is_none());
+    }
+
+    #[test]
+    fn a_theme_can_keep_the_brand_logo() {
+        let theme = serde_json::json!({"canvas": "#191724", "accent": "#c4a7e7", "logo": "brand"});
+        let palette = Palette::from_theme(&theme).expect("palette");
+        assert!(palette.brand_logo && !palette.glow);
+        assert_eq!(
+            LogoColors::for_palette(&palette).front,
+            Color32::from_rgb(0x6d, 0x28, 0xd9)
+        );
+    }
+
+    #[test]
+    fn pluto_stock_is_a_violet_theme_with_the_glow() {
+        let stock = pluto_stock();
+        assert!(stock.custom && stock.dark && stock.brand_logo && stock.glow);
+        assert_eq!(stock.primary, Color32::from_rgb(0xa7, 0x8b, 0xfa));
+        assert_eq!(
+            stock.primary_foreground,
+            Color32::from_rgb(0x1a, 0x14, 0x26)
+        );
+        let upstream = DARK;
+        assert!(!upstream.brand_logo && !upstream.glow);
+    }
+
+    #[test]
+    fn a_white_accent_keeps_the_logo_rings_apart_from_the_planet() {
+        // Carbonfox: the accent is the text color.
+        let theme = serde_json::json!({"canvas": "#161616", "accent": "#ffffff",
+                                       "colors": {"text": "#f2f4f8"}});
+        let logo = LogoColors::for_palette(&Palette::from_theme(&theme).expect("palette"));
+        assert_ne!(logo.ring, logo.planet);
+        assert_eq!(logo.ring, logo.band);
+        assert!(
+            logo.front.r() < logo.ring.r(),
+            "the front ring is the darker one"
+        );
     }
 }
 
