@@ -386,6 +386,20 @@ impl App {
             reset: false,
             control: Control::Switch(memory["enabled"] != false),
         }];
+        // The server's `ChatMemoryReactor` reads finished chats for memories.
+        if memory["enabled"] != false {
+            settings.push(Row {
+                id: "memory-auto".into(),
+                title: "Learn from chats".into(),
+                description: "After a chat goes quiet, Pluto updates your memories with what it \
+                              taught about you, using your text generation model."
+                    .into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: Control::Switch(memory["auto"] != false),
+            });
+        }
         if !entries.is_empty() {
             settings.push(Row {
                 id: "memory-clear".into(),
@@ -443,6 +457,9 @@ impl App {
         match action {
             RowAction::Toggle(on) if id == "memory-enabled" => {
                 self.change_memory(|memory| memory["enabled"] = json!(on));
+            }
+            RowAction::Toggle(on) if id == "memory-auto" => {
+                self.change_memory(|memory| memory["auto"] = json!(on));
             }
             RowAction::Click if id == "memory-clear" => {
                 self.confirm = Some(Confirm {
