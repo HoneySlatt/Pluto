@@ -1,13 +1,11 @@
-//! Images a tool returned (`V2ItemInspector.tsx`'s `ToolOutput`,
-//! `work-log/itemDetail.ts`): a screenshot, an image file the agent read.
-//! The timeline withholds a tool call's output (`outputOmitted`), so an
-//! opened call fetches its item (`orchestration.getTurnItem`), counts the
-//! images of its output like `toolOutputImages`, and loads each through a
-//! `tool-output-image` asset, shown within 16rem of height under the call;
-//! a click expands one.
-//!
-//! Not ported: the rest of the inspector (the fetched input and output text
-//! of the call).
+//! A tool call's withheld detail (`V2ItemInspector.tsx`'s
+//! `useFetchedTurnItem` and `ToolOutput`, `work-log/itemDetail.ts`). The
+//! timeline withholds a call's output (`outputOmitted`) and summarizes a large
+//! input, so an opened call fetches its item (`orchestration.getTurnItem`);
+//! its text shows in the inspector (`inspector.rs`) and the images of its
+//! output (`toolOutputImages`: a screenshot, an image file the agent read)
+//! load through `tool-output-image` assets, within 16rem of height under the
+//! call; a click expands one.
 use eframe::egui::{CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::{Value, json};
 
@@ -24,11 +22,11 @@ const MAX_IMAGES: usize = 8;
 /// `LIVE_TURN_ITEM_STATUSES`: their detail is not cached by time.
 const LIVE_STATUSES: [&str; 4] = ["idle", "pending", "running", "inProgress"];
 
-/// A fetched call's images, by the revision fetched.
+/// A fetched call, by the revision fetched.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ToolOutput {
     Loading,
-    Images(usize),
+    Item(std::sync::Arc<Value>),
     Failed(String),
 }
 
@@ -41,9 +39,19 @@ fn revision(item: &TurnItem) -> String {
     }
 }
 
-/// Whether the timeline withheld output the call's item holds.
+/// `isSummarizedValue`: the wire's `{summary, truncated: true}` stand-in.
+pub(crate) fn summarized(value: &Value) -> bool {
+    value["truncated"] == true && value["summary"].is_string()
+}
+
+/// `turnItemNeedsDetailFetch`: the timeline withheld what the item holds.
 pub(crate) fn has_withheld_output(item: &TurnItem) -> bool {
-    item.kind == "dynamic_tool" && item.get("outputOmitted") == &Value::Bool(true)
+    let omitted = item.get("outputOmitted") == &Value::Bool(true);
+    match item.kind.as_str() {
+        "command_execution" => omitted,
+        "dynamic_tool" => omitted || summarized(item.get("input")),
+        _ => false,
+    }
 }
 
 /// `readToolOutputImage`'s raster types (the image types a turn can send).
@@ -92,7 +100,27 @@ fn image_key(item: &TurnItem, index: usize) -> String {
 }
 
 impl App {
-    /// Draws an opened call's images under it, fetching them the first time;
+    /// The opened call's fetched item, asking for it the first time; `None`
+    /// when the timeline withheld nothing.
+    pub(crate) fn fetched_tool_item(&mut self, item: &TurnItem) -> Option<ToolOutput> {
+        if !has_withheld_output(item) {
+            return None;
+        }
+        let key = format!("{}@{}", item.id, revision(item));
+        if let Some(state) = self.tool_outputs.get(&key) {
+            return Some(state.clone());
+        }
+        self.tool_outputs.insert(key.clone(), ToolOutput::Loading);
+        self.send_request(
+            format!("turn-item:{key}"),
+            "orchestration.getTurnItem",
+            json!({"threadId": item.thread_id, "itemId": item.id,
+                "revision": revision(item)}),
+        );
+        Some(ToolOutput::Loading)
+    }
+
+    /// Draws the images of an opened call's fetched output under it;
     /// returns whether anything was drawn.
     pub(crate) fn tool_output_images(
         &mut self,
@@ -101,34 +129,15 @@ impl App {
         left: f32,
         width: f32,
     ) -> bool {
-        if !has_withheld_output(item) {
+        let count = match self.fetched_tool_item(item) {
+            Some(ToolOutput::Item(fetched)) if fetched["type"] == item.kind.as_str() => {
+                image_count(&fetched["output"])
+            }
+            _ => 0,
+        };
+        if count == 0 {
             return false;
         }
-        let key = format!("{}@{}", item.id, revision(item));
-        let state = self.tool_outputs.get(&key).cloned();
-        let count = match state {
-            None => {
-                self.tool_outputs.insert(key.clone(), ToolOutput::Loading);
-                self.send_request(
-                    format!("turn-item:{key}"),
-                    "orchestration.getTurnItem",
-                    json!({"threadId": item.thread_id, "itemId": item.id,
-                        "revision": revision(item)}),
-                );
-                return false;
-            }
-            Some(ToolOutput::Images(count)) if count > 0 => count,
-            Some(ToolOutput::Images(_)) => return false,
-            // `ToolOutput`'s pending and error lines.
-            Some(ToolOutput::Loading) => {
-                self.tool_output_note(ui, left, width, "Loading output…".into());
-                return true;
-            }
-            Some(ToolOutput::Failed(error)) => {
-                self.tool_output_note(ui, left, width, format!("Couldn't load output: {error}"));
-                return true;
-            }
-        };
         for index in 0..count {
             let image_key = image_key(item, index);
             if attachments::media_state(&image_key).is_none() {
@@ -211,18 +220,6 @@ impl App {
         true
     }
 
-    fn tool_output_note(&self, ui: &mut Ui, left: f32, width: f32, text: String) {
-        ui.add_space(6.0);
-        let (row, _) = ui.allocate_exact_size(Vec2::new(width, 17.875), Sense::hover());
-        widgets::text_in(
-            ui,
-            Rect::from_min_size(Pos2::new(left, row.top()), Vec2::new(width, 17.875)),
-            &text,
-            theme::mono(11.0),
-            theme::muted_foreground(),
-        );
-    }
-
     /// A fetched call (`orchestration.getTurnItem`); true when `key` was one.
     pub(crate) fn turn_item_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
         let Some(key) = key.strip_prefix("turn-item:") else {
@@ -232,7 +229,7 @@ impl App {
             Ok(value) if value["item"].is_null() => {
                 ToolOutput::Failed("Output is no longer available.".into())
             }
-            Ok(value) => ToolOutput::Images(image_count(&value["item"]["output"])),
+            Ok(value) => ToolOutput::Item(std::sync::Arc::new(value["item"].clone())),
             Err(error) => ToolOutput::Failed(error.clone()),
         };
         if self.tool_outputs.len() > 500 {

@@ -1852,12 +1852,18 @@ impl App {
         let tool_like = timeline::is_tool_like(entry);
         let destructive =
             failed && (entry.tone == "error" && entry.item_type.is_none() || !tool_like);
-        let body = expanded_body(entry, label);
-        // A call whose output the timeline withheld opens to fetch it.
-        let withheld = entry
+        // Command runs and tool calls open as the inspector's body.
+        let call = entry
             .item
-            .as_deref()
-            .is_some_and(crate::ui::tool_images::has_withheld_output);
+            .clone()
+            .filter(|item| crate::ui::inspector::is_tool_call(item));
+        let body = if call.is_some() {
+            None
+        } else {
+            expanded_body(entry, label)
+        };
+        // A call whose output the timeline withheld opens to fetch it.
+        let withheld = call.as_deref().is_some_and(crate::ui::inspector::has_body);
         let can_expand = entry.question.is_some()
             || (failed && !label.trim().is_empty())
             || body.is_some()
@@ -1986,6 +1992,9 @@ impl App {
                 galley,
                 theme::secondary_label(),
             );
+        }
+        if expanded && let Some(item) = &call {
+            self.inspector_body(ui, item, rect.left() + 2.0 + 28.0, width - 30.0);
         }
         if expanded && let Some(item) = entry.item.clone() {
             let left = rect.left() + 2.0 + 28.0;
