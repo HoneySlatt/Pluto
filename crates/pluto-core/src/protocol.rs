@@ -49,7 +49,16 @@ pub enum Action {
         payload: Value,
     },
     StopStream(String),
+    /// Checks the connection now (the app came back to the foreground): the
+    /// server must answer within `PROBE` or the connection is lost.
+    Ping,
 }
+
+/// Silence after which an open socket counts as lost: the server answers
+/// every heartbeat, so three missed ones mean it is gone.
+const SILENCE: Duration = Duration::from_secs(45);
+/// How long an explicit probe (`Action::Ping`) waits for any answer.
+const PROBE: Duration = Duration::from_secs(6);
 
 pub enum Event {
     Data(Route, Value),
@@ -458,9 +467,17 @@ fn run(
     let mut negotiated = false;
     let opened = Instant::now();
     let mut heartbeat = Instant::now();
+    // The last frame from the server, and an explicit probe waiting for one.
+    let mut heard = Instant::now();
+    let mut probe: Option<Instant> = None;
     loop {
         loop {
             match inbox.try_recv() {
+                // A probe needs no synchronization.
+                Ok(Action::Ping) => {
+                    send(&mut socket, json!({"_tag":"Ping"}))?;
+                    probe.get_or_insert_with(Instant::now);
+                }
                 Ok(action) if negotiated => match action {
                     Action::Select(thread_id) => {
                         let obsolete: Vec<_> = pending
@@ -567,6 +584,7 @@ fn run(
                             )?;
                         }
                     }
+                    Action::Ping => {}
                 },
                 Ok(_) => {
                     return Err("Wait for server synchronization before sending commands".into());
@@ -599,7 +617,15 @@ fn run(
             send(&mut socket, json!({"_tag":"Ping"}))?;
             heartbeat = Instant::now();
         }
-        match socket.read() {
+        if heard.elapsed() > SILENCE || probe.is_some_and(|at| at.elapsed() > PROBE) {
+            return Err("The server stopped answering".into());
+        }
+        let read = socket.read();
+        if read.is_ok() {
+            heard = Instant::now();
+            probe = None;
+        }
+        match read {
             Ok(Message::Text(text)) => {
                 for mut frame in frames(&text)? {
                     if matches!(

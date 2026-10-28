@@ -413,6 +413,15 @@ fn TaskCard(task: Value, now: i64) -> Element {
 #[component]
 pub fn TaskMenu(id: String) -> Element {
     let ui = use_context::<Ui>();
+    // Run now and Delete wait for the server's answer.
+    let mut done = use_signal(String::new);
+    let (mut sent, busy, error) = crate::sheets::use_outcome(ui, move || {
+        ui.back();
+        let text = done.peek().clone();
+        if !text.is_empty() {
+            ui.ctx.toast(text);
+        }
+    });
     let task = tasks_list(&ui)
         .and_then(Result::ok)
         .and_then(|t| t.into_iter().find(|t| t["id"] == id.as_str()));
@@ -422,27 +431,32 @@ pub fn TaskMenu(id: String) -> Element {
     let webhook = task["schedule"]["type"] == "webhook";
     let (i1, i2) = (id.clone(), id.clone());
     let title = task["title"].as_str().unwrap_or_default().to_owned();
+    let mut ask = move |method: &'static str, task: &str, toast: String| {
+        let key = format!("task-action:{}", uuid::Uuid::new_v4());
+        done.set(toast);
+        ui.ctx.request(key.clone(), method, json!({"id": task}));
+        sent.set(Some(key));
+    };
     rsx! {
         if !webhook {
-            button { class: "srow", onclick: move |_| {
-                    ui.ctx.mutate("scheduledTasks.runNow", json!({"id": i1}));
-                    ui.back();
-                    ui.ctx.toast(format!("Running {title}"));
-                },
+            button { class: "srow", disabled: busy, onclick: move |_| ask("scheduledTasks.runNow", &i1, format!("Running {title}")),
                 Icon { name: "play" } span { class: "grow", "Run now" }
             }
         }
-        button { class: "srow", onclick: move |_| {
+        button { class: "srow", disabled: busy, onclick: move |_| {
                 ui.drafts.clone().write().task = Some(TaskDraft::from_task(&task));
                 ui.open_page(Page::TaskEdit(Some(i2.clone())));
             },
             Icon { name: "pencil" } span { class: "grow", "Edit" }
         }
-        button { class: "srow danger", onclick: move |_| {
-                ui.ctx.mutate("scheduledTasks.delete", json!({"id": id}));
-                ui.back();
-            },
+        button { class: "srow danger", disabled: busy, onclick: move |_| ask("scheduledTasks.delete", &id, "Task deleted".into()),
             Icon { name: "trash-2" } span { class: "grow", "Delete" }
+        }
+        if busy {
+            p { class: "note", role: "status", "Waiting for the server…" }
+        }
+        if let Some(error) = error {
+            p { class: "err", role: "alert", "{error}" }
         }
     }
 }
@@ -587,6 +601,8 @@ pub fn TaskEditor(id: Option<String>) -> Element {
             ui.ctx
                 .request("scheduled-upsert", "scheduledTasks.upsert", input);
         };
+    // One save at a time: the button waits for the server's answer.
+    let saving = ui.ctx.session.read().waiting("scheduled-upsert");
     // The upsert's reply: saved closes the editor, a failure shows.
     let reply = ui
         .ctx
@@ -716,8 +732,8 @@ pub fn TaskEditor(id: Option<String>) -> Element {
                         }
                     }
                     div { class: "formerr", role: "alert", "{draft.error.clone().unwrap_or_default()}" }
-                    button { class: "btn primary big", style: "margin-top:4px", onclick: save,
-                        if editing { "Save task" } else { "Create task" }
+                    button { class: "btn primary big", style: "margin-top:4px", disabled: saving, onclick: save,
+                        if saving { "Saving…" } else if editing { "Save task" } else { "Create task" }
                     }
                 }
             }

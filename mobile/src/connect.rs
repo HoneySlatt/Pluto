@@ -212,7 +212,7 @@ pub fn Unreachable() -> Element {
                         "Try again"
                     }
                 }
-                button { class: "btn ghostbtn", onclick: move |_| ui.ctx.disconnect(), "Change server" }
+                button { class: "btn ghostbtn", onclick: move |_| ui.disconnect(), "Change server" }
             }
         }
     }

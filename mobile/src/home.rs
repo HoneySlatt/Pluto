@@ -121,7 +121,7 @@ pub fn Home() -> Element {
                     h1 {
                         "Temporary chat"
                         br {}
-                        span { style: "font-size:15px;color:var(--muted)", "Not saved, no memory, deleted when you leave." }
+                        span { style: "font-size:15px;color:var(--muted)", "No memory, deleted from the server once you leave it." }
                     }
                 } else if chat {
                     h1 { "How can I help?" }
@@ -254,9 +254,28 @@ pub fn Composer(target: Target, placeholder: &'static str) -> Element {
                     ui.open_thread(id);
                 }
             }
-            Err(error) => ui.ctx.toast(error),
+            Err(error) if !error.is_empty() => ui.ctx.toast(error),
+            Err(_) => {}
         }
     };
+    // A message the server refused comes back here, unless something new
+    // was typed meanwhile.
+    let unsent_key = key.clone();
+    use_effect(move || {
+        let Some(text) = ui.ctx.session.read().unsent.get(&unsent_key).cloned() else {
+            return;
+        };
+        ui.ctx.session.clone().write().unsent.remove(&unsent_key);
+        let mut drafts = drafts.write();
+        let empty = drafts
+            .text
+            .get(&unsent_key)
+            .is_none_or(|t| t.trim().is_empty());
+        if empty {
+            drafts.text.insert(unsent_key.clone(), text);
+            drafts.cleared += 1;
+        }
+    });
     let stop_target = target.clone();
     let stop = move |_| {
         if let (Target::Thread(id), Some(run)) = (&stop_target, run.clone()) {
@@ -289,11 +308,11 @@ pub fn Composer(target: Target, placeholder: &'static str) -> Element {
                 button { class: "tool round", "aria-label": "Attach", onclick: move |_| ui.open_sheet(Sheet::Attach),
                     Icon { name: "plus" }
                 }
-                button { class: "tool", "aria-label": "Model: {model_label}", onclick: move |_| ui.open_sheet(Sheet::Model),
+                button { class: "tool model", "aria-label": "Model: {model_label}", onclick: move |_| ui.open_sheet(Sheet::Model),
                     if let Some(mark) = mark {
                         img { src: mark, alt: "" }
                     }
-                    "{model_label}"
+                    span { class: "lbl", "{model_label}" }
                     Icon { name: "chevron-down", class: "chev" }
                 }
                 if code {

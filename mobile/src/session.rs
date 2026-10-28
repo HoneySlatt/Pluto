@@ -3,9 +3,13 @@
 //! the connection's health. A session lost after it was established
 //! reconnects on its own, three times, before it shows "Can't reach the
 //! server" with Retry; a remembered server that does not answer at launch
-//! shows "Can't reach your server".
+//! shows "Can't reach your server". Commands only go out once the server
+//! synchronized; a reconnected session follows the open thread and the
+//! scheduled tasks again. A message the server refused (or whose fate the
+//! connection lost) comes back to its composer. Temporary chats the phone
+//! opened are deleted once it leaves them (`chat_mode.rs`'s sweep).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -79,6 +83,14 @@ pub struct Session {
     pub listed: bool,
     /// One-shot replies by request key.
     pub replies: HashMap<String, Result<Value, String>>,
+    /// Requests and tracked commands (`command:{id}`) still waiting for
+    /// their reply.
+    pending: HashSet<String>,
+    /// Messages on their way, by request key or command id: their composer
+    /// and text, given back if the server refuses them.
+    sends: HashMap<String, (String, String)>,
+    /// Texts given back to their composer (by composer key).
+    pub unsent: HashMap<String, String>,
     /// The scheduled tasks (`scheduledTasks.subscribe`), once listed.
     pub tasks: Option<Result<Vec<Value>, String>>,
     tasks_streaming: bool,
@@ -88,9 +100,15 @@ pub struct Session {
     serial: u64,
     /// The open thread to follow again once the shell lists it.
     resubscribe: Option<String>,
-    /// Project favicons asked for, by project id: a data URL once fetched,
-    /// `None` while asked or when the project has none.
-    pub favicons: HashMap<String, Option<String>>,
+    /// Why the open thread could not be followed, by thread id.
+    pub thread_error: Option<(String, String)>,
+    /// Images by key (`favicon:{project}`, `attachment:{id}`): a data URL
+    /// once fetched, `None` while asked or when there is none.
+    pub assets: HashMap<String, Option<String>>,
+    /// Temporary chats opened here, and those already sent `thread.delete`
+    /// on this connection.
+    temporary: HashSet<String>,
+    deleted: HashSet<String>,
 }
 
 impl Default for Session {
@@ -108,13 +126,19 @@ impl Default for Session {
             expansion: Expansion::default(),
             listed: false,
             replies: HashMap::new(),
+            pending: HashSet::new(),
+            sends: HashMap::new(),
+            unsent: HashMap::new(),
             tasks: None,
             tasks_streaming: false,
             prefs: Prefs::load(),
             toast: None,
             serial: 0,
             resubscribe: None,
-            favicons: HashMap::new(),
+            thread_error: None,
+            assets: HashMap::new(),
+            temporary: HashSet::new(),
+            deleted: HashSet::new(),
         }
     }
 }
@@ -197,6 +221,56 @@ impl Session {
         self.serial += 1;
         self.toast = Some((text.into(), self.serial));
     }
+
+    /// Whether the request `key` (or `command:{id}`) still waits.
+    pub fn waiting(&self, key: &str) -> bool {
+        self.pending.contains(key)
+    }
+
+    /// The live subagent below `parent` that waits on the user
+    /// (`refresh_subagent_requests`'s walk, from the child up).
+    pub fn pending_subagent(&self, parent: &str) -> Option<std::sync::Arc<Thread>> {
+        self.state
+            .threads
+            .iter()
+            .filter(|t| t.is_subagent() && !t.is_provider_native_subagent() && t.child_run_live())
+            .filter(|t| {
+                t.pending_runtime_request
+                    .as_ref()
+                    .is_some_and(|r| r.kind != "auth_refresh")
+            })
+            .find(|child| {
+                let mut seen = vec![child.id.clone()];
+                let mut current = child.lineage.parent_thread_id.clone();
+                while let Some(id) = current {
+                    if id == parent {
+                        return true;
+                    }
+                    if seen.contains(&id) {
+                        return false;
+                    }
+                    seen.push(id.clone());
+                    current = self
+                        .thread(&id)
+                        .filter(|t| t.is_subagent())
+                        .and_then(|t| t.lineage.parent_thread_id.clone());
+                }
+                false
+            })
+            .cloned()
+    }
+
+    fn is_temporary(&self, id: &str) -> bool {
+        self.thread(id)
+            .is_some_and(|t| self.space(&t) == Space::Temporary)
+    }
+
+    /// Hands every message on its way back to its composer.
+    fn give_back_sends(&mut self) {
+        for (_, (composer, text)) in std::mem::take(&mut self.sends) {
+            self.unsent.entry(composer).or_insert(text);
+        }
+    }
 }
 
 /// "192.168.1.20:3774" from "http://192.168.1.20:3774/".
@@ -221,12 +295,20 @@ pub fn last_activity(thread: &Thread) -> &str {
 pub struct Link(pub Signal<Option<Rc<Connection>>>);
 
 impl Link {
-    pub fn send(&self, action: Action) {
-        if let Some(connection) = self.0.peek().as_ref() {
-            connection.send(action);
+    /// Sends `action` once the server synchronized; false without a
+    /// synchronized connection.
+    pub fn send(&self, action: Action) -> bool {
+        match self.0.peek().as_ref() {
+            Some(connection) => {
+                connection.send(action);
+                true
+            }
+            None => false,
         }
     }
 }
+
+const NOT_CONNECTED: &str = "Not connected to the server: nothing was sent.";
 
 /// The session and its connection, as the screens use them.
 #[derive(Clone, Copy)]
@@ -271,10 +353,12 @@ impl Ctx {
                 return;
             }
         };
-        self.link.0.set(Some(connection.clone()));
-        // A reconnected session follows the open thread again.
-        if let Some(id) = self.session.peek().selected.clone() {
-            connection.send(Action::Select(Some(id)));
+        // A reconnected session follows the open thread again once the shell
+        // lists it (commands sent before the server synchronized would end
+        // the connection).
+        {
+            let mut session = self.session.write();
+            session.resubscribe = session.selected.clone();
         }
         // The session outlives the screen that started it (the connection
         // screen unmounts once connected).
@@ -293,6 +377,13 @@ impl Ctx {
                         self.failed(error, remembered);
                         return;
                     }
+                    // The server's config comes once it synchronized: the
+                    // link opens to the screens.
+                    if matches!(event, Event::Data(Route::Config, _))
+                        && self.link.0.peek().is_none()
+                    {
+                        self.link.0.set(Some(connection.clone()));
+                    }
                     self.apply(event);
                 }
             }
@@ -301,6 +392,22 @@ impl Ctx {
 
     /// The connection ended or never started.
     fn failed(mut self, error: String, remembered: bool) {
+        {
+            let mut session = self.session.write();
+            if !session.sends.is_empty() {
+                session.give_back_sends();
+                session.show_toast(
+                    "The connection dropped while sending: your message is back in the composer. Check the thread before sending it again.",
+                );
+            }
+            // Whatever still waited will not hear back from this connection.
+            for key in std::mem::take(&mut session.pending) {
+                session.replies.insert(
+                    key,
+                    Err("The connection dropped before the server answered.".into()),
+                );
+            }
+        }
         let (established, net) = {
             let session = self.session.peek();
             (session.established, session.net.clone())
@@ -359,8 +466,34 @@ impl Ctx {
         session.tasks_streaming = false;
         session.selected = None;
         session.state = State::default();
+        session.expansion = Expansion::default();
+        session.replies.clear();
+        session.pending.clear();
+        session.sends.clear();
+        session.unsent.clear();
+        session.resubscribe = None;
+        session.thread_error = None;
+        session.assets.clear();
+        session.temporary.clear();
+        session.deleted.clear();
+        session.toast = None;
         drop(session);
         self.link.0.set(None);
+    }
+
+    /// Checks a session that may have died while the phone slept: the
+    /// server must answer at once, else it reconnects. Its settings come
+    /// back as `probe` once it answered.
+    pub fn probe(self) {
+        let net = self.session.peek().net.clone();
+        match net {
+            Net::Offline => self.retry(),
+            _ if net.online() => {
+                self.link.send(Action::Ping);
+                self.request("probe", "server.getSettings", json!({}));
+            }
+            _ => {}
+        }
     }
 
     fn apply(mut self, event: Event) {
@@ -372,6 +505,17 @@ impl Ctx {
                     let back = session.established;
                     session.net = if back { Net::Back } else { Net::Connected };
                     session.established = true;
+                    // A new connection deletes again what the last one may
+                    // not have.
+                    session.deleted.clear();
+                    // The tasks the last connection followed.
+                    if session.tasks_streaming {
+                        self.link.send(Action::Stream {
+                            key: "scheduled-tasks".into(),
+                            method: "scheduledTasks.subscribe",
+                            payload: json!({}),
+                        });
+                    }
                     if back {
                         drop(session);
                         self.settle_back();
@@ -387,8 +531,16 @@ impl Ctx {
                     && session.thread(&id).is_some()
                 {
                     session.resubscribe = None;
+                    session.thread_error = None;
                     self.link.send(Action::Select(Some(id)));
                 }
+                if let Some(id) = session.selected.clone()
+                    && session.is_temporary(&id)
+                {
+                    session.temporary.insert(id);
+                }
+                drop(session);
+                self.sweep_temporary();
             }
             Event::Data(Route::Thread(id), value) => {
                 if let Err(error) = session.state.thread(&id, &value) {
@@ -420,56 +572,96 @@ impl Ctx {
             }
             // A new thread can be asked for before the server created it:
             // it is followed again once the shell lists it.
-            Event::Failed(Route::Thread(id), _)
+            Event::Failed(Route::Thread(id), message)
                 if session.selected.as_deref() == Some(id.as_str()) =>
             {
+                session.thread_error = Some((id.clone(), message));
                 session.resubscribe = Some(id);
             }
-            Event::Data(Route::Rpc(key), value) if key.starts_with("favicon:") => {
-                let server = session.server.clone();
+            Event::Data(Route::Rpc(key), value) if key.starts_with("asset:") => {
+                let (server, generation) = (session.server.clone(), session.generation);
                 drop(session);
-                self.fetch_favicon(&key["favicon:".len()..], &server, &value);
+                self.fetch_asset(&key["asset:".len()..], &server, &value, generation);
+            }
+            Event::Failed(Route::Rpc(key), _) if key.starts_with("asset:") => {
+                // A failure is tried again on the next showing.
+                session.assets.remove(&key["asset:".len()..]);
             }
             Event::Data(Route::Rpc(key), value) => rpc_result(&mut session, key, Ok(value)),
             Event::Failed(Route::Rpc(key), message) => rpc_result(&mut session, key, Err(message)),
-            Event::Failed(Route::Command(_), message) => session.show_toast(message),
+            Event::Data(Route::Command(id), value) => {
+                session.sends.remove(&id);
+                let key = format!("command:{id}");
+                if session.pending.remove(&key) {
+                    session.replies.insert(key, Ok(value));
+                }
+            }
+            Event::Failed(Route::Command(id), message) => {
+                let key = format!("command:{id}");
+                // A tracked command shows its failure where it was asked.
+                if session.pending.remove(&key) {
+                    session.replies.insert(key, Err(message));
+                } else if let Some((composer, text)) = session.sends.remove(&id) {
+                    session.unsent.entry(composer).or_insert(text);
+                    session.show_toast(format!(
+                        "Message not sent: {} Your text is back in the composer.",
+                        sentence(&message)
+                    ));
+                } else {
+                    session.show_toast(message);
+                }
+            }
             Event::Failed(_, message) => session.show_toast(message),
             Event::Data(..) | Event::Disconnected(_) => {}
         }
     }
 
     /// A project's favicon (`favicon.rs`): `assets.createUrl` with a
-    /// `project-favicon` resource, once per project. The WebView may not load
-    /// plain http from the network, so the image is fetched here and shown
-    /// as a data URL.
-    pub fn favicon(mut self, project: &Project) -> Option<String> {
-        if let Some(found) = self.session.peek().favicons.get(&project.id) {
-            return found.clone();
-        }
-        if project.project_icon.is_some() || !self.session.peek().net.online() {
+    /// `project-favicon` resource, once per project.
+    pub fn favicon(self, project: &Project) -> Option<String> {
+        if project.project_icon.is_some() {
             return None;
         }
-        self.session
-            .write()
-            .favicons
-            .insert(project.id.clone(), None);
         let mut resource = json!({"_tag": "project-favicon", "cwd": project.workspace_root});
         if let Some(path) = &project.favicon_path {
             resource["path"] = json!(path);
         }
+        self.asset(&format!("favicon:{}", project.id), resource)
+    }
+
+    /// A message's image attachment (`attachments.rs`).
+    pub fn attachment(self, id: &str) -> Option<String> {
+        self.asset(
+            &format!("attachment:{id}"),
+            json!({"_tag": "attachment", "attachmentId": id}),
+        )
+    }
+
+    /// An image the server serves (`assets.createUrl`), asked for once. The
+    /// WebView may not load plain http from the network, so the image is
+    /// fetched here and shown as a data URL.
+    fn asset(mut self, key: &str, resource: Value) -> Option<String> {
+        if let Some(found) = self.session.peek().assets.get(key) {
+            return found.clone();
+        }
+        if !self.session.peek().net.online() {
+            return None;
+        }
+        self.session.write().assets.insert(key.to_owned(), None);
         self.link.send(Action::Request {
-            key: format!("favicon:{}", project.id),
+            key: format!("asset:{key}"),
             method: "assets.createUrl",
             payload: json!({"resource": resource}),
         });
         None
     }
 
-    fn fetch_favicon(self, project: &str, server: &str, reply: &Value) {
+    fn fetch_asset(mut self, key: &str, server: &str, reply: &Value, generation: u64) {
         let url = reply["relativeUrl"]
             .as_str()
             .and_then(|relative| url::Url::parse(server.trim()).ok()?.join(relative).ok());
-        // The server's marker for a project without one keeps the monogram.
+        // The server's marker for a project without a favicon keeps the
+        // monogram; it stays `None` for the session.
         let Some(url) = url.filter(|u| {
             u.path_segments()
                 .and_then(|mut s| s.next_back())
@@ -481,12 +673,26 @@ impl Ctx {
         std::thread::spawn(move || {
             let _ = done.send(pluto_core::http::get(&url));
         });
-        let (mut session, project) = (self.session, project.to_owned());
+        let key = key.to_owned();
         dioxus::core::spawn_forever(async move {
-            if let Ok(Some(bytes)) = fetched.await
-                && let Some(data) = crate::badge::data_url(&bytes)
-            {
-                session.write().favicons.insert(project, Some(data));
+            let data = fetched
+                .await
+                .ok()
+                .flatten()
+                .and_then(|bytes| crate::badge::data_url(&bytes));
+            let mut session = self.session.write();
+            // An image of an older connection or server stays out.
+            if session.generation != generation {
+                return;
+            }
+            match data {
+                Some(data) => {
+                    session.assets.insert(key, Some(data));
+                }
+                // A failed download is tried again on the next showing.
+                None => {
+                    session.assets.remove(&key);
+                }
             }
         });
     }
@@ -503,19 +709,96 @@ impl Ctx {
         });
     }
 
-    pub fn dispatch(self, command: Value) {
-        self.link.send(Action::Dispatch(command));
+    /// Sends a command whose failure shows as a toast.
+    pub fn dispatch(self, command: Value) -> bool {
+        let sent = self.link.send(Action::Dispatch(command));
+        if !sent {
+            self.toast(NOT_CONNECTED);
+        }
+        sent
+    }
+
+    /// Sends a command whose reply lands in `replies` under
+    /// `command:{id}`; returns that key.
+    pub fn dispatch_tracked(mut self, command: Value) -> String {
+        let key = format!(
+            "command:{}",
+            command["commandId"].as_str().unwrap_or_default()
+        );
+        {
+            let mut session = self.session.write();
+            session.replies.remove(&key);
+            session.pending.insert(key.clone());
+        }
+        if !self.link.send(Action::Dispatch(command)) {
+            let mut session = self.session.write();
+            session.pending.remove(&key);
+            session
+                .replies
+                .insert(key.clone(), Err(NOT_CONNECTED.into()));
+        }
+        key
+    }
+
+    /// Sends a message from `composer`: refused, it comes back there.
+    pub fn send_message(mut self, command: Value, composer: String, text: String) -> bool {
+        let id = command["commandId"].as_str().unwrap_or_default().to_owned();
+        self.session
+            .write()
+            .sends
+            .insert(id.clone(), (composer, text));
+        let sent = self.dispatch(command);
+        if !sent {
+            self.session.write().sends.remove(&id);
+        }
+        sent
+    }
+
+    /// Starts a thread from `composer`'s draft (`orchestration.launchThread`):
+    /// refused, the text comes back there.
+    pub fn launch(mut self, thread_id: &str, input: Value, composer: String, text: String) -> bool {
+        let key = format!("launch:{thread_id}");
+        self.session
+            .write()
+            .sends
+            .insert(key.clone(), (composer, text));
+        self.request(key.clone(), "orchestration.launchThread", input);
+        let refused = self.session.peek().replies.contains_key(&key);
+        if refused {
+            self.session.write().sends.remove(&key);
+        }
+        !refused
     }
 
     /// A one-shot request; its reply lands in `replies` under `key`.
     pub fn request(mut self, key: impl Into<String>, method: &'static str, payload: Value) {
         let key = key.into();
-        self.session.write().replies.remove(&key);
-        self.link.send(Action::Request {
-            key,
+        {
+            let mut session = self.session.write();
+            session.replies.remove(&key);
+            session.pending.insert(key.clone());
+        }
+        let sent = self.link.send(Action::Request {
+            key: key.clone(),
             method,
             payload,
         });
+        if !sent {
+            let mut session = self.session.write();
+            session.pending.remove(&key);
+            if key.starts_with("mutation:") || key.starts_with("settings:") {
+                session.show_toast(NOT_CONNECTED);
+            }
+            session.replies.insert(key, Err(NOT_CONNECTED.into()));
+        }
+    }
+
+    /// Drops the replies under `prefix` (a closed picker's searches).
+    pub fn forget(mut self, prefix: &str) {
+        self.session
+            .write()
+            .replies
+            .retain(|key, _| !key.starts_with(prefix));
     }
 
     /// A request whose reply is only checked for failure.
@@ -545,8 +828,59 @@ impl Ctx {
         session.state.switch_detail(id.as_deref());
         session.selected = id.clone();
         session.expansion = Expansion::default();
+        session.thread_error = None;
+        if let Some(id) = &id
+            && session.is_temporary(id)
+        {
+            session.temporary.insert(id.clone());
+        }
+        // Offline, the thread is followed once the server is back.
+        let online = session.net.online();
+        session.resubscribe = if online { None } else { id.clone() };
         drop(session);
-        self.link.send(Action::Select(id));
+        if online {
+            self.link.send(Action::Select(id));
+        }
+        self.sweep_temporary();
+    }
+
+    /// Follows the open thread again after it failed to load.
+    pub fn follow_again(mut self, id: &str) {
+        self.session.write().thread_error = None;
+        self.link.send(Action::Select(Some(id.to_owned())));
+    }
+
+    /// Marks a temporary chat started here, deleted once the phone leaves it.
+    pub fn opened_temporary(mut self, id: &str) {
+        self.session.write().temporary.insert(id.to_owned());
+    }
+
+    /// Deletes the temporary chats opened here that the phone left
+    /// (`poll_chat_mode`); a chat open on the computer is not the phone's.
+    fn sweep_temporary(mut self) {
+        let left: Vec<String> = {
+            let session = self.session.peek();
+            if !session.net.online() {
+                return;
+            }
+            session
+                .temporary
+                .iter()
+                .filter(|id| session.selected.as_deref() != Some(id.as_str()))
+                .filter(|id| !session.deleted.contains(*id) && session.thread(id).is_some())
+                .cloned()
+                .collect()
+        };
+        for id in left {
+            if self.link.send(Action::Dispatch(pluto_core::model::command(
+                "thread.delete",
+                &id,
+            ))) {
+                let mut session = self.session.write();
+                session.deleted.insert(id.clone());
+                session.temporary.remove(&id);
+            }
+        }
     }
 
     /// A `server.updateSettings` patch, applied locally at once.
@@ -570,7 +904,37 @@ impl Ctx {
     }
 }
 
+/// A message as a sentence, for the toasts that go on after it.
+fn sentence(text: &str) -> String {
+    let text = text.trim();
+    if text.ends_with(['.', '!', '?']) {
+        text.to_owned()
+    } else {
+        format!("{text}.")
+    }
+}
+
 fn rpc_result(session: &mut Session, key: String, result: Result<Value, String>) {
+    session.pending.remove(&key);
+    if let Some(sent) = session.sends.remove(&key)
+        && let Err(error) = &result
+    {
+        // The launch was refused: the draft comes back, and the screen of a
+        // thread that will not exist goes home.
+        let thread = key.trim_start_matches("launch:").to_owned();
+        session.unsent.entry(sent.0).or_insert(sent.1);
+        if session.selected.as_deref() == Some(thread.as_str()) {
+            session.selected = None;
+            session.state.switch_detail(None);
+            session.resubscribe = None;
+        }
+        session.show_toast(format!(
+            "Could not start the thread: {} Your text is back in the composer.",
+            sentence(error)
+        ));
+        session.replies.insert(key, result);
+        return;
+    }
     if key == "scheduled-tasks" {
         session.tasks = Some(match result {
             Ok(value) => Ok(value["tasks"].as_array().cloned().unwrap_or_default()),
@@ -581,12 +945,10 @@ fn rpc_result(session: &mut Session, key: String, result: Result<Value, String>)
         });
         return;
     }
-    if let Err(error) = &result {
-        if let Some(what) = key.strip_prefix("launch:").map(|_| "start the thread") {
-            session.show_toast(format!("Could not {what}: {error}"));
-        } else if key.starts_with("mutation:") || key.starts_with("settings:") {
-            session.show_toast(error.clone());
-        }
+    if let Err(error) = &result
+        && (key.starts_with("mutation:") || key.starts_with("settings:"))
+    {
+        session.show_toast(error.clone());
     }
     session.replies.insert(key, result);
 }

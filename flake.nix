@@ -68,6 +68,8 @@
             pkgs.dioxus-cli
             # The app's license notice (scripts/mobile-notice.sh).
             pkgs.cargo-about
+            # The APK's ABI check (scripts/mobile-apk.sh).
+            pkgs.unzip
             pkgs.jdk17
             android.androidsdk
             android.platform-tools

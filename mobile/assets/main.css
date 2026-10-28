@@ -824,3 +824,69 @@ label.set { cursor: pointer; }
 .badge.emoji { font-size: 15px; line-height: 1; }
 .disc .badge.emoji, .phead .badge.emoji { font-size: 22px; }
 .phead .badge.emoji { font-size: 40px; }
+
+/* Exits: a closed page or sheet slides out before it leaves (`nav.rs`),
+   the drawer keeps its visibility until it is out; a sheet pulled by its
+   top follows the finger (`main.rs`). */
+.pagewrap { display: contents; }
+.leaving > .page { animation: page-out 240ms var(--ease) forwards; pointer-events: none; }
+.sheet.leave { animation: sheet-out 240ms var(--ease) forwards; pointer-events: none; }
+.scrim.leave { opacity: 0; pointer-events: none; animation: fade-out 240ms; }
+@keyframes page-out { to { transform: translateX(100%); } }
+@keyframes sheet-out { to { transform: translateY(105%); } }
+@keyframes fade-out { from { opacity: 1; } }
+.sheet { transition: transform 220ms var(--ease); }
+.sheet.dragging { transition: none; }
+.drawer { transition: transform 280ms var(--ease), visibility 0s 280ms; }
+.app.drawer-open .drawer { transition: transform 280ms var(--ease); }
+.sheet .grab, .sheet h2 { touch-action: none; }
+
+/* Toasts wrap instead of leaving the screen; a tap dismisses them. */
+.toast { white-space: normal; width: max-content; max-width: calc(100% - 32px); text-align: center; line-height: 1.4; }
+.toast.on { pointer-events: auto; }
+
+/* The composer grows with its text up to its max height, then scrolls. */
+.composer textarea { field-sizing: content; overflow-y: auto; }
+/* A long model name shortens instead of pushing Send out. */
+.tool.model { flex: 0 1 auto; min-width: 0; }
+.tool .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer .tools .send, .composer .tools .tool.round { flex: none; }
+
+/* The timeline jumps to its end instead of scrolling there; answers out of
+   view skip their layout until they come near. */
+.timeline { scroll-behavior: auto; overflow-anchor: auto; }
+.tlin > .a { content-visibility: auto; contain-intrinsic-size: auto 240px; }
+.tolatest {
+  position: absolute; left: 50%; bottom: 0; z-index: 2;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--overlay); border: 1px solid var(--input); color: var(--text);
+  backdrop-filter: blur(12px);
+  transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+  transition: opacity 180ms, transform 180ms;
+}
+.tlwrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tlwrap.away .tolatest { opacity: 1; transform: translate(-50%, -12px); pointer-events: auto; }
+.thread-state { display: grid; justify-items: center; gap: 12px; padding: 48px 24px; text-align: center; color: var(--muted); font-size: 15px; }
+.thread-state b { color: var(--text); font-size: 17px; font-weight: 500; }
+.earlier .error { display: block; margin-top: 4px; font-size: 13px; color: var(--error); text-align: center; }
+
+/* A message's images and files (`UserTimelineRow`). */
+.u-images { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; width: 210px; margin: 20px 0 -8px auto; }
+.u-images.one { grid-template-columns: 1fr; width: 160px; }
+.u-images .img { aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; background: var(--chip); border: 1px solid var(--border); display: grid; place-items: center; color: var(--muted); }
+.u-images img { width: 100%; height: 100%; object-fit: cover; }
+.chipline { flex-wrap: wrap; }
+
+/* Request cards: every option the provider offers, its warning, the app. */
+.ask-card .app { padding: 0 16px 10px; font-size: 13px; color: var(--muted); }
+.ask-card .warn { display: flex; gap: 8px; margin: 0 16px 12px; padding: 10px 12px; border-radius: 12px; background: rgb(255 185 0 / .08); color: var(--warning); font-size: 14px; }
+.ask-card .err, .sheet .err { margin: 0 16px 12px; font-size: 14px; color: var(--error); }
+.sheet .err { margin: 0 24px 8px; }
+.subagent-card .ch { color: var(--info); }
+
+/* A thread row is a button for the keyboard and TalkBack too. */
+.trow:focus-visible, .srow:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline { scroll-behavior: auto !important; }
+}

@@ -286,8 +286,7 @@ fn Settings() -> Element {
                         }
                     }
                     button { class: "set danger", onclick: move |_| {
-                            ui.reset();
-                            ui.ctx.disconnect();
+                            ui.disconnect();
                         },
                         Icon { name: "log-out" }
                         span { class: "grow", "Disconnect" }
@@ -425,15 +424,12 @@ pub fn SettingSheet(setting: &'static str) -> Element {
 fn Projects() -> Element {
     let ui = use_context::<Ui>();
     let s = ui.ctx.session.read();
+    let listed = s.listed(false);
     let rows: Vec<(Project, usize, usize, usize)> = s
         .code_projects()
         .into_iter()
         .map(|p| {
-            let threads: Vec<_> = s
-                .listed(false)
-                .into_iter()
-                .filter(|t| t.project_id == p.id)
-                .collect();
+            let threads: Vec<_> = listed.iter().filter(|t| t.project_id == p.id).collect();
             let waiting = threads
                 .iter()
                 .filter(|t| t.has_pending_approvals || t.has_pending_user_input)
@@ -692,29 +688,62 @@ pub fn ProjectSettingSheet(project: String, field: &'static str) -> Element {
 #[component]
 pub fn RemoveProject(project: String) -> Element {
     let ui = use_context::<Ui>();
-    let title = ui
-        .ctx
-        .session
-        .read()
-        .state
-        .project(&project)
-        .map(|p| p.title.clone())
-        .unwrap_or_default();
+    // `removeMembers`'s confirmation (`projects_page.rs`).
+    let (title, lines) = {
+        let session = ui.ctx.session.read();
+        let found = session.state.project(&project);
+        let title = found.map(|p| p.title.clone()).unwrap_or_default();
+        let root = found.map(|p| p.workspace_root.clone()).unwrap_or_default();
+        let threads = session
+            .state
+            .threads
+            .iter()
+            .filter(|t| t.project_id == project && t.archived_at.is_none())
+            .count();
+        let heading = if threads > 0 {
+            format!(
+                "Remove project \"{title}\" and delete its {threads} thread{}?",
+                if threads == 1 { "" } else { "s" }
+            )
+        } else {
+            format!("Remove project \"{title}\"?")
+        };
+        let mut lines = vec![heading, format!("Path: {root}")];
+        if let Some(label) = session.state.config["environment"]["label"].as_str() {
+            lines.push(format!("Environment: {label}"));
+        }
+        lines.push(if threads > 0 {
+            "This permanently clears conversation history for those threads and any archived threads.".into()
+        } else {
+            "This permanently clears any archived conversation history.".into()
+        });
+        lines.push("This removes only the project entries, not the files on disk.".into());
+        lines.push("This action cannot be undone.".into());
+        (title, lines)
+    };
+    let removed = title.clone();
+    let (mut sent, busy, error) = crate::sheets::use_outcome(ui, move || {
+        ui.ctx.toast(format!("{removed} removed"));
+        ui.reset();
+    });
     rsx! {
-        p { class: "confirm", "{title}: this removes only the project entries, not the files on disk." }
+        for (index, line) in lines.into_iter().enumerate() {
+            p { key: "{index}", class: "confirm", style: if index == 0 { "color:var(--text)" }, "{line}" }
+        }
+        if let Some(error) = error {
+            p { class: "err", role: "alert", "{error}" }
+        }
         div { class: "actions two",
             button { class: "btn", onclick: move |_| ui.back(), "Cancel" }
-            button { class: "btn danger", onclick: move |_| {
-                    ui.ctx.dispatch(json!({
+            button { class: "btn danger", disabled: busy, onclick: move |_| {
+                    sent.set(Some(ui.ctx.dispatch_tracked(json!({
                         "type": "project.delete",
                         "commandId": uuid::Uuid::new_v4().to_string(),
                         "projectId": project,
                         "force": true,
-                    }));
-                    ui.ctx.toast(format!("{title} removed"));
-                    ui.back();
+                    }))));
                 },
-                "Remove"
+                if busy { "Removing…" } else { "Remove" }
             }
         }
     }

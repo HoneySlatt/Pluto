@@ -159,8 +159,8 @@ pub fn Badge(project: Project, #[props(default)] class: &'static str) -> Element
     let favicon = ctx
         .session
         .read()
-        .favicons
-        .get(&project.id)
+        .assets
+        .get(&format!("favicon:{}", project.id))
         .cloned()
         .flatten();
     let named = |value: &serde_json::Value| {

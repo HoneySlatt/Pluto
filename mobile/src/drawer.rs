@@ -12,15 +12,40 @@ use crate::nav::{Page, Ui};
 use crate::session::{Net, last_activity};
 use crate::{chat_time, day_group, relative_time};
 
-/// The pull to refresh: the shell is live, so a connected list is already
-/// current; an offline one reconnects.
+/// The pull to refresh: the shell is live, so a connected list is current
+/// once the server answers a probe; an offline one reconnects. The spinner
+/// ends with the outcome (`plutoRefreshed`).
 pub fn refresh(ui: Ui) {
     let online = ui.ctx.session.peek().net.online();
     if online {
-        ui.ctx.toast("Threads up to date");
+        ui.ctx.probe();
     } else {
         ui.ctx.retry();
     }
+    dioxus::core::spawn_forever(async move {
+        // The server answers the probe, or misses its six-second deadline;
+        // a reconnection tries three times.
+        for _ in 0..60 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let net = ui.ctx.session.peek().net.clone();
+            if (online && !net.online()) || (!online && matches!(net, Net::Offline)) {
+                break;
+            }
+            if !online && net.online() {
+                break;
+            }
+            if online && ui.ctx.session.peek().replies.contains_key("probe") {
+                break;
+            }
+        }
+        document::eval("window.plutoRefreshed && window.plutoRefreshed()");
+        let net = ui.ctx.session.peek().net.clone();
+        ui.ctx.toast(if net.online() {
+            "Threads up to date"
+        } else {
+            "Can’t reach the server"
+        });
+    });
 }
 
 #[derive(Clone, PartialEq)]
@@ -36,6 +61,37 @@ struct RowData {
 #[component]
 pub fn Drawer() -> Element {
     let ui = use_context::<Ui>();
+    // The list lives while the drawer shows (and through its closing).
+    let mut shown = use_signal(|| false);
+    use_effect(move || {
+        let open = ui.nav.read().drawer;
+        if open {
+            shown.set(true);
+            return;
+        }
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(320)).await;
+            if !ui.nav.peek().drawer {
+                shown.set(false);
+            }
+        });
+    });
+    // The times move on while it is open.
+    let mut minute = use_signal(|| 0u64);
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            if ui.nav.peek().drawer {
+                minute += 1;
+            }
+        }
+    });
+    let _ = minute.read();
+    if !shown() {
+        return rsx! {
+            aside { class: "drawer", "aria-label": "Threads" }
+        };
+    }
     let mut query = use_signal(String::new);
     let mut open_attention = use_signal(|| true);
     let mut open_threads = use_signal(|| true);
@@ -65,9 +121,14 @@ pub fn Drawer() -> Element {
         title: t.title.clone(),
         project: session.state.project(&t.project_id).cloned(),
         branch: t.branch.clone(),
-        status: if t.has_pending_approvals {
+        // A subagent below waiting on the user shows on its parent.
+        status: if t.has_pending_approvals
+            || t.pending_subagent_request.as_deref() == Some("approval")
+        {
             Some("approval")
-        } else if t.has_pending_user_input {
+        } else if t.has_pending_user_input
+            || t.pending_subagent_request.as_deref() == Some("user_input")
+        {
             Some("input")
         } else if t.is_running() {
             Some("working")
@@ -82,14 +143,17 @@ pub fn Drawer() -> Element {
     };
     let visible: Vec<_> = threads.iter().filter(|t| matches(t)).collect();
     let settled = |t: &pluto_core::model::Thread| t.settled_override.as_deref() == Some("settled");
+    let waits = |t: &pluto_core::model::Thread| {
+        t.has_pending_approvals || t.has_pending_user_input || t.pending_subagent_request.is_some()
+    };
     let attention: Vec<RowData> = visible
         .iter()
-        .filter(|t| !settled(t) && (t.has_pending_approvals || t.has_pending_user_input))
+        .filter(|t| !settled(t) && waits(t))
         .map(|t| row(t))
         .collect();
     let mut active: Vec<_> = visible
         .iter()
-        .filter(|t| !settled(t) && !(t.has_pending_approvals || t.has_pending_user_input))
+        .filter(|t| !settled(t) && !waits(t))
         .collect();
     active.sort_by_key(|t| t.pinned_at.is_none());
     let active: Vec<RowData> = active.into_iter().map(|t| row(t)).collect();
@@ -133,7 +197,17 @@ pub fn Drawer() -> Element {
                 key: "{data.id}",
                 class: if current { "trow current" } else { "trow" },
                 role: "button",
-                onclick: move |_| ui.open_thread(id.clone()),
+                tabindex: "0",
+                "aria-current": if current { "true" },
+                onclick: {
+                    let id = id.clone();
+                    move |_| ui.open_thread(id.clone())
+                },
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Enter {
+                        ui.open_thread(id.clone());
+                    }
+                },
                 div { class: "body",
                     div { class: "title", "{data.title}" }
                     div { class: "meta",
@@ -172,7 +246,7 @@ pub fn Drawer() -> Element {
         }
     };
     rsx! {
-        aside { class: "drawer", "aria-label": "Threads",
+        aside { class: "drawer", "aria-label": "Threads", role: "dialog", "aria-modal": "true", tabindex: "-1",
             header { class: "dhead",
                 crate::Avatar {}
                 div { class: "who",
@@ -301,7 +375,19 @@ fn AttentionRow(data: RowData) -> Element {
     let approval = data.status == Some("approval");
     let id = data.id.clone();
     rsx! {
-        div { class: "trow arow", role: "button", onclick: move |_| ui.open_thread(id.clone()),
+        div {
+            class: "trow arow",
+            role: "button",
+            tabindex: "0",
+            onclick: {
+                let id = id.clone();
+                move |_| ui.open_thread(id.clone())
+            },
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::Enter {
+                    ui.open_thread(id.clone());
+                }
+            },
             span {
                 class: "adisc",
                 style: if approval { "background:rgb(255 185 0 / .1)" } else { "background:rgb(81 162 255 / .1)" },

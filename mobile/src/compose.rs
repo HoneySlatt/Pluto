@@ -206,10 +206,16 @@ pub fn send(ui: Ui, target: &Target, text: &str) -> Result<Option<String>, Strin
             message["titleSeed"] = json!(title_seed(text));
             drop(drafts);
             drop(session);
+            if !ui.ctx.session.peek().net.online() {
+                return Err("Not connected to the server: nothing was sent.".into());
+            }
             for command in commands {
                 ui.ctx.dispatch(command);
             }
-            ui.ctx.dispatch(message);
+            // Refused, the text comes back to this composer.
+            if !ui.ctx.send_message(message, target.key(), text.to_owned()) {
+                return Err(String::new());
+            }
             Ok(None)
         }
         Target::Chat | Target::Code => {
@@ -257,13 +263,19 @@ pub fn send(ui: Ui, target: &Target, text: &str) -> Result<Option<String>, Strin
                     input["workspaceStrategy"]["startFromOrigin"] = json!(true);
                 }
             }
+            let temporary = chat && drafts.temporary;
             drop(drafts);
             drop(session);
-            ui.ctx.request(
-                format!("launch:{thread_id}"),
-                "orchestration.launchThread",
-                input,
-            );
+            if !ui
+                .ctx
+                .launch(&thread_id, input, target.key(), text.to_owned())
+            {
+                return Err("Not connected to the server: nothing was sent.".into());
+            }
+            // Deleted once the phone leaves it.
+            if temporary {
+                ui.ctx.opened_temporary(&thread_id);
+            }
             Ok(Some(thread_id))
         }
     }

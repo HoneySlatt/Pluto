@@ -33,6 +33,12 @@ pub fn files_dir() -> Option<std::path::PathBuf> {
     imp::files_dir()
 }
 
+/// Whether the phone shows a 24-hour clock (`DateFormat.is24HourFormat`);
+/// `None` off Android.
+pub fn clock_24h() -> Option<bool> {
+    imp::clock_24h()
+}
+
 /// A sealed token: the IV and the ciphertext.
 type Sealed = (Vec<u8>, Vec<u8>);
 
@@ -81,6 +87,19 @@ mod imp {
 
     fn path() -> Option<PathBuf> {
         files_dir().map(|dir| dir.join(FILE))
+    }
+
+    pub fn clock_24h() -> Option<bool> {
+        with_env(|env, activity| {
+            env.call_static_method(
+                "android/text/format/DateFormat",
+                "is24HourFormat",
+                "(Landroid/content/Context;)Z",
+                &[JValue::Object(activity)],
+            )?
+            .z()
+        })
+        .ok()
     }
 
     /// The app's private files (`Context.getFilesDir`).
@@ -310,6 +329,10 @@ mod imp {
     pub fn forget_token() {}
 
     pub fn files_dir() -> Option<std::path::PathBuf> {
+        None
+    }
+
+    pub fn clock_24h() -> Option<bool> {
         None
     }
 }

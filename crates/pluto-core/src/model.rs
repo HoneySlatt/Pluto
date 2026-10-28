@@ -309,7 +309,7 @@ impl Thread {
     }
 
     /// `isChildRunLive` in `threadShell.ts`.
-    fn child_run_live(&self) -> bool {
+    pub fn child_run_live(&self) -> bool {
         match &self.activity_run_status {
             Some(status) => status.is_some(),
             None => matches!(

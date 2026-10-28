@@ -40,9 +40,14 @@ static GEIST_MEDIUM: Asset = asset!("/assets/fonts/Geist-Medium.otf");
 static GEIST_SEMIBOLD: Asset = asset!("/assets/fonts/Geist-SemiBold.otf");
 static GEIST_MONO: Asset = asset!("/assets/fonts/GeistMono-Regular.otf");
 
-/// The system bar insets (`MainActivity.kt`), the drawer's edge swipe and
-/// the list's pull to refresh (the prototype's `swipe` and `pullToRefresh`),
-/// sending `drawer`, `close` or `refresh`.
+/// The system bar insets (`MainActivity.kt`); the drawer and the sheets
+/// following the finger (the prototype's `swipe`): an edge swipe opens the
+/// drawer, a swipe back or a sheet pulled down by its top closes them
+/// (`drawer`, `close`, `sheet-close`); the list's pull to refresh
+/// (`refresh`, ended by `plutoRefreshed`); `resume` when the app comes back
+/// to the foreground; the composer growing with its text where the WebView
+/// lacks `field-sizing`; and `plutoModal`, which makes everything but the
+/// open drawer or sheet inert and moves the focus into it.
 const GESTURES: &str = r#"
 (() => {
   // The activity's system bar heights (MainActivity.kt), once the page runs.
@@ -52,22 +57,57 @@ const GESTURES: &str = r#"
     document.documentElement.style.setProperty('--sab', i.bottom + 'px');
   } catch (_) {}
   const app = () => document.querySelector('.app');
-  let x0 = null, y0 = 0, opening = false;
+  const drawer = () => document.querySelector('.drawer');
+  // The drawer follows a horizontal swipe from the left edge, or back.
+  let x0 = null, y0 = 0, opening = false, dragging = false, last = 0, at = 0;
   document.addEventListener('touchstart', e => {
-    const a = app(); if (!a || document.querySelector('.sheet')) return;
+    const a = app(); if (!a || document.querySelector('.sheet:not(.leave)') || document.querySelector('.app > .pagewrap')) return;
     const t = e.touches[0], open = a.classList.contains('drawer-open');
     if ((!open && t.clientX - a.getBoundingClientRect().left < 28) || open) {
-      x0 = t.clientX; y0 = t.clientY; opening = !open;
+      x0 = t.clientX; y0 = t.clientY; opening = !open; dragging = false; last = t.clientX; at = e.timeStamp;
     }
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (x0 === null) return;
+    const t = e.touches[0], dx = t.clientX - x0, dy = t.clientY - y0, d = drawer();
+    if (!dragging) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { x0 = null; return; }
+      if (Math.abs(dx) < 10 || !d) return;
+      dragging = true; d.classList.add('dragging');
+    }
+    const w = d.offsetWidth, offset = opening ? Math.min(0, dx - w) : Math.min(0, dx);
+    d.style.transform = `translateX(${offset}px)`; d.style.visibility = 'visible';
+    last = t.clientX; at = e.timeStamp;
   }, { passive: true });
   document.addEventListener('touchend', e => {
     if (x0 === null) return;
-    const t = e.changedTouches[0], dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
-    if (dy < 60) {
-      if (opening && dx > 60) dioxus.send('drawer');
-      if (!opening && dx < -60) dioxus.send('close');
-    }
-    x0 = null;
+    const t = e.changedTouches[0], dx = t.clientX - x0, d = drawer();
+    const speed = (t.clientX - last) / Math.max(1, e.timeStamp - at);
+    if (dragging && d) { d.classList.remove('dragging'); d.style.transform = ''; d.style.visibility = ''; }
+    const far = Math.abs(dx) > (d ? d.offsetWidth * .3 : 60) || Math.abs(speed) > .4;
+    if (opening && dx > 0 && far) dioxus.send('drawer');
+    if (!opening && dx < 0 && far) dioxus.send('close');
+    x0 = null; dragging = false;
+  });
+  // A sheet pulled down by its grab or title closes.
+  let s0 = null, sheet = null;
+  document.addEventListener('touchstart', e => {
+    const top = e.target.closest && e.target.closest('.sheet .grab, .sheet h2');
+    if (!top) return;
+    sheet = top.closest('.sheet'); s0 = e.touches[0].clientY; sheet.classList.add('dragging');
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (s0 === null) return;
+    const dy = Math.max(0, e.touches[0].clientY - s0);
+    sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (s0 === null) return;
+    const dy = e.changedTouches[0].clientY - s0;
+    sheet.classList.remove('dragging');
+    // Closing, the sheet leaves from where the finger let it go.
+    if (dy > 90) dioxus.send('sheet-close'); else sheet.style.transform = '';
+    s0 = null; sheet = null;
   });
   const LIMIT = 64;
   let p0 = null, pull = 0, busy = false;
@@ -91,6 +131,9 @@ const GESTURES: &str = r#"
     if (pull > 0 && e.cancelable) e.preventDefault();
     set(Math.min(pull, 96));
   }, { passive: false });
+  let done = null;
+  // The session's answer ends the spinner (or a long silence does).
+  window.plutoRefreshed = () => { if (done) done(); };
   document.addEventListener('touchend', () => {
     if (p0 === null) return; p0 = null;
     const [list, ptr] = parts(); if (!list || !ptr) return;
@@ -98,8 +141,36 @@ const GESTURES: &str = r#"
     if (pull < LIMIT) { set(0); pull = 0; return; }
     busy = true; set(LIMIT);
     const svg = ptr.querySelector('svg'); svg && svg.classList.add('spin');
+    const timer = setTimeout(() => done && done(), 12000);
+    done = () => { clearTimeout(timer); done = null; svg && svg.classList.remove('spin'); set(0); busy = false; pull = 0; };
     dioxus.send('refresh');
-    setTimeout(() => { svg && svg.classList.remove('spin'); set(0); busy = false; pull = 0; }, 900);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') dioxus.send('resume');
+  });
+  // The composer grows with its text up to its max height.
+  if (!(window.CSS && CSS.supports('field-sizing', 'content'))) {
+    document.addEventListener('input', e => {
+      const t = e.target;
+      if (!t.matches || !t.matches('.composer textarea, .instr textarea')) return;
+      t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px';
+    });
+  }
+  window.plutoModal = kind => requestAnimationFrame(() => {
+    const a = app(); if (!a) return;
+    const top = kind === 'sheet' ? a.querySelector('.sheet:not(.leave)') : kind === 'drawer' ? drawer() : null;
+    for (const el of a.children) {
+      const keep = !top || el === top || el.matches('.toast, .netbar') || (kind === 'sheet' && el.matches('.scrim'));
+      el.inert = !keep;
+    }
+    if (top) {
+      if (!window.plutoReturn) window.plutoReturn = document.activeElement;
+      if (!top.contains(document.activeElement)) top.focus({ preventScroll: true });
+    } else if (window.plutoReturn) {
+      // Back where it was, but a field would open the keyboard.
+      const r = window.plutoReturn; window.plutoReturn = null;
+      if (document.contains(r) && !r.matches('input, textarea')) r.focus({ preventScroll: true });
+    }
   });
 })();
 "#;
@@ -136,7 +207,9 @@ fn App() -> Element {
                 match gesture.as_str() {
                     "drawer" => ui.open_drawer(),
                     "close" if nav.peek().drawer => ui.back(),
+                    "sheet-close" if nav.peek().sheet.is_some() => ui.back(),
                     "refresh" => drawer::refresh(ui),
+                    "resume" => ctx.probe(),
                     _ => {}
                 }
             }
@@ -148,14 +221,40 @@ fn App() -> Element {
          @font-face {{ font-family: Geist; src: url({GEIST_SEMIBOLD}); font-weight: 600; }}
          @font-face {{ font-family: 'Geist Mono'; src: url({GEIST_MONO}); font-weight: 400; }}"
     );
+    // Everything but the open drawer or sheet is inert, the focus inside.
+    use_effect(move || {
+        let nav = nav.read();
+        let kind = if nav.sheet.is_some() {
+            "sheet"
+        } else if nav.drawer {
+            "drawer"
+        } else {
+            ""
+        };
+        document::eval(&format!("window.plutoModal && window.plutoModal('{kind}')"));
+    });
     let net = session.read().net.clone();
     let launch = session.read().launch;
     let drawer_open = nav.read().drawer;
     let pages = nav.read().pages.clone();
+    let leaving_page = nav.read().leaving_page.clone().map(|(page, _)| page);
     let sheet_open = nav.read().sheet.is_some();
+    let sheet_leaving = nav.read().leaving_sheet.is_some();
     let selected = session.read().selected.clone();
     // The base view: a thread under a thread page stays the page's.
-    let thread_page = pages.iter().any(|p| matches!(p, Page::Thread(_)));
+    let thread_page = pages
+        .iter()
+        .chain(leaving_page.iter())
+        .any(|p| matches!(p, Page::Thread(_)));
+    // The pages, the leaving one last under its own index: it keeps its
+    // element (and scroll) while it slides out.
+    let count = pages.len();
+    let layers: Vec<(usize, Page, bool)> = pages
+        .into_iter()
+        .enumerate()
+        .map(|(index, page)| (index, page, false))
+        .chain(leaving_page.map(|page| (count, page, true)))
+        .collect();
     rsx! {
         document::Stylesheet { href: STYLE }
         document::Style { "{fonts}" }
@@ -181,13 +280,18 @@ fn App() -> Element {
                         Some(id) => rsx! { thread::ThreadView { key: "{id}", id, page: false } },
                         None => rsx! { home::Home {} },
                     }
-                    for (index, page) in pages.into_iter().enumerate() {
-                        pages::PageView { key: "{index}", page }
+                    for (index, page, leaving) in layers {
+                        div { key: "{index}", class: if leaving { "pagewrap leaving" } else { "pagewrap" },
+                            pages::PageView { page }
+                        }
                     }
                     NetBar {}
                     drawer::Drawer {}
-                    if sheet_open {
-                        div { class: "scrim on", onclick: move |_| ui.back() }
+                    if sheet_open || sheet_leaving {
+                        div {
+                            class: if sheet_open { "scrim on" } else { "scrim leave" },
+                            onclick: move |_| if sheet_open { ui.back() },
+                        }
                         sheets::SheetView {}
                     }
                 },
@@ -303,17 +407,19 @@ fn NetBar() -> Element {
     }
 }
 
-/// The toast at the top, for 1.8 s.
+/// The toast at the top: 1.8 s for a confirmation, longer for a longer
+/// message (an error), up to 7 s; a tap dismisses it.
 #[component]
 fn Toast() -> Element {
     let mut session = use_context::<Signal<Session>>();
     let toast = session.read().toast.clone();
     use_effect(move || {
-        let Some((_, serial)) = session.read().toast.clone() else {
+        let Some((text, serial)) = session.read().toast.clone() else {
             return;
         };
+        let millis = (1800 + 45 * text.chars().count() as u64).min(7000);
         spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(1800)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
             if session
                 .peek()
                 .toast
@@ -325,7 +431,10 @@ fn Toast() -> Element {
         });
     });
     rsx! {
-        div { class: if toast.is_some() { "toast on" } else { "toast" }, role: "status",
+        div {
+            class: if toast.is_some() { "toast on" } else { "toast" },
+            role: "status",
+            onclick: move |_| session.write().toast = None,
             if let Some((text, _)) = toast.clone() {
                 "{text}"
             }
@@ -369,10 +478,20 @@ pub fn chat_time(iso: &str, now: chrono::DateTime<chrono::Utc>, format: &str) ->
     };
     let local = at.with_timezone(&chrono::Local);
     match day_group(iso, now) {
-        "Today" => match format {
-            "12-hour" => local.format("%-I:%M %p").to_string(),
-            _ => local.format("%H:%M").to_string(),
-        },
+        "Today" => {
+            // System default follows the phone's clock, read once.
+            static SYSTEM_24H: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let twelve = match format {
+                "12-hour" => true,
+                "24-hour" => false,
+                _ => !*SYSTEM_24H.get_or_init(|| secret::clock_24h().unwrap_or(true)),
+            };
+            if twelve {
+                local.format("%-I:%M %p").to_string()
+            } else {
+                local.format("%H:%M").to_string()
+            }
+        }
         "Yesterday" | "This week" => local.format("%a").to_string(),
         _ => local.format("%b %-d").to_string(),
     }

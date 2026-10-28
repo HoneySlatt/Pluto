@@ -146,13 +146,18 @@ layout, Pluto stock theme). Build it in the Nix shell:
 
 ```sh
 nix develop .#mobile
-cd mobile && dx bundle --platform android --release --target aarch64-linux-android
+scripts/mobile-apk.sh
 # installable APK: target/dx/Pluto/release/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+The script regenerates the license notice, drops the libraries an earlier
+build for another ABI left in dx's Gradle project, runs `dx bundle --release`
+and checks the APK carries one ABI only. The Rust code is a release build;
+the APK is signed with Gradle's debug key.
+
 `nix develop .#emulator` provides a headless x86_64 emulator for looking at
-the app on the computer (build with `--target x86_64-linux-android`; the
-computer's loopback is `10.0.2.2` there).
+the app on the computer (`scripts/mobile-apk.sh x86_64`; the computer's
+loopback is `10.0.2.2` there).
 
 Wired to the server: the connection screen (plain http for private and
 Tailscale addresses only, the token sealed with an Android Keystore key when
@@ -206,6 +211,33 @@ build without it says so). The app draws edge to edge through its own
 activity (`mobile/android/MainActivity.kt`), which hands the system bars'
 heights to the page and shrinks it for the keyboard.
 
+How the session holds up: commands go out only once the server synchronized,
+and a reconnected session follows the open thread and the scheduled tasks
+again; a socket that stops answering for 45 s, or a probe that gets no answer
+within 6 s when the app comes back to the foreground or the list is pulled,
+counts as lost. A message the server refuses, or whose fate a dropped
+connection leaves open, comes back to its composer (nothing is sent again by
+itself); a refused launch leaves the thread screen for the draft. Leaving the
+server clears its drafts, replies and images. Temporary chats the phone
+started are deleted (`thread.delete`) once it leaves them, again after a
+reconnection if needed; a temporary chat open on the computer is left alone.
+The branch sheet records a thread's branch only once the checkout succeeded
+(the desktop's `branch_picker.rs`: remote refs, a worktree that has the ref
+already, the provider sessions detached when the worktree changes). Request
+cards show every option the provider offers with its warning and app, and
+the actions that change data (request answers, rename, fork, delete, project
+removal, task actions, memories, instructions) wait for the server and show
+its refusal where they were asked. Personalization reads the memory file
+again before each change; a read that failed for another reason than a
+missing file blocks changes until Retry. A user message shows its images
+(`assets.createUrl`), its files, and the context it carries without a link.
+The timeline follows its end through every change of height, offers a jump
+back to it, keeps the rows in view while earlier turns load, skips the layout
+of answers out of view and ticks its clock only while the thread works. Pages
+and sheets slide out as they close, the drawer and the sheets follow the
+finger, everything behind an open sheet or drawer is inert, and System
+default follows the phone's 12/24-hour clock.
+
 Not wired yet: attachments (the Attach sheet's Photos, Camera and Files show a
 notice), chat projects' own memories (the desktop's chat project pages),
 thread notifications and a
@@ -215,14 +247,17 @@ the "ask" line of Needs you (it reads "Waiting for your approval" or "Waiting
 for your answer", not the request's text), unread state, snoozed threads
 (listed with the others), published pages, MCP apps and generated images in
 the timeline (a note points to the computer), the code blocks' copy button
-and syntax colors, the drawer's refresh (the shell is live; a refresh only
-reconnects an offline session), and https servers (the app finds no Android root
+and syntax colors, a list window for very long threads (every row stays
+mounted; answers out of view only skip their layout), and https servers (the app finds no Android root
 certificates yet). Checked in the emulator against a
 disposable server (connection, drafts, drawer, sheets, Settings, projects,
 tasks, usage, reconnection, Personalization with a synthetic chat space,
-the licenses, the keyboard and the edge-to-edge layout on Android 14); a
-thread's timeline, the request cards and the
-diff were not seen there, since a thread needs a provider turn.
+the licenses, the keyboard and the edge-to-edge layout on Android 14), and
+against a synthetic protocol server for threads (a 200-message timeline,
+request cards, an image-only message, refused launches, answers and branch
+switches, dropped and silent connections, temporary chats, unreadable
+memory files); the diff page was not seen there, and frame rates, latency
+and battery remain to be measured on a phone.
 
 ## Development
 

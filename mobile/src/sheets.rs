@@ -26,8 +26,14 @@ fn target(ui: &Ui) -> Target {
 #[component]
 pub fn SheetView() -> Element {
     let ui = use_context::<Ui>();
-    let Some(sheet) = ui.nav.read().sheet.clone() else {
-        return rsx! {};
+    // The open sheet, else the one leaving (its exit, `nav.rs`).
+    let (sheet, leaving) = {
+        let nav = ui.nav.read();
+        match (nav.sheet.clone(), nav.leaving_sheet.clone()) {
+            (Some(sheet), _) => (sheet, false),
+            (None, Some((sheet, _))) => (sheet, true),
+            (None, None) => return rsx! {},
+        }
     };
     let (title, body) = match sheet {
         Sheet::Model => ("Model".to_owned(), rsx! { ModelSheet {} }),
@@ -99,7 +105,12 @@ pub fn SheetView() -> Element {
         ),
     };
     rsx! {
-        div { class: "sheet on", role: "dialog", "aria-modal": "true",
+        div {
+            class: if leaving { "sheet leave" } else { "sheet on" },
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": if title.is_empty() { "Choose a ref" } else { "{title}" },
+            tabindex: "-1",
             div { class: "grab" }
             if !title.is_empty() {
                 h2 { "{title}" }
@@ -107,6 +118,36 @@ pub fn SheetView() -> Element {
             div { class: "sbody", {body} }
         }
     }
+}
+
+/// A tracked command or request asked from a sheet: the key to set once
+/// sent, whether it still waits, and why it failed; `on_ok` runs once the
+/// server accepted it.
+pub fn use_outcome(
+    ui: Ui,
+    mut on_ok: impl FnMut() + 'static,
+) -> (Signal<Option<String>>, bool, Option<String>) {
+    let mut sent = use_signal(|| None::<String>);
+    let mut error = use_signal(|| None::<String>);
+    use_effect(move || {
+        let Some(key) = sent.read().clone() else {
+            return;
+        };
+        let Some(result) = ui.ctx.session.read().replies.get(&key).cloned() else {
+            return;
+        };
+        ui.ctx.forget(&key);
+        sent.set(None);
+        match result {
+            Ok(_) => on_ok(),
+            Err(message) => error.set(Some(message)),
+        }
+    });
+    let busy = sent
+        .read()
+        .as_ref()
+        .is_some_and(|key| ui.ctx.session.read().waiting(key));
+    (sent, busy, error())
 }
 
 /// A checked row of a choice sheet.
@@ -269,6 +310,15 @@ fn ThreadMenu(id: String) -> Element {
     let title = thread.title.clone();
     let confirm = session.prefs.flag("confirmThreadDelete");
     drop(session);
+    let mut done = use_signal(|| "");
+    let deleted = id.clone();
+    let (mut sent, busy, error) = use_outcome(ui, move || {
+        if *done.peek() == "Deleted" {
+            leave_deleted(ui, &deleted);
+        }
+        ui.back();
+        ui.ctx.toast(*done.peek());
+    });
     let run_command = move |kind: &str, id: &str| {
         let mut command = pluto_core::model::command(kind, id);
         if kind == "thread.unsettle" {
@@ -295,9 +345,10 @@ fn ThreadMenu(id: String) -> Element {
         }
         if !chat {
             if let Some(run) = latest_run {
-                button { class: "srow", onclick: move |_| {
+                button { class: "srow", disabled: busy, onclick: move |_| {
                         let target = uuid::Uuid::new_v4().to_string();
-                        ui.ctx.dispatch(json!({
+                        done.set("Forked");
+                        sent.set(Some(ui.ctx.dispatch_tracked(json!({
                             "type": "thread.fork",
                             "commandId": uuid::Uuid::new_v4().to_string(),
                             "createdBy": "user",
@@ -306,9 +357,7 @@ fn ThreadMenu(id: String) -> Element {
                             "targetThreadId": target,
                             "sourcePoint": {"type": "run", "runId": run},
                             "title": format!("{title} fork"),
-                        }));
-                        ui.back();
-                        ui.ctx.toast("Forked");
+                        }))));
                     },
                     Icon { name: "git-fork" } span { class: "grow", "Fork thread" }
                 }
@@ -336,36 +385,53 @@ fn ThreadMenu(id: String) -> Element {
         button { class: "srow", onclick: move |_| run_command(if settled { "thread.unsettle" } else { "thread.settle" }, &i6),
             Icon { name: "archive" } span { class: "grow", if settled { "Unsettle" } else { "Settle" } }
         }
-        button { class: "srow danger", onclick: move |_| {
+        button { class: "srow danger", disabled: busy, onclick: move |_| {
                 if confirm {
                     ui.open_sheet(Sheet::DeleteThread(i7.clone()));
                 } else {
-                    delete_thread(ui, &i7);
+                    done.set("Deleted");
+                    sent.set(Some(ui.ctx.dispatch_tracked(pluto_core::model::command("thread.delete", &i7))));
                 }
             },
             Icon { name: "trash-2" } span { class: "grow", "Delete" }
         }
+        if busy {
+            p { class: "note", role: "status", "Waiting for the server…" }
+        }
+        if let Some(error) = error {
+            p { class: "err", role: "alert", "{error}" }
+        }
     }
 }
 
-fn delete_thread(ui: Ui, id: &str) {
+/// A deleted thread that was open leaves for the draft.
+fn leave_deleted(ui: Ui, id: &str) {
     if ui.ctx.session.peek().selected.as_deref() == Some(id) {
         ui.ctx.select(None);
     }
-    ui.ctx
-        .dispatch(pluto_core::model::command("thread.delete", id));
-    ui.back();
-    ui.ctx.toast("Deleted");
 }
 
 #[component]
 fn DeleteThread(id: String) -> Element {
     let ui = use_context::<Ui>();
+    let deleted = id.clone();
+    let (mut sent, busy, error) = use_outcome(ui, move || {
+        leave_deleted(ui, &deleted);
+        ui.back();
+        ui.ctx.toast("Deleted");
+    });
     rsx! {
         p { class: "confirm", "This deletes the thread and its chat history." }
+        if let Some(error) = error {
+            p { class: "err", role: "alert", "{error}" }
+        }
         div { class: "actions two",
             button { class: "btn", onclick: move |_| ui.back(), "Cancel" }
-            button { class: "btn danger", onclick: move |_| delete_thread(ui, &id), "Delete" }
+            button { class: "btn danger", disabled: busy, onclick: move |_| {
+                    sent.set(Some(ui.ctx.dispatch_tracked(pluto_core::model::command("thread.delete", &id))));
+                },
+                if busy { "Deleting…" } else { "Delete" }
+            }
         }
     }
 }
@@ -381,19 +447,22 @@ fn Rename(id: String) -> Element {
         .map(|t| t.title.clone())
         .unwrap_or_default();
     let mut title = use_signal(|| current);
+    let (mut sent, busy, error) = use_outcome(ui, move || ui.back());
     rsx! {
         label { class: "sfield",
             input { initial_value: "{title}", "aria-label": "Title", oninput: move |e| title.set(e.value()) }
         }
+        if let Some(error) = error {
+            p { class: "err", role: "alert", "{error}" }
+        }
         div { class: "actions two",
             button { class: "btn", onclick: move |_| ui.back(), "Cancel" }
-            button { class: "btn primary", disabled: title.read().trim().is_empty(), onclick: move |_| {
+            button { class: "btn primary", disabled: busy || title.read().trim().is_empty(), onclick: move |_| {
                     let mut command = pluto_core::model::command("thread.metadata.update", &id);
                     command["title"] = json!(title.peek().trim());
-                    ui.ctx.dispatch(command);
-                    ui.back();
+                    sent.set(Some(ui.ctx.dispatch_tracked(command)));
                 },
-                "Save"
+                if busy { "Saving…" } else { "Save" }
             }
         }
     }
@@ -506,13 +575,96 @@ fn ref_tag(r: &Value, root: &str) -> Option<&'static str> {
     }
 }
 
+/// `local_name`: a remote ref without its remote.
+fn local_name(remote: &str) -> &str {
+    match remote.find('/') {
+        Some(index) if index > 0 && index + 1 < remote.len() => &remote[index + 1..],
+        _ => remote,
+    }
+}
+
+/// `selection_target` (`branch_picker.rs`): where a picked ref is checked
+/// out, the thread's worktree afterwards, and whether a worktree that has it
+/// already is reused.
+fn selection_target(
+    project_cwd: &str,
+    worktree: Option<&str>,
+    r: &Value,
+) -> (String, Option<String>, bool) {
+    if let Some(path) = r["worktreePath"].as_str() {
+        let next = (path != project_cwd).then(|| path.to_owned());
+        return (path.to_owned(), next, true);
+    }
+    let next = worktree
+        .filter(|_| r["isDefault"] != true)
+        .map(str::to_owned);
+    (
+        next.clone().unwrap_or_else(|| project_cwd.to_owned()),
+        next,
+        false,
+    )
+}
+
+/// `setThreadBranch`: the thread records its branch and worktree; a new
+/// worktree detaches the provider sessions of the old one.
+fn set_thread_branch(ui: Ui, id: &str, branch: &str, worktree: Option<String>) {
+    let detach: Vec<String> = {
+        let session = ui.ctx.session.peek();
+        let moved = session
+            .thread(id)
+            .is_some_and(|t| t.worktree_path != worktree);
+        session
+            .state
+            .detail
+            .as_ref()
+            .filter(|d| moved && d.id() == id)
+            .map(|d| {
+                d.provider_sessions
+                    .iter()
+                    .filter_map(|s| s["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let base = uuid::Uuid::new_v4().to_string();
+    for session_id in detach {
+        ui.ctx.dispatch(json!({
+            "type": "provider-session.detach",
+            "commandId": format!("{base}:detach:{session_id}"),
+            "threadId": id,
+            "providerSessionId": session_id,
+            "reason": "client-requested",
+        }));
+    }
+    let mut command = pluto_core::model::command("thread.metadata.update", id);
+    command["branch"] = json!(branch);
+    command["worktreePath"] = json!(worktree);
+    ui.ctx.dispatch(command);
+}
+
+/// A ref switch on its way: its request key, the branch it shows, and the
+/// thread's worktree afterwards.
+#[derive(Clone, PartialEq)]
+struct Switch {
+    key: String,
+    shown: String,
+    remote: bool,
+    create: bool,
+    worktree: Option<String>,
+}
+
 /// The ref picker: the draft's base for a new worktree, or the thread's
-/// branch (`vcs.switchRef`, or `vcs.createRef` for a new one).
+/// branch (`vcs.switchRef`, or `vcs.createRef` for a new one; the thread
+/// records it once the checkout succeeded).
 #[component]
 fn BranchSheet() -> Element {
     let ui = use_context::<Ui>();
     let mut query = use_signal(String::new);
-    let (cwd, root, thread) = {
+    // The query the list shows, a moment after the typing stops.
+    let mut searched = use_signal(String::new);
+    let mut switch = use_signal(|| None::<Switch>);
+    let mut failure = use_signal(|| None::<String>);
+    let (cwd, root, thread, worktree) = {
         let session = ui.ctx.session.read();
         match session.selected.clone().and_then(|id| session.thread(&id)) {
             Some(thread) => {
@@ -525,29 +677,80 @@ fn BranchSheet() -> Element {
                     thread.worktree_path.clone().unwrap_or_else(|| root.clone()),
                     root,
                     Some(thread.id.clone()),
+                    thread.worktree_path.clone(),
                 )
             }
             None => {
                 let root = compose::code_project(&session, ui.drafts.read().project.as_deref())
                     .map(|p| p.workspace_root.clone())
                     .unwrap_or_default();
-                (root.clone(), root, None)
+                (root.clone(), root, None, None)
             }
         }
     };
-    let q = query.read().trim().to_owned();
+    // The picker's searches leave with it.
+    use_drop(move || ui.ctx.forget("refs:"));
+    use_effect(move || {
+        let q = query.read().trim().to_owned();
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(220)).await;
+            if query.peek().trim() == q && *searched.peek() != q {
+                searched.set(q);
+            }
+        });
+    });
+    let q = searched.read().clone();
     let key = format!("refs:{cwd}\0{q}");
     use_effect({
-        let (key, cwd) = (key.clone(), cwd.clone());
+        let cwd = cwd.clone();
         move || {
-            let q = query.read().trim().to_owned();
+            let q = searched.read().clone();
+            let key = format!("refs:{cwd}\0{q}");
+            if ui.ctx.session.peek().replies.contains_key(&key) {
+                return;
+            }
             let mut payload = json!({"cwd": cwd, "limit": 100});
             if !q.is_empty() {
                 payload["query"] = json!(q.split_whitespace().collect::<Vec<_>>().join("-"));
             }
-            let _ = &key;
-            ui.ctx
-                .request(format!("refs:{cwd}\0{q}"), "vcs.listRefs", payload);
+            ui.ctx.request(key, "vcs.listRefs", payload);
+        }
+    });
+    // The switch's answer: the thread records the branch, or the sheet says
+    // why the checkout failed.
+    use_effect({
+        let thread = thread.clone();
+        move || {
+            let Some(pending) = switch.read().clone() else {
+                return;
+            };
+            let Some(result) = ui.ctx.session.read().replies.get(&pending.key).cloned() else {
+                return;
+            };
+            ui.ctx.forget(&pending.key);
+            switch.set(None);
+            match result {
+                Ok(value) => {
+                    let returned = value["refName"].as_str().map(str::to_owned);
+                    let branch = if pending.create || pending.remote {
+                        returned.unwrap_or(pending.shown)
+                    } else {
+                        pending.shown
+                    };
+                    if let Some(id) = &thread {
+                        set_thread_branch(ui, id, &branch, pending.worktree);
+                    }
+                    ui.back();
+                }
+                Err(error) => failure.set(Some(format!(
+                    "{} {error}",
+                    if pending.create {
+                        "Failed to create and switch ref."
+                    } else {
+                        "Failed to switch ref."
+                    }
+                ))),
+            }
         }
     });
     let refs: Option<Result<Vec<Value>, String>> =
@@ -556,40 +759,75 @@ fn BranchSheet() -> Element {
                 .map(|v| v["refs"].as_array().cloned().unwrap_or_default())
                 .map_err(Clone::clone)
         });
-    let new_name: String = q.split_whitespace().collect::<Vec<_>>().join("-");
+    let typed = query.read().trim().to_owned();
+    let new_name: String = typed.split_whitespace().collect::<Vec<_>>().join("-");
     let create = thread.is_some()
         && !new_name.is_empty()
         && refs
             .as_ref()
             .and_then(|r| r.as_ref().ok())
             .is_some_and(|refs| !refs.iter().any(|r| r["name"] == new_name.as_str()));
+    let busy = switch.read().is_some();
     let pick = {
-        let (cwd, thread) = (cwd.clone(), thread.clone());
-        move |name: String, created: bool| {
-            match &thread {
-                None => ui.drafts.clone().write().base = Some(name),
-                Some(id) => {
-                    let (method, payload) = if created {
-                        (
-                            "vcs.createRef",
-                            json!({"cwd": cwd, "refName": name, "switchRef": true}),
-                        )
-                    } else {
-                        ("vcs.switchRef", json!({"cwd": cwd, "refName": name}))
-                    };
-                    ui.ctx.mutate(method, payload);
-                    let mut command = pluto_core::model::command("thread.metadata.update", id);
-                    command["branch"] = json!(name);
-                    ui.ctx.dispatch(command);
-                }
+        let (cwd, root, thread, worktree) =
+            (cwd.clone(), root.clone(), thread.clone(), worktree.clone());
+        move |r: Value, created: bool| {
+            let name = r["name"].as_str().unwrap_or_default().to_owned();
+            let Some(id) = &thread else {
+                ui.drafts.clone().write().base = Some(name);
+                ui.back();
+                return;
+            };
+            failure.set(None);
+            let key = format!("branch-action:{}", uuid::Uuid::new_v4());
+            if created {
+                ui.ctx.request(
+                    key.clone(),
+                    "vcs.createRef",
+                    json!({"cwd": cwd, "refName": name, "switchRef": true}),
+                );
+                switch.set(Some(Switch {
+                    key,
+                    shown: name,
+                    remote: false,
+                    create: true,
+                    worktree: worktree.clone(),
+                }));
+                return;
             }
-            ui.back();
+            let (target, next, reuse) = selection_target(&root, worktree.as_deref(), &r);
+            // A worktree that has the ref checked out already is reused.
+            if reuse {
+                set_thread_branch(ui, id, &name, next);
+                ui.back();
+                return;
+            }
+            let remote = r["isRemote"] == true;
+            let shown = if remote { local_name(&name) } else { &name }.to_owned();
+            ui.ctx.request(
+                key.clone(),
+                "vcs.switchRef",
+                json!({"cwd": target, "refName": name}),
+            );
+            switch.set(Some(Switch {
+                key,
+                shown,
+                remote,
+                create: false,
+                worktree: next,
+            }));
         }
     };
     rsx! {
         label { class: "sfield",
             Icon { name: "search" }
             input { placeholder: "Search refs...", "aria-label": "Search refs", initial_value: "{query}", oninput: move |e| query.set(e.value()) }
+        }
+        if busy {
+            p { class: "note", role: "status", "Switching…" }
+        }
+        if let Some(error) = failure() {
+            p { class: "err", role: "alert", "{error}" }
         }
         match refs {
             None => rsx! { p { class: "note", "Loading refs..." } },
@@ -602,10 +840,11 @@ fn BranchSheet() -> Element {
                     button {
                         key: "{r[\"name\"]}",
                         class: "srow",
+                        disabled: busy,
                         onclick: {
-                            let pick = pick.clone();
-                            let name = r["name"].as_str().unwrap_or_default().to_owned();
-                            move |_| pick(name.clone(), false)
+                            let mut pick = pick.clone();
+                            let r = r.clone();
+                            move |_| pick(r.clone(), false)
                         },
                         Icon { name: "git-branch" }
                         span { class: "grow", "{r[\"name\"].as_str().unwrap_or_default()}" }
@@ -615,10 +854,10 @@ fn BranchSheet() -> Element {
                     }
                 }
                 if create {
-                    button { class: "srow", onclick: {
-                            let pick = pick.clone();
+                    button { class: "srow", disabled: busy, onclick: {
+                            let mut pick = pick.clone();
                             let name = new_name.clone();
-                            move |_| pick(name.clone(), true)
+                            move |_| pick(json!({"name": name}), true)
                         },
                         Icon { name: "plus" }
                         span { class: "grow", "Create new ref “{new_name}”" }
@@ -626,5 +865,32 @@ fn BranchSheet() -> Element {
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `branch_picker.rs`'s cases.
+    #[test]
+    fn a_ref_checked_out_elsewhere_reuses_its_worktree() {
+        assert_eq!(local_name("origin/feature/x"), "feature/x");
+        assert_eq!(local_name("main"), "main");
+        let elsewhere = json!({"name": "dev", "worktreePath": "/repo-dev"});
+        assert_eq!(
+            selection_target("/repo", None, &elsewhere),
+            ("/repo-dev".into(), Some("/repo-dev".into()), true)
+        );
+        let default = json!({"name": "main", "isDefault": true});
+        assert_eq!(
+            selection_target("/repo", Some("/wt"), &default),
+            ("/repo".into(), None, false)
+        );
+        let plain = json!({"name": "x"});
+        assert_eq!(
+            selection_target("/repo", Some("/wt"), &plain),
+            ("/wt".into(), Some("/wt".into()), false)
+        );
     }
 }

@@ -4,7 +4,10 @@
 //! one included), and what Chat remembers about the user (the chat space's
 //! `.pluto/memory.json`): Use memory, Learn from chats, Add a memory, Delete
 //! all memories, then the saved memories with Edit and Forget. Read and
-//! written with `projects.readFile` and `projects.writeFile`.
+//! written with `projects.readFile` and `projects.writeFile`. A change reads
+//! the file again first (the computer may have changed it), and shows as
+//! done once the server wrote it; a read that failed for another reason
+//! than a missing file blocks every change until it is read again.
 
 use dioxus::prelude::*;
 use serde_json::{Value, json};
@@ -33,13 +36,80 @@ const FIELDS: [(&str, &str, &str); 2] = [
 /// The page's state: the memory file, the saved and edited instructions.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Personalization {
-    /// `None` while it loads; an error when the file is not memory JSON
-    /// (the page then changes nothing).
+    /// `None` while it loads; an error when the file could not be read or
+    /// is not memory JSON (the page then changes nothing).
     pub memory: Option<Result<Value, String>>,
-    pub saved: Option<[String; 2]>,
+    /// `None` while they load; an error blocks Save.
+    pub saved: Option<Result<[String; 2], String>>,
     pub draft: [String; 2],
     /// Cancel remounts the fields with the saved text.
     pub generation: u64,
+    /// The memory change on its way (read again, then written).
+    pub change: Option<MemoryChange>,
+    /// The instruction files still being written, and the first failure.
+    pub writing: Vec<String>,
+    pub write_error: Option<String>,
+}
+
+/// A change of the memory file, applied to its latest contents.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MemoryChange {
+    Add(String),
+    Edit(String, String),
+    Forget(String),
+    Clear,
+    Enabled(bool),
+    Learn(bool),
+}
+
+impl MemoryChange {
+    fn apply(&self, memory: &mut Value) {
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let entries = memory["memories"].as_array_mut();
+        match (self, entries) {
+            (MemoryChange::Add(text), Some(entries)) => {
+                let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
+                entries.push(json!({"id": id, "text": text, "createdAt": now, "updatedAt": now}));
+            }
+            (MemoryChange::Edit(id, text), Some(entries)) => {
+                for entry in entries.iter_mut().filter(|e| e["id"] == id.as_str()) {
+                    entry["text"] = json!(text);
+                    entry["updatedAt"] = json!(now);
+                }
+            }
+            (MemoryChange::Forget(id), Some(entries)) => {
+                entries.retain(|entry| entry["id"] != id.as_str());
+            }
+            (MemoryChange::Clear, _) => memory["memories"] = json!([]),
+            (MemoryChange::Enabled(on), _) => memory["enabled"] = json!(on),
+            (MemoryChange::Learn(on), _) => memory["auto"] = json!(on),
+            _ => {}
+        }
+    }
+
+    /// What the toast says once it is written.
+    fn done(&self) -> &'static str {
+        match self {
+            MemoryChange::Add(_) => "Memory added",
+            MemoryChange::Edit(..) => "Memory saved",
+            MemoryChange::Forget(_) => "Memory forgotten",
+            MemoryChange::Clear => "All memories deleted",
+            MemoryChange::Enabled(_) | MemoryChange::Learn(_) => "",
+        }
+    }
+}
+
+/// A read's result: the server reports a missing file as a failure to read
+/// it (a chat space without one has saved nothing yet); a failure of the
+/// connection itself is not a missing file.
+fn read_result(result: &Result<Value, String>) -> Result<Option<String>, String> {
+    match result {
+        Ok(file) => Ok(Some(
+            file["contents"].as_str().unwrap_or_default().to_owned(),
+        )),
+        Err(error) if error.starts_with("Failed to read workspace file") => Ok(None),
+        Err(error) => Err(error.clone()),
+    }
 }
 
 /// An instructions file's fields; empty when missing or unreadable.
@@ -97,56 +167,26 @@ pub fn load(ui: Ui) {
     );
 }
 
-/// Changes the loaded memories and writes them back.
-fn change_memory(ui: Ui, change: impl FnOnce(&mut Value)) {
+/// Reads the memory file again, applies `change` to it and writes it back
+/// (`Memory` follows the replies); one change at a time.
+pub fn change_memory(ui: Ui, change: MemoryChange) {
     let Some(root) = chats_root(&ui) else {
         return;
     };
     let mut drafts = ui.drafts;
-    let contents = {
+    {
         let mut drafts = drafts.write();
-        let Some(Ok(memory)) = drafts.personalization.memory.as_mut() else {
+        let state = &mut drafts.personalization;
+        if state.change.is_some() || !matches!(state.memory, Some(Ok(_))) {
             return;
-        };
-        change(memory);
-        format!(
-            "{}\n",
-            serde_json::to_string_pretty(memory).unwrap_or_default()
-        )
-    };
-    ui.ctx.request(
-        "mutation:chat-memory",
-        "projects.writeFile",
-        json!({"cwd": root, "relativePath": MEMORY_PATH, "contents": contents}),
-    );
-}
-
-/// Saves a memory's new text (`Some`), adds one (empty `id`), or forgets
-/// it (`None`).
-pub fn edit_memory(ui: Ui, id: &str, text: Option<&str>) {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    change_memory(ui, |memory| {
-        let Some(entries) = memory["memories"].as_array_mut() else {
-            return;
-        };
-        match text {
-            Some(text) if id.is_empty() => {
-                let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
-                entries.push(json!({"id": id, "text": text, "createdAt": now, "updatedAt": now}));
-            }
-            Some(text) => {
-                for entry in entries.iter_mut().filter(|e| e["id"] == id) {
-                    entry["text"] = json!(text);
-                    entry["updatedAt"] = json!(now);
-                }
-            }
-            None => entries.retain(|entry| entry["id"] != id),
         }
-    });
-}
-
-pub fn clear_memories(ui: Ui) {
-    change_memory(ui, |memory| memory["memories"] = json!([]));
+        state.change = Some(change);
+    }
+    ui.ctx.request(
+        "chat-memory:fresh",
+        "projects.readFile",
+        json!({"cwd": root, "relativePath": MEMORY_PATH}),
+    );
 }
 
 /// Writes the edited instructions to every chat space.
@@ -163,11 +203,6 @@ fn save_instructions(ui: Ui) {
         serde_json::to_string_pretty(&json!({"version": 1, "about": about, "style": style}))
             .unwrap_or_default()
     );
-    {
-        let mut drafts = drafts.write();
-        drafts.personalization.saved = Some([about.clone(), style.clone()]);
-        drafts.personalization.draft = [about, style];
-    }
     let session = ui.ctx.session.peek();
     let roots: Vec<String> = session
         .state
@@ -177,14 +212,149 @@ fn save_instructions(ui: Ui) {
         .map(|p| p.workspace_root.clone())
         .collect();
     drop(session);
+    {
+        let mut drafts = drafts.write();
+        let state = &mut drafts.personalization;
+        state.draft = [about, style];
+        state.write_error = None;
+        state.writing = roots
+            .iter()
+            .map(|root| format!("instructions-write:{root}"))
+            .collect();
+    }
     for root in roots {
         ui.ctx.request(
-            format!("mutation:instructions:{root}"),
+            format!("instructions-write:{root}"),
             "projects.writeFile",
             json!({"cwd": root, "relativePath": INSTRUCTIONS_PATH, "contents": contents}),
         );
     }
-    ui.ctx.toast("Instructions saved");
+}
+
+/// Follows the files' replies: the first reads, a change's read and write,
+/// the instructions' writes.
+fn follow_replies(ui: Ui) {
+    let mut drafts = ui.drafts;
+    let session = ui.ctx.session.read();
+    let reply = |key: &str| session.replies.get(key).cloned();
+    let (memory, instructions, fresh, written) = (
+        reply("chat-memory:read"),
+        reply("chat-instructions:read"),
+        reply("chat-memory:fresh"),
+        reply("chat-memory:write"),
+    );
+    let writes: Vec<(String, Result<Value, String>)> = drafts
+        .peek()
+        .personalization
+        .writing
+        .iter()
+        .filter_map(|key| Some((key.clone(), session.replies.get(key)?.clone())))
+        .collect();
+    drop(session);
+    if memory.is_none()
+        && instructions.is_none()
+        && fresh.is_none()
+        && written.is_none()
+        && writes.is_empty()
+    {
+        return;
+    }
+    let root = chats_root(&ui);
+    let mut forget = Vec::new();
+    let mut toast = None;
+    let mut write = None;
+    {
+        let mut drafts = drafts.write();
+        let state = &mut drafts.personalization;
+        if let Some(result) = memory {
+            forget.push("chat-memory:read");
+            state.memory = Some(match read_result(&result) {
+                Ok(Some(contents)) => parse(&contents),
+                Ok(None) => Ok(json!({"version": 1, "memories": []})),
+                Err(error) => Err(error),
+            });
+        }
+        if let Some(result) = instructions {
+            forget.push("chat-instructions:read");
+            let saved = read_result(&result)
+                .map(|contents| contents.map(|c| parse_instructions(&c)).unwrap_or_default());
+            if let Ok(fields) = &saved {
+                state.draft = fields.clone();
+            }
+            state.saved = Some(saved);
+        }
+        if let Some(result) = fresh {
+            forget.push("chat-memory:fresh");
+            let latest = read_result(&result).and_then(|contents| match contents {
+                Some(contents) => parse(&contents),
+                None => Ok(json!({"version": 1, "memories": []})),
+            });
+            match (latest, state.change.clone(), &root) {
+                (Ok(mut latest), Some(change), Some(root)) => {
+                    change.apply(&mut latest);
+                    let contents = format!(
+                        "{}\n",
+                        serde_json::to_string_pretty(&latest).unwrap_or_default()
+                    );
+                    state.memory = Some(Ok(latest));
+                    write = Some(
+                        json!({"cwd": root, "relativePath": MEMORY_PATH, "contents": contents}),
+                    );
+                }
+                (Err(error), ..) => {
+                    state.change = None;
+                    toast = Some(format!("Nothing changed: {error}"));
+                }
+                _ => state.change = None,
+            }
+        }
+        if let Some(result) = written {
+            forget.push("chat-memory:write");
+            let change = state.change.take();
+            match result {
+                Ok(_) => {
+                    toast = change
+                        .map(|c| c.done().to_owned())
+                        .filter(|t| !t.is_empty())
+                }
+                Err(error) => toast = Some(format!("The memories were not saved: {error}")),
+            }
+        }
+        if !writes.is_empty() {
+            for (key, result) in &writes {
+                state.writing.retain(|k| k != key);
+                if let Err(error) = result
+                    && state.write_error.is_none()
+                {
+                    state.write_error = Some(error.clone());
+                }
+            }
+            if state.writing.is_empty() {
+                match state.write_error.take() {
+                    None => {
+                        state.saved = Some(Ok(state.draft.clone()));
+                        toast = Some("Instructions saved".into());
+                    }
+                    Some(error) => {
+                        toast = Some(format!("The instructions were not saved: {error}"))
+                    }
+                }
+            }
+        }
+    }
+    for key in forget {
+        ui.ctx.forget(key);
+    }
+    for (key, _) in writes {
+        ui.ctx.forget(&key);
+    }
+    if let Some(payload) = write {
+        ui.ctx
+            .request("chat-memory:write", "projects.writeFile", payload);
+    }
+    if let Some(text) = toast {
+        ui.ctx.toast(text);
+    }
 }
 
 #[component]
@@ -192,49 +362,12 @@ pub fn Memory() -> Element {
     let ui = use_context::<Ui>();
     let mut drafts = ui.drafts;
     use_hook(move || load(ui));
-    // The files' replies fill the page once.
-    use_effect(move || {
-        let session = ui.ctx.session.read();
-        let memory = session.replies.get("chat-memory:read").cloned();
-        let instructions = session.replies.get("chat-instructions:read").cloned();
-        drop(session);
-        let waiting = {
-            let state = &drafts.peek().personalization;
-            (state.memory.is_none() && memory.is_some())
-                || (state.saved.is_none() && instructions.is_some())
-        };
-        if !waiting {
-            return;
-        }
-        let mut drafts = drafts.write();
-        let state = &mut drafts.personalization;
-        if state.memory.is_none()
-            && let Some(result) = memory
-        {
-            // The server reports a missing file like any read failure: a
-            // chat space without one has saved nothing yet.
-            state.memory = Some(match result {
-                Ok(file) => parse(file["contents"].as_str().unwrap_or_default()),
-                Err(_) => Ok(json!({"version": 1, "memories": []})),
-            });
-        }
-        if state.saved.is_none()
-            && let Some(result) = instructions
-        {
-            let fields = result
-                .ok()
-                .map(|file| parse_instructions(file["contents"].as_str().unwrap_or_default()))
-                .unwrap_or_default();
-            state.draft = fields.clone();
-            state.saved = Some(fields);
-        }
-    });
+    use_effect(move || follow_replies(ui));
     let has_chats = ui.ctx.session.read().space_project(Space::Chats).is_some();
     let state = drafts.read().personalization.clone();
-    let dirty = state
-        .saved
-        .as_ref()
-        .is_some_and(|saved| *saved != state.draft);
+    let dirty = matches!(&state.saved, Some(Ok(saved)) if *saved != state.draft);
+    let saving = !state.writing.is_empty();
+    let changing = state.change.is_some();
     let now = chrono::Utc::now();
     if !has_chats {
         return rsx! {
@@ -262,6 +395,10 @@ pub fn Memory() -> Element {
                 div { class: "glabel", style: "padding-top:8px", "Custom instructions" }
                 if state.saved.is_none() {
                     div { class: "loading-note", "Loading…" }
+                } else if let Some(Err(error)) = state.saved.clone() {
+                    div { class: "empty-page", b { "Could not read the instructions" } "{error}"
+                        div { style: "margin-top:16px", button { class: "btn", onclick: move |_| load(ui), "Retry" } }
+                    }
                 } else {
                     for (index, (_, title, description)) in FIELDS.into_iter().enumerate() {
                         label { class: "instr", key: "{index}-{generation}",
@@ -275,11 +412,13 @@ pub fn Memory() -> Element {
                         }
                     }
                     div { class: "savebar",
-                        if dirty {
+                        if saving {
+                            span { role: "status", "Saving…" }
+                        } else if dirty {
                             button { class: "btn", onclick: move |_| {
                                     let mut drafts = drafts.write();
                                     let state = &mut drafts.personalization;
-                                    state.draft = state.saved.clone().unwrap_or_default();
+                                    state.draft = state.saved.clone().and_then(Result::ok).unwrap_or_default();
                                     state.generation += 1;
                                 },
                                 "Cancel"
@@ -293,7 +432,11 @@ pub fn Memory() -> Element {
                 div { class: "glabel", "Memory" }
                 match &state.memory {
                     None => rsx! { div { class: "loading-note", "Loading memories" } },
-                    Some(Err(error)) => rsx! { div { class: "empty-page", b { "Could not read the memories" } "{error}" } },
+                    Some(Err(error)) => rsx! {
+                        div { class: "empty-page", b { "Could not read the memories" } "{error}"
+                            div { style: "margin-top:16px", button { class: "btn", onclick: move |_| load(ui), "Retry" } }
+                        }
+                    },
                     Some(Ok(_)) => rsx! {
                         div { class: "group",
                             label { class: "set",
@@ -302,7 +445,7 @@ pub fn Memory() -> Element {
                                     small { "Chats remember what you share about yourself and use it in later conversations. You can also ask a chat to remember, correct or forget something." }
                                 }
                                 span { class: "toggle",
-                                    input { r#type: "checkbox", checked: enabled, onchange: move |e| change_memory(ui, |m| m["enabled"] = json!(e.checked())) }
+                                    input { r#type: "checkbox", checked: enabled, disabled: changing, onchange: move |e| change_memory(ui, MemoryChange::Enabled(e.checked())) }
                                     span {}
                                 }
                             }
@@ -312,7 +455,7 @@ pub fn Memory() -> Element {
                                     small { "After a chat goes quiet, Pluto updates your memories with what it taught about you, using your text generation model." }
                                 }
                                 span { class: "toggle",
-                                    input { r#type: "checkbox", checked: learn, disabled: !enabled, onchange: move |e| change_memory(ui, |m| m["auto"] = json!(e.checked())) }
+                                    input { r#type: "checkbox", checked: learn, disabled: !enabled || changing, onchange: move |e| change_memory(ui, MemoryChange::Learn(e.checked())) }
                                     span {}
                                 }
                             }
@@ -328,7 +471,7 @@ pub fn Memory() -> Element {
                                 }
                             }
                         }
-                        div { class: "glabel", "Saved memories" }
+                        div { class: "glabel", if changing { "Saved memories · saving…" } else { "Saved memories" } }
                         if entries.is_empty() {
                             div { class: "empty-page", style: "padding:32px 16px",
                                 b { "No saved memories" }
@@ -397,6 +540,7 @@ pub fn MemoryEditSheet(id: Option<String>) -> Element {
         .unwrap_or_default();
     let mut text = use_signal(|| initial.clone());
     let editing = id.is_some();
+    let changing = ui.drafts.read().personalization.change.is_some();
     rsx! {
         div { class: "instr-sheet",
             textarea {
@@ -412,11 +556,13 @@ pub fn MemoryEditSheet(id: Option<String>) -> Element {
         }
         div { class: "actions two",
             button { class: "btn", onclick: move |_| ui.back(), "Cancel" }
-            button { class: "btn primary", disabled: text.read().trim().is_empty(), onclick: move |_| {
+            button { class: "btn primary", disabled: changing || text.read().trim().is_empty(), onclick: move |_| {
                     let value = text.peek().trim().to_owned();
-                    edit_memory(ui, id.as_deref().unwrap_or_default(), Some(&value));
+                    change_memory(ui, match &id {
+                        Some(id) => MemoryChange::Edit(id.clone(), value),
+                        None => MemoryChange::Add(value),
+                    });
                     ui.back();
-                    ui.ctx.toast(if editing { "Memory saved" } else { "Memory added" });
                 },
                 if editing { "Save" } else { "Add memory" }
             }
@@ -433,9 +579,8 @@ pub fn MemoryMenu(id: String) -> Element {
             Icon { name: "pencil" } span { class: "grow", "Edit" }
         }
         button { class: "srow danger", onclick: move |_| {
-                edit_memory(ui, &id, None);
+                change_memory(ui, MemoryChange::Forget(id.clone()));
                 ui.back();
-                ui.ctx.toast("Memory forgotten");
             },
             Icon { name: "trash-2" } span { class: "grow", "Forget" }
         }
@@ -450,9 +595,8 @@ pub fn ClearMemories() -> Element {
         div { class: "actions two",
             button { class: "btn", onclick: move |_| ui.back(), "Cancel" }
             button { class: "btn danger", onclick: move |_| {
-                    clear_memories(ui);
+                    change_memory(ui, MemoryChange::Clear);
                     ui.back();
-                    ui.ctx.toast("All memories deleted");
                 },
                 "Delete all"
             }
@@ -480,6 +624,34 @@ mod tests {
             parse_instructions("not json"),
             [String::new(), String::new()]
         );
+    }
+
+    /// A missing file reads as empty; a lost connection blocks changes.
+    #[test]
+    fn only_a_missing_file_reads_as_empty() {
+        let missing = Err("Failed to read workspace file '.pluto/memory.json' in '/c'.".into());
+        assert_eq!(read_result(&missing), Ok(None));
+        let lost = Err("The connection dropped before the server answered.".to_owned());
+        assert!(read_result(&lost).is_err());
+        assert_eq!(
+            read_result(&Ok(json!({"contents": "{}"}))),
+            Ok(Some("{}".into()))
+        );
+    }
+
+    #[test]
+    fn changes_apply_to_the_latest_file() {
+        let mut memory = json!({"version": 1, "memories": [{"id": "a", "text": "old"}]});
+        MemoryChange::Edit("a".into(), "new".into()).apply(&mut memory);
+        assert_eq!(memory["memories"][0]["text"], "new");
+        MemoryChange::Add("more".into()).apply(&mut memory);
+        assert_eq!(memory["memories"].as_array().unwrap().len(), 2);
+        MemoryChange::Forget("a".into()).apply(&mut memory);
+        assert_eq!(memory["memories"][0]["text"], "more");
+        MemoryChange::Enabled(false).apply(&mut memory);
+        assert_eq!(memory["enabled"], false);
+        MemoryChange::Clear.apply(&mut memory);
+        assert_eq!(memory["memories"], json!([]));
     }
 
     #[test]
