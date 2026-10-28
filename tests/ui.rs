@@ -602,6 +602,62 @@ fn a_draft_can_start_in_a_new_worktree() {
 }
 
 #[test]
+fn a_new_worktree_picks_its_base_ref() {
+    let mut harness = harness_with(
+        json!([{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}]),
+        json!([]),
+    );
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    let find = |harness: &Harness<'static, App>, label: &str| {
+        texts(harness)
+            .into_iter()
+            .filter(|(text, _)| text == label)
+            .map(|(_, rect)| rect)
+            .next_back()
+    };
+    let current = find(&harness, "Current checkout").expect("the workspace selector");
+    click(&mut harness, current.center());
+    let worktree = find(&harness, "New worktree").expect("the workspace menu");
+    click(&mut harness, worktree.center());
+    harness.run_steps(2);
+    harness.state_mut().load_offline_reply(
+        "branch-refs:/fixture/demo\0\0",
+        json!({"refs": [
+            {"name": "dev", "current": true, "isDefault": false, "isRemote": false, "worktreePath": "/fixture/demo"},
+            {"name": "main", "current": false, "isDefault": true, "isRemote": false, "worktreePath": null},
+            {"name": "origin/feature", "current": false, "isDefault": false, "isRemote": true, "worktreePath": null},
+        ], "isRepo": true, "hasPrimaryRemote": true, "nextCursor": null, "totalCount": 3}),
+    );
+    harness.run_steps(3);
+    // The repository's default branch is the base until one is picked.
+    let base = find(&harness, "From main").unwrap_or_else(|| panic!("{:?}", texts(&harness)));
+    click(&mut harness, base.center());
+    harness.run_steps(2);
+    let shown: Vec<String> = texts(&harness).into_iter().map(|(t, _)| t).collect();
+    assert!(shown.iter().any(|t| t == "Start from origin"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "remote"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "current"), "{shown:?}");
+    let feature = find(&harness, "origin/feature").expect("the remote ref");
+    click(&mut harness, feature.center());
+    harness.run_steps(2);
+    assert!(find(&harness, "From origin/feature").is_some());
+    assert!(find(&harness, "Start from origin").is_none());
+}
+
+#[test]
 fn the_sidebar_search_finds_threads_by_their_messages() {
     let mut harness = harness();
     let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {

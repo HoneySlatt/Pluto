@@ -25,6 +25,8 @@ pub struct App {
     /// Where the open draft starts, when picked (`DraftThreadEnvMode`):
     /// `local` or `worktree`, by project.
     pub(crate) draft_env_mode: Option<(String, String)>,
+    pub(crate) draft_workspace: Option<crate::ui::branch_picker::DraftWorkspace>,
+    pub(crate) branch_picker: crate::ui::branch_picker::BranchPicker,
     pub(crate) composer: String,
     /// Images attached to the composer, sent with the next message.
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
@@ -423,6 +425,8 @@ impl App {
             thread_retry: None,
             draft_project_id: None,
             draft_env_mode: None,
+            draft_workspace: None,
+            branch_picker: Default::default(),
             composer: String::new(),
             composer_images: Vec::new(),
             composer_files: Vec::new(),
@@ -918,6 +922,7 @@ impl App {
         // picked (`applyStickyState`), not from the last draft's pick.
         self.composer_selection.remove("draft");
         self.draft_env_mode = None;
+        self.draft_workspace = None;
     }
 
     /// Dispatches a request reply; the request stays "responding" until the
@@ -1065,6 +1070,9 @@ impl App {
                 .state
                 .project(&thread.project_id)
                 .map(|p| p.workspace_root.clone());
+        }
+        if let Some(path) = self.draft_workspace().and_then(|w| w.worktree.clone()) {
+            return Some(path);
         }
         self.draft_project().map(|p| p.workspace_root)
     }
@@ -1563,6 +1571,7 @@ impl App {
             || self.chat_project_result(&key, &result)
             || self.chat_mode_result(&key, &result)
             || self.thread_search_result(&key, &result)
+            || self.branch_result(&key, &result)
             || self.scheduled_result(&key, &result)
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)

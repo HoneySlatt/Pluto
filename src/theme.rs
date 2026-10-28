@@ -1119,6 +1119,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "image",
         "text-search",
         "folder-git-2",
+        "folder-git",
         "palette",
         "monitor",
         "tablet",

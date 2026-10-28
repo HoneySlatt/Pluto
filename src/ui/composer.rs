@@ -1300,6 +1300,10 @@ impl App {
         let Some(project) = self.draft_project() else {
             return "local".into();
         };
+        // A draft in an existing worktree works there (`resolveEffectiveEnvMode`).
+        if self.draft_workspace().is_some_and(|w| w.worktree.is_some()) {
+            return "local".into();
+        }
         if let Some((id, mode)) = &self.draft_env_mode
             && *id == project.id
         {
@@ -1332,12 +1336,19 @@ impl App {
         };
         // `BranchToolbarEnvModeSelector`: a draft picks where it starts.
         let worktree = draft && self.draft_env_mode() == "worktree";
-        let (icon, label) = if worktree {
-            ("folder-git-2", "New worktree")
-        } else if draft {
-            ("folder", "Current checkout")
+        let in_worktree = if draft {
+            self.draft_workspace().is_some_and(|w| w.worktree.is_some())
         } else {
-            ("folder", "Local checkout")
+            self.current_thread()
+                .is_some_and(|t| t.worktree_path.is_some())
+        };
+        // `resolveCurrentWorkspaceLabel`, `resolveLockedWorkspaceLabel`.
+        let (icon, label) = match (worktree, draft, in_worktree) {
+            (true, _, _) => ("folder-git-2", "New worktree"),
+            (_, true, true) => ("folder-git", "Current worktree"),
+            (_, true, false) => ("folder", "Current checkout"),
+            (_, false, true) => ("folder-git", "Worktree"),
+            (_, false, false) => ("folder", "Local checkout"),
         };
         let left = rect.left() + 4.0;
         let label_font = font(12.0, Weight::Regular);
@@ -1380,53 +1391,35 @@ impl App {
             if response.clicked() {
                 self.open_menu = Some("composer-workspace".into());
             }
-            self.workspace_menu(ui, control, worktree);
+            self.workspace_menu(ui, control, worktree, in_worktree);
         }
-        let branch = self
-            .current_thread()
-            .and_then(|t| t.branch.clone())
-            .or_else(|| self.workspace_branch())
-            .unwrap_or_else(|| "main".into());
-        let branch_color = theme::alpha(theme::muted_foreground(), 0.7);
-        let branch_width = widgets::text_width(ui, &branch, label_font.clone());
-        let right = rect.right() - 8.0;
-        let start = right - 7.0 - 12.0 - 2.0 - branch_width - 2.0 - 12.0 - 7.0;
-        theme::paint_icon(
-            ui,
-            "git-branch",
-            Rect::from_min_size(Pos2::new(start + 7.0, rect.top() + 10.0), Vec2::splat(12.0)),
-            12.0,
-            branch_color,
-        );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(start + 21.0, rect.top() + 4.0),
-                Pos2::new(right, rect.top() + 28.0),
-            ),
-            &branch,
-            label_font,
-            branch_color,
-        );
-        theme::paint_icon(
-            ui,
-            "chevron-down",
-            Rect::from_min_size(
-                Pos2::new(start + 23.0 + branch_width, rect.top() + 10.0),
-                Vec2::splat(12.0),
-            ),
-            12.0,
-            branch_color,
-        );
+        self.branch_control(ui, rect.top(), rect.right() - 8.0, draft);
     }
 
-    fn workspace_menu(&mut self, ui: &mut Ui, anchor: Rect, worktree: bool) {
+    fn workspace_menu(&mut self, ui: &mut Ui, anchor: Rect, worktree: bool, in_worktree: bool) {
         use crate::ui::widgets::{MenuEntry, MenuItem};
-        let entries = [
+        let current = self.draft_workspace().and_then(|w| w.worktree.clone());
+        let previous = self.draft_project().and_then(|project| {
+            crate::ui::branch_picker::previous_worktree(
+                &self.state.threads,
+                &project.id,
+                current.as_deref(),
+            )
+        });
+        // `resolvePreviousWorktreeLabel`.
+        let previous_label = previous.as_ref().map(|(branch, _)| match branch {
+            Some(branch) => format!("Previous worktree ({branch})"),
+            None => "Previous worktree".to_owned(),
+        });
+        let mut entries = vec![
             MenuEntry::Item(MenuItem {
-                icon: Some("folder"),
+                icon: Some(if in_worktree { "folder-git" } else { "folder" }),
                 selected: !worktree,
-                ..MenuItem::new("Current checkout")
+                ..MenuItem::new(if in_worktree {
+                    "Current worktree"
+                } else {
+                    "Current checkout"
+                })
             }),
             MenuEntry::Item(MenuItem {
                 icon: Some("folder-git-2"),
@@ -1434,6 +1427,12 @@ impl App {
                 ..MenuItem::new("New worktree")
             }),
         ];
+        if let Some(label) = &previous_label {
+            entries.push(MenuEntry::Item(MenuItem {
+                icon: Some("folder-git"),
+                ..MenuItem::new(label)
+            }));
+        }
         let Some(index) = widgets::menu(
             ui,
             &mut self.open_menu,
@@ -1444,9 +1443,10 @@ impl App {
         ) else {
             return;
         };
-        if let Some(project) = self.draft_project() {
-            let mode = if index == 1 { "worktree" } else { "local" };
-            self.draft_env_mode = Some((project.id, mode.into()));
+        match (index, previous) {
+            (2, Some((branch, path))) => self.use_previous_worktree(branch, path),
+            (1, _) => self.set_draft_mode("worktree"),
+            _ => self.set_draft_mode("local"),
         }
     }
 
@@ -1780,22 +1780,28 @@ impl App {
                 &contexts,
                 inline,
             );
-            // New worktree mode branches off the checked-out branch.
+            // New worktree mode branches off the picked base; an existing
+            // worktree or a switched branch is the thread's workspace.
+            let workspace = self.draft_workspace().cloned().unwrap_or_default();
             if self.draft_env_mode() == "worktree" && self.workspace_is_repo() {
-                let Some(branch) = self.workspace_branch() else {
+                let Some(branch) = self.draft_worktree_base() else {
                     self.status =
                         Some("Select a base branch before sending in New worktree mode.".into());
                     return;
                 };
                 input["workspaceStrategy"] = json!({"type": "worktree", "baseRef": branch});
-                let settings = &self.state.config["settings"];
-                let from_origin = settings["projectSettingsOverrides"][&project.id]
-                    ["newWorktreesStartFromOrigin"]
-                    .as_bool()
-                    .or(settings["newWorktreesStartFromOrigin"].as_bool());
-                if from_origin == Some(true) {
+                if self.draft_start_from_origin() {
                     input["workspaceStrategy"]["startFromOrigin"] = json!(true);
                 }
+            } else if let Some(path) = workspace.worktree {
+                input["workspaceStrategy"] =
+                    json!({"type": "existing_worktree", "worktreePath": path});
+                if let Some(branch) = self.workspace_branch().or(workspace.branch) {
+                    input["workspaceStrategy"]["branch"] = json!(branch);
+                }
+            } else if let Some(branch) = self.workspace_branch().or(workspace.branch) {
+                // `resolveBranchToolbarValue`: the checkout's branch first.
+                input["workspaceStrategy"]["branch"] = json!(branch);
             }
             TurnSend {
                 thread_id,

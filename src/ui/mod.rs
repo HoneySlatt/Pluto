@@ -4,6 +4,7 @@ pub mod agents_panel;
 pub mod attachments;
 pub mod backdrop;
 pub mod bitbucket;
+pub mod branch_picker;
 pub mod changed_files;
 pub mod chat;
 pub mod chat_export;
