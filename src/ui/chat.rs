@@ -621,7 +621,12 @@ impl App {
                 .rows(&thread, &detail, &self.expansion, revision, &images);
         // A revealed citation's message: its folded turn opens, and the
         // timeline stops following its end until it is in view.
-        let reveal = self.citation_scroll_target(&thread.id);
+        let mut reveal = self.citation_scroll_target(&thread.id);
+        if reveal.is_some() && !self.locate_citation_source(&detail) {
+            reveal = None;
+            // Waiting for the source: the view stays where it is.
+            self.keep_scroll = self.cite_target_pending();
+        }
         if let Some(message_id) = &reveal {
             let shown = rows
                 .iter()

@@ -22,6 +22,7 @@ use eframe::egui::{
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::citations::{self, Citation};
+use crate::ui::toasts::{Kind, Toast};
 use crate::ui::widgets::{self, CopyCleanup};
 
 const PLACEHOLDER_BASE: u32 = 0xF0000;
@@ -97,6 +98,8 @@ pub(crate) struct Target {
     pub(crate) message_id: String,
     pub(crate) quote: String,
     started: Option<f64>,
+    /// The history cursors already loaded while looking for the source.
+    pages: std::collections::HashSet<String>,
 }
 
 fn placeholder(index: usize) -> char {
@@ -676,7 +679,62 @@ impl App {
             message_id: citation.message_id.clone(),
             quote: citation.text.clone(),
             started: None,
+            pages: Default::default(),
         });
+    }
+
+    /// `useAssistantCitationTarget`: whether the revealed source is loaded
+    /// and can scroll into view. A source before the loaded turns pages
+    /// them in (20 pages at most); a missing source or one that is not an
+    /// answer ends the reveal with a warning.
+    pub(crate) fn locate_citation_source(&mut self, detail: &crate::model::Detail) -> bool {
+        let Some(target) = &mut self.cite.target else {
+            return false;
+        };
+        if !self.state.detail_synced || detail.id() != target.thread_id {
+            return false;
+        }
+        let fail = |app: &mut App, title: &str, description: &str| {
+            app.cite.target = None;
+            app.toasts
+                .add(Toast::new(Kind::Warning, title).description(description));
+        };
+        match crate::timeline::message_role(detail, &target.message_id).as_deref() {
+            Some("assistant") => true,
+            Some(_) => {
+                fail(
+                    self,
+                    "The citation does not refer to an assistant response",
+                    "The selected text is still saved in your citation.",
+                );
+                false
+            }
+            None if detail.history.has_more => {
+                if detail.history.loading {
+                    return false;
+                }
+                let cursor = detail.history.cursor.as_deref().unwrap_or("first");
+                if target.pages.contains(cursor) || target.pages.len() >= 20 {
+                    fail(
+                        self,
+                        "Could not load the cited response",
+                        "Load earlier turns, then click the citation to try again. Your saved quote is unchanged.",
+                    );
+                    return false;
+                }
+                target.pages.insert(cursor.to_owned());
+                self.load_earlier_history();
+                false
+            }
+            None => {
+                fail(
+                    self,
+                    "The cited response is unavailable",
+                    "It may have been removed. The selected text is still saved in your citation.",
+                );
+                false
+            }
+        }
     }
 
     /// The revealed source of the open thread: its message id while it
@@ -687,6 +745,14 @@ impl App {
             .as_ref()
             .filter(|t| t.thread_id == thread_id && t.started.is_none())
             .map(|t| t.message_id.clone())
+    }
+
+    /// A reveal is still looking for its source.
+    pub(crate) fn cite_target_pending(&self) -> bool {
+        self.cite
+            .target
+            .as_ref()
+            .is_some_and(|t| t.started.is_none())
     }
 
     /// The revealed message is in view: its pulse starts.

@@ -6,6 +6,7 @@
 
 use crate::app::App;
 use crate::model::{Detail, Thread};
+use crate::ui::toasts::{Kind, Toast};
 
 /// The conversation as Markdown.
 fn markdown(thread: &Thread, detail: &Detail, exported: &str) -> String {
@@ -75,7 +76,7 @@ impl App {
         self.poll_chat_export();
     }
 
-    /// Saves the pending export once its thread's history has arrived.
+    /// Saves the pending export once its thread's whole history has arrived.
     pub(crate) fn poll_chat_export(&mut self) {
         let Some(thread_id) = self.pending_chat_export.clone() else {
             return;
@@ -88,7 +89,22 @@ impl App {
         let (Some(thread), Some(detail)) = (self.current_thread(), self.current_detail()) else {
             return;
         };
-        if detail.id() != thread_id {
+        if detail.id() != thread_id || !self.state.detail_synced {
+            return;
+        }
+        // The export holds every turn: the ones before the loaded window
+        // are paged in first.
+        if let Some(error) = &detail.history.error {
+            self.pending_chat_export = None;
+            self.toasts.add(
+                Toast::new(Kind::Error, "Could not export the chat").description(error.as_str()),
+            );
+            return;
+        }
+        if detail.history.has_more {
+            if !detail.history.loading {
+                self.load_earlier_history();
+            }
             return;
         }
         let Some(ctx) = self.egui_ctx.clone() else {

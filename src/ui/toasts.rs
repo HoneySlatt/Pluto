@@ -22,6 +22,7 @@ pub(crate) enum Kind {
     Plain,
     Info,
     Success,
+    Warning,
     Error,
     Loading,
 }
@@ -266,6 +267,7 @@ fn icon_of(kind: Kind) -> Option<(&'static str, Color32)> {
         Kind::Plain | Kind::Loading => None,
         Kind::Info => Some(("info", theme::BLUE_500)),
         Kind::Success => Some(("circle-check", Color32::from_rgb(0, 188, 125))),
+        Kind::Warning => Some(("triangle-alert", theme::warning())),
         Kind::Error => Some(("circle-alert", Color32::from_rgb(251, 44, 54))),
     }
 }

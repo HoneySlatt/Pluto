@@ -1340,6 +1340,14 @@ fn changes_by_message(detail: &Detail) -> HashMap<String, (String, Vec<Checkpoin
 }
 
 /// The fold that hides `entry_id` while folded (a citation reveal opens it).
+/// The role of the timeline message `message_id`, when it is loaded.
+pub fn message_role(detail: &Detail, message_id: &str) -> Option<String> {
+    entries(detail).into_iter().find_map(|entry| match entry {
+        Entry::Message(message) if message.id == message_id => Some(message.role),
+        _ => None,
+    })
+}
+
 pub fn fold_containing(thread: &Thread, detail: &Detail, entry_id: &str) -> Option<String> {
     let entries = entries(detail);
     let runtime = thread.runtime.as_ref();

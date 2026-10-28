@@ -7,7 +7,7 @@
 //! with the turn item visibility of `shared/orchestrationV2Timeline.ts`.
 //! Threads open on a bounded snapshot (the recent turns) and page in older
 //! turns on demand, like `state/threads.ts` and `state/threadHistoryMerge.ts`;
-//! the `throughEntryId` jump of find and citations is not ported.
+//! compact snapshots get their local items back (`boundedSnapshotProjection`).
 use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer};
@@ -950,6 +950,20 @@ impl Detail {
         }
     }
 
+    /// `restoreLocalVisibleTurnItems`: a compact bounded snapshot leaves
+    /// out the items of its local rows, which lead `turnItems`.
+    fn restore_local_visible_items(&mut self) {
+        let thread_id = self.id().to_owned();
+        let mut items: Vec<Arc<TurnItem>> = self
+            .visible
+            .iter()
+            .filter(|row| row.visibility == "local" || row.source_thread_id == thread_id)
+            .map(|row| row.item.clone())
+            .collect();
+        items.append(&mut self.turn_items);
+        self.turn_items = items;
+    }
+
     /// `shouldDropMissingPartialTurnItem`.
     fn drop_missing_partial_item(&self, item: &TurnItem) -> bool {
         if self.visible.iter().any(|row| row.source_item_id == item.id) {
@@ -1107,6 +1121,9 @@ pub struct State {
     /// left): one opened again shows at once while its new subscription
     /// catches up (`threadRetention.ts` `THREAD_SNAPSHOT_IDLE_TTL_MS`).
     recent: Vec<(Arc<Detail>, Option<u64>, std::time::Instant)>,
+    /// `detail` came from the current subscription's snapshot, not from
+    /// the recent threads.
+    pub detail_synced: bool,
     shell_sequence: Option<u64>,
     thread_sequence: Option<u64>,
 }
@@ -1280,6 +1297,7 @@ impl State {
 
     pub fn clear_detail(&mut self) {
         self.detail = None;
+        self.detail_synced = false;
         self.thread_sequence = None;
         self.revision += 1;
     }
@@ -1311,6 +1329,9 @@ impl State {
                 let projection = &item["projection"];
                 if projection["thread"]["id"] == selected {
                     let mut detail = Detail::decode(projection)?;
+                    if item["turnItemsOmitLocalVisible"] == true {
+                        detail.restore_local_visible_items();
+                    }
                     // A bounded snapshot carries its cursor; a full one
                     // replaces progressive state.
                     detail.history = History {
@@ -1321,6 +1342,7 @@ impl State {
                         error: None,
                     };
                     self.detail = Some(Arc::new(detail));
+                    self.detail_synced = true;
                     self.revision += 1;
                     self.thread_sequence = item["snapshotSequence"].as_u64();
                 }
@@ -1584,6 +1606,26 @@ mod tests {
         assert_eq!(detail.turn_items.len(), 3);
         assert!(!detail.history.partial());
         assert!(!detail.history.loading);
+    }
+
+    #[test]
+    fn a_compact_snapshot_gets_its_local_items_back() {
+        let mut state = State::default();
+        let text = json!({"messageId":"m","text":"hi","streaming":false});
+        let c = item("c", "assistant_message", 3, Some("r2"), text);
+        let request = item("i", "run_interrupt_request", 1, Some("r1"), json!({}));
+        let snapshot = json!({"kind":"snapshot","snapshotSequence":1,"projection":{
+            "thread":{"id":"t","projectId":"p","title":"T"},"runs":[],"attempts":[],"nodes":[],
+            "subagents":[],"providerSessions":[],"providerThreads":[],"providerTurns":[],
+            "runtimeRequests":[],"messages":[],"plans":[],"turnItems":[request],
+            "checkpointScopes":[],"checkpoints":[],"contextHandoffs":[],"contextTransfers":[],
+            "visibleTurnItems":[row(c)],"updatedAt":AT},
+            "historyCursor":"cursor-1","hasMoreHistory":true,"latestLocalTurnOrdinal":3,
+            "turnItemsOmitLocalVisible":true});
+        state.thread("t", &snapshot).unwrap();
+        let detail = state.detail.as_ref().unwrap();
+        let ids: Vec<&str> = detail.turn_items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["c", "i"]);
     }
 
     #[test]
