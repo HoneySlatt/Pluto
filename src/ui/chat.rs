@@ -188,7 +188,12 @@ impl App {
             rect.right() - theme::WORKSPACE_GUTTER
         } else {
             self.panel_controls(ui, rect.right());
-            rect.right() - 13.0 - 64.0 + 4.0 - 12.0
+            let details = if self.thread_details_available() {
+                32.0
+            } else {
+                0.0
+            };
+            rect.right() - 13.0 - 64.0 + 4.0 - 12.0 - details
         };
         let gap = if compact { 8.0 } else { 12.0 };
         if project.is_some() {

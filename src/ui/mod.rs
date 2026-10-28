@@ -78,6 +78,7 @@ pub mod tasks;
 pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod text_menu;
+pub mod thread_details;
 pub mod thread_find;
 pub mod thread_menu;
 pub mod thread_notifications;

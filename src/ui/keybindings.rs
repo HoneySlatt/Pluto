@@ -1032,6 +1032,7 @@ impl App {
 /// `DEFAULT_KEYBINDINGS` (`shared/keybindings.ts`): key, command, when.
 const DEFAULTS: &[(&str, &str, &str)] = &[
     ("mod+b", "sidebar.toggle", ""),
+    ("mod+shift+b", "threadPanel.toggle", "!terminalFocus"),
     ("mod+[", "navigation.back", "!terminalFocus"),
     ("mod+]", "navigation.forward", "!terminalFocus"),
     ("mod+j", "terminal.toggle", ""),

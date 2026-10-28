@@ -1039,6 +1039,39 @@ impl App {
                 }
             }
         }
+        // `PanelLayoutControls`' thread details toggle leads the group.
+        if self.thread_details_available() {
+            use crate::ui::thread_details::MENU;
+            let button = Rect::from_min_size(Pos2::new(x - 28.0, 12.0), Vec2::splat(28.0));
+            let open = self.open_menu.as_deref() == Some(MENU);
+            if open {
+                ui.painter()
+                    .rect_filled(button, CornerRadius::same(10), theme::accent());
+            }
+            let shortcut = crate::ui::shortcuts::effective_shortcut_label(
+                &self.state.config["keybindings"],
+                "threadPanel.toggle",
+                &[],
+            );
+            let tip = match shortcut {
+                Some(label) => format!("Toggle thread details ({label})"),
+                None => "Toggle thread details".to_owned(),
+            };
+            if widgets::icon_button(
+                ui,
+                button,
+                ("panel-control", "square-menu"),
+                "square-menu",
+                16.0,
+                theme::foreground(),
+                &tip,
+            )
+            .clicked()
+            {
+                self.open_menu = (!open).then(|| MENU.to_owned());
+            }
+            self.thread_details_card(ui, button);
+        }
     }
 
     fn resize_handle(&mut self, ui: &mut Ui, rect: Rect) {

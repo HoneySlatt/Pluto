@@ -77,6 +77,8 @@ pub struct App {
     pub(crate) tasks_open: bool,
     /// The queued messages' banner above the composer.
     pub(crate) queue: crate::ui::queue::QueueUi,
+    /// The thread details card's paging and folds.
+    pub(crate) thread_details: crate::ui::thread_details::DetailsState,
     /// Every thread's messages searched (`orchestration.searchThreads`).
     pub(crate) thread_search: [crate::ui::thread_search::ThreadSearch; 2],
     /// Storage cleanup's last report (`server.getStorageCleanupReport`), the
@@ -451,6 +453,7 @@ impl App {
             user_text_sizes: Default::default(),
             tasks_open: false,
             queue: Default::default(),
+            thread_details: Default::default(),
             thread_search: Default::default(),
             storage_report: None,
             storage_stream: false,

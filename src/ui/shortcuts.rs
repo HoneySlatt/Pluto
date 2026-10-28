@@ -208,6 +208,11 @@ impl App {
                 self.open_thread_find()
             }
             "sidebar.toggle" => self.toggle_sidebar(),
+            "threadPanel.toggle" if self.thread_details_available() => {
+                use crate::ui::thread_details::MENU;
+                let open = self.open_menu.as_deref() == Some(MENU);
+                self.open_menu = (!open).then(|| MENU.to_owned());
+            }
             "editor.openFavorite" => return self.open_in_favorite(),
             "chat.newWithoutProject" if self.scratch_root().is_some() => {
                 self.start_scratch_thread()

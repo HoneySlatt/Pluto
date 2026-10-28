@@ -1285,6 +1285,7 @@ const AFTER: &[Item] = &[
 /// `STATIC_KEYBINDING_COMMANDS` with their `DEFAULT_KEYBINDINGS` keys.
 const KEYBINDINGS: &[(&str, &[&str])] = &[
     ("sidebar.toggle", &["mod+b"]),
+    ("threadPanel.toggle", &["mod+shift+b"]),
     ("navigation.back", &["mod+["]),
     ("navigation.forward", &["mod+]"]),
     ("terminal.toggle", &["mod+j"]),

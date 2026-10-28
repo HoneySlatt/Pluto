@@ -1193,6 +1193,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "play-fill",
         "arrow-right-left",
         "git-fork",
+        "square-menu",
+        "corner-left-up",
     )
 }
 
