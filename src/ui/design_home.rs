@@ -450,9 +450,15 @@ impl App {
                 Some(MODEL_MENU.into())
             };
         }
-        if let Some(chosen) =
-            self.model_picker_popup(ui, model_button, MODEL_MENU, selection.clone(), true, false)
-        {
+        if let Some(chosen) = self.model_picker_popup(
+            ui,
+            model_button,
+            MODEL_MENU,
+            selection.clone(),
+            true,
+            false,
+            None,
+        ) {
             self.design_home.model = Some(chosen);
         }
         if let (Some(rect), Some(label)) = (traits_button, &traits_label) {

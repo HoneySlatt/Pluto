@@ -2114,7 +2114,8 @@ impl App {
             }
             return;
         }
-        if let Some(chosen) = self.model_picker_popup(ui, anchor, &model_menu, current, true, true)
+        if let Some(chosen) =
+            self.model_picker_popup(ui, anchor, &model_menu, current, true, true, None)
         {
             self.update_setting(
                 Store::Server,

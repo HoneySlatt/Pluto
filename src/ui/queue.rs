@@ -84,7 +84,7 @@ pub(crate) fn active_run(detail: &Detail) -> Option<&Run> {
 }
 
 /// `resolveThreadProviderSession`.
-fn provider_session(detail: &Detail) -> Option<&Value> {
+pub(crate) fn provider_session(detail: &Detail) -> Option<&Value> {
     let provider_thread = active_run(detail)
         .and_then(|run| run.provider_thread_id.clone())
         .or_else(|| {
@@ -112,6 +112,28 @@ fn provider_session(detail: &Detail) -> Option<&Value> {
             .rev()
             .find(|s| s["status"] != "stopped" && s["status"] != "error"),
     }
+}
+
+/// `threadSupportsProviderHandoff`: the thread can move to another
+/// provider (its session says so, or nothing ran it yet, or its native
+/// thread survives a detached session).
+pub(crate) fn supports_handoff(detail: &Detail) -> bool {
+    if let Some(session) = provider_session(detail) {
+        return session["capabilities"]["sessions"]["supportsProviderSwitchingViaHandoff"] == true;
+    }
+    if active_run(detail).is_some() {
+        return false;
+    }
+    let thread = &detail.thread;
+    if thread["historyOrigin"] == "v1_import" || detail.runs.is_empty() {
+        return true;
+    }
+    detail.provider_threads.iter().any(|t| {
+        t["id"] == thread["activeProviderThreadId"]
+            && t["appThreadId"] == thread["id"]
+            && t["providerInstanceId"] == thread["modelSelection"]["instanceId"]
+            && !t["nativeThreadRef"].is_null()
+    })
 }
 
 /// `deriveThreadQueueWorkflowState`: the user's queued runs in queue order
@@ -1064,6 +1086,32 @@ mod tests {
         assert!(workflow.held);
         assert!(!workflow.can_steer);
         assert!(!workflow.can_reorder);
+    }
+
+    #[test]
+    fn handoff_follows_the_session_then_the_history() {
+        let detail = |extra: serde_json::Value| -> Detail {
+            let mut base = json!({"thread": {"id": "t", "activeProviderThreadId": "pt",
+                "modelSelection": {"instanceId": "codex"}}});
+            for (key, value) in extra.as_object().unwrap() {
+                base[key] = value.clone();
+            }
+            serde_json::from_value(base).unwrap()
+        };
+        // Nothing ran yet: any provider may take it.
+        assert!(supports_handoff(&detail(json!({}))));
+        let run = json!([{"id": "r", "threadId": "t", "ordinal": 1, "status": "completed",
+            "userMessageId": "m", "requestedAt": "1"}]);
+        // A settled run without a native thread to hand over stays put.
+        assert!(!supports_handoff(&detail(json!({"runs": run}))));
+        let session = |can: bool| {
+            json!({"runs": run,
+                "providerThreads": [{"id": "pt", "appThreadId": "t", "providerSessionId": "s"}],
+                "providerSessions": [{"id": "s", "status": "ready",
+                    "capabilities": {"sessions": {"supportsProviderSwitchingViaHandoff": can}}}]})
+        };
+        assert!(supports_handoff(&detail(session(true))));
+        assert!(!supports_handoff(&detail(session(false))));
     }
 
     #[test]

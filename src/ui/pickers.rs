@@ -336,16 +336,47 @@ impl App {
     pub(crate) fn model_picker(&mut self, ui: &mut Ui, anchor: Rect, draft: bool) {
         let selection = self.composer_model_selection(draft);
         let chat = self.chat_context(draft);
-        if let Some(chosen) =
-            self.model_picker_popup(ui, anchor, "model-picker", selection, false, chat)
-        {
+        let locked = if draft { None } else { self.locked_driver() };
+        if let Some(chosen) = self.model_picker_popup(
+            ui,
+            anchor,
+            "model-picker",
+            selection,
+            false,
+            chat,
+            locked.as_deref(),
+        ) {
             self.set_selection(draft, chosen);
         }
+    }
+
+    /// `deriveLockedProvider`: a started thread keeps its provider's driver
+    /// unless it can hand its context over (`threadSupportsProviderHandoff`).
+    fn locked_driver(&self) -> Option<String> {
+        let thread = self.current_thread()?;
+        let detail = self.current_detail()?;
+        let started =
+            thread.latest_run.is_some() || thread.runtime.is_some() || !detail.visible.is_empty();
+        if !started || crate::ui::queue::supports_handoff(&detail) {
+            return None;
+        }
+        let instance = thread
+            .runtime
+            .as_ref()
+            .map(|r| r.provider_instance_id.clone())
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| thread.model_selection.instance_id.clone());
+        self.providers()
+            .iter()
+            .find(|p| p["instanceId"] == instance.as_str())
+            .and_then(|p| p["driver"].as_str().map(str::to_owned))
+            .or(Some(instance))
     }
 
     /// The model picker (`ProviderModelPicker`) open as `menu`, above
     /// `anchor` or below it; returns the model chosen. `chats` offers the
     /// providers that run only in chats (Pluto's `CHAT_ONLY_DRIVERS`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn model_picker_popup(
         &mut self,
         ui: &mut Ui,
@@ -354,10 +385,14 @@ impl App {
         selection: ModelSelection,
         below: bool,
         chats: bool,
+        locked: Option<&str>,
     ) -> Option<ModelSelection> {
         if self.open_menu.as_deref() != Some(menu) {
             return None;
         }
+        // A locked thread offers its own driver's instances only; the others
+        // stay on the rail, inert.
+        let unlocked = |p: &Value| locked.is_none_or(|driver| p["driver"] == driver);
         // The rail shows every enabled instance; those not ready are dimmed
         // and list no models (`isProviderInstancePickerReady`).
         let providers = sort_instances(
@@ -371,7 +406,8 @@ impl App {
                 .cloned()
                 .collect(),
         );
-        let ready = |p: &Value| p["status"] == "ready" && p["availability"] != "unavailable";
+        let ready =
+            |p: &Value| p["status"] == "ready" && p["availability"] != "unavailable" && unlocked(p);
         // Each instance's models after its Settings → Providers preferences.
         let model_lists: std::collections::HashMap<String, Vec<Value>> = providers
             .iter()
@@ -390,6 +426,7 @@ impl App {
                 let models = model_lists.get(id).map(Vec::as_slice).unwrap_or_default();
                 p["enabled"] != false
                     && p["status"] != "disabled"
+                    && unlocked(p)
                     && has_provider_setup(p)
                     && (!ready(p)
                         || p["installed"] == false
