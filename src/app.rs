@@ -1002,15 +1002,29 @@ impl App {
         {
             return Some(project.clone());
         }
+        // Pluto: a draft follows the sidebar's mode. Chat opens a new chat;
+        // Code takes the latest code thread's project, never a chat space,
+        // which would show "How can I help?" in Code.
+        if self.chat_mode() {
+            return self.chats_project();
+        }
+        let code_project = |p: &&Project| {
+            !self.is_chats(p) && !self.is_temporary_chats(p) && !self.is_chat_project(p)
+        };
         let latest = self
             .state
             .threads
             .iter()
             .filter(|t| t.archived_at.is_none())
+            .filter(|t| {
+                self.state
+                    .project(&t.project_id)
+                    .is_some_and(|p| code_project(&p))
+            })
             .max_by(|a, b| a.created_at.cmp(&b.created_at));
         latest
             .and_then(|t| self.state.project(&t.project_id))
-            .or_else(|| self.state.projects.first())
+            .or_else(|| self.state.projects.iter().find(code_project))
             .cloned()
     }
 
