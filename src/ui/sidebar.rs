@@ -145,8 +145,8 @@ pub fn sections<'a>(
     sections
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Status {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Status {
     Approval,
     Input,
     Working,
@@ -159,7 +159,7 @@ enum Status {
 }
 
 /// `resolveSidebarThreadStatus`.
-fn status(thread: &Thread) -> Status {
+pub(crate) fn status(thread: &Thread) -> Status {
     let subagent = thread.pending_subagent_request.as_deref();
     let runtime = thread.runtime.as_ref();
     if thread.has_pending_approvals || subagent == Some("approval") {

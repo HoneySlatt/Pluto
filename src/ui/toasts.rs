@@ -28,10 +28,13 @@ pub(crate) enum Kind {
 
 /// What a toast's button does.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::enum_variant_names)] // `GitAction` names what it runs.
 pub(crate) enum Action {
     /// Runs a stacked git action (`GitRunStackedActionToastCta.run_action`).
     GitAction(String),
     OpenUrl(String),
+    /// Opens a thread (`ThreadNotificationCoordinator`'s "Open thread").
+    OpenThread(String),
 }
 
 #[derive(Clone, Debug)]

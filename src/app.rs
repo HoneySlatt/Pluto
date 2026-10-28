@@ -112,6 +112,7 @@ pub struct App {
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
     /// Toasts, newest last.
     pub(crate) toasts: crate::ui::toasts::Toasts,
+    pub(crate) thread_notifications: crate::ui::thread_notifications::ThreadNotifications,
     /// The header's git actions: what runs, its menu and dialogs.
     pub(crate) git: crate::ui::git_actions::GitActions,
     /// Proposed plan cards: folds, menu and save dialog.
@@ -447,6 +448,7 @@ impl App {
             media_menu: None,
             media_pending: None,
             toasts: Default::default(),
+            thread_notifications: Default::default(),
             git: Default::default(),
             plans: Default::default(),
             publish: None,
@@ -615,7 +617,15 @@ impl App {
                         self.turn_command_done(&id, true);
                     }
                     Route::Rpc(key) => self.rpc_result(key, Ok(value)),
+                    Route::History { thread_id, cursor } => {
+                        if let Err(error) = self.state.history_page(&thread_id, &cursor, &value) {
+                            self.state.history_failed(&thread_id, &cursor, error);
+                        }
+                    }
                 },
+                Event::Failed(Route::History { thread_id, cursor }, message) => {
+                    self.state.history_failed(&thread_id, &cursor, message);
+                }
                 Event::Failed(Route::Vcs(_), _) => self.vcs = None,
                 Event::Failed(Route::Rpc(key), message) => self.rpc_result(key, Err(message)),
                 Event::Failed(Route::Command(id), message) => {
@@ -963,6 +973,10 @@ impl App {
             Some(crate::ui::toasts::Action::OpenUrl(url)) => {
                 crate::ui::widgets::open_external(&url)
             }
+            Some(crate::ui::toasts::Action::OpenThread(thread_id)) => {
+                self.settings_page = None;
+                self.select_thread(Some(thread_id));
+            }
             None => {}
         }
     }
@@ -977,6 +991,7 @@ impl eframe::App for App {
         }
         self.now = chrono::Utc::now();
         self.poll_events();
+        self.thread_notifications(ui.ctx());
         self.egui_ctx = Some(ui.ctx().clone());
         self.apply_typography(ui.ctx());
         if self.connected() {

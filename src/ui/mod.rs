@@ -74,6 +74,7 @@ pub mod terminal_drawer;
 pub mod terminal_surface;
 pub mod text_menu;
 pub mod thread_menu;
+pub mod thread_notifications;
 pub mod thread_pull_requests;
 pub mod timeline_view;
 pub mod toasts;
