@@ -133,6 +133,8 @@ pub(crate) fn row_key(row: &Row) -> Id {
             ..
         } => Id::new(("work-live", group_id)),
         Row::LiveWork { .. } | Row::Thinking { .. } => Id::new("live-activity"),
+        Row::Compaction { id, .. } => Id::new(("compaction", id)),
+        Row::AttemptFold { attempt_id, .. } => Id::new(("attempt-fold", attempt_id)),
     }
 }
 
@@ -168,6 +170,8 @@ fn estimate(row: &Row, width: f32) -> f32 {
         Row::Working { .. } => 37.0 + 4.0,
         Row::LiveWork { thought, .. } => 28.0 + if thought.is_some() { 28.0 } else { 0.0 } + 8.0,
         Row::Thinking { .. } => 28.0 + 8.0,
+        Row::Compaction { .. } => 24.0 + 8.0,
+        Row::AttemptFold { .. } => 34.0 + 8.0,
         // The card or divider, then the row's space.
         Row::Event { entries, .. } => {
             let card = match entries.first().and_then(|e| e.item_type.as_deref()) {

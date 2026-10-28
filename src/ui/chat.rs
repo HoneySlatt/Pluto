@@ -1064,6 +1064,19 @@ impl App {
                 }
                 ui.add_space(if *expanded { 0.0 } else { 8.0 });
             }
+            Row::AttemptFold {
+                attempt_id,
+                expanded,
+            } => {
+                if self.attempt_fold_row(ui, *expanded, width).clicked() {
+                    self.toggle_work_group(&format!("attempt-fold:{attempt_id}"));
+                }
+                ui.add_space(8.0);
+            }
+            Row::Compaction { label, active, .. } => {
+                crate::ui::live_activity::compaction_row(ui, label, *active, width);
+                ui.add_space(8.0);
+            }
             Row::Thinking { group_id, expanded } => {
                 if self.thinking_row(ui, group_id.is_some(), width).clicked()
                     && let Some(group_id) = group_id
@@ -2002,6 +2015,61 @@ impl App {
                 ui.add_space(4.0);
             }
         }
+    }
+
+    /// `AttemptFoldTimelineRow`: the output a steer cut off, behind a bordered
+    /// disclosure.
+    fn attempt_fold_row(&mut self, ui: &mut Ui, expanded: bool, width: f32) -> egui::Response {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
+        let response = ui
+            .interact(
+                rect,
+                ui.id().with(("attempt-fold", rect.top() as i32)),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let fill = theme::alpha(theme::muted(), if response.hovered() { 0.35 } else { 0.2 });
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(6),
+            fill,
+            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.6)),
+            egui::StrokeKind::Inside,
+        );
+        let muted = theme::muted_foreground();
+        theme::paint_icon(
+            ui,
+            if expanded {
+                "chevron-down"
+            } else {
+                "chevron-right"
+            },
+            Rect::from_center_size(
+                Pos2::new(rect.left() + 11.0 + 7.0, rect.center().y),
+                Vec2::splat(14.0),
+            ),
+            14.0,
+            muted,
+        );
+        let x = rect.left() + 11.0 + 14.0 + 8.0;
+        let label = "Superseded attempt";
+        let label_font = font(12.0, Weight::Medium);
+        let label_width = widgets::text_width(ui, label, label_font.clone());
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(x, rect.top()), rect.max),
+            label,
+            label_font,
+            theme::alpha(theme::foreground(), 0.8),
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(Pos2::new(x + label_width + 8.0, rect.top() + 1.0), rect.max),
+            "Cut off by a steer",
+            font(11.0, Weight::Regular),
+            muted,
+        );
+        response
     }
 
     /// Opens or closes a work group, keeping the clicked row in place.

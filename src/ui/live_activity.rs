@@ -50,22 +50,37 @@ fn mask(offset: f32) -> f32 {
 /// of `highlight` when `sweep` is on.
 fn label(ui: &Ui, rect: Rect, text: &str, base: Color32, highlight: Color32, sweep: bool) {
     let font = font(14.0, Weight::Regular);
-    let galley = widgets::galley_truncated(ui, text, font.clone(), base, LINE, rect.width());
-    let pos = Pos2::new(rect.left(), rect.center().y - LINE / 2.0);
+    sweep_label(ui, rect, text, font, LINE, base, highlight, sweep);
+}
+
+/// [`label`] at any type size; returns the text's width.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sweep_label(
+    ui: &Ui,
+    rect: Rect,
+    text: &str,
+    font: eframe::egui::FontId,
+    line: f32,
+    base: Color32,
+    highlight: Color32,
+    sweep: bool,
+) -> f32 {
+    let galley = widgets::galley_truncated(ui, text, font.clone(), base, line, rect.width());
+    let pos = Pos2::new(rect.left(), rect.center().y - line / 2.0);
     let width = galley.size().x;
     ui.painter().galley(pos, galley, base);
     if !sweep {
-        return;
+        return width;
     }
     let time = ui.input(|i| i.time) as f32;
     let step = ((time % PERIOD) / PERIOD * STEPS).floor() / STEPS;
     let band_left = pos.x - BAND + step * (width + 2.0 * BAND);
-    let text_rect = Rect::from_min_size(pos, Vec2::new(width, LINE));
-    let lit = widgets::galley_truncated(ui, text, font, highlight, LINE, rect.width());
+    let text_rect = Rect::from_min_size(pos, Vec2::new(width, line));
+    let lit = widgets::galley_truncated(ui, text, font, highlight, line, rect.width());
     const STRIP: f32 = 4.0;
     let mut x = band_left;
     while x < band_left + BAND {
-        let strip = Rect::from_min_max(Pos2::new(x, pos.y), Pos2::new(x + STRIP, pos.y + LINE))
+        let strip = Rect::from_min_max(Pos2::new(x, pos.y), Pos2::new(x + STRIP, pos.y + line))
             .intersect(text_rect);
         let opacity = mask(x + STRIP / 2.0 - band_left);
         if strip.width() > 0.0 && opacity > 0.0 {
@@ -77,6 +92,53 @@ fn label(ui: &Ui, rect: Rect, text: &str, base: Color32, highlight: Color32, swe
     }
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_secs_f32(PERIOD / STEPS));
+    width
+}
+
+/// `ContextCompactionTimelineRow`: the label between two hairlines (`py-1
+/// gap-3 text-xs`), sweeping while the compaction runs.
+pub(crate) fn compaction_row(ui: &mut Ui, text: &str, active: bool, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+    let muted = theme::muted_foreground();
+    let label_font = font(12.0, Weight::Regular);
+    let text_width =
+        widgets::text_width(ui, text, label_font.clone()).min(width - 12.0 - 6.0 - 2.0 * 24.0);
+    let content = 12.0 + 6.0 + text_width;
+    let left = rect.center().x - content / 2.0;
+    let line = theme::alpha(theme::border(), 0.7);
+    let y = rect.center().y;
+    for (from, to) in [
+        (rect.left(), left - 12.0),
+        (left + content + 12.0, rect.right()),
+    ] {
+        if to > from {
+            ui.painter().rect_filled(
+                Rect::from_min_max(Pos2::new(from, y - 0.5), Pos2::new(to, y + 0.5)),
+                0.0,
+                line,
+            );
+        }
+    }
+    theme::paint_icon(
+        ui,
+        "minimize-2",
+        Rect::from_center_size(Pos2::new(left + 6.0, y), Vec2::splat(12.0)),
+        12.0,
+        muted,
+    );
+    sweep_label(
+        ui,
+        Rect::from_min_max(
+            Pos2::new(left + 18.0, rect.top()),
+            Pos2::new(left + content + 1.0, rect.bottom()),
+        ),
+        text,
+        label_font,
+        16.0,
+        muted,
+        theme::foreground(),
+        active,
+    );
 }
 
 impl App {

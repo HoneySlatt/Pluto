@@ -9,14 +9,16 @@
 //! subagents fold with their turn once none of the batch works.
 //! A working turn's trailing calls become one live row (`work-live`, drawn
 //! by `ui/live_activity.rs`), or "Thinking" (`thinking`).
-//! Not ported from v0.1.0's rows yet: superseded attempt folds, context compaction rows, MCP apps, and the secret request
-//! card, which shows as a standalone work row with its upstream label.
+//! Compactions are dividers (`context-compaction`), and the output of an
+//! attempt a steer cut off folds behind `attempt-fold`.
+//! Not ported from v0.1.0's rows yet: MCP apps, and the secret request card,
+//! which shows as a standalone work row with its upstream label.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::model::{CheckpointFile, Detail, RunSummary, Thread, TurnItem};
+use crate::model::{CheckpointFile, Detail, RunAttempt, RunSummary, Thread, TurnItem};
 
 /// `ChatMessage`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -218,6 +220,18 @@ pub enum Row {
         expanded: bool,
         active: bool,
         thought: Option<String>,
+    },
+    /// Output of an attempt a steer cut off, folded (`attempt-fold`).
+    AttemptFold {
+        attempt_id: String,
+        expanded: bool,
+    },
+    /// A context compaction as a divider (`context-compaction`), sweeping
+    /// while the active run compacts.
+    Compaction {
+        id: String,
+        label: String,
+        active: bool,
     },
     /// "Thinking" while the active turn shows nothing live (`thinking`);
     /// after a failed tool it opens that tool's group.
@@ -863,6 +877,160 @@ pub fn live_thought_line(markdown: &str) -> String {
     plain
 }
 
+/// `resolveAttempt`: the attempt whose root node holds the item, walking up
+/// its execution nodes.
+fn resolve_attempt<'a>(detail: &'a Detail, item: &TurnItem) -> Option<&'a RunAttempt> {
+    let run = item.run_id.as_deref()?;
+    let by_root = |node: &str| {
+        detail
+            .attempts
+            .iter()
+            .find(|a| a.root_node_id == node && a.run_id == run)
+    };
+    let mut node_id = item.node_id.clone();
+    let mut visited = HashSet::new();
+    while let Some(id) = node_id {
+        if !visited.insert(id.clone()) {
+            break;
+        }
+        if let Some(attempt) = by_root(&id) {
+            return Some(attempt);
+        }
+        let node = detail.nodes.iter().find(|n| n.id == id)?;
+        if let Some(attempt) = by_root(&node.root_node_id) {
+            return Some(attempt);
+        }
+        node_id = node.parent_node_id.clone();
+    }
+    None
+}
+
+/// Each entry's attempt and item, by entry id.
+fn entry_attempts(detail: &Detail) -> HashMap<String, (&RunAttempt, &Arc<TurnItem>)> {
+    detail
+        .visible
+        .iter()
+        .filter_map(|row| {
+            let item = &row.item;
+            let attempt = resolve_attempt(detail, item)?;
+            let id = match item.kind.as_str() {
+                "user_message" | "assistant_message" => item.str("messageId")?.to_owned(),
+                "proposed_plan" => item.str("planId")?.to_owned(),
+                _ => item.id.clone(),
+            };
+            Some((id, (attempt, item)))
+        })
+        .collect()
+}
+
+type Attempts<'a> = HashMap<String, (&'a RunAttempt, &'a Arc<TurnItem>)>;
+
+fn superseded<'a>(attempts: &Attempts<'a>, entry: &Entry) -> Option<&'a RunAttempt> {
+    attempts
+        .get(entry.id())
+        .map(|(attempt, _)| *attempt)
+        .filter(|a| a.status == "superseded")
+}
+
+/// `completeSupersededReplyEntryIds`: a superseded attempt's last output,
+/// when it is an answer that completed before the steer replaced it.
+fn complete_superseded_replies(entries: &[Entry], attempts: &Attempts) -> HashSet<String> {
+    let mut last: HashMap<&str, &Entry> = HashMap::new();
+    for entry in entries {
+        let Some(attempt) = superseded(attempts, entry) else {
+            continue;
+        };
+        let output = match entry {
+            Entry::Message(m) => m.role != "user",
+            Entry::Work(w) => !matches!(
+                w.item_type.as_deref(),
+                Some("system_notice" | "notification")
+            ),
+            _ => false,
+        };
+        if output {
+            last.insert(attempt.id.as_str(), entry);
+        }
+    }
+    last.into_values()
+        .filter(|entry| {
+            let Entry::Message(message) = entry else {
+                return false;
+            };
+            let Some((attempt, item)) = attempts.get(entry.id()) else {
+                return false;
+            };
+            let completed = item.completed_at.as_deref().and_then(parse_time);
+            let superseded_at = attempt.completed_at.as_deref().and_then(parse_time);
+            !message.streaming
+                && item.kind == "assistant_message"
+                && item.status == "completed"
+                && matches!((completed, superseded_at), (Some(done), Some(cut)) if done < cut)
+        })
+        .map(|entry| entry.id().to_owned())
+        .collect()
+}
+
+/// `SupersededAttemptFold`.
+struct AttemptFold {
+    attempt_id: String,
+    hidden: HashSet<String>,
+}
+
+/// `deriveSupersededAttemptFolds`: the output of an attempt a steer cut off,
+/// anchored at its first entry. Prompts, published pages, linked resources,
+/// working children and finished answers stay out.
+fn attempt_folds(
+    entries: &[Entry],
+    attempts: &Attempts,
+    failed: &HashSet<String>,
+    complete: &HashSet<String>,
+) -> BTreeMap<String, AttemptFold> {
+    let live = live_subagent_ids(entries);
+    let complete_attempts: HashSet<&str> = complete
+        .iter()
+        .filter_map(|id| attempts.get(id).map(|(a, _)| a.id.as_str()))
+        .collect();
+    let mut order: Vec<String> = Vec::new();
+    let mut by_attempt: HashMap<String, Vec<&Entry>> = HashMap::new();
+    for entry in entries {
+        let Some(attempt) = superseded(attempts, entry) else {
+            continue;
+        };
+        let kept = complete_attempts.contains(attempt.id.as_str())
+            || failed.contains(&attempt.run_id)
+            || matches!(entry, Entry::Message(m) if m.role == "user")
+            || matches!(entry, Entry::HtmlRender(_))
+            || matches!(entry, Entry::Work(w) if persistent_card(w)
+                || w.item_type.as_deref() == Some("system_notice"))
+            || live.contains(entry.id());
+        if kept {
+            continue;
+        }
+        by_attempt
+            .entry(attempt.id.clone())
+            .or_insert_with(|| {
+                order.push(attempt.id.clone());
+                Vec::new()
+            })
+            .push(entry);
+    }
+    order
+        .into_iter()
+        .filter_map(|attempt_id| {
+            let group = by_attempt.remove(&attempt_id)?;
+            let anchor = group.first()?.id().to_owned();
+            Some((
+                anchor,
+                AttemptFold {
+                    attempt_id,
+                    hidden: group.iter().map(|e| e.id().to_owned()).collect(),
+                },
+            ))
+        })
+        .collect()
+}
+
 /// `PERSISTENT_RESOURCE_V2_ITEM_TYPES`: linked resources stay visible when
 /// their turn folds.
 fn persistent_card(entry: &WorkEntry) -> bool {
@@ -1438,6 +1606,7 @@ fn turn_folds(
     terminal: &HashSet<String>,
     latest: Option<&RunSummary>,
     unfolded: &HashSet<String>,
+    complete_replies: &HashSet<String>,
 ) -> BTreeMap<String, Fold> {
     let live_subagents = live_subagent_ids(entries);
     let mut interrupted: HashSet<String> = HashSet::new();
@@ -1549,6 +1718,7 @@ fn turn_folds(
             // Linked resources and still-working children outlive the fold.
             if matches!(entry, Entry::Work(w) if persistent_card(w))
                 || live_subagents.contains(entry.id())
+                || complete_replies.contains(entry.id())
             {
                 continue;
             }
@@ -1657,11 +1827,13 @@ pub fn fold_containing(thread: &Thread, detail: &Detail, entry_id: &str) -> Opti
         .union(&failed_run_ids(&entries, latest))
         .cloned()
         .collect();
+    let complete = complete_superseded_replies(&entries, &entry_attempts(detail));
     let folds = turn_folds(
         &entries,
         &terminal_assistant_ids(&entries),
         latest,
         &unfolded,
+        &complete,
     );
     folds
         .into_values()
@@ -1684,11 +1856,21 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
     let failed = failed_run_ids(&entries, latest);
     let active_runs = active_response_runs(&entries, unsettled.as_deref(), is_working);
     let unfolded: HashSet<String> = active_runs.union(&failed).cloned().collect();
-    let folds = turn_folds(&entries, &terminal, latest, &unfolded);
+    let attempts = entry_attempts(detail);
+    let complete = complete_superseded_replies(&entries, &attempts);
+    let attempt_folds = attempt_folds(&entries, &attempts, &failed, &complete);
+    let folds = turn_folds(&entries, &terminal, latest, &unfolded, &complete);
     let mut collapsed: HashSet<String> = HashSet::new();
     for fold in folds.values() {
         if !expansion.turns.contains(&fold.run_id) {
             collapsed.extend(fold.hidden.iter().cloned());
+        }
+    }
+    let attempt_key = |id: &str| format!("attempt-fold:{id}");
+    let mut cut_off: HashSet<String> = HashSet::new();
+    for fold in attempt_folds.values() {
+        if !expansion.groups.contains(&attempt_key(&fold.attempt_id)) {
+            cut_off.extend(fold.hidden.iter().cloned());
         }
     }
     let changes = changes_by_message(detail);
@@ -1731,7 +1913,9 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                 )
                 || !w.run_id.as_ref().is_some_and(|r| active_runs.contains(r))
                 || collapsed.contains(&w.id)
+                || cut_off.contains(&w.id)
                 || folds.contains_key(&w.id)
+                || attempt_folds.contains_key(&w.id)
             {
                 break;
             }
@@ -1775,10 +1959,14 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
     } else {
         HashSet::new()
     };
-    let compacting = entries.iter().any(|e| {
-        matches!(e, Entry::Work(w) if w.source_kind == "context-compaction"
-            && w.status.as_deref() == Some("inProgress"))
-    });
+    // `workEntryIsInActiveRun`.
+    let in_active_run = |w: &WorkEntry| {
+        is_working
+            && w.status.as_deref() == Some("inProgress")
+            && w.run_id.is_some()
+            && w.run_id == unsettled
+    };
+    let mut compacting = false;
     let mut has_activity = false;
 
     let mut out = Vec::new();
@@ -1827,7 +2015,26 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             index += 1;
             continue;
         }
+        if let Some(fold) = attempt_folds.get(entry.id()) {
+            out.push(Row::AttemptFold {
+                attempt_id: fold.attempt_id.clone(),
+                expanded: expansion.groups.contains(&attempt_key(&fold.attempt_id)),
+            });
+        }
+        if cut_off.contains(entry.id()) {
+            index += 1;
+            continue;
+        }
         match entry {
+            Entry::Work(first) if first.source_kind == "context-compaction" => {
+                let active = in_active_run(first);
+                compacting |= active;
+                out.push(Row::Compaction {
+                    id: first.id.clone(),
+                    label: first.label.clone(),
+                    active,
+                });
+            }
             Entry::Work(first) if is_card(first) => {
                 // Adjacent subagents of one provider turn share a row.
                 if subagent(first)
@@ -1862,7 +2069,9 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                     if breaks_group(next)
                         || live_ids.contains(&next.id)
                         || collapsed.contains(&next.id)
+                        || cut_off.contains(&next.id)
                         || folds.contains_key(&next.id)
+                        || attempt_folds.contains_key(&next.id)
                         || cursor == working_index
                     {
                         break;
@@ -2253,6 +2462,76 @@ mod tests {
                 .any(|r| matches!(r, Row::WorkToggle { .. } | Row::Work { .. }))
         );
         assert!(!rows.iter().any(|r| matches!(r, Row::Thinking { .. })));
+    }
+
+    #[test]
+    fn a_steer_folds_the_attempt_it_cut_off() {
+        let (thread, mut detail) = settled();
+        // c1 and c2 belong to the first attempt, which the steer replaced.
+        for (index, node) in [(1, "n1"), (2, "n1"), (3, "n2"), (4, "n2")] {
+            Arc::make_mut(&mut detail.visible[index].item).node_id = Some(node.into());
+        }
+        let attempt = |id: &str, node: &str, status: &str| RunAttempt {
+            id: id.into(),
+            run_id: "run".into(),
+            root_node_id: node.into(),
+            status: status.into(),
+            completed_at: Some("2026-01-01T00:02:30.000Z".into()),
+            ..Default::default()
+        };
+        detail.attempts = vec![
+            attempt("a1", "n1", "superseded"),
+            attempt("a2", "n2", "completed"),
+        ];
+        let mut expansion = Expansion::default();
+        expansion.turns.insert("run".into());
+        let folded = rows(&thread, &detail, &expansion);
+        let fold = folded
+            .iter()
+            .position(|r| matches!(r, Row::AttemptFold { attempt_id, expanded: false } if attempt_id == "a1"))
+            .expect("an attempt fold");
+        // Its calls are hidden; the replacement attempt's work stays.
+        let ids: Vec<String> = folded[fold + 1..]
+            .iter()
+            .filter_map(|r| match r {
+                Row::Work { id, .. } => Some(id.clone()),
+                Row::WorkToggle { group_id, .. } => Some(group_id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !ids.iter().any(|id| id.contains("c1") || id.contains("c2")),
+            "{ids:?}"
+        );
+        expansion.groups.insert("attempt-fold:a1".into());
+        let open = rows(&thread, &detail, &expansion);
+        assert!(
+            open.iter()
+                .any(|r| matches!(r, Row::AttemptFold { expanded: true, .. }))
+        );
+    }
+
+    #[test]
+    fn a_lone_compaction_is_a_divider_outside_the_fold() {
+        let (thread, mut detail) = settled();
+        detail.visible.insert(
+            1,
+            item(
+                "k",
+                "compaction",
+                "2026-01-01T00:00:30.000Z",
+                Some("run"),
+                json!({"beforeTokenCount": 180_000, "afterTokenCount": 12_000}),
+            ),
+        );
+        let mut expansion = Expansion::default();
+        expansion.turns.insert("run".into());
+        let rows = rows(&thread, &detail, &expansion);
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, Row::Compaction { label, active: false, .. }
+            if label == "Context compacted 180K → 12K tokens"))
+        );
     }
 
     #[test]
