@@ -7,7 +7,9 @@
 //! in the studio layout (`crate::ui::design`). A new project in the folder
 //! the screen proposed also gets a Git repository (`vcs.init`), so T3
 //! checkpoints each turn and the Design surface can show earlier versions;
-//! a folder the user chose is left as it is.
+//! a folder the user chose is left as it is. References (images and files,
+//! pasted, dropped or picked) go with the brief, through the composer's
+//! attachments and launch (`start_turn`).
 
 use std::sync::mpsc::Receiver;
 
@@ -83,6 +85,9 @@ struct Creating {
     stage: Stage,
     /// Initialize Git once the profile is written.
     init_git: bool,
+    /// The references: images to persist, and uploaded files.
+    uploads: Vec<Value>,
+    files: Vec<Value>,
 }
 
 #[derive(PartialEq)]
@@ -129,6 +134,7 @@ impl App {
     /// The New design screen in the main area.
     pub(crate) fn design_home_page(&mut self, ui: &mut Ui, area: Rect) {
         ui.painter().rect_filled(area, 0.0, theme::background());
+        self.take_incoming_images();
         if let Some(picked) = &self.design_home.picking
             && let Ok(picked) = picked.try_recv()
         {
@@ -176,8 +182,9 @@ impl App {
         );
         y += 36.0;
 
-        // The brief card: the text, the kinds, the agent and Create.
-        let card = Rect::from_min_size(Pos2::new(left, y), Vec2::new(width, 176.0));
+        // The brief card: the text, the references, the kinds, the agent and Create.
+        let strip = self.image_strip_height(width - 32.0 + 34.0);
+        let card = Rect::from_min_size(Pos2::new(left, y), Vec2::new(width, 176.0 + strip));
         ui.painter().rect(
             card,
             CornerRadius::same(16),
@@ -187,7 +194,7 @@ impl App {
         );
         let editor = Rect::from_min_max(
             card.min + Vec2::new(16.0, 14.0),
-            Pos2::new(card.right() - 16.0, card.bottom() - 56.0),
+            Pos2::new(card.right() - 16.0, card.bottom() - 56.0 - strip),
         );
         let placeholder = EXAMPLES
             .iter()
@@ -209,6 +216,30 @@ impl App {
         );
         if self.design_home.brief.is_empty() && !response.has_focus() {
             response.request_focus();
+        }
+        // The references below the brief, as in the composer.
+        if strip > 0.0 {
+            self.composer_image_strip(
+                ui,
+                Pos2::new(editor.left(), editor.bottom() + 2.0),
+                editor.width(),
+            );
+        }
+        // An image paste: egui only pastes text, but reports the V key's release.
+        let pasted = response.has_focus()
+            && ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. }
+                        if modifiers.command)
+                })
+            });
+        if pasted {
+            crate::ui::attachments::paste_clipboard_image(&self.incoming_images, ui.ctx());
+        }
+        // Files dropped anywhere on the screen.
+        let dropped = ui.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            crate::ui::attachments::add_dropped_files(&self.incoming_images, ui.ctx(), dropped);
         }
         let row_y = card.bottom() - 44.0;
         // The agent's button comes first: the kinds take the room it leaves.
@@ -289,6 +320,29 @@ impl App {
             widgets::menu(ui, &mut self.open_menu, KIND_MENU, chip, false, &entries)
         {
             self.design_home.kind = index;
+        }
+        // Attach references (the composer's paperclip).
+        let attach = Rect::from_min_size(Pos2::new(chip.right() + 6.0, row_y), Vec2::splat(30.0));
+        let attach_response = ui
+            .interact(attach, ui.id().with("design-attach"), Sense::click())
+            .on_hover_text("Attach images or files as references");
+        if attach_response.hovered() {
+            ui.painter()
+                .rect_filled(attach, CornerRadius::same(8), theme::accent());
+        }
+        theme::paint_icon(
+            ui,
+            "paperclip",
+            Rect::from_center_size(attach.center(), Vec2::splat(16.0)),
+            16.0,
+            if attach_response.hovered() {
+                theme::foreground()
+            } else {
+                theme::muted_foreground()
+            },
+        );
+        if attach_response.clicked() {
+            crate::ui::attachments::pick_files(&self.incoming_images, ui.ctx());
         }
         // Create.
         let create = Rect::from_min_size(
@@ -614,6 +668,17 @@ impl App {
     /// Starts creating the design: the project first, unless the folder
     /// already is one.
     fn create_design(&mut self, selection: &ModelSelection) {
+        // The references go with the brief once their files are uploaded.
+        let files = match self.file_attachments() {
+            Ok(files) => files,
+            Err(reason) => {
+                self.design_home.error = Some(reason);
+                return;
+            }
+        };
+        let uploads = crate::ui::attachments::upload_payload(&self.composer_images);
+        self.composer_images.clear();
+        self.composer_files.clear();
         let home = &mut self.design_home;
         let cwd = expand_home(home.folder.trim().trim_end_matches('/'));
         let brief = home.brief.trim().to_owned();
@@ -644,6 +709,8 @@ impl App {
             model: model.clone(),
             stage,
             init_git,
+            uploads: uploads.clone(),
+            files: files.clone(),
         };
         match existing {
             Some(project_id) => {
@@ -748,11 +815,16 @@ impl App {
             &runtime,
             "default",
         );
-        self.send_request(
-            format!("launch:{thread_id}"),
-            "orchestration.launchThread",
-            input,
-        );
+        // The composer's launch: the reference images are persisted first.
+        let mut send = crate::ui::composer::TurnSend {
+            thread_id: thread_id.clone(),
+            before: Vec::new(),
+            message: input,
+            launch: true,
+            uploads: creating.uploads,
+        };
+        send.set_attachments(Value::Array(creating.files));
+        self.start_turn(send);
         self.mark_design_project(&creating.cwd);
         self.design_home = DesignHome::default();
         self.select_thread(Some(thread_id));

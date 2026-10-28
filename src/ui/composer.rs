@@ -284,7 +284,7 @@ impl App {
 
     /// The attached images' row above the prompt (`mb-3 flex flex-wrap
     /// gap-2` of 64px thumbnails), wrapping to the editor width.
-    fn image_strip_height(&self, width: f32) -> f32 {
+    pub(crate) fn image_strip_height(&self, width: f32) -> f32 {
         let images = self.images_block_height(width - 34.0);
         // Pluto: file chips follow the images.
         let (_, files) = crate::ui::attachments::file_grid(self.composer_files.len(), width - 34.0);
@@ -709,7 +709,7 @@ impl App {
 
     /// The attached images: 64px thumbnails (`h-16 w-16 rounded-lg border
     /// border-border/80 bg-background`) with their remove button.
-    fn composer_image_strip(&mut self, ui: &mut Ui, origin: Pos2, width: f32) {
+    pub(crate) fn composer_image_strip(&mut self, ui: &mut Ui, origin: Pos2, width: f32) {
         let per_row = (((width + 8.0) / 72.0).floor() as usize).max(1);
         let mut remove = None;
         let mut preview = None;
