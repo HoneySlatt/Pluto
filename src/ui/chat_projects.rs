@@ -1124,8 +1124,10 @@ impl App {
             width,
         );
         use crate::ui::action_editor::{Kind, footer_button, footer_rect};
+        let mut right = card.right() - 16.0;
         if !entries.is_empty() {
-            let clear = footer_rect(ui, card.right() - 16.0, top + 14.0, "Delete all");
+            let clear = footer_rect(ui, right, top + 14.0, "Delete all");
+            right = clear.left() - 8.0;
             if footer_button(ui, clear, "Delete all", Kind::Destructive) {
                 self.confirm = Some(crate::ui::thread_menu::Confirm {
                     title: format!("Delete the memory of \"{}\"?", project.title),
@@ -1136,6 +1138,16 @@ impl App {
                     command: json!({"type": CLEAR_MEMORY_COMMAND, "projectId": project.id}),
                     more: Vec::new(),
                 });
+            }
+        }
+        if matches!(memory, Some(Ok(_))) {
+            let add = footer_rect(ui, right, top + 14.0, "Add");
+            if footer_button(ui, add, "Add", Kind::Outline) {
+                self.edit_memory(
+                    crate::ui::memory_settings::MemoryScope::Project(project.id.clone()),
+                    "",
+                    "",
+                );
             }
         }
         let mut y = top + 62.0;

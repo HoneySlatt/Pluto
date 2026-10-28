@@ -399,6 +399,18 @@ impl App {
                 reset: false,
                 control: Control::Switch(memory["auto"] != false),
             });
+            settings.push(Row {
+                id: "memory-add".into(),
+                title: "Add a memory".into(),
+                description: "Write something your chats should know about you.".into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: Control::OutlineXs {
+                    label: "Add",
+                    icon: "plus",
+                },
+            });
         }
         if !entries.is_empty() {
             settings.push(Row {
@@ -461,6 +473,9 @@ impl App {
             RowAction::Toggle(on) if id == "memory-auto" => {
                 self.change_memory(|memory| memory["auto"] = json!(on));
             }
+            RowAction::Click if id == "memory-add" => {
+                self.edit_memory(MemoryScope::Main, "", "");
+            }
             RowAction::Click if id == "memory-clear" => {
                 self.confirm = Some(Confirm {
                     title: "Delete all memories?".into(),
@@ -508,6 +523,12 @@ impl App {
                 return;
             };
             match text {
+                // A new memory has no id yet.
+                Some(text) if id.is_empty() => {
+                    let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
+                    entries.push(json!({"id": id, "text": text, "createdAt": now,
+                        "updatedAt": now}));
+                }
                 Some(text) => {
                     for entry in entries.iter_mut().filter(|e| e["id"] == id) {
                         entry["text"] = json!(text);
@@ -556,7 +577,11 @@ impl App {
                 widgets::text(
                     ui,
                     Pos2::new(left, dialog.top() + 25.0),
-                    "Edit memory",
+                    if edit.id.is_empty() {
+                        "Add memory"
+                    } else {
+                        "Edit memory"
+                    },
                     font(20.0, Weight::SemiBold),
                     theme::foreground(),
                     20.0,
@@ -594,7 +619,7 @@ impl App {
                 {
                     close = true;
                 }
-                if footer_button(ui, delete, "Forget", Kind::Destructive) {
+                if !edit.id.is_empty() && footer_button(ui, delete, "Forget", Kind::Destructive) {
                     decision = Some(None);
                 }
             });
