@@ -563,3 +563,40 @@ fn queued_messages_list_above_the_composer_and_open_in_it() {
     assert!(find(&shown, "First follow-up").is_empty());
     assert_eq!(find(&shown, "Queued").len(), 1);
 }
+
+#[test]
+fn a_draft_can_start_in_a_new_worktree() {
+    let mut harness = harness_with(
+        json!([{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}]),
+        json!([]),
+    );
+    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    let find = |harness: &Harness<'static, App>, label: &str| {
+        texts(harness)
+            .into_iter()
+            .filter(|(text, _)| text == label)
+            .map(|(_, rect)| rect)
+            .next_back()
+    };
+    let current =
+        find(&harness, "Current checkout").unwrap_or_else(|| panic!("{:?}", texts(&harness)));
+    click(&mut harness, current.center());
+    let worktree = find(&harness, "New worktree").expect("the workspace menu");
+    click(&mut harness, worktree.center());
+    harness.run_steps(2);
+    assert!(find(&harness, "Current checkout").is_none());
+    assert!(find(&harness, "New worktree").is_some());
+}

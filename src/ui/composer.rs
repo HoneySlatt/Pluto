@@ -1294,22 +1294,56 @@ impl App {
         }
     }
 
+    /// `resolveNewThreadEnvMode`: the draft's pick, else the project's
+    /// override, the project's own default, then the environment's.
+    pub(crate) fn draft_env_mode(&self) -> String {
+        let Some(project) = self.draft_project() else {
+            return "local".into();
+        };
+        if let Some((id, mode)) = &self.draft_env_mode
+            && *id == project.id
+        {
+            return mode.clone();
+        }
+        let settings = &self.state.config["settings"];
+        settings["projectSettingsOverrides"][&project.id]["defaultThreadEnvMode"]
+            .as_str()
+            .map(str::to_owned)
+            .or(project.default_thread_env_mode.clone())
+            .or_else(|| settings["defaultThreadEnvMode"].as_str().map(str::to_owned))
+            .filter(|mode| mode == "worktree")
+            .unwrap_or_else(|| "local".into())
+    }
+
+    /// The checked-out branch the workspace status reports (`refName`).
+    fn workspace_branch(&self) -> Option<String> {
+        let cwd = self.workspace_cwd()?;
+        self.vcs
+            .as_ref()
+            .filter(|(c, _)| *c == cwd)
+            .and_then(|(_, status)| status["refName"].as_str().map(str::to_owned))
+    }
+
     fn checkout_strip(&mut self, ui: &mut Ui, rect: Rect, draft: bool) {
         let muted = if draft {
             theme::muted_foreground()
         } else {
             theme::alpha(theme::muted_foreground(), 0.7)
         };
-        let label = if draft {
-            "Current checkout"
+        // `BranchToolbarEnvModeSelector`: a draft picks where it starts.
+        let worktree = draft && self.draft_env_mode() == "worktree";
+        let (icon, label) = if worktree {
+            ("folder-git-2", "New worktree")
+        } else if draft {
+            ("folder", "Current checkout")
         } else {
-            "Local checkout"
+            ("folder", "Local checkout")
         };
         let left = rect.left() + 4.0;
         let label_font = font(12.0, Weight::Regular);
         theme::paint_icon(
             ui,
-            "folder",
+            icon,
             Rect::from_min_size(Pos2::new(left + 8.0, rect.top() + 10.0), Vec2::splat(12.0)),
             12.0,
             muted,
@@ -1335,10 +1369,23 @@ impl App {
                 12.0,
                 theme::alpha(muted, 0.5),
             );
+            let control = Rect::from_min_max(
+                Pos2::new(left + 1.0, rect.top() + 4.0),
+                Pos2::new(left + 28.0 + width + 14.0, rect.top() + 28.0),
+            );
+            let response = ui
+                .interact(control, ui.id().with("composer-workspace"), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(label);
+            if response.clicked() {
+                self.open_menu = Some("composer-workspace".into());
+            }
+            self.workspace_menu(ui, control, worktree);
         }
         let branch = self
             .current_thread()
             .and_then(|t| t.branch.clone())
+            .or_else(|| self.workspace_branch())
             .unwrap_or_else(|| "main".into());
         let branch_color = theme::alpha(theme::muted_foreground(), 0.7);
         let branch_width = widgets::text_width(ui, &branch, label_font.clone());
@@ -1371,6 +1418,36 @@ impl App {
             12.0,
             branch_color,
         );
+    }
+
+    fn workspace_menu(&mut self, ui: &mut Ui, anchor: Rect, worktree: bool) {
+        use crate::ui::widgets::{MenuEntry, MenuItem};
+        let entries = [
+            MenuEntry::Item(MenuItem {
+                icon: Some("folder"),
+                selected: !worktree,
+                ..MenuItem::new("Current checkout")
+            }),
+            MenuEntry::Item(MenuItem {
+                icon: Some("folder-git-2"),
+                selected: worktree,
+                ..MenuItem::new("New worktree")
+            }),
+        ];
+        let Some(index) = widgets::menu(
+            ui,
+            &mut self.open_menu,
+            "composer-workspace",
+            anchor,
+            true,
+            &entries,
+        ) else {
+            return;
+        };
+        if let Some(project) = self.draft_project() {
+            let mode = if index == 1 { "worktree" } else { "local" };
+            self.draft_env_mode = Some((project.id, mode.into()));
+        }
     }
 
     pub(crate) fn providers(&self) -> &[Value] {
@@ -1703,6 +1780,23 @@ impl App {
                 &contexts,
                 inline,
             );
+            // New worktree mode branches off the checked-out branch.
+            if self.draft_env_mode() == "worktree" && self.workspace_is_repo() {
+                let Some(branch) = self.workspace_branch() else {
+                    self.status =
+                        Some("Select a base branch before sending in New worktree mode.".into());
+                    return;
+                };
+                input["workspaceStrategy"] = json!({"type": "worktree", "baseRef": branch});
+                let settings = &self.state.config["settings"];
+                let from_origin = settings["projectSettingsOverrides"][&project.id]
+                    ["newWorktreesStartFromOrigin"]
+                    .as_bool()
+                    .or(settings["newWorktreesStartFromOrigin"].as_bool());
+                if from_origin == Some(true) {
+                    input["workspaceStrategy"]["startFromOrigin"] = json!(true);
+                }
+            }
             TurnSend {
                 thread_id,
                 before: Vec::new(),

@@ -22,6 +22,9 @@ pub struct App {
     thread_retry: Option<(String, u8, bool)>,
     /// Project of the open new-thread draft; `None` follows the latest project.
     pub(crate) draft_project_id: Option<String>,
+    /// Where the open draft starts, when picked (`DraftThreadEnvMode`):
+    /// `local` or `worktree`, by project.
+    pub(crate) draft_env_mode: Option<(String, String)>,
     pub(crate) composer: String,
     /// Images attached to the composer, sent with the next message.
     pub(crate) composer_images: Vec<crate::ui::attachments::ComposerImage>,
@@ -406,6 +409,7 @@ impl App {
             selected: None,
             thread_retry: None,
             draft_project_id: None,
+            draft_env_mode: None,
             composer: String::new(),
             composer_images: Vec::new(),
             composer_files: Vec::new(),
@@ -893,6 +897,7 @@ impl App {
         // A new draft starts from its project's default or the last model
         // picked (`applyStickyState`), not from the last draft's pick.
         self.composer_selection.remove("draft");
+        self.draft_env_mode = None;
     }
 
     /// Dispatches a request reply; the request stays "responding" until the
