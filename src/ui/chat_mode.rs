@@ -16,7 +16,10 @@
 //!
 //! Temporary chats, after ChatGPT's, live in a second hidden project beside
 //! it (`temporary-chats`), whose profile tells the server to leave memory
-//! out. They are listed nowhere and deleted as soon as the user leaves them.
+//! out. They are listed nowhere and deleted as soon as the user leaves them:
+//! this window deletes the ones it showed, not those another client (the
+//! phone) may have open; a temporary chat idle for `STALE` (a client that
+//! closed without deleting it) goes too.
 
 use std::collections::HashSet;
 
@@ -35,6 +38,8 @@ const MATCH_ROW: f32 = 50.0;
 /// The pause in typing before the messages are searched.
 const SEARCH_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 const GROUP: f32 = 28.0;
+/// A temporary chat no client touched for this long was left behind.
+const STALE: chrono::Duration = chrono::Duration::hours(12);
 
 /// One of the two hidden chat projects.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -91,6 +96,8 @@ pub(crate) struct ChatMode {
     last: (Option<String>, Option<String>),
     /// Temporary chats already sent `thread.delete`.
     deleted: HashSet<String>,
+    /// The temporary chats (their first version) this window showed.
+    opened: HashSet<String>,
     search: ChatSearch,
     /// The next message is a research request (`chat_research`).
     pub(crate) research: bool,
@@ -449,16 +456,29 @@ impl App {
         }
         // The open chat keeps its versions.
         let open = self.selected.as_deref().map(|id| self.version_root(id));
+        if let Some(root) = &open
+            && self
+                .current_thread()
+                .is_some_and(|t| self.is_temporary_thread(&t))
+        {
+            self.chat_mode.opened.insert(root.clone());
+        }
+        let now = chrono::Utc::now();
         let left: Vec<String> = self
             .state
             .threads
             .iter()
             .filter(|t| {
                 // A subagent goes with its chat.
-                !t.is_subagent()
-                    && !self.chat_mode.deleted.contains(&t.id)
-                    && self.is_temporary_thread(t)
-                    && open.as_deref() != Some(self.version_root(&t.id).as_str())
+                if t.is_subagent()
+                    || self.chat_mode.deleted.contains(&t.id)
+                    || !self.is_temporary_thread(t)
+                {
+                    return false;
+                }
+                let root = self.version_root(&t.id);
+                open.as_deref() != Some(root.as_str())
+                    && (self.chat_mode.opened.contains(&root) || stale(t, now))
             })
             .map(|t| t.id.clone())
             .collect();
@@ -870,9 +890,32 @@ impl App {
     }
 }
 
+/// A temporary chat left behind: not working, untouched for `STALE`.
+fn stale(thread: &Thread, now: chrono::DateTime<chrono::Utc>) -> bool {
+    !thread.is_running()
+        && crate::timeline::parse_time(&thread.updated_at).is_some_and(|at| now - at > STALE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_idle_temporary_chats_are_stale() {
+        let now = chrono::Utc::now();
+        let at = |hours: i64| {
+            (now - chrono::Duration::hours(hours))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        let mut thread = Thread {
+            updated_at: at(13),
+            status: "idle".into(),
+            ..Default::default()
+        };
+        assert!(stale(&thread, now));
+        thread.updated_at = at(1);
+        assert!(!stale(&thread, now));
+    }
 
     #[test]
     fn excerpts_start_near_the_match() {

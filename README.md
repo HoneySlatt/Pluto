@@ -220,7 +220,9 @@ connection leaves open, comes back to its composer (nothing is sent again by
 itself); a refused launch leaves the thread screen for the draft. Leaving the
 server clears its drafts, replies and images. Temporary chats the phone
 started are deleted (`thread.delete`) once it leaves them, again after a
-reconnection if needed; a temporary chat open on the computer is left alone.
+reconnection if needed; a temporary chat open on the computer is left alone,
+and the computer likewise deletes only the temporary chats it showed, plus
+those nobody touched for 12 hours (a client closed before deleting them).
 The branch sheet records a thread's branch only once the checkout succeeded
 (the desktop's `branch_picker.rs`: remote refs, a worktree that has the ref
 already, the provider sessions detached when the worktree changes). Request
