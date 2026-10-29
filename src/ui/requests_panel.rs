@@ -223,6 +223,9 @@ impl App {
 
         // Actions: primary decline/accept, the rest behind "…".
         let responding = self.responding.contains(&approval.request_id);
+        // A provider process that is gone cannot take the answer: the
+        // primary buttons wait, the menu (Cancel…) stays.
+        let can_respond = approval.resumable;
         let options = approval.options();
         let primary: Vec<_> = options
             .iter()
@@ -249,9 +252,17 @@ impl App {
             if response.clicked() && !responding {
                 self.open_menu = Some("approval-more".into());
             }
+            // An option's warning: its icon, and the text on hover.
             let items: Vec<widgets::MenuEntry> = more
                 .iter()
-                .map(|o| widgets::MenuEntry::Item(widgets::MenuItem::new(&o.label)))
+                .map(|o| {
+                    let mut item = widgets::MenuItem::new(&o.label);
+                    if let Some(warning) = &o.warning {
+                        item.icon = Some("triangle-alert");
+                        item.tooltip = Some(warning);
+                    }
+                    widgets::MenuEntry::Item(item)
+                })
                 .collect();
             let anchor =
                 Rect::from_min_max(Pos2::new(button.right() - 200.0, button.top()), button.max);
@@ -280,7 +291,7 @@ impl App {
                     button,
                     ("approval", &option.decision),
                     &option.label,
-                    !responding,
+                    !responding && can_respond,
                 )
                 .clicked()
             } else {
@@ -294,8 +305,16 @@ impl App {
                 )
                 .clicked()
             };
-            if clicked && !responding {
+            if clicked && !responding && can_respond {
                 decision = Some(option.decision.clone());
+            }
+            if let Some(warning) = &option.warning {
+                ui.interact(
+                    button,
+                    ui.id().with(("approval-warning", &option.decision)),
+                    Sense::hover(),
+                )
+                .on_hover_text(warning);
             }
             x = button.left() - 6.0;
         }
@@ -335,7 +354,11 @@ impl App {
                 theme::muted_foreground(),
             );
         }
-        let detail = approval.detail.as_deref().unwrap_or(label);
+        let detail = if can_respond {
+            approval.detail.as_deref().unwrap_or(label)
+        } else {
+            "Provider process is gone — interrupt or restart the run to respond."
+        };
         let clip = Rect::from_min_max(
             Pos2::new(content_left, top + 20.0),
             Pos2::new(x - 8.0, top + content_height),
@@ -389,7 +412,8 @@ impl App {
         );
         banner_surface(ui, rect, neutral_surface(), neutral_outline());
         let collapsed = self.question_collapsed.as_deref() == Some(question.id.as_str());
-        let responding = self.responding.contains(&input.request_id);
+        // A question the provider can no longer take reads as answered.
+        let responding = self.responding.contains(&input.request_id) || !input.resumable;
 
         // Header row toggles the card.
         let header = Rect::from_min_size(
@@ -607,8 +631,10 @@ impl App {
                         y = row.bottom();
                     }
                 });
-            // Number keys pick options while the prompt editor is not focused.
-            let editor_focused = ui.memory(|m| m.focused().is_some());
+            // Number keys pick options while the prompt editor is not
+            // focused; a choice-only question's editor takes no text.
+            let editor_focused =
+                question.allow_custom_answer && ui.memory(|m| m.focused().is_some());
             if !responding && !editor_focused {
                 for (index, key) in [
                     egui::Key::Num1,

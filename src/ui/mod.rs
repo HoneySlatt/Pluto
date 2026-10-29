@@ -96,6 +96,7 @@ pub mod thread_search;
 pub mod timeline_view;
 pub mod toasts;
 pub mod tool_images;
+pub mod typing_guard;
 pub mod typography;
 pub mod usage;
 pub mod usage_prices;

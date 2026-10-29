@@ -846,6 +846,43 @@ fn add_files(incoming: &Incoming, ctx: &egui::Context, paths: Vec<std::path::Pat
     });
 }
 
+/// `pastedTextDisposition`'s size: a paste this large goes as a file.
+pub(crate) const PASTED_TEXT_FILE_BYTES: usize = 32 * 1024;
+
+impl App {
+    /// A large paste as a text file attachment (`pasted-text.txt`, then
+    /// `-2`…), written to a private temporary directory.
+    pub(crate) fn attach_pasted_text(&mut self, text: String) -> Result<String, String> {
+        let taken = |name: &str| {
+            self.composer_files
+                .iter()
+                .any(|f| f.name.eq_ignore_ascii_case(name))
+        };
+        let name = (1..)
+            .map(|n| {
+                if n == 1 {
+                    "pasted-text.txt".to_owned()
+                } else {
+                    format!("pasted-text-{n}.txt")
+                }
+            })
+            .find(|name| !taken(name))
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!("pluto-paste-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir)
+            .map_err(|_| "Pasted text could not be attached.".to_owned())?;
+        let path = dir.join(&name);
+        std::fs::write(&path, text.as_bytes())
+            .map_err(|_| "Pasted text could not be attached.".to_owned())?;
+        let mut file = composer_file(&name, &path)?;
+        file.mime_type = "text/plain;charset=utf-8".into();
+        if let Ok(mut incoming) = self.incoming_images.lock() {
+            incoming.push(Ok(Attached::File(file)));
+        }
+        Ok(name)
+    }
+}
+
 /// The composer images as `UploadChatImageAttachment`s (inline data URLs).
 pub(crate) fn upload_payload(images: &[ComposerImage]) -> Vec<Value> {
     use base64::Engine;

@@ -203,7 +203,25 @@ impl App {
             self.tasks_thread = Some(thread.id.clone());
             self.tasks_open = false;
         }
-        let pending = crate::requests::derive(&detail);
+        let mut pending = crate::requests::derive(&detail);
+        // A request arriving mid-sentence waits for the typing to pause.
+        let ids: Vec<String> = pending
+            .approvals
+            .iter()
+            .map(|a| a.request_id.clone())
+            .chain(pending.user_inputs.iter().map(|i| i.request_id.clone()))
+            .collect();
+        let now = std::time::Instant::now();
+        let held = self.typing_guard.requests(&thread.id, &ids, now).clone();
+        if let Some(wait) = self.typing_guard.release_in(now)
+            && let Some(ctx) = &self.egui_ctx
+        {
+            ctx.request_repaint_after(wait);
+        }
+        pending.approvals.retain(|a| !held.contains(&a.request_id));
+        pending
+            .user_inputs
+            .retain(|i| !held.contains(&i.request_id));
         // Requests that are no longer pending stop counting as in flight.
         let open: std::collections::HashSet<&str> = pending
             .approvals
@@ -273,9 +291,15 @@ impl App {
 
     fn surface_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         let strip = self.image_strip_height(width);
+        // The prompt-length alert takes a line under the editor.
+        let alert = if self.prompt_length_error.is_some() {
+            20.0
+        } else {
+            0.0
+        };
         match mode {
             Mode::Normal | Mode::Plan(_) => {
-                17.0 + strip + self.composer_text_height(ui, width) + 10.0 + 28.0 + 19.0
+                17.0 + strip + self.composer_text_height(ui, width) + alert + 10.0 + 28.0 + 19.0
             }
             Mode::Question(_) => 17.0 + self.composer_text_height(ui, width) + 16.0 + 28.0 + 17.0,
             Mode::Approval(..) => 17.0 + 32.0 + 17.0,
@@ -449,11 +473,11 @@ impl App {
                 .questions
                 .get(self.question_index)
                 .is_some_and(|q| !q.allow_custom_answer));
-        let providers_known = !self.providers().is_empty();
-        let provider_ready = self
-            .providers()
-            .iter()
-            .any(|p| p["enabled"] != false && p["status"] == "ready");
+        // The selected provider is gone from the catalog.
+        let provider_unavailable =
+            !self.providers().is_empty() && self.composer_provider(draft).is_none();
+        // `phase === "disconnected"`: a thread that never ran (or a draft).
+        let never_ran = draft || self.current_thread().is_none_or(|t| t.runtime.is_none());
         let placeholder = match mode {
             Mode::Approval(..) => "Resolve this approval request to continue",
             Mode::Question(_) if choice_only => "Choose an option above",
@@ -461,16 +485,17 @@ impl App {
                 "Type your own answer, or leave this blank to use the selected option"
             }
             Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
-            Mode::Normal if !self.connected() => {
-                "Ask for changes, send follow-ups, or attach images"
+            Mode::Normal if draft && self.draft_project().is_none() => {
+                "Choose a project above to start a thread"
             }
-            Mode::Normal if providers_known && !provider_ready => {
+            Mode::Normal if provider_unavailable => {
                 "Enable a provider in Settings to send a message"
             }
             // Pluto: a chat asks like the chat sites do.
             Mode::Normal if self.image_on(draft) => "Describe the image to make",
             Mode::Normal if self.research_on(draft) => "What should I research?",
             Mode::Normal if self.chat_context(draft) => "Ask anything",
+            Mode::Normal if never_ran => "Ask for changes, send follow-ups, or attach images",
             Mode::Normal => "Ask anything, @tag files/folders, $use skills, or / for commands",
         };
         // Attached images count as context, which hides the placeholder.
@@ -497,6 +522,9 @@ impl App {
         let editor_id = ui.id().with("composer-editor");
         self.cite.editor_id = Some(editor_id);
         let focused = ui.memory(|m| m.has_focus(editor_id));
+        if normal {
+            self.typing_guard.focus(focused);
+        }
         // The suggestion menu takes its keys first.
         if normal {
             self.refresh_skill_metas(draft);
@@ -524,6 +552,53 @@ impl App {
         cite::set_copy_tokens(&collapsed);
         let chips: Vec<cite::Chip> = collapsed.tokens.iter().map(|(c, _)| c.clone()).collect();
         let mut display = collapsed.display.clone();
+        // A large paste goes as a file (`pastedTextDisposition`), unless
+        // Ctrl+Shift+V asked to keep it inline.
+        if normal && focused {
+            let pastes: Vec<String> = ui.input(|i| {
+                let plain = i.modifiers.shift;
+                i.events
+                    .iter()
+                    .filter_map(|e| match e {
+                        egui::Event::Paste(text) if !plain => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            for text in pastes {
+                let total = crate::ui::citations::utf16_len(self.composer.trim())
+                    + crate::ui::citations::utf16_len(&text);
+                let large = text.len() >= crate::ui::attachments::PASTED_TEXT_FILE_BYTES
+                    || total > MAX_PROMPT_CHARS;
+                if !large {
+                    continue;
+                }
+                ui.input_mut(|i| {
+                    i.events
+                        .retain(|e| !matches!(e, egui::Event::Paste(t) if *t == text))
+                });
+                let bytes = text.len() as u64;
+                match self.attach_pasted_text(text) {
+                    Ok(name) => self.toasts.add(
+                        crate::ui::toasts::Toast::new(
+                            crate::ui::toasts::Kind::Info,
+                            format!("Large paste attached as {name}"),
+                        )
+                        .description(format!(
+                            "{} · Use Ctrl+Shift+V to keep a large paste inline.",
+                            crate::ui::attachments::format_size(bytes)
+                        )),
+                    ),
+                    Err(error) => self.toasts.add(
+                        crate::ui::toasts::Toast::new(
+                            crate::ui::toasts::Kind::Error,
+                            "Pasted text is too large to attach",
+                        )
+                        .description(error),
+                    ),
+                };
+            }
+        }
         let mut editor_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
         egui::ScrollArea::vertical()
             .id_salt("composer-scroll")
@@ -531,6 +606,7 @@ impl App {
             .show(&mut editor_ui, |ui| {
                 let output = egui::TextEdit::multiline(&mut display)
                     .id(editor_id)
+                    .interactive(!choice_only)
                     .frame(egui::Frame::NONE)
                     .margin(egui::Margin::ZERO)
                     .font(theme::composer_font())
@@ -542,6 +618,7 @@ impl App {
                     })
                     .show(ui);
                 if display != collapsed.display {
+                    self.typing_guard.typed(std::time::Instant::now());
                     self.composer = cite::expand(&display, &collapsed.tokens);
                     if cite::collapse(&self.composer).display != display {
                         self.remap_composer_caret(ui.ctx(), &display, &collapsed.tokens);
@@ -576,8 +653,29 @@ impl App {
             self.composer_command_menu(ui, surface, editor_id, draft);
         }
 
+        // `ComposerPromptLengthValidation`: kept while the prompt is too
+        // long, gone once it fits.
+        if self.prompt_length_error.is_some() {
+            self.prompt_length_error = prompt_length_message(&self.composer);
+        }
+        let alert_height = if let Some(error) = &self.prompt_length_error {
+            widgets::text_in(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(surface.left() + 17.0, text_rect.bottom() + 4.0),
+                    Vec2::new(text_rect.width(), 16.0),
+                ),
+                error,
+                font(12.0, Weight::Regular),
+                theme::error(),
+            );
+            20.0
+        } else {
+            0.0
+        };
         // Toolbar. The actions go first: the controls fit the room they leave.
         let bar_top = text_rect.bottom()
+            + alert_height
             + if matches!(mode, Mode::Question(_)) {
                 16.0
             } else {
@@ -1043,7 +1141,7 @@ impl App {
         thread_id: &str,
         submit: bool,
     ) -> f32 {
-        let responding = self.responding.contains(&input.request_id);
+        let responding = self.responding.contains(&input.request_id) || !input.resumable;
         let last = self.question_index + 1 >= input.questions.len();
         let label = if responding {
             "Submitting..."
@@ -1726,6 +1824,12 @@ impl App {
         if text.is_empty() && self.composer_images.is_empty() && self.composer_files.is_empty() {
             return;
         }
+        self.typing_guard.idle();
+        // Too long for a provider turn: refused here, the text stays.
+        if let Some(error) = prompt_length_message(&text) {
+            self.prompt_length_error = Some(error);
+            return;
+        }
         // Pluto: files go once uploaded.
         let files = match self.file_attachments() {
             Ok(files) => files,
@@ -2008,6 +2112,36 @@ impl App {
         // The mode change before it failed: the message stays here.
         self.give_back(&send.send_key())
     }
+}
+
+/// `PROVIDER_SEND_TURN_MAX_INPUT_CHARS`, in UTF-16 units like upstream.
+pub(crate) const MAX_PROMPT_CHARS: usize = 120_000;
+
+/// `composerSubmission`'s alert for a prompt over the limit.
+pub(crate) fn prompt_length_message(prompt: &str) -> Option<String> {
+    let length = crate::ui::citations::utf16_len(prompt.trim());
+    let excess = length.checked_sub(MAX_PROMPT_CHARS).filter(|e| *e > 0)?;
+    let group = |n: usize| {
+        let digits = n.to_string();
+        let mut out = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(c);
+        }
+        out
+    };
+    Some(format!(
+        "Prompt is {} {} over the {}-character limit. Shorten or split it before sending.",
+        group(excess),
+        if excess == 1 {
+            "character"
+        } else {
+            "characters"
+        },
+        group(MAX_PROMPT_CHARS)
+    ))
 }
 
 #[cfg(test)]

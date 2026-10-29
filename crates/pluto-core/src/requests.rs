@@ -16,6 +16,9 @@ pub struct ApprovalOption {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingApproval {
     pub request_id: String,
+    /// The provider can still take the answer (`responseCapability` live);
+    /// otherwise its process is gone.
+    pub resumable: bool,
     pub request_kind: String,
     pub created_at: String,
     pub detail: Option<String>,
@@ -76,6 +79,8 @@ pub struct Question {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingUserInput {
     pub request_id: String,
+    /// Not `not_resumable`: the answer can still reach the provider.
+    pub resumable: bool,
     pub created_at: String,
     pub questions: Vec<Question>,
     pub dismissible: bool,
@@ -154,6 +159,7 @@ pub fn derive(detail: &Detail) -> Pending {
             let questions = parse_questions(item.get("questions"));
             pending.user_inputs.push(PendingUserInput {
                 request_id: request.id.clone(),
+                resumable: capability != "not_resumable",
                 created_at: request.created_at.clone(),
                 questions,
                 dismissible: item.str("responseMode") == Some("message") || capability == "message",
@@ -180,6 +186,7 @@ pub fn derive(detail: &Detail) -> Pending {
             .collect();
         pending.approvals.push(PendingApproval {
             request_id: request.id.clone(),
+            resumable: capability == "live" || capability.is_empty(),
             request_kind: request.kind.clone(),
             created_at: request.created_at.clone(),
             detail: field("prompt"),

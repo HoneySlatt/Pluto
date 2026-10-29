@@ -172,6 +172,10 @@ pub struct App {
     /// Branch notices shown once (they stay while the mismatch lasts), and
     /// the thread whose branch is being restored.
     pub(crate) revealed_notices: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Holds a request back while the user types (`ui/typing_guard.rs`).
+    pub(crate) typing_guard: crate::ui::typing_guard::TypingGuard,
+    /// The composer's prompt-length alert, once a send was refused.
+    pub(crate) prompt_length_error: Option<String>,
     /// The provider status banner dismissed, by its key.
     pub(crate) dismissed_provider_status: Option<String>,
     pub(crate) restoring_branch: Option<String>,
@@ -580,6 +584,8 @@ impl App {
                     .collect(),
             revealed_notices: Default::default(),
             dismissed_provider_status: None,
+            prompt_length_error: None,
+            typing_guard: Default::default(),
             restoring_branch: None,
             notice_busy: Default::default(),
             dismissed_thread_errors: Default::default(),
