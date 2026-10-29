@@ -12,6 +12,7 @@ use std::time::Duration;
 
 uniffi::setup_scaffolding!();
 
+mod attachments;
 mod badge;
 mod catalog;
 mod compose;

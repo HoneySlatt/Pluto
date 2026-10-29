@@ -200,8 +200,13 @@ they were asked. Pages, sheets and the drawer follow the finger and the
 back gesture (predictive back), rows and cards fade into place, and System
 default follows the phone's 12/24-hour clock.
 
-Not wired yet: attachments (the Attach sheet's Photos, Camera and Files show a
-notice), chat projects' own memories, thread notifications and a background
+Attachments come from the Attach sheet (Photos, Camera, Files): images the
+providers take go inline (a photo they do not take, or over 10 MiB, as a
+JPEG of at most 3072 px), other files up to 50 MiB are uploaded when
+attached (`attachments.createUploadUrl`) and sent by id; a refused message
+brings its attachments back with its text.
+
+Not wired yet: chat projects' own memories, thread notifications and a background
 connection, creating the chat space from the phone, the "ask" line of Needs
 you, unread state, snoozed threads, published pages and MCP apps in the
 timeline (a note points to the computer), and the code blocks' copy button

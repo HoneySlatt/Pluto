@@ -237,7 +237,10 @@ fun Composer(target: Target, placeholder: String) {
     var focused by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val border by animateColorAsState(if (focused) P.focus else P.input, tween(150), label = "composer")
-    val empty = text.isBlank()
+    val attachments = remember(model.revision, key) { core.attachments(key) }
+    val uploading = attachments.any { it.state is app.pluto.core.UploadState.Uploading }
+    // Nothing to send: no text and no attachment.
+    val empty = text.isBlank() && attachments.isEmpty()
     val shape = RoundedCornerShape(28.dp)
     Column(
         Modifier
@@ -247,6 +250,7 @@ fun Composer(target: Target, placeholder: String) {
             .background(P.surface)
             .border(1.dp, border, shape),
     ) {
+        AttachmentsRow(key, attachments)
         Box(Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 180.dp).padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 6.dp)) {
             BasicTextField(
                 text,
@@ -294,7 +298,7 @@ fun Composer(target: Target, placeholder: String) {
                     if (target is Target.Thread) core.stop(target.id)
                 }
             } else {
-                SendButton(stop = false, enabled = !empty && view.online, label = "Send") {
+                SendButton(stop = false, enabled = !empty && !uploading && view.online, label = "Send") {
                     haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                     val outcome = core.send(target, text)
                     val error = outcome.error

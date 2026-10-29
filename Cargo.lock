@@ -3063,6 +3063,7 @@ dependencies = [
 name = "pluto-ffi"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "pluto-core",
  "pulldown-cmark",

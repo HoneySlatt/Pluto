@@ -194,9 +194,21 @@ fn image_model(session: &Session) -> Option<Value> {
 /// Sends `text` from `target`; returns the new thread's id for a draft.
 pub fn send(app: &mut App, target: &Target, text: &str) -> Result<Option<String>, String> {
     let text = text.trim();
-    if text.is_empty() {
+    let attached = app
+        .session
+        .attachments
+        .get(&target.key())
+        .is_some_and(|list| !list.is_empty());
+    if text.is_empty() && !attached {
         return Ok(None);
     }
+    let attachments = Value::Array(app.session.wire_attachments(&target.key())?);
+    // A message of attachments alone takes its title from the first one.
+    let seed = if text.is_empty() {
+        app.session.attachments[&target.key()][0].name.clone()
+    } else {
+        title_seed(text)
+    };
     let App {
         session, drafts, ..
     } = app;
@@ -232,7 +244,8 @@ pub fn send(app: &mut App, target: &Target, text: &str) -> Result<Option<String>
                 &catalog::wire(&selection),
                 "auto",
             );
-            message["titleSeed"] = json!(title_seed(text));
+            message["titleSeed"] = json!(seed);
+            message["attachments"] = attachments;
             if !session.net.online() {
                 return Err(crate::session::NOT_CONNECTED.into());
             }
@@ -268,13 +281,14 @@ pub fn send(app: &mut App, target: &Target, text: &str) -> Result<Option<String>
             let mut input = pluto_core::commands::launch_input(
                 &thread_id,
                 &project.id,
-                &title_seed(text),
+                &seed,
                 &text_out,
                 &model_json,
                 &access,
                 interaction,
             );
             pluto_core::context::apply(&mut input["initialMessage"], &text_out, &records, inline);
+            input["initialMessage"]["attachments"] = attachments;
             if !chat
                 && drafts
                     .worktree

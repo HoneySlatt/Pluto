@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import app.pluto.core.Badge
 import app.pluto.core.RefSwitch
 import app.pluto.mobile.LocalModel
+import kotlinx.coroutines.launch
 import app.pluto.mobile.Page
 import app.pluto.mobile.Sheet
 import kotlinx.coroutines.delay
@@ -140,7 +141,32 @@ fun ThreadMenuSheet(id: String) {
 
 @Composable
 fun AttachSheet() {
-    val core = LocalModel.current.core
+    val model = LocalModel.current
+    val core = model.core
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // The composer the sheet acts for: the shown thread, else the draft.
+    val composer = remember {
+        val shell = core.shell()
+        shell.selected ?: if (shell.chat) "chat" else "code"
+    }
+    val take = { uris: List<android.net.Uri> ->
+        if (uris.isNotEmpty()) {
+            model.nav.back()
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) { attachUris(context, core, composer, uris) }
+        }
+    }
+    val photos = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(20),
+    ) { take(it) }
+    val files = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
+    ) { take(it) }
+    // The camera writes its photo where the app's file provider points.
+    val shot = remember { arrayOfNulls<android.net.Uri>(1) }
+    val camera = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.TakePicture(),
+    ) { saved -> shot[0]?.takeIf { saved }?.let { take(listOf(it)) } }
     // `.tiles`: three tiles in a row.
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp),
@@ -155,7 +181,27 @@ fun AttachSheet() {
                     .pressScale(interaction, .97f)
                     .card(P.overlay, shape)
                     .pressRow(interaction)
-                    .tap(interaction = interaction) { core.toast("Attachments from the phone are not available yet") }
+                    .tap(interaction = interaction) {
+                        when (label) {
+                            "Photos" -> photos.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                            "Files" -> files.launch(arrayOf("*/*"))
+                            else -> {
+                                val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+                                val file = java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.files",
+                                    file,
+                                )
+                                shot[0] = uri
+                                runCatching { camera.launch(uri) }.onFailure { core.toast("No camera app is available") }
+                            }
+                        }
+                    }
                     .padding(horizontal = 8.dp, vertical = 18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),

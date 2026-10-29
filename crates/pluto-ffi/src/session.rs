@@ -24,6 +24,7 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::Hub;
+use crate::attachments::Attached;
 use crate::prefs::Prefs;
 
 /// Reconnection attempts before the session gives up (`#lost`).
@@ -115,7 +116,9 @@ pub struct Session {
     pending: HashSet<String>,
     /// Messages on their way, by request key or command id: their composer
     /// and text, given back if the server refuses them.
-    sends: HashMap<String, (String, String)>,
+    sends: HashMap<String, (String, String, Vec<Attached>)>,
+    /// Each composer's attachments (`attachments.rs`).
+    pub attachments: HashMap<String, Vec<Attached>>,
     /// Texts given back to their composer (by composer key).
     pub unsent: HashMap<String, String>,
     /// The scheduled tasks (`scheduledTasks.subscribe`), once listed.
@@ -160,6 +163,7 @@ impl Session {
             replies: HashMap::new(),
             pending: HashSet::new(),
             sends: HashMap::new(),
+            attachments: HashMap::new(),
             unsent: HashMap::new(),
             tasks: None,
             tasks_streaming: false,
@@ -299,9 +303,21 @@ impl Session {
 
     /// Hands every message on its way back to its composer.
     fn give_back_sends(&mut self) {
-        for (_, (composer, text)) in std::mem::take(&mut self.sends) {
-            self.unsent.entry(composer).or_insert(text);
+        for (_, (composer, text, attachments)) in std::mem::take(&mut self.sends) {
+            self.give_back(composer, text, attachments);
         }
+    }
+
+    /// A message the server did not take: its text and attachments go back
+    /// to its composer.
+    fn give_back(&mut self, composer: String, text: String, attachments: Vec<Attached>) {
+        if !attachments.is_empty() {
+            let list = self.attachments.entry(composer.clone()).or_default();
+            if list.is_empty() {
+                *list = attachments;
+            }
+        }
+        self.unsent.entry(composer).or_insert(text);
     }
 
     /// Sends `action` once the server synchronized; false without a
@@ -571,6 +587,14 @@ impl Session {
                     Asset::Failed(std::time::Instant::now()),
                 );
             }
+            Event::Data(Route::Rpc(key), value) if key.starts_with("file-upload:") => {
+                self.pending.remove(&key);
+                self.upload_target(hub, &key, Ok(value));
+            }
+            Event::Failed(Route::Rpc(key), message) if key.starts_with("file-upload:") => {
+                self.pending.remove(&key);
+                self.upload_target(hub, &key, Err(message));
+            }
             Event::Data(Route::Rpc(key), value) => self.rpc_result(key, Ok(value)),
             Event::Failed(Route::Rpc(key), message) => self.rpc_result(key, Err(message)),
             Event::Data(Route::Command(id), value) => {
@@ -585,8 +609,8 @@ impl Session {
                 // A tracked command shows its failure where it was asked.
                 if self.pending.remove(&key) {
                     self.replies.insert(key, Err(message));
-                } else if let Some((composer, text)) = self.sends.remove(&id) {
-                    self.unsent.entry(composer).or_insert(text);
+                } else if let Some((composer, text, attachments)) = self.sends.remove(&id) {
+                    self.give_back(composer, text, attachments);
                     self.show_toast(format!(
                         "Message not sent: {} Your text is back in the composer.",
                         sentence(&message)
@@ -741,10 +765,12 @@ impl Session {
     /// Sends a message from `composer`: refused, it comes back there.
     pub fn send_message(&mut self, command: Value, composer: String, text: String) -> bool {
         let id = command["commandId"].as_str().unwrap_or_default().to_owned();
-        self.sends.insert(id.clone(), (composer, text));
+        let attachments = self.attachments.remove(&composer).unwrap_or_default();
+        self.sends
+            .insert(id.clone(), (composer.clone(), text, attachments));
         let sent = self.dispatch(command);
-        if !sent {
-            self.sends.remove(&id);
+        if !sent && let Some((_, _, attachments)) = self.sends.remove(&id) {
+            self.attachments.insert(composer, attachments);
         }
         sent
     }
@@ -759,11 +785,13 @@ impl Session {
         text: String,
     ) -> bool {
         let key = format!("launch:{thread_id}");
-        self.sends.insert(key.clone(), (composer, text));
+        let attachments = self.attachments.remove(&composer).unwrap_or_default();
+        self.sends
+            .insert(key.clone(), (composer.clone(), text, attachments));
         self.request(key.clone(), "orchestration.launchThread", input);
         let refused = self.replies.contains_key(&key);
-        if refused {
-            self.sends.remove(&key);
+        if refused && let Some((_, _, attachments)) = self.sends.remove(&key) {
+            self.attachments.insert(composer, attachments);
         }
         !refused
     }
@@ -889,7 +917,7 @@ impl Session {
             // The launch was refused: the draft comes back, and the screen of
             // a thread that will not exist goes home.
             let thread = key.trim_start_matches("launch:").to_owned();
-            self.unsent.entry(sent.0).or_insert(sent.1);
+            self.give_back(sent.0, sent.1, sent.2);
             if self.selected.as_deref() == Some(thread.as_str()) {
                 self.selected = None;
                 self.state.switch_detail(None);

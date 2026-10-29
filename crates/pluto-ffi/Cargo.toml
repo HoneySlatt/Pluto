@@ -9,6 +9,7 @@ description = "Pluto's core for the Android app: the session with the server and
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pluto-core = { path = "../pluto-core" }
 pulldown-cmark = { version = "0.13", default-features = false }
