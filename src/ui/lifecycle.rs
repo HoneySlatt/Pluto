@@ -780,27 +780,6 @@ impl App {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn details_read_as_one_plain_line() {
-        assert_eq!(
-            plain_detail("- Fixed [the parser](src/p.rs)\n- Ran `cargo test`"),
-            "Fixed the parser Ran cargo test"
-        );
-    }
-
-    #[test]
-    fn group_states_count_in_reading_order() {
-        assert_eq!(
-            summarize(&["completed", "running", "failed", "completed", "interrupted"]),
-            "1 working · 2 done · 1 failed · 1 stopped"
-        );
-    }
-}
-
 impl App {
     /// "Subagent of · <parent>", opening the parent (`MessagesTimeline`'s
     /// list header for a subagent thread).
@@ -972,5 +951,26 @@ impl App {
                 20.0,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn details_read_as_one_plain_line() {
+        assert_eq!(
+            plain_detail("- Fixed [the parser](src/p.rs)\n- Ran `cargo test`"),
+            "Fixed the parser Ran cargo test"
+        );
+    }
+
+    #[test]
+    fn group_states_count_in_reading_order() {
+        assert_eq!(
+            summarize(&["completed", "running", "failed", "completed", "interrupted"]),
+            "1 working · 2 done · 1 failed · 1 stopped"
+        );
     }
 }
