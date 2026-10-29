@@ -67,6 +67,7 @@ pub const RED_300: Color32 = Color32::from_rgb(255, 162, 162);
 pub const EMERALD_300: Color32 = Color32::from_rgb(94, 233, 181);
 pub const BLUE_400: Color32 = Color32::from_rgb(81, 162, 255); // --info-foreground
 pub const BLUE_500: Color32 = Color32::from_rgb(43, 127, 255); // --info
+pub const EMERALD_500: Color32 = Color32::from_rgb(0, 188, 125); // --success
 
 /// `color-mix(in oklab, #fff N%, transparent)` on the stock palette.
 const fn white(alpha: f32) -> Color32 {
@@ -97,6 +98,8 @@ pub struct Palette {
     pub primary_foreground: Color32,
     pub warning: Color32,
     pub warning_foreground: Color32,
+    /// `--error`: red-500 mixed 90% with white.
+    pub error: Color32,
     pub error_foreground: Color32,
     pub border: Color32,
     pub input: Color32,
@@ -137,6 +140,7 @@ pub const DARK: Palette = Palette {
     primary_foreground: Color32::WHITE,
     warning: Color32::from_rgb(254, 154, 0),
     warning_foreground: Color32::from_rgb(255, 185, 0),
+    error: Color32::from_rgb(251, 65, 74),
     error_foreground: Color32::from_rgb(255, 100, 103),
     border: white(0.06),
     input: white(0.08),
@@ -279,6 +283,7 @@ impl Palette {
             primary_foreground: pick("messageActionForeground", canvas),
             warning: pick("warning", DARK.warning),
             warning_foreground: pick("warningForeground", DARK.warning_foreground),
+            error: pick("error", DARK.error),
             error_foreground: pick("errorForeground", DARK.error_foreground),
             border: pick("border", input),
             input,
@@ -437,6 +442,9 @@ pub fn warning() -> Color32 {
 }
 pub fn warning_foreground() -> Color32 {
     palette().warning_foreground
+}
+pub fn error() -> Color32 {
+    palette().error
 }
 pub fn error_foreground() -> Color32 {
     palette().error_foreground

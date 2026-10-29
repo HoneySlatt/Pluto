@@ -239,7 +239,12 @@ impl App {
                     pinned.collect()
                 };
                 for version in versions {
-                    self.dispatch(command(&format!("thread.{action}"), &version));
+                    let command = if action == "pin" {
+                        self.pin_command(&version)
+                    } else {
+                        command("thread.unpin", &version)
+                    };
+                    self.dispatch(command);
                 }
             }
             "settle" => self.dispatch(command("thread.settle", id)),

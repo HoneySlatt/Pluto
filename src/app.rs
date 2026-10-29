@@ -1080,11 +1080,40 @@ impl App {
         let woke = crate::snooze::woke_at(thread, self.now)?;
         let woke_time = crate::timeline::parse_time(&woke)?;
         let seen = self
-            .last_visited
-            .get(&thread.id)
-            .and_then(|at| crate::timeline::parse_time(at))
+            .last_visited(thread)
+            .and_then(|at| crate::timeline::parse_time(&at))
             .is_some_and(|visited| visited >= woke_time);
         (!seen && thread.settled_override.as_deref() != Some("settled")).then_some(woke)
+    }
+
+    /// `thread.pin`, at the top of the pinned block on servers that order
+    /// pins (`threadPinReorder`).
+    pub(crate) fn pin_command(&self, thread_id: &str) -> Value {
+        let mut command = crate::model::command("thread.pin", thread_id);
+        if self.capability("threadPinReorder")
+            && let Some(key) = crate::ui::sidebar::top_pin_key(&self.state.threads)
+        {
+            command["orderKey"] = json!(key);
+        }
+        command
+    }
+
+    /// `useAcknowledgeThreadWoke`: the wake at `at` was seen, on the server
+    /// when it tracks visits (it keeps the later time), else here.
+    pub(crate) fn acknowledge_woke(&mut self, thread_id: &str, at: &str) {
+        let tracked = self
+            .state
+            .threads
+            .iter()
+            .find(|t| t.id == thread_id)
+            .is_some_and(|t| t.last_visited_at.is_some());
+        if tracked {
+            let mut command = crate::model::command("thread.visit", thread_id);
+            command["visitedAt"] = json!(at);
+            self.dispatch(command);
+        } else {
+            self.mark_visited(thread_id, at);
+        }
     }
 
     /// `markThreadUnread`: the visit moves to just before the latest

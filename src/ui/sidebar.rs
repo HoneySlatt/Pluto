@@ -92,15 +92,94 @@ pub fn sort_pinned(threads: &mut [&Thread]) {
     });
 }
 
+// Pinned order keys (`threadSort.ts`): base-26 fractions in (0, 1), compared
+// as plain strings; a key never ends with the minimum digit.
+const PIN_DIGITS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+
+fn valid_pin_key(key: &str) -> bool {
+    !key.is_empty() && key.bytes().all(|b| PIN_DIGITS.contains(&b)) && !key.ends_with('a')
+}
+
+/// `pinOrderMidpoint`: a key strictly between `a` and `b` ("" is open).
+fn pin_midpoint(a: &str, b: &str) -> String {
+    let digit = |s: &str, i: usize| s.as_bytes().get(i).copied();
+    if !b.is_empty() {
+        let mut n = 0;
+        while digit(a, n).unwrap_or(b'a') == digit(b, n).unwrap_or(0) {
+            n += 1;
+        }
+        if n > 0 {
+            return format!(
+                "{}{}",
+                &b[..n],
+                pin_midpoint(a.get(n..).unwrap_or(""), &b[n..])
+            );
+        }
+    }
+    let index = |c: u8| PIN_DIGITS.iter().position(|&d| d == c).unwrap_or(0);
+    let low = digit(a, 0).map_or(0, index);
+    let high = digit(b, 0).map_or(PIN_DIGITS.len(), index);
+    if high - low > 1 {
+        return (PIN_DIGITS[(low + high).div_ceil(2).min(25)] as char).to_string();
+    }
+    if b.len() > 1 {
+        return b[..1].to_owned();
+    }
+    format!(
+        "{}{}",
+        PIN_DIGITS[low] as char,
+        pin_midpoint(a.get(1..).unwrap_or(""), "")
+    )
+}
+
+/// `topOfPinnedRunOrderKey`: a key before every keyed pinned thread, so a
+/// new pin lands at the top; `None` when the keys are corrupt.
+pub(crate) fn top_pin_key(threads: &[std::sync::Arc<Thread>]) -> Option<String> {
+    let first = threads
+        .iter()
+        .filter(|t| t.pinned_at.is_some())
+        .filter_map(|t| t.pin_order_key.as_deref())
+        .min();
+    match first {
+        Some(first) if !valid_pin_key(first) => None,
+        Some(first) => Some(pin_midpoint("", first)),
+        None => Some(pin_midpoint("", "")),
+    }
+}
+
+/// `formatWorkingDurationLabel`: "42s", "5m", "1h 5m".
+fn working_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    match seconds {
+        0..60 => format!("{seconds}s"),
+        60..3600 => format!("{}m", seconds / 60),
+        _ => format!("{}h {}m", seconds / 3600, seconds % 3600 / 60),
+    }
+}
+
+/// `resolveSettledThreadTimestamp`: when it was settled, else its latest
+/// activity (user message, run requested, started or completed), else its
+/// update.
 fn settled_timestamp(thread: &Thread) -> Option<&str> {
-    thread
-        .settled_at
-        .as_deref()
-        .or(thread
-            .latest_run
-            .as_ref()
-            .and_then(|r| r.completed_at.as_deref()))
-        .or(Some(thread.updated_at.as_str()))
+    fn parsed(at: &Option<String>) -> Option<(chrono::DateTime<chrono::Utc>, &str)> {
+        at.as_deref()
+            .and_then(|s| crate::timeline::parse_time(s).map(|t| (t, s)))
+    }
+    if let Some((_, at)) = parsed(&thread.settled_at) {
+        return Some(at);
+    }
+    let run = thread.latest_run.as_ref();
+    [
+        parsed(&thread.latest_user_message_at),
+        run.and_then(|r| parsed(&r.requested_at)),
+        run.and_then(|r| parsed(&r.started_at)),
+        run.and_then(|r| parsed(&r.completed_at)),
+    ]
+    .into_iter()
+    .flatten()
+    .max_by_key(|(time, _)| *time)
+    .map(|(_, at)| at)
+    .or_else(|| crate::timeline::parse_time(&thread.updated_at).map(|_| thread.updated_at.as_str()))
 }
 
 pub struct Sections<'a> {
@@ -908,16 +987,14 @@ impl App {
                     .as_ref()
                     .is_some_and(|g| g["status"] == "active") =>
             {
-                Some(("Goal", "circle-dashed", theme::SKY_400))
+                Some(("Goal", "circle-dashed", theme::BLUE_500))
             }
-            Status::Working => Some(("Working", "circle-dashed", theme::SKY_400)),
+            Status::Working => Some(("Working", "circle-dashed", theme::BLUE_500)),
             Status::Waiting => Some(("Waiting", "circle-dot-dashed", theme::muted_foreground())),
             Status::Limited => Some(("Limited", "circle-alert", theme::warning())),
-            Status::Failed => Some(("Failed", "circle-alert", theme::RED_300)),
-            Status::Ready if woke.is_some() => {
-                Some(("Woke", "alarm-clock", theme::warning_foreground()))
-            }
-            Status::Ready if unread => Some(("Done", "circle-check", theme::EMERALD_300)),
+            Status::Failed => Some(("Failed", "circle-alert", theme::error())),
+            Status::Ready if woke.is_some() => Some(("Woke", "alarm-clock", theme::warning())),
+            Status::Ready if unread => Some(("Done", "circle-check", theme::EMERALD_500)),
             Status::Ready => None,
         };
         let is_woke_status = status_label.is_some_and(|(label, _, _)| label == "Woke");
@@ -991,7 +1068,27 @@ impl App {
         if let Some((label, icon, color)) = status_label
             && (!(hovered || snooze_open) || is_woke_status)
         {
-            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium));
+            // Working and Waiting count the time (`WorkingDuration`).
+            let since = match status {
+                Status::Working => thread.working_started_at(),
+                Status::Waiting => thread
+                    .latest_run
+                    .as_ref()
+                    .and_then(|r| r.completed_at.clone()),
+                _ => None,
+            };
+            let duration = since
+                .as_deref()
+                .and_then(crate::timeline::parse_time)
+                .map(|start| working_duration((self.now - start).num_seconds()));
+            let duration_width = duration.as_ref().map_or(0.0, |d| {
+                widgets::tabular_width(ui, d, font(12.0, Weight::Medium)) + 4.0
+            });
+            if duration.is_some() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs(1));
+            }
+            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium)) + duration_width;
             let start = slot_right - width - 20.0;
             theme::paint_icon(
                 ui,
@@ -1010,6 +1107,16 @@ impl App {
                 font(12.0, Weight::Medium),
                 color,
             );
+            if let Some(duration) = &duration {
+                widgets::tabular_text(
+                    ui,
+                    Pos2::new(slot_right - duration_width + 4.0, top + 2.0),
+                    duration,
+                    font(12.0, Weight::Medium),
+                    color,
+                    16.0,
+                );
+            }
             status_width = right - start;
             if is_woke_status {
                 let badge =
@@ -1020,7 +1127,7 @@ impl App {
                 if badge_response.clicked()
                     && let Some(at) = &woke
                 {
-                    self.mark_visited(&thread.id, at);
+                    self.acknowledge_woke(&thread.id, at);
                 }
             }
         } else if !(hovered || snooze_open) {
@@ -1296,7 +1403,7 @@ impl App {
                 if badge_response.clicked()
                     && let Some(at) = &woke
                 {
-                    self.mark_visited(&thread.id, at);
+                    self.acknowledge_woke(&thread.id, at);
                 }
             }
         }
@@ -1421,5 +1528,18 @@ mod tests {
         assert_eq!(ids(&sections.snoozed), ["sooner", "later"]);
         assert_eq!(ids(&sections.active), ["elapsed"]);
         assert!(sections.pinned.is_empty() && sections.settled.is_empty());
+    }
+
+    #[test]
+    fn new_pins_go_first_and_durations_compact() {
+        assert_eq!(pin_midpoint("", ""), "n");
+        assert_eq!(pin_midpoint("", "n"), "h");
+        assert_eq!(pin_midpoint("", "b"), "an");
+        assert!(pin_midpoint("", "ab").as_str() < "ab");
+        assert!(!valid_pin_key("ba"));
+        assert_eq!(working_duration(-3), "0s");
+        assert_eq!(working_duration(42), "42s");
+        assert_eq!(working_duration(300), "5m");
+        assert_eq!(working_duration(3900), "1h 5m");
     }
 }

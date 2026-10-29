@@ -410,12 +410,12 @@ impl App {
                 let Some(thread) = thread else {
                     return false;
                 };
-                let kind = if thread.pinned_at.is_some() {
-                    "thread.unpin"
+                let command = if thread.pinned_at.is_some() {
+                    crate::model::command("thread.unpin", &thread.id)
                 } else {
-                    "thread.pin"
+                    self.pin_command(&thread.id)
                 };
-                self.dispatch(crate::model::command(kind, &thread.id));
+                self.dispatch(command);
             }
             "usage.cost" | "usage.tokens" | "usage.limits" if self.usage_open => {
                 let metric = ["usage.cost", "usage.tokens", "usage.limits"]

@@ -2640,7 +2640,23 @@ impl App {
                 kind: StatusAction::Unsettle,
             });
         }
+        // Only with snoozing; a completion after the wake reads as seen, so a
+        // completion's own wake does not flash (`ChatView`'s visit floor).
+        if !self.capability("threadSnooze") {
+            return None;
+        }
         let woke = self.woke_at(thread)?;
+        let completed = thread
+            .latest_run
+            .as_ref()
+            .and_then(|r| r.completed_at.as_deref())
+            .and_then(crate::timeline::parse_time);
+        if completed
+            .zip(crate::timeline::parse_time(&woke))
+            .is_some_and(|(done, woke)| done >= woke)
+        {
+            return None;
+        }
         Some(StatusLine {
             icon: "alarm-clock",
             label: "Woke from snooze".into(),
@@ -2717,7 +2733,7 @@ impl App {
                 command["reason"] = serde_json::json!("user");
                 self.dispatch(command);
             }
-            StatusAction::Dismiss(at) => self.mark_visited(thread_id, at),
+            StatusAction::Dismiss(at) => self.acknowledge_woke(thread_id, at),
         }
     }
 }

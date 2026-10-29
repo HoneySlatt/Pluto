@@ -1867,6 +1867,13 @@ impl App {
         let composer = self.composer_key(draft);
         let held = self.take_composer();
         self.hold_sent(key, composer, held);
+        // Sending answers a wake as well.
+        if !draft
+            && let Some(thread) = self.current_thread()
+            && let Some(woke) = self.woke_at(&thread)
+        {
+            self.acknowledge_woke(&thread.id, &woke);
+        }
         self.start_turn(send);
         self.chat_mode.research = false;
         self.chat_mode.image = false;
