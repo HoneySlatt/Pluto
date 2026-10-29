@@ -101,7 +101,7 @@ impl App {
     pub(crate) fn composer_key(&self, draft: bool) -> String {
         match (&self.selected, draft) {
             (Some(id), false) => id.clone(),
-            _ => "draft".into(),
+            _ => self.draft_key.clone(),
         }
     }
 

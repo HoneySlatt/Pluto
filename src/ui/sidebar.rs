@@ -503,6 +503,7 @@ impl App {
         } else {
             self.inbox_sidebar(ui, rect);
             self.sidebar_selection_menu(ui);
+            self.draft_row_menu(ui);
         }
         self.sidebar_footer(ui, rect);
     }
@@ -776,7 +777,14 @@ impl App {
             0.0
         };
         let tail_height = snoozed_block + 32.0 + settled_rows as f32 * (LIST_GAP + SLIM_HEIGHT);
-        let content_height = cards.len() as f32 * CARD_SLOT + tail_height + 4.0;
+        // Unsent drafts lead the list, outside search.
+        let draft_rows = if query.is_empty() {
+            self.draft_rows(scope.as_deref())
+        } else {
+            Vec::new()
+        };
+        let drafts_height = Self::draft_block_height(&draft_rows);
+        let content_height = drafts_height + cards.len() as f32 * CARD_SLOT + tail_height + 4.0;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         egui::ScrollArea::vertical()
             .id_salt("sidebar-threads")
@@ -807,10 +815,15 @@ impl App {
                 let (area, _) =
                     ui.allocate_exact_size(Vec2::new(rect.width(), height), Sense::hover());
                 let mut y = area.top();
-                if cards.is_empty() && settled.is_empty() && snoozed_count == 0 {
+                if draft_rows.is_empty()
+                    && cards.is_empty()
+                    && settled.is_empty()
+                    && snoozed_count == 0
+                {
                     self.empty_list(ui, area);
                     return;
                 }
+                y = self.draft_block(ui, area, y, &draft_rows);
                 // The sections a dragged row can land on.
                 use crate::ui::sidebar_drag::Zone;
                 let pinned_count = cards.iter().filter(|t| t.pinned_at.is_some()).count();

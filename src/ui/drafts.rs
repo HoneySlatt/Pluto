@@ -5,10 +5,13 @@
 //! by server. A message on its way keeps its draft until the server took
 //! it: refused, or lost with the connection, it comes back to its composer.
 //!
-//! Not ported: one draft per new-thread session (there is one new-thread
-//! draft by server), files whose upload had not finished when the app
-//! closed (dropped; upstream keeps a reattach row), and the drafts' model
-//! and mode picks (kept for the run only).
+//! New-thread drafts are sessions (`DraftSessionState`): starting a new
+//! thread leaves a draft with content behind under its own key, with its
+//! project, start and workspace, and the sidebar lists it (`draft_rows`).
+//!
+//! Not ported: files whose upload had not finished when the app closed
+//! (dropped; upstream keeps a reattach row), and the drafts' model and
+//! mode picks (kept for the run only).
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -43,11 +46,54 @@ impl ComposerDraft {
     }
 }
 
+/// A new-thread draft's session: where it starts, and since when.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct DraftSession {
+    pub(crate) project_id: Option<String>,
+    pub(crate) created_at: String,
+    /// `local` or `worktree`, when picked.
+    pub(crate) env_mode: Option<String>,
+    pub(crate) branch: Option<String>,
+    pub(crate) worktree: Option<String>,
+}
+
+impl DraftSession {
+    fn entry(&self) -> Value {
+        json!({
+            "projectId": self.project_id,
+            "createdAt": self.created_at,
+            "envMode": self.env_mode,
+            "branch": self.branch,
+            "worktreePath": self.worktree,
+        })
+    }
+
+    fn read(entry: &Value) -> Self {
+        let text = |key: &str| entry[key].as_str().map(str::to_owned);
+        DraftSession {
+            project_id: text("projectId"),
+            created_at: text("createdAt").unwrap_or_default(),
+            env_mode: text("envMode"),
+            branch: text("branch"),
+            worktree: text("worktreePath"),
+        }
+    }
+}
+
+/// A sidebar row for a draft (`SidebarDraftRow`).
+pub(crate) struct DraftRow {
+    pub(crate) key: String,
+    pub(crate) session: DraftSession,
+    pub(crate) preview: String,
+}
+
 /// The drafts of the threads not open, sends in flight and the saving state.
 #[derive(Default)]
 pub(crate) struct Drafts {
     /// By server and composer key (`server\nkey`).
     stored: HashMap<String, ComposerDraft>,
+    /// New-thread draft sessions, by the same scoped key.
+    sessions: HashMap<String, DraftSession>,
     /// Messages on their way, by send key (`launch:<thread>`,
     /// `command:<id>`): their composer key and what it held.
     sent: HashMap<String, (String, ComposerDraft)>,
@@ -170,10 +216,63 @@ pub(crate) fn load(settings: Option<&std::path::Path>) -> Drafts {
         .map(|(key, entry)| (key.clone(), read_draft(entry)))
         .filter(|(_, draft)| !draft.is_empty())
         .collect();
+    let sessions = value["sessions"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, entry)| (key.clone(), DraftSession::read(entry)))
+        .collect();
     Drafts {
         stored,
+        sessions,
         ..Default::default()
     }
+}
+
+/// `draftPreviewText`: the prompt's first line, its references read as
+/// their labels; else how many attachments it holds.
+pub(crate) fn draft_preview(draft: &ComposerDraft) -> String {
+    preview_text(
+        &draft.text,
+        draft.images.len() + draft.files.len() + draft.contexts.len(),
+    )
+}
+
+fn preview_text(prompt: &str, attachments: usize) -> String {
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(open) = rest.find('[') {
+        let after = &rest[open + 1..];
+        match after.find("](").and_then(|close| {
+            after[close + 2..]
+                .find(')')
+                .map(|end| (close, close + 2 + end + 1))
+        }) {
+            Some((close, end)) => {
+                out.push_str(&rest[..open]);
+                out.push_str(&after[..close]);
+                rest = &after[end..];
+            }
+            None => {
+                out.push_str(&rest[..=open]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    let text = out.trim();
+    if !text.is_empty() {
+        return text.to_owned();
+    }
+    format!(
+        "{attachments} attachment{}",
+        if attachments == 1 { "" } else { "s" }
+    )
 }
 
 impl App {
@@ -196,6 +295,170 @@ impl App {
         self.composer_images = draft.images;
         self.composer_files = draft.files;
         self.composer_contexts = draft.contexts;
+    }
+
+    fn composer_is_empty(&self) -> bool {
+        self.composer.trim().is_empty()
+            && self.composer_images.is_empty()
+            && self.composer_files.is_empty()
+            && self.composer_contexts.is_empty()
+    }
+
+    /// The open draft's session as the composer has it now.
+    fn open_session(&self) -> DraftSession {
+        let scope = self.draft_scope(&self.draft_key);
+        let workspace = self.draft_workspace.clone();
+        DraftSession {
+            project_id: self
+                .draft_project_id
+                .clone()
+                .or_else(|| self.draft_project().map(|p| p.id)),
+            created_at: self
+                .drafts
+                .sessions
+                .get(&scope)
+                .map(|s| s.created_at.clone())
+                .filter(|at| !at.is_empty())
+                .unwrap_or_else(crate::model::now_iso),
+            env_mode: self.draft_env_mode.as_ref().map(|(_, mode)| mode.clone()),
+            branch: workspace.as_ref().and_then(|w| w.branch.clone()),
+            worktree: workspace.and_then(|w| w.worktree),
+        }
+    }
+
+    /// Leaving the new-thread draft: one with content keeps its session.
+    pub(crate) fn note_draft_session(&mut self) {
+        if self.selected.is_none() && !self.composer_is_empty() {
+            let session = self.open_session();
+            let scope = self.draft_scope(&self.draft_key);
+            self.drafts.sessions.insert(scope, session);
+            self.drafts.revision += 1;
+        }
+    }
+
+    /// A new-thread surface leaves a draft with content behind and opens a
+    /// fresh one (`Sidebar.tsx`'s new DraftId).
+    pub(crate) fn leave_draft(&mut self) {
+        let open = self.selected.is_none();
+        let has_content = if open {
+            !self.composer_is_empty()
+        } else {
+            self.drafts
+                .stored
+                .get(&self.draft_scope(&self.draft_key))
+                .is_some_and(|d| !d.is_empty())
+        };
+        if !has_content {
+            return;
+        }
+        self.note_draft_session();
+        let old = self.draft_key.clone();
+        self.draft_key = format!("draft:{}", uuid::Uuid::new_v4());
+        if open {
+            self.swap_drafts(&old, &self.draft_key.clone());
+        }
+        self.draft_listed = false;
+    }
+
+    /// Opens a listed draft, where it started.
+    pub(crate) fn open_draft_session(&mut self, key: &str) {
+        if self.selected.is_none() && self.draft_key == key {
+            return;
+        }
+        self.note_draft_session();
+        let scope = self.draft_scope(key);
+        let session = self
+            .drafts
+            .sessions
+            .get(&scope)
+            .cloned()
+            .unwrap_or_default();
+        if self.selected.is_none() {
+            let old = self.draft_key.clone();
+            self.swap_drafts(&old, key);
+            self.draft_key = key.to_owned();
+        } else {
+            self.draft_key = key.to_owned();
+            self.select_thread(None);
+        }
+        self.legacy_selection.clear();
+        self.draft_project_id = session.project_id.clone();
+        self.draft_env_mode = session
+            .env_mode
+            .clone()
+            .zip(session.project_id.clone())
+            .map(|(mode, project)| (project, mode));
+        self.draft_workspace = session.project_id.clone().and_then(|project| {
+            (session.branch.is_some() || session.worktree.is_some()).then(|| {
+                crate::ui::branch_picker::DraftWorkspace {
+                    project,
+                    branch: session.branch.clone(),
+                    worktree: session.worktree.clone(),
+                    from_origin: None,
+                }
+            })
+        });
+        self.draft_listed = true;
+    }
+
+    /// Discards a draft; the open one leaves an empty composer.
+    pub(crate) fn discard_draft_session(&mut self, key: &str) {
+        let scope = self.draft_scope(key);
+        self.drafts.stored.remove(&scope);
+        self.drafts.sessions.remove(&scope);
+        if self.selected.is_none() && self.draft_key == key {
+            let _ = self.take_composer();
+            self.draft_listed = false;
+        }
+        self.drafts.revision += 1;
+    }
+
+    /// `SidebarDraftBlock`'s rows: new-thread drafts with content in
+    /// `scope`'s project (any without one), newest first. The open draft
+    /// shows only when it was opened from the list.
+    pub(crate) fn draft_rows(&self, scope: Option<&str>) -> Vec<DraftRow> {
+        let prefix = self.draft_scope("draft");
+        let open_key = self.selected.is_none().then_some(self.draft_key.as_str());
+        let mut rows: Vec<DraftRow> = Vec::new();
+        for (scoped, draft) in &self.drafts.stored {
+            let Some(key) = scoped
+                .strip_prefix(&prefix[..prefix.len() - "draft".len()])
+                .filter(|k| k.starts_with("draft"))
+            else {
+                continue;
+            };
+            if Some(key) == open_key || draft.is_empty() {
+                continue;
+            }
+            let session = self
+                .drafts
+                .sessions
+                .get(scoped)
+                .cloned()
+                .unwrap_or_default();
+            rows.push(DraftRow {
+                key: key.to_owned(),
+                preview: draft_preview(draft),
+                session,
+            });
+        }
+        if let Some(key) = open_key.filter(|_| self.draft_listed && !self.composer_is_empty()) {
+            rows.push(DraftRow {
+                key: key.to_owned(),
+                preview: preview_text(
+                    &self.composer,
+                    self.composer_images.len()
+                        + self.composer_files.len()
+                        + self.composer_contexts.len(),
+                ),
+                session: self.open_session(),
+            });
+        }
+        rows.retain(|row| {
+            scope.is_none_or(|scope| row.session.project_id.as_deref().is_none_or(|p| p == scope))
+        });
+        rows.sort_by(|a, b| b.session.created_at.cmp(&a.session.created_at));
+        rows
     }
 
     /// `useThreadHasUnsentDraft`: a thread not open keeps a draft.
@@ -412,7 +675,20 @@ impl App {
             .collect();
         encoded.retain(|id, _| held.contains(id));
         self.drafts.encoded = encoded;
-        let text = json!({"version": 1, "drafts": entries}).to_string();
+        // Sessions go with their drafts.
+        let sessions: serde_json::Map<String, Value> = self
+            .drafts
+            .sessions
+            .iter()
+            .filter(|(key, _)| entries.contains_key(*key))
+            .map(|(key, session)| (key.clone(), session.entry()))
+            .collect();
+        let open_scope = self.draft_scope(&self.draft_key);
+        let mut sessions = sessions;
+        if self.selected.is_none() && entries.contains_key(&open_scope) {
+            sessions.insert(open_scope, self.open_session().entry());
+        }
+        let text = json!({"version": 1, "drafts": entries, "sessions": sessions}).to_string();
         Some((path, text))
     }
 }
@@ -442,6 +718,66 @@ fn write_drafts(path: &std::path::Path, text: Option<String>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_thread_drafts_stay_behind_as_rows() {
+        use crate::app::{App, Options};
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+        let config = json!({"type": "snapshot", "config": {"providers": []}});
+        let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
+            "projects": [{"id": "p", "title": "Plain", "workspaceRoot": "/fixture/plain"}],
+            "threads": []}});
+        let app = harness.state_mut();
+        app.load_offline(&config, &shell).unwrap();
+        app.start_draft(Some("p".into()));
+        app.composer = "First idea".into();
+        // A new thread leaves the draft behind, listed.
+        app.start_draft(Some("p".into()));
+        assert!(app.composer.is_empty());
+        let rows = app.draft_rows(None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].preview, "First idea");
+        assert_eq!(rows[0].session.project_id.as_deref(), Some("p"));
+        // Opening it brings its text back; it stays listed while open.
+        let key = rows[0].key.clone();
+        app.composer = "Second".into();
+        app.open_draft_session(&key);
+        assert_eq!(app.composer, "First idea");
+        let keys: Vec<String> = app.draft_rows(None).into_iter().map(|r| r.key).collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&key));
+        app.discard_draft_session(&key);
+        assert!(app.composer.is_empty());
+        assert_eq!(app.draft_rows(None).len(), 1);
+    }
+
+    #[test]
+    fn draft_rows_preview_their_first_line() {
+        assert_eq!(
+            preview_text("\n  Look at [main.rs](file:///a/main.rs) now\nmore", 0),
+            "Look at main.rs now"
+        );
+        assert_eq!(preview_text("  ", 1), "1 attachment");
+        assert_eq!(preview_text("", 3), "3 attachments");
+        let session = DraftSession {
+            project_id: Some("p".into()),
+            created_at: "2026-10-29T10:00:00.000Z".into(),
+            env_mode: Some("worktree".into()),
+            branch: Some("main".into()),
+            worktree: None,
+        };
+        assert_eq!(DraftSession::read(&session.entry()), session);
+    }
 
     #[test]
     fn drafts_round_trip_without_unfinished_uploads() {

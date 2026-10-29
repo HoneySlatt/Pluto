@@ -97,6 +97,12 @@ pub struct App {
     thread_retry: Option<(String, u8, bool)>,
     /// Project of the open new-thread draft; `None` follows the latest project.
     pub(crate) draft_project_id: Option<String>,
+    /// The open new-thread draft's composer key (`draft`, `draft:<id>`), and
+    /// whether it was opened from the sidebar's draft rows.
+    pub(crate) draft_key: String,
+    pub(crate) draft_listed: bool,
+    /// A draft row's menu, by draft key.
+    pub(crate) draft_menu: Option<(String, crate::ui::context_menu::State)>,
     /// Where the open draft starts, when picked (`DraftThreadEnvMode`):
     /// `local` or `worktree`, by project.
     pub(crate) draft_env_mode: Option<(String, String)>,
@@ -563,6 +569,9 @@ impl App {
             selected: None,
             thread_retry: None,
             draft_project_id: None,
+            draft_key: "draft".into(),
+            draft_listed: false,
+            draft_menu: None,
             draft_env_mode: None,
             draft_workspace: None,
             branch_picker: Default::default(),
@@ -1291,7 +1300,11 @@ impl App {
         }
         // The composer keeps each thread's draft.
         let from = self.composer_key(false);
-        self.swap_drafts(&from, id.as_deref().unwrap_or("draft"));
+        if self.selected.is_none() {
+            self.note_draft_session();
+        }
+        let to = id.clone().unwrap_or_else(|| self.draft_key.clone());
+        self.swap_drafts(&from, &to);
         self.selected = id.clone();
         self.state.switch_detail(id.as_deref());
         self.expansion = Expansion::default();
@@ -1458,6 +1471,7 @@ impl App {
         let project_id = project_id
             .or_else(|| self.current_thread().map(|t| t.project_id.clone()))
             .or_else(|| self.draft_project().map(|p| p.id));
+        self.leave_draft();
         self.select_thread(None);
         // A draft clears the sidebar's selection.
         self.legacy_selection.clear();
@@ -1465,7 +1479,7 @@ impl App {
         self.draft_project_id = project_id;
         // A new draft starts from its project's default or the last model
         // picked (`applyStickyState`), not from the last draft's pick.
-        self.composer_selection.remove("draft");
+        self.composer_selection.remove(&self.draft_key.clone());
         self.draft_env_mode = None;
         self.draft_workspace = None;
     }
