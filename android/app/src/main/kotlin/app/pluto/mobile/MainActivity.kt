@@ -12,6 +12,8 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var model: Model
@@ -40,8 +42,15 @@ class MainActivity : ComponentActivity() {
         // to look at the screens without a server.
         if (BuildConfig.DEBUG) {
             intent.getStringExtra("demo")?.let { name ->
-                val error = model.core.loadDemo(java.io.File(filesDir, name).readText())
-                if (error != null) model.core.toast(error)
+                val text = java.io.File(filesDir, name).readText()
+                // A remembered server connects first: the demo's images
+                // then come from it.
+                lifecycleScope.launch {
+                    if (model.secret.load() != null) {
+                        repeat(50) { if (!model.core.online()) kotlinx.coroutines.delay(200) }
+                    }
+                    model.core.loadDemo(text)?.let { model.core.toast(it) }
+                }
             }
         }
     }

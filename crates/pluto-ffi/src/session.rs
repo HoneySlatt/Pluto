@@ -74,7 +74,13 @@ pub enum Asset {
     Missing,
     /// Raster bytes (an SVG arrives rendered as PNG).
     Ready(Arc<Vec<u8>>),
+    /// The last try failed then: the next one waits a little (the screens
+    /// ask on every frame they show it).
+    Failed(std::time::Instant),
 }
+
+/// How long a failed image waits before it is asked for again.
+const ASSET_RETRY: Duration = Duration::from_secs(20);
 
 pub struct Session {
     pub state: State,
@@ -540,8 +546,11 @@ impl Session {
                 self.fetch_asset(hub, &key["asset:".len()..], &value);
             }
             Event::Failed(Route::Rpc(key), _) if key.starts_with("asset:") => {
-                // A failure is tried again on the next showing.
-                self.assets.remove(&key["asset:".len()..]);
+                // A failure is tried again a little later.
+                self.assets.insert(
+                    key["asset:".len()..].to_owned(),
+                    Asset::Failed(std::time::Instant::now()),
+                );
             }
             Event::Data(Route::Rpc(key), value) => self.rpc_result(key, Ok(value)),
             Event::Failed(Route::Rpc(key), message) => self.rpc_result(key, Err(message)),
@@ -598,6 +607,7 @@ impl Session {
     fn asset(&mut self, key: &str, resource: Value) -> Option<Arc<Vec<u8>>> {
         match self.assets.get(key) {
             Some(Asset::Ready(bytes)) => return Some(bytes.clone()),
+            Some(Asset::Failed(at)) if at.elapsed() >= ASSET_RETRY => {}
             Some(_) => return None,
             None => {}
         }
@@ -643,9 +653,11 @@ impl Session {
                     Some(bytes) => {
                         app.session.assets.insert(key, Asset::Ready(Arc::new(bytes)));
                     }
-                    // A failed download is tried again on the next showing.
+                    // A failed download is tried again a little later.
                     None => {
-                        app.session.assets.remove(&key);
+                        app.session
+                            .assets
+                            .insert(key, Asset::Failed(std::time::Instant::now()));
                     }
                 }
             });

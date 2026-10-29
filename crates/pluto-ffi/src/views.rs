@@ -1037,6 +1037,17 @@ impl Core {
             .map(|bytes| bytes.to_vec())
     }
 
+    /// TEMPORARY: an image's state, for debugging.
+    pub fn debug_asset(&self, key: String) -> String {
+        self.read(|app| match app.session.assets.get(&key) {
+            None => "none".into(),
+            Some(crate::session::Asset::Pending) => "pending".into(),
+            Some(crate::session::Asset::Missing) => "missing".into(),
+            Some(crate::session::Asset::Ready(b)) => format!("ready {}", b.len()),
+            Some(crate::session::Asset::Failed(at)) => format!("failed {:?} ago", at.elapsed()),
+        } + &format!(" online={} server={}", app.session.net.online(), app.session.server))
+    }
+
     /// A message's image, asked for on first use.
     pub fn attachment(&self, id: String) -> Option<Vec<u8>> {
         self.hub
@@ -1133,13 +1144,18 @@ impl Core {
         };
         self.update(|app, _| {
             let s = &mut app.session;
-            s.server = "http://demo.invalid:3773".into();
-            s.state.config_event(&demo["config"]);
+            // Over a connected session, its images still come from the server.
+            if !s.net.in_session() {
+                if s.server.is_empty() {
+                    s.server = "http://demo.invalid:3773".into();
+                }
+                s.net = Net::Connected;
+                s.state.config_event(&demo["config"]);
+            }
             if let Err(error) = s.state.shell(&demo["shell"]) {
                 return Some(error);
             }
             s.listed = true;
-            s.net = Net::Connected;
             if let Some(id) = demo["thread"].as_str() {
                 s.selected = Some(id.to_owned());
                 s.state.switch_detail(Some(id));

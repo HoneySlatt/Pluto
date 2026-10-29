@@ -451,6 +451,7 @@ private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also { images[image.id] = it }
         }
     }
+    android.util.Log.d("PlutoDebug", "attachment ${image.id}: ${model.core.debugAsset("attachment:" + image.id)} bitmap=${bitmap != null}")
     val shape = RoundedCornerShape(14.dp)
     Box(
         modifier.aspectRatio(4f / 3f).card(P.chip, shape),
