@@ -441,7 +441,7 @@ fun decodeImage(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
 // decoded off the main thread and kept in `images`; asked again with each
 // change until it is there.
 @Composable
-private fun rememberImage(key: String, name: String, fetch: () -> ByteArray?): app.pluto.mobile.Viewed? {
+internal fun rememberImage(key: String, name: String, fetch: () -> ByteArray?): app.pluto.mobile.Viewed? {
     val model = LocalModel.current
     val cached = images[key]
     val tick = if (cached == null) model.revision else -1

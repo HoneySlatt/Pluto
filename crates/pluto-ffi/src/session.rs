@@ -713,6 +713,35 @@ impl Session {
         self.request(key, "generatedImages.list", json!({"threadId": thread}));
     }
 
+    /// An image already loaded under `key`.
+    pub fn ready_asset(&self, key: &str) -> Option<Arc<Vec<u8>>> {
+        match self.assets.get(key) {
+            Some(Asset::Ready(bytes)) => Some(bytes.clone()),
+            _ => None,
+        }
+    }
+
+    /// Marks `key` as on its way; false when it already is (or failed
+    /// moments ago).
+    pub fn start_asset(&mut self, key: &str) -> bool {
+        match self.assets.get(key) {
+            Some(Asset::Failed(at)) if at.elapsed() >= ASSET_RETRY => {}
+            Some(_) => return false,
+            None => {}
+        }
+        self.assets.insert(key.to_owned(), Asset::Pending);
+        true
+    }
+
+    /// A download started with `start_asset` finished.
+    pub fn finish_asset(&mut self, key: String, image: Option<Vec<u8>>) {
+        let asset = match image {
+            Some(bytes) => Asset::Ready(Arc::new(bytes)),
+            None => Asset::Failed(std::time::Instant::now()),
+        };
+        self.assets.insert(key, asset);
+    }
+
     /// An image the server serves (`assets.createUrl`), asked for once.
     fn asset(&mut self, key: &str, resource: Value) -> Option<Arc<Vec<u8>>> {
         match self.assets.get(key) {

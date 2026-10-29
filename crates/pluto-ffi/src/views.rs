@@ -1189,6 +1189,64 @@ impl Core {
         self.update(|app, _| app.session.watch_generated(&thread));
     }
 
+    /// An answer's markdown image (`classifyMarkdownImageSource`): a file
+    /// of the open thread's workspace through the server, a URL fetched
+    /// here, or a data URL; asked for on first use.
+    pub fn markdown_image(&self, src: String) -> Option<Vec<u8>> {
+        use pluto_core::media::{ImageSource, classify};
+        let mut app = self.hub.lock();
+        let session = &mut app.session;
+        let thread = session.selected.clone()?;
+        let root = session.thread(&thread).and_then(|t| {
+            t.worktree_path.clone().or_else(|| {
+                session
+                    .state
+                    .project(&t.project_id)
+                    .map(|p| p.workspace_root.clone())
+            })
+        });
+        match classify(&src, root.as_deref()) {
+            ImageSource::File(path) => session.generated_image(&thread, &path).map(|b| b.to_vec()),
+            ImageSource::Direct(url) if url.starts_with("data:") => {
+                use base64::Engine;
+                let (head, data) = url.split_once(',')?;
+                if !head.contains(";base64") || data.len() > 14_000_000 {
+                    return None;
+                }
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(data.trim())
+                    .ok()?;
+                crate::images::raster(&bytes)
+            }
+            ImageSource::Direct(url) => {
+                let url = if url.starts_with("//") {
+                    format!("https:{url}")
+                } else {
+                    url
+                };
+                let parsed = url::Url::parse(&url)
+                    .ok()
+                    .filter(|u| matches!(u.scheme(), "http" | "https"))?;
+                let key = format!("direct:{url}");
+                if let Some(bytes) = session.ready_asset(&key) {
+                    return Some(bytes.to_vec());
+                }
+                if session.start_asset(&key) {
+                    let hub = std::sync::Arc::downgrade(&self.hub);
+                    std::thread::spawn(move || {
+                        let image =
+                            pluto_core::http::get(&parsed).and_then(|b| crate::images::raster(&b));
+                        if let Some(hub) = hub.upgrade() {
+                            hub.update(|app, _| app.session.finish_asset(key, image));
+                        }
+                    });
+                }
+                None
+            }
+            ImageSource::Blocked => None,
+        }
+    }
+
     /// A message's image, asked for on first use.
     pub fn attachment(&self, id: String) -> Option<Vec<u8>> {
         self.hub

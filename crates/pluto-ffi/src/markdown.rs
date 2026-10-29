@@ -29,6 +29,12 @@ pub enum BlockKind {
         tokens: Vec<CodeToken>,
     },
     Rule,
+    /// An image (`![alt](src)`), on its own row; the core loads it
+    /// (`Core::markdown_image`).
+    Image {
+        src: String,
+        alt: String,
+    },
     Table {
         header: Vec<Vec<Span>>,
         rows: Vec<Vec<Vec<Span>>>,
@@ -66,6 +72,8 @@ struct Builder {
     heading: Option<u8>,
     code: Option<(String, String)>,
     table: Option<Table>,
+    /// An image being read: its source and alt text.
+    image: Option<(String, String)>,
 }
 
 /// A table being read: its header, its rows, the row being read, and
@@ -74,6 +82,10 @@ type Table = (Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>, Vec<Vec<Span>>, bool);
 
 impl Builder {
     fn push_text(&mut self, text: &str, code: bool) {
+        if let Some((_, alt)) = &mut self.image {
+            alt.push_str(text);
+            return;
+        }
         if let Some((_, body)) = &mut self.code {
             body.push_str(text);
             return;
@@ -131,6 +143,7 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
         heading: None,
         code: None,
         table: None,
+        image: None,
     };
     for event in Parser::new_ext(markdown, options) {
         match event {
@@ -171,8 +184,14 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 Tag::Emphasis => b.style.italic = b.style.italic.saturating_add(1),
                 Tag::Strong => b.style.bold = b.style.bold.saturating_add(1),
                 Tag::Strikethrough => b.style.strike = b.style.strike.saturating_add(1),
-                Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
+                Tag::Link { dest_url, .. } => {
                     b.style.link.push(safe_url(&dest_url));
+                }
+                // The text before it stays its paragraph; the image gets
+                // its own row.
+                Tag::Image { dest_url, .. } => {
+                    b.flush(BlockKind::Paragraph);
+                    b.image = Some((dest_url.to_string(), String::new()));
                 }
                 Tag::Table(_) => {
                     b.flush(BlockKind::Paragraph);
@@ -218,8 +237,19 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 TagEnd::Emphasis => b.style.italic = b.style.italic.saturating_sub(1),
                 TagEnd::Strong => b.style.bold = b.style.bold.saturating_sub(1),
                 TagEnd::Strikethrough => b.style.strike = b.style.strike.saturating_sub(1),
-                TagEnd::Link | TagEnd::Image => {
+                TagEnd::Link => {
                     b.style.link.pop();
+                }
+                TagEnd::Image => {
+                    if let Some((src, alt)) = b.image.take() {
+                        b.blocks.push(Block {
+                            kind: BlockKind::Image { src, alt },
+                            spans: Vec::new(),
+                            indent: b.lists.len().min(255) as u8,
+                            marker: b.marker.take(),
+                            quote: b.quote,
+                        });
+                    }
                 }
                 TagEnd::TableCell => {
                     let cell = std::mem::take(&mut b.spans);

@@ -5,10 +5,14 @@ package app.pluto.mobile.ui
 // list items with their marker, quotes, code, rules and tables. Only
 // http(s) and mailto links are links; any HTML stays text.
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -26,7 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.AnnotatedString
@@ -45,6 +51,7 @@ import app.pluto.core.TokenKind
 import app.pluto.core.CodeToken
 import app.pluto.core.BlockKind
 import app.pluto.core.Span
+import app.pluto.mobile.LocalModel
 
 // `boxed`: the inline code's box is drawn around it (`Paragraph`), else
 // its fill marks it.
@@ -101,7 +108,7 @@ private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
         last -> 0.dp
         inList && !listEnd -> 8.dp
         else -> when (block.kind) {
-            is BlockKind.Code, is BlockKind.Table -> 14.dp
+            is BlockKind.Code, is BlockKind.Table, is BlockKind.Image -> 14.dp
             is BlockKind.Heading -> 8.dp
             else -> 12.dp
         }
@@ -127,6 +134,7 @@ private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
                 is BlockKind.Code -> CodeBlock(kind.language, kind.text, kind.tokens)
                 is BlockKind.Rule -> Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(P.input))
                 is BlockKind.Table -> Table(kind.header, kind.rows)
+                is BlockKind.Image -> MarkdownImage(kind.src, kind.alt)
             }
         }
     }
@@ -279,3 +287,35 @@ private fun Cell(content: List<Span>, head: Boolean, bottom: Boolean) {
     }
 }
 
+
+// An answer's image (`![alt](src)`): as wide as the answer at its own
+// ratio once loaded, a tap opens it full screen; until then (or when it
+// cannot load) its alt text beside an image icon.
+@Composable
+private fun MarkdownImage(src: String, alt: String) {
+    val model = LocalModel.current
+    val name = alt.ifBlank { src.substringAfterLast('/') }
+    val viewed = rememberImage("markdown:$src", name) { model.core.markdownImage(src) }
+    val bitmap = viewed?.bitmap
+    val shape = RoundedCornerShape(16.dp)
+    if (bitmap != null) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(bitmap.width.toFloat() / bitmap.height)
+                .clip(shape)
+                .tap(label = "Open $name") { model.viewer = viewed },
+        ) {
+            Image(bitmap, name, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+        }
+    } else {
+        Row(
+            Modifier.heightIn(min = 40.dp).card(P.chip, shape).padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon("image", P.muted, size = 16.dp)
+            T(name, 14f, P.muted2, lines = 2)
+        }
+    }
+}
