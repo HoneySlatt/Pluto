@@ -918,6 +918,19 @@ fn spacer(ui: &Ui, font: egui::FontId, width: f32, line_height: f32) -> egui::Te
     format
 }
 
+/// Appends one section per call: the inline's bookkeeping (`chips`,
+/// `files`, `icons`, `links`) is indexed by section, so egui's merging of
+/// a section into the previous one of the same format must not happen.
+fn push_section(job: &mut LayoutJob, text: &str, leading_space: f32, format: egui::TextFormat) {
+    let start = job.text.len();
+    job.text.push_str(text);
+    job.sections.push(egui::text::LayoutSection {
+        leading_space,
+        byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(job.text.len()),
+        format,
+    });
+}
+
 /// The job and its per-section metadata, with a line break inserted before
 /// the sections (by their index without the inserted breaks) in `breaks`.
 #[allow(clippy::too_many_arguments)]
@@ -950,7 +963,7 @@ fn build_inlines(
             inserted.push(chips.len());
             // The zero-width space marks the break as layout-only, so copies
             // drop it (`widgets::CopyCleanup`).
-            job.append("\u{200B}\n", 0.0, newline.clone());
+            push_section(job, "\u{200B}\n", 0.0, newline.clone());
             chips.push(None);
             files.push(None);
             icons.push(None);
@@ -1006,7 +1019,7 @@ fn build_inlines(
                 } else {
                     0.0
                 };
-                job.append(text, leading, format);
+                push_section(&mut job, text, leading, format);
                 chips.push(None);
                 files.push(None);
                 icons.push(link_icon.take());
@@ -1027,12 +1040,14 @@ fn build_inlines(
                     &mut links,
                     &mut inserted,
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     &label,
                     chip_lead(chip_size),
                     widgets::format(chip_font.clone(), text, line_height),
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     "\u{a0}",
                     0.0,
                     spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
@@ -1062,12 +1077,14 @@ fn build_inlines(
                     &mut links,
                     &mut inserted,
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     &label,
                     chip_lead(chip_size),
                     widgets::format(chip_font.clone(), text, line_height),
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     "\u{a0}",
                     0.0,
                     spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
@@ -1097,12 +1114,14 @@ fn build_inlines(
                     &mut links,
                     &mut inserted,
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     &label_text,
                     chip_lead(chip_size),
                     widgets::format(chip_font.clone(), text, line_height),
                 );
-                job.append(
+                push_section(
+                    &mut job,
                     "\u{a0}",
                     0.0,
                     spacer(ui, chip_font, 0.5 * chip_size + 1.0, line_height),
@@ -1127,13 +1146,14 @@ fn build_inlines(
                 let space = ui.fonts_mut(|f| f.glyph_width(&pad_font, ' '));
                 let mut pad = widgets::format(pad_font, Color32::TRANSPARENT, line_height);
                 pad.extra_letter_spacing = 6.6 - space;
-                job.append(" ", 0.0, pad.clone());
-                job.append(
+                push_section(&mut job, " ", 0.0, pad.clone());
+                push_section(
+                    &mut job,
                     code,
                     0.0,
                     widgets::format(code_font, theme::foreground(), line_height),
                 );
-                job.append(" ", 0.0, pad);
+                push_section(&mut job, " ", 0.0, pad);
                 chips.extend([Some(chip), Some(chip), Some(chip)]);
                 files.extend([None, None, None]);
                 icons.extend([None, None, None]);
@@ -1141,7 +1161,8 @@ fn build_inlines(
                 chip += 1;
             }
             Inline::Break => {
-                job.append(
+                push_section(
+                    &mut job,
                     "\n",
                     0.0,
                     widgets::format(font(size, base_weight), color, line_height),
@@ -2982,6 +3003,42 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_chip_after_a_soft_break_keeps_its_own_section() {
+        // egui merges a section into the previous one of the same format:
+        // the text and its soft break became one section, and the file chip
+        // after them took the section of the space that follows its label.
+        let blocks = parse_with("Here :\n`/fixture/out/pluto-arm64-v8a.apk`", false);
+        let Block::Paragraph(inlines) = &blocks[0] else {
+            panic!("{blocks:?}")
+        };
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut laid = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            laid = Some(layout_inlines(
+                ui,
+                inlines,
+                14.0,
+                20.0,
+                Weight::Regular,
+                Color32::WHITE,
+                600.0,
+                &HashMap::new(),
+            ));
+        });
+        output.textures_delta.clear();
+        let laid = laid.unwrap();
+        let text = &laid.galley.job.text;
+        let at = text.find("pluto").unwrap();
+        let section = char_sections(&laid.galley)[text[..at].chars().count()];
+        assert!(
+            matches!(laid.files.get(section), Some(Some(_))),
+            "the label's section {section} is not the chip's: {:?}",
+            laid.galley.job.sections
+        );
     }
 
     #[test]
