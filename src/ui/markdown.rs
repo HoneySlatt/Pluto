@@ -2,7 +2,10 @@
 //! margins collapse like CSS, inline code gets its padded chip, fenced code
 //! uses the pierre-dark highlighter, tables use the 12px compact layout.
 //! File references become file chips and external links lead with their
-//! site's icon (`md_links`).
+//! site's icon (`md_links`). GitHub alerts (`> [!NOTE]`), footnotes and
+//! bare URLs follow remark-gfm and `markdownGithubAlerts.ts`; answers keep
+//! the sanitized HTML of `md_html` (`<details>` as a disclosure), user
+//! messages show HTML as typed.
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -31,6 +34,8 @@ pub(crate) struct Style {
     pub(crate) italic: bool,
     pub(crate) strike: bool,
     pub(crate) link: Option<String>,
+    /// Inside a `<script>` or `<style>`, whose text the sanitizer drops.
+    pub(crate) hidden: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -123,7 +128,13 @@ fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
         match block {
             Block::Paragraph(i) | Block::Heading(_, i) => inlines(i, out),
             Block::List { items, .. } => items.iter().for_each(|item| collect_files(item, out)),
-            Block::Quote(blocks) => collect_files(blocks, out),
+            Block::Quote(blocks) | Block::Alert(_, blocks) => collect_files(blocks, out),
+            Block::Details {
+                summary, blocks, ..
+            } => {
+                inlines(summary, out);
+                collect_files(blocks, out);
+            }
             Block::Table { head, rows, .. } => {
                 head.iter().for_each(|cell| inlines(cell, out));
                 rows.iter().flatten().for_each(|cell| inlines(cell, out));
@@ -151,6 +162,14 @@ enum Block {
         rows: Vec<Vec<Vec<Inline>>>,
     },
     Quote(Vec<Block>),
+    /// A GitHub alert (`> [!NOTE]`): its kind's title over ordinary text.
+    Alert(&'static str, Vec<Block>),
+    /// `<details>` (`MarkdownDetails`): a disclosure under its summary.
+    Details {
+        summary: Vec<Inline>,
+        open: bool,
+        blocks: Vec<Block>,
+    },
     Rule,
     /// An image alone in its paragraph (`markStandaloneImages`); images
     /// within a line of text keep their alt text.
@@ -167,14 +186,356 @@ fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_GFM);
+    options.insert(Options::ENABLE_FOOTNOTES);
     let events: Vec<Event> = Parser::new_ext(text, options)
         .map(|event| match event {
             Event::SoftBreak if line_breaks => Event::HardBreak,
             event => event,
         })
         .collect();
+    // User messages show HTML as typed; answers parse the sanitized tags.
+    RAW_HTML.set(!line_breaks);
+    FOOTNOTES.with_borrow_mut(Footnotes::clear);
     let mut index = 0;
-    parse_blocks(&events, &mut index, None)
+    let mut blocks = parse_blocks(&events, &mut index, None);
+    // `remark-gfm`'s footnotes section: a rule, then the definitions in the
+    // order of their first reference.
+    let mut definitions = FOOTNOTES.with_borrow_mut(Footnotes::take);
+    if !definitions.is_empty() {
+        definitions.sort_by_key(|(number, _)| *number);
+        blocks.push(Block::Rule);
+        blocks.push(Block::List {
+            start: Some(1),
+            items: definitions.into_iter().map(|(_, blocks)| blocks).collect(),
+        });
+    }
+    autolink_blocks(&mut blocks);
+    blocks
+}
+
+thread_local! {
+    /// Whether the text being parsed keeps its raw HTML's meaning.
+    static RAW_HTML: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    static FOOTNOTES: std::cell::RefCell<Footnotes> = std::cell::RefCell::new(Footnotes::default());
+}
+
+/// Footnote numbers by label (first reference first), and the definitions.
+#[derive(Default)]
+struct Footnotes {
+    numbers: Vec<String>,
+    definitions: Vec<(String, Vec<Block>)>,
+}
+
+impl Footnotes {
+    fn clear(&mut self) {
+        *self = Footnotes::default();
+    }
+
+    fn number(&mut self, label: &str) -> usize {
+        match self.numbers.iter().position(|l| l == label) {
+            Some(index) => index + 1,
+            None => {
+                self.numbers.push(label.to_owned());
+                self.numbers.len()
+            }
+        }
+    }
+
+    fn take(&mut self) -> Vec<(usize, Vec<Block>)> {
+        let definitions = std::mem::take(&mut self.definitions);
+        definitions
+            .into_iter()
+            .map(|(label, blocks)| (self.number(&label), blocks))
+            .collect()
+    }
+}
+
+/// A footnote reference: its number, as a link-colored `[n]`.
+fn footnote_reference(label: &str) -> Inline {
+    let number = FOOTNOTES.with_borrow_mut(|f| f.number(label));
+    Inline::Text(
+        format!("[{number}]"),
+        Style {
+            link: Some(format!("#user-content-fn-{label}")),
+            ..Style::default()
+        },
+    )
+}
+
+/// `GITHUB_ALERT_PRESENTATIONS`' labels by kind.
+fn alert_kind(kind: pulldown_cmark::BlockQuoteKind) -> &'static str {
+    use pulldown_cmark::BlockQuoteKind;
+    match kind {
+        BlockQuoteKind::Note => "note",
+        BlockQuoteKind::Tip => "tip",
+        BlockQuoteKind::Important => "important",
+        BlockQuoteKind::Warning => "warning",
+        BlockQuoteKind::Caution => "caution",
+    }
+}
+
+/// An HTML tag met among inline events: text and links keep going, the
+/// allowed tags set the style; code and kbd gather their text.
+fn inline_html(html: &str, style: &mut Style, out: &mut Vec<Inline>, code: &mut Option<String>) {
+    use crate::ui::md_html::{Token, safe_href, tokens};
+    if !RAW_HTML.get() {
+        out.push(Inline::Text(html.to_owned(), style.clone()));
+        return;
+    }
+    for token in tokens(html) {
+        match &token {
+            Token::Text(_) if style.hidden => {}
+            Token::Text(text) => match code {
+                Some(code) => code.push_str(text),
+                None => out.push(Inline::Text(text.clone(), style.clone())),
+            },
+            Token::Open { name, .. } => match name.as_str() {
+                "script" | "style" => style.hidden = true,
+                "br" => out.push(Inline::Break),
+                "b" | "strong" => style.bold = true,
+                "i" | "em" => style.italic = true,
+                "s" | "del" | "strike" => style.strike = true,
+                "code" | "kbd" | "samp" => *code = Some(String::new()),
+                "a" => {
+                    if let Some(href) = token.attribute("href").filter(|h| safe_href(h)) {
+                        style.link = Some(href.to_owned());
+                    }
+                }
+                "img" => {
+                    if let Some(alt) = token.attribute("alt").filter(|a| !a.is_empty()) {
+                        out.push(Inline::Text(alt.to_owned(), style.clone()));
+                    }
+                }
+                _ => {}
+            },
+            Token::Close(name) => match name.as_str() {
+                "script" | "style" => style.hidden = false,
+                "b" | "strong" => style.bold = false,
+                "i" | "em" => style.italic = false,
+                "s" | "del" | "strike" => style.strike = false,
+                "a" => style.link = None,
+                "code" | "kbd" | "samp" => {
+                    if let Some(text) = code.take() {
+                        out.push(Inline::Code(text));
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+}
+
+/// A raw HTML block that is not a disclosure: its paragraphs, headings and
+/// images, the other tags dropped.
+fn html_blocks(html: &str, blocks: &mut Vec<Block>) {
+    use crate::ui::md_html::{Token, tokens};
+    let mut inlines = Vec::new();
+    let mut style = Style::default();
+    let mut code = None;
+    let mut heading: Option<u8> = None;
+    let flush = |inlines: &mut Vec<Inline>, heading: Option<u8>, blocks: &mut Vec<Block>| {
+        let empty = inlines.iter().all(|i| match i {
+            Inline::Text(t, _) => t.trim().is_empty(),
+            Inline::Break => true,
+            _ => false,
+        });
+        if !empty {
+            let content = std::mem::take(inlines);
+            blocks.push(match heading {
+                Some(level) => Block::Heading(level, content),
+                None => Block::Paragraph(content),
+            });
+        }
+        inlines.clear();
+    };
+    for token in tokens(html) {
+        let block_tag = |name: &str| {
+            matches!(
+                name,
+                "p" | "div"
+                    | "section"
+                    | "article"
+                    | "center"
+                    | "li"
+                    | "tr"
+                    | "table"
+                    | "ul"
+                    | "ol"
+            )
+        };
+        match &token {
+            Token::Open { name, .. } if block_tag(name) => flush(&mut inlines, heading, blocks),
+            Token::Close(name) if block_tag(name) => flush(&mut inlines, heading, blocks),
+            Token::Open { name, .. } if name.len() == 2 && name.starts_with('h') => {
+                flush(&mut inlines, heading, blocks);
+                heading = name[1..].parse().ok().filter(|l| (1..=6).contains(l));
+            }
+            Token::Close(name) if name.len() == 2 && name.starts_with('h') => {
+                flush(&mut inlines, heading, blocks);
+                heading = None;
+            }
+            Token::Open { name, .. } if name == "img" => {
+                if let Some(src) = token.attribute("src").filter(|s| !s.is_empty()) {
+                    flush(&mut inlines, heading, blocks);
+                    blocks.push(Block::Image {
+                        src: src.to_owned(),
+                        alt: token.attribute("alt").unwrap_or_default().to_owned(),
+                    });
+                }
+            }
+            Token::Open { name, attributes } => {
+                let tag = format!(
+                    "<{name}{}>",
+                    attributes
+                        .iter()
+                        .map(|(k, v)| format!(" {k}=\"{v}\""))
+                        .collect::<String>()
+                );
+                inline_html(&tag, &mut style, &mut inlines, &mut code);
+            }
+            Token::Close(name) => {
+                inline_html(&format!("</{name}>"), &mut style, &mut inlines, &mut code)
+            }
+            Token::Text(_) if style.hidden => {}
+            Token::Text(text) => {
+                // Source line breaks inside HTML are spaces.
+                let text = text.replace('\n', " ");
+                match &mut code {
+                    Some(code) => code.push_str(&text),
+                    None => inlines.push(Inline::Text(text, style.clone())),
+                }
+            }
+        }
+    }
+    flush(&mut inlines, heading, blocks);
+}
+
+/// A `<details>` opening in `html`: its summary, whether it starts open,
+/// and what follows the summary within the same block.
+fn details_start(html: &str) -> Option<(Vec<Inline>, bool, String)> {
+    let lower = html.to_ascii_lowercase();
+    let at = lower.find("<details")?;
+    let tag_end = lower[at..].find('>')? + at;
+    let open = lower[at..tag_end].contains(" open");
+    let rest = &html[tag_end + 1..];
+    let rest_lower = rest.to_ascii_lowercase();
+    let (summary, after) = match rest_lower.find("<summary") {
+        Some(start) => {
+            let body_start = rest_lower[start..]
+                .find('>')
+                .map_or(rest.len(), |e| start + e + 1);
+            let body_end = rest_lower[body_start..]
+                .find("</summary>")
+                .map_or(rest.len(), |e| body_start + e);
+            let after = (body_end + "</summary>".len()).min(rest.len());
+            (&rest[body_start..body_end], &rest[after..])
+        }
+        None => ("", rest),
+    };
+    let mut inlines = Vec::new();
+    let mut style = Style::default();
+    let mut code = None;
+    inline_html(summary, &mut style, &mut inlines, &mut code);
+    if inlines.is_empty() {
+        inlines.push(Inline::Text("Details".into(), Style::default()));
+    }
+    Some((inlines, open, after.to_owned()))
+}
+
+/// Bare URLs in text become links (remark-gfm's autolink literals): `http`,
+/// `https` and `www.`, trailing punctuation left out.
+fn autolink(list: &mut Vec<Inline>) {
+    let mut out = Vec::with_capacity(list.len());
+    for inline in list.drain(..) {
+        let Inline::Text(text, style) = &inline else {
+            out.push(inline);
+            continue;
+        };
+        if style.link.is_some() || !(text.contains("http") || text.contains("www.")) {
+            out.push(inline);
+            continue;
+        }
+        let mut cursor = 0;
+        let mut search = 0;
+        while let Some(found) = ["https://", "http://", "www."]
+            .iter()
+            .filter_map(|p| text[search..].find(p).map(|i| i + search))
+            .min()
+        {
+            // At a word's start only.
+            let boundary = found == 0
+                || text[..found]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_whitespace() || "(<*_~\"'".contains(c));
+            let end = text[found..]
+                .find(|c: char| c.is_whitespace() || c == '<')
+                .map_or(text.len(), |e| found + e);
+            let mut url_end = end;
+            while url_end > found {
+                let last = text[..url_end].chars().next_back().unwrap_or(' ');
+                let unbalanced_paren = last == ')'
+                    && text[found..url_end].matches('(').count()
+                        < text[found..url_end].matches(')').count();
+                if ".,:;!?\"'*_~".contains(last) || unbalanced_paren {
+                    url_end -= last.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            let url = &text[found..url_end];
+            let valid = boundary && url.contains('.') && url.len() > "www.".len() + 1;
+            if !valid {
+                search = found + 1;
+                continue;
+            }
+            if found > cursor {
+                out.push(Inline::Text(text[cursor..found].to_owned(), style.clone()));
+            }
+            let href = if url.starts_with("www.") {
+                format!("http://{url}")
+            } else {
+                url.to_owned()
+            };
+            out.push(Inline::Text(
+                url.to_owned(),
+                Style {
+                    link: Some(href),
+                    ..style.clone()
+                },
+            ));
+            cursor = url_end;
+            search = url_end;
+        }
+        if cursor == 0 {
+            out.push(inline);
+        } else if cursor < text.len() {
+            out.push(Inline::Text(text[cursor..].to_owned(), style.clone()));
+        }
+    }
+    *list = out;
+}
+
+fn autolink_blocks(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(list) | Block::Heading(_, list) => autolink(list),
+            Block::List { items, .. } => items.iter_mut().for_each(|item| autolink_blocks(item)),
+            Block::Quote(children) | Block::Alert(_, children) => autolink_blocks(children),
+            Block::Details {
+                summary, blocks, ..
+            } => {
+                autolink(summary);
+                autolink_blocks(blocks);
+            }
+            Block::Table { head, rows, .. } => {
+                head.iter_mut().for_each(autolink);
+                rows.iter_mut().flatten().for_each(autolink);
+            }
+            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+        }
+    }
 }
 
 /// The image of a paragraph holding nothing else (whitespace aside), from
@@ -217,6 +578,17 @@ fn standalone_image(events: &[Event], index: &mut usize) -> Option<Block> {
 }
 
 fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> Vec<Block> {
+    parse_blocks_until(events, index, until, false)
+}
+
+/// Blocks until `until`, or, inside a `<details>`, until the HTML block that
+/// closes it.
+fn parse_blocks_until(
+    events: &[Event],
+    index: &mut usize,
+    until: Option<TagEnd>,
+    in_details: bool,
+) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut loose: Vec<Inline> = Vec::new();
     while *index < events.len() {
@@ -316,11 +688,64 @@ fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> V
                     rows,
                 });
             }
-            Event::Start(Tag::BlockQuote(_)) => blocks.push(Block::Quote(parse_blocks(
-                events,
-                index,
-                Some(TagEnd::BlockQuote(None)),
-            ))),
+            Event::Start(Tag::BlockQuote(kind)) => {
+                let children = parse_blocks(events, index, Some(TagEnd::BlockQuote(*kind)));
+                blocks.push(match kind {
+                    Some(kind) => Block::Alert(alert_kind(*kind), children),
+                    None => Block::Quote(children),
+                });
+            }
+            Event::Start(Tag::HtmlBlock) => {
+                let mut html = String::new();
+                while *index < events.len() {
+                    let event = &events[*index];
+                    *index += 1;
+                    match event {
+                        Event::Html(t) | Event::Text(t) => html.push_str(t),
+                        Event::End(TagEnd::HtmlBlock) => break,
+                        _ => {}
+                    }
+                }
+                if !RAW_HTML.get() {
+                    blocks.push(Block::Paragraph(vec![Inline::Text(
+                        html.trim_end_matches('\n').to_owned(),
+                        Style::default(),
+                    )]));
+                    continue;
+                }
+                let lower = html.to_ascii_lowercase();
+                if in_details && !lower.contains("<details") && lower.contains("</details>") {
+                    let before = &html[..lower.find("</details>").unwrap_or(0)];
+                    html_blocks(before, &mut blocks);
+                    break;
+                }
+                match details_start(&html) {
+                    Some((summary, open, after)) => {
+                        let after_lower = after.to_ascii_lowercase();
+                        let mut children = Vec::new();
+                        if let Some(close) = after_lower.find("</details>") {
+                            html_blocks(&after[..close], &mut children);
+                        } else {
+                            html_blocks(&after, &mut children);
+                            children.extend(parse_blocks_until(events, index, until, true));
+                        }
+                        blocks.push(Block::Details {
+                            summary,
+                            open,
+                            blocks: children,
+                        });
+                    }
+                    None => html_blocks(&html, &mut blocks),
+                }
+            }
+            Event::Start(Tag::FootnoteDefinition(label)) => {
+                let label = label.to_string();
+                let children = parse_blocks(events, index, Some(TagEnd::FootnoteDefinition));
+                FOOTNOTES.with_borrow_mut(|f| f.definitions.push((label, children)));
+            }
+            Event::FootnoteReference(label) => {
+                loose.push(footnote_reference(label));
+            }
             Event::Rule => blocks.push(Block::Rule),
             // Tight list items carry inline content without a paragraph.
             Event::Text(_) | Event::Code(_) | Event::SoftBreak | Event::HardBreak => {
@@ -346,6 +771,7 @@ fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> V
 fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut style = Style::default();
+    let mut html_code: Option<String> = None;
     let mut depth = 0;
     while *index < events.len() {
         match &events[*index] {
@@ -367,10 +793,16 @@ fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
             Event::End(TagEnd::Link) => style.link = None,
-            Event::Text(t) => out.push(Inline::Text(t.to_string(), style.clone())),
+            Event::Text(_) if style.hidden => {}
+            Event::Text(t) => match &mut html_code {
+                Some(code) => code.push_str(t),
+                None => out.push(Inline::Text(t.to_string(), style.clone())),
+            },
             Event::Code(t) => out.push(code_inline(t)),
             Event::SoftBreak => out.push(Inline::Text(" ".into(), style.clone())),
             Event::HardBreak => out.push(Inline::Break),
+            Event::InlineHtml(t) => inline_html(t, &mut style, &mut out, &mut html_code),
+            Event::FootnoteReference(label) => out.push(footnote_reference(label)),
             // A nested list (or any block) ends the item's inline run.
             Event::Start(
                 Tag::List(_)
@@ -393,6 +825,7 @@ fn parse_inline_run(events: &[Event], index: &mut usize) -> Vec<Inline> {
 fn parse_inlines(events: &[Event], index: &mut usize, end: TagEnd) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut style = Style::default();
+    let mut html_code: Option<String> = None;
     while *index < events.len() {
         let event = &events[*index];
         *index += 1;
@@ -414,13 +847,18 @@ fn parse_inlines(events: &[Event], index: &mut usize, end: TagEnd) -> Vec<Inline
             Event::End(TagEnd::Strong) => style.bold = false,
             Event::End(TagEnd::Strikethrough) => style.strike = false,
             Event::End(TagEnd::Link) => style.link = None,
-            Event::Text(t) => out.push(Inline::Text(t.to_string(), style.clone())),
+            Event::Text(_) if style.hidden => {}
+            Event::Text(t) => match &mut html_code {
+                Some(code) => code.push_str(t),
+                None => out.push(Inline::Text(t.to_string(), style.clone())),
+            },
             Event::Code(t) => out.push(code_inline(t)),
             Event::SoftBreak => out.push(Inline::Text(" ".into(), style.clone())),
             Event::HardBreak => out.push(Inline::Break),
             Event::Html(t) | Event::InlineHtml(t) => {
-                out.push(Inline::Text(t.to_string(), style.clone()))
+                inline_html(t, &mut style, &mut out, &mut html_code)
             }
+            Event::FootnoteReference(label) => out.push(footnote_reference(label)),
             _ => {}
         }
     }
@@ -1321,7 +1759,13 @@ fn skill_chip_blocks(blocks: &mut [Block]) {
         match block {
             Block::Paragraph(list) | Block::Heading(_, list) => inlines(list),
             Block::List { items, .. } => items.iter_mut().for_each(|item| skill_chip_blocks(item)),
-            Block::Quote(children) => skill_chip_blocks(children),
+            Block::Quote(children) | Block::Alert(_, children) => skill_chip_blocks(children),
+            Block::Details {
+                summary, blocks, ..
+            } => {
+                inlines(summary);
+                skill_chip_blocks(blocks);
+            }
             Block::Table { head, rows, .. } => {
                 head.iter_mut().for_each(inlines);
                 rows.iter_mut().flatten().for_each(inlines);
@@ -1347,7 +1791,15 @@ fn context_display_kinds(blocks: &mut [Block], records: &[serde_json::Value]) {
             Block::List { items, .. } => items
                 .iter_mut()
                 .for_each(|item| context_display_kinds(item, records)),
-            Block::Quote(children) => context_display_kinds(children, records),
+            Block::Quote(children) | Block::Alert(_, children) => {
+                context_display_kinds(children, records)
+            }
+            Block::Details {
+                summary, blocks, ..
+            } => {
+                inlines(summary, records);
+                context_display_kinds(blocks, records);
+            }
             Block::Table { head, rows, .. } => {
                 head.iter_mut().for_each(|cell| inlines(cell, records));
                 rows.iter_mut()
@@ -1652,12 +2104,194 @@ impl<'a> Markdown<'a> {
                     theme::border(),
                 );
             }
+            Block::Alert(kind, blocks) => self.alert(ui, kind, blocks, width, depth, id),
+            Block::Details {
+                summary,
+                open,
+                blocks,
+            } => self.details(ui, summary, *open, blocks, width, depth, id),
             Block::Rule => {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, theme::border());
             }
             Block::Image { src, alt } => self.image_block(ui, src, alt, width, id),
         }
+    }
+
+    /// A GitHub alert (`MarkdownBlockquote` with `data-alert`): a colored
+    /// left border, the kind's icon and title, then its text, not muted.
+    fn alert(
+        &mut self,
+        ui: &mut Ui,
+        kind: &str,
+        blocks: &[Block],
+        width: f32,
+        depth: usize,
+        id: egui::Id,
+    ) {
+        let dark = theme::palette().dark;
+        // Tailwind's 500 borders at 70%, the titles' 400 (dark) or 600.
+        let (label, icon, border, title) = match kind {
+            "tip" => (
+                "Tip",
+                "lightbulb",
+                0x10b981,
+                if dark { 0x34d399 } else { 0x059669 },
+            ),
+            "important" => (
+                "Important",
+                "message-square-warning",
+                0xa855f7,
+                if dark { 0xc084fc } else { 0x9333ea },
+            ),
+            "warning" => (
+                "Warning",
+                "triangle-alert",
+                0xf59e0b,
+                if dark { 0xf59e0b } else { 0xd97706 },
+            ),
+            "caution" => (
+                "Caution",
+                "octagon-alert",
+                0xef4444,
+                if dark { 0xf87171 } else { 0xdc2626 },
+            ),
+            _ => (
+                "Note",
+                "info",
+                0x3b82f6,
+                if dark { 0x60a5fa } else { 0x2563eb },
+            ),
+        };
+        let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+        let top = ui.cursor().top();
+        let left = ui.cursor().left();
+        let inner = width - 14.0;
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(Rect::from_min_size(
+                Pos2::new(left + 14.0, top),
+                Vec2::new(inner, f32::INFINITY),
+            )),
+            |ui| {
+                let (row, _) = ui.allocate_exact_size(Vec2::new(inner, BODY_LINE), Sense::hover());
+                theme::paint_icon(
+                    ui,
+                    icon,
+                    Rect::from_min_size(
+                        Pos2::new(row.left(), row.center().y - 7.0),
+                        Vec2::splat(14.0),
+                    ),
+                    14.0,
+                    rgb(title),
+                );
+                widgets::text(
+                    ui,
+                    Pos2::new(row.left() + 14.0 + 6.0, row.top()),
+                    label,
+                    font(BODY, Weight::Medium),
+                    rgb(title),
+                    BODY_LINE,
+                );
+                ui.add_space(4.0);
+                let quoted = std::mem::replace(&mut self.quoted, false);
+                self.blocks(ui, blocks, inner, depth + 1, id.with("alert"));
+                self.quoted = quoted;
+            },
+        );
+        let bottom = ui.cursor().top();
+        ui.painter().rect_filled(
+            Rect::from_min_max(Pos2::new(left, top), Pos2::new(left + 2.0, bottom)),
+            0.0,
+            theme::alpha(rgb(border), 0.7),
+        );
+    }
+
+    /// `MarkdownDetails`: a full-width row between hairlines, its chevron
+    /// turning as the summary opens the indented content.
+    #[allow(clippy::too_many_arguments)]
+    fn details(
+        &mut self,
+        ui: &mut Ui,
+        summary: &[Inline],
+        open: bool,
+        blocks: &[Block],
+        width: f32,
+        depth: usize,
+        id: egui::Id,
+    ) {
+        let state = id.with("details-open");
+        let expanded = ui.data(|d| d.get_temp::<bool>(state)).unwrap_or(open);
+        let left = ui.cursor().left();
+        let top = ui.cursor().top();
+        let laid = layout_inlines(
+            ui,
+            summary,
+            BODY,
+            20.0,
+            Weight::Medium,
+            theme::foreground(),
+            width - 24.0,
+            &self.suffixes,
+        );
+        let height = laid.galley.size().y.max(20.0) + 16.0;
+        let (row, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+        self.note_width(row.right());
+        // The summary's selectable text takes the press: a click (no drag)
+        // anywhere on the row still toggles it.
+        let clicked = response.clicked()
+            || (ui.rect_contains_pointer(row) && ui.input(|i| i.pointer.primary_clicked()));
+        if clicked {
+            ui.data_mut(|d| d.insert_temp(state, !expanded));
+        }
+        if ui.rect_contains_pointer(row) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let chevron = if expanded {
+            "chevron-down"
+        } else {
+            "chevron-right"
+        };
+        theme::paint_icon(
+            ui,
+            chevron,
+            Rect::from_min_size(Pos2::new(left, row.top() + 10.0), Vec2::splat(16.0)),
+            16.0,
+            theme::muted_foreground(),
+        );
+        if let Some(chip) = paint_inlines(
+            ui,
+            Pos2::new(left + 24.0, row.top() + 8.0),
+            &laid,
+            id.with("summary"),
+            self.highlight.as_ref(),
+            self.find.as_mut(),
+            Some((md_copy::Kind::Paragraph, self.prefixes.clone())),
+        ) {
+            self.open_chip(chip);
+        }
+        if expanded {
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(Rect::from_min_size(
+                    Pos2::new(left + 24.0, row.bottom()),
+                    Vec2::new(width - 24.0, f32::INFINITY),
+                )),
+                |ui| self.blocks(ui, blocks, width - 24.0, depth + 1, id.with("details")),
+            );
+            ui.add_space(12.0);
+        }
+        let bottom = ui.cursor().top();
+        let line = theme::alpha(theme::border(), 0.6);
+        let painter = ui.painter();
+        painter.rect_filled(
+            Rect::from_min_size(Pos2::new(left, top), Vec2::new(width, 1.0)),
+            0.0,
+            line,
+        );
+        painter.rect_filled(
+            Rect::from_min_size(Pos2::new(left, bottom - 1.0), Vec2::new(width, 1.0)),
+            0.0,
+            line,
+        );
     }
 
     /// `ChatMarkdownImage` / `ChatMarkdownAssetImage`: a host file through a
@@ -2277,6 +2911,8 @@ fn margins(block: &Block) -> (f32, f32) {
     match block {
         Block::Heading(..) => (20.0, 8.0),
         Block::Rule => (16.0, 16.0),
+        Block::Alert(..) => (4.0, 4.0),
+        Block::Details { .. } => (8.0, 8.0),
         _ => (BLOCK_MARGIN, BLOCK_MARGIN),
     }
 }
@@ -2332,4 +2968,70 @@ pub(crate) fn language_icon(language: &str) -> Option<(&'static str, Color32)> {
         | "tiff" => ("lang-image", pink),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn texts(inlines: &[Inline]) -> Vec<(String, Option<String>)> {
+        inlines
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Text(t, style) => Some((t.clone(), style.link.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn alerts_footnotes_and_bare_urls_follow_gfm() {
+        let blocks = parse_with(
+            "> [!WARNING]\n> Careful.\n\nSee https://example.dev/a). Done[^1].\n\n[^1]: The note.",
+            false,
+        );
+        assert!(matches!(&blocks[0], Block::Alert("warning", children) if children.len() == 1));
+        let Block::Paragraph(inlines) = &blocks[1] else {
+            panic!("{blocks:?}")
+        };
+        let links = texts(inlines);
+        assert!(links.contains(&(
+            "https://example.dev/a".into(),
+            Some("https://example.dev/a".into())
+        )));
+        assert!(links.iter().any(|(t, _)| t == "[1]"));
+        assert!(matches!(blocks[2], Block::Rule));
+        assert!(matches!(&blocks[3], Block::List { start: Some(1), items } if items.len() == 1));
+    }
+
+    #[test]
+    fn answers_keep_sanitized_html_and_user_text_shows_it() {
+        let blocks = parse_with(
+            "Press <kbd>Ctrl</kbd> <b>now</b><script>x</script>\n\n<details>\n<summary>More</summary>\n\nHidden text\n\n</details>",
+            false,
+        );
+        let Block::Paragraph(inlines) = &blocks[0] else {
+            panic!("{blocks:?}")
+        };
+        assert!(
+            inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Code(c) if c == "Ctrl"))
+        );
+        assert!(
+            inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Text(t, s) if t == "now" && s.bold))
+        );
+        assert!(!texts(inlines).iter().any(|(t, _)| t.contains('x')));
+        assert!(
+            matches!(&blocks[1], Block::Details { summary, open: false, blocks }
+            if texts(summary)[0].0 == "More" && blocks.len() == 1)
+        );
+        let user = parse_with("a <b>b</b>", true);
+        let Block::Paragraph(inlines) = &user[0] else {
+            panic!()
+        };
+        assert!(texts(inlines).iter().any(|(t, _)| t == "<b>"));
+    }
 }

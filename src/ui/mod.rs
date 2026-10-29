@@ -44,6 +44,7 @@ pub mod lucide;
 pub mod markdown;
 pub mod mcp_apps;
 pub mod md_copy;
+pub mod md_html;
 pub mod md_links;
 pub mod media;
 pub mod memory_settings;
