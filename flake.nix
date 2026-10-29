@@ -21,14 +21,16 @@
           android_sdk.accept_license = true;
         };
       };
-      buildTools = "35.0.0";
+      buildTools = "37.0.0";
       android = pkgs.androidenv.composeAndroidPackages {
         platformVersions = [
           "34"
           "35"
+          "37.0"
         ];
         buildToolsVersions = [
           "34.0.0"
+          "35.0.0"
           buildTools
         ];
         includeNDK = true;
@@ -66,6 +68,10 @@
           packages = [
             rust
             pkgs.dioxus-cli
+            # The Compose app (android/): Gradle, and the Rust core built
+            # for each ABI.
+            pkgs.gradle_9
+            pkgs.cargo-ndk
             # The app's license notice (scripts/mobile-notice.sh).
             pkgs.cargo-about
             # The APK's ABI check (scripts/mobile-apk.sh).

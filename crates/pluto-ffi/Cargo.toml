@@ -1,0 +1,13 @@
+[package]
+name = "pluto-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Pluto's core for the Android app: the session with the server and the screens' data, exposed to Kotlin through UniFFI."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+pluto-core = { path = "../pluto-core" }
+uniffi = "0.32"
