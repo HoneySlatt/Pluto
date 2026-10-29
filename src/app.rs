@@ -47,6 +47,8 @@ pub struct App {
     pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
     pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
     pub(crate) composer_rect: Option<Rect>,
+    /// Ctrl+Q's hold (`ui/quit_hold.rs`).
+    pub(crate) quit_hold: crate::ui::quit_hold::QuitHold,
     /// What the last parks can undo (`ui/undo.rs`).
     pub(crate) undo: crate::ui::undo::Undo,
     /// Commands whose receipt something waits on (`ui/park.rs`).
@@ -521,6 +523,7 @@ impl App {
             synced: false,
             pending_commands: Default::default(),
             undo: Default::default(),
+            quit_hold: Default::default(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
             composer_rect: None,
@@ -1692,6 +1695,7 @@ impl eframe::App for App {
         self.save_drafts_when_idle(ui.ctx());
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
+        self.quit_hold(ui, rect);
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
             Screen::Main if self.settings_page.is_some() => {

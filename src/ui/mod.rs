@@ -68,6 +68,7 @@ pub mod providers;
 pub mod publish;
 pub mod pull_requests;
 pub mod queue;
+pub mod quit_hold;
 pub mod requests_panel;
 pub mod rewind;
 pub mod scheduled_tasks;

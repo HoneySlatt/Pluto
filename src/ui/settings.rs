@@ -145,6 +145,12 @@ const NOTIFICATION_MODES: [(&str, &str); 4] = [
     ("sound", "Sound only"),
     ("notifications-and-sound", "Notifications with sound"),
 ];
+/// `confirmQuit`.
+const QUIT_MODES: [(&str, &str); 3] = [
+    ("direct", "Direct"),
+    ("hold", "Hold"),
+    ("double-click", "Double press"),
+];
 const TIMESTAMP_FORMATS: [(&str, &str); 3] = [
     ("locale", "System default"),
     ("12-hour", "12-hour"),
@@ -951,6 +957,15 @@ impl App {
                 reset: !is_default("confirmThreadDelete"),
                 control: switch("confirmThreadDelete"),
             },
+            Row {
+                id: "quit-confirmation".into(),
+                title: "Quit shortcut".into(),
+                description: "Hold mode also quits on two quick presses.".into(),
+                status: None,
+                layers: false,
+                reset: !is_default("confirmQuit"),
+                control: client_select("confirmQuit", &QUIT_MODES, 160.0),
+            },
         ];
 
         let text_generation = {
@@ -1114,6 +1129,7 @@ impl App {
             "legacy-sidebar" => Some("legacySidebarEnabled"),
             "thread-notifications" => Some("notificationMode"),
             "time-format" => Some("timestampFormat"),
+            "quit-confirmation" => Some("confirmQuit"),
             "diff-layout" => Some("diffLayout"),
             "send-shortcut" => Some("sendShortcut"),
             "follow-up-behavior" => Some("followUpBehavior"),
