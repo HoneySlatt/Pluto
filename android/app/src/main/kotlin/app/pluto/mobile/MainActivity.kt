@@ -1,27 +1,45 @@
 package app.pluto.mobile
 
+// Pluto's activity: the app draws edge to edge, under transparent status
+// and navigation bars, and the keyboard resizes it. Coming back to the
+// foreground checks the session (it may have died while the phone slept).
+
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import app.pluto.core.coreVersion
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
+    private lateinit var model: Model
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
-        setContent {
-            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                BasicText("Pluto core ${coreVersion()}", style = TextStyle(color = Color.White))
-            }
+        // No scrim behind the three-button bar either, and light icons on
+        // the dark app.
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
         }
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightNavigationBars = false
+            isAppearanceLightStatusBars = false
+        }
+        model = (application as PlutoApplication).model
+        setContent { PlutoApp(model) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.core.probe()
     }
 }
