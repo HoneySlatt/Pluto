@@ -1090,7 +1090,17 @@ impl App {
             return send.left();
         }
         let resume = !draft && !has_content && !editing && self.can_resume();
-        let can_send = (has_content || resume) && self.connected();
+        // `submitStatus`: why the button is off, shown as its tooltip.
+        let status = if !self.connected() {
+            Some(if self.connecting() {
+                "Connecting"
+            } else {
+                "Environment disconnected"
+            })
+        } else {
+            self.clone_send_block()
+        };
+        let can_send = (has_content || resume) && status.is_none();
         let response = ui.interact(
             send,
             ui.id().with("send"),
@@ -1137,7 +1147,9 @@ impl App {
         };
         let size = if icon == "send-arrow" { 14.0 } else { 16.0 };
         theme::paint_icon(ui, icon, send, size, arrow);
-        let tooltip = if running && !editing {
+        let tooltip = if let Some(status) = status {
+            status.to_owned()
+        } else if running && !editing {
             let shortcut = crate::ui::shortcuts::effective_shortcut_label(
                 &self.state.config["keybindings"],
                 "composer.sendAlternate",

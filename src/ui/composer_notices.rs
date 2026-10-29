@@ -12,8 +12,9 @@
 //! (Resume at reset, Snooze until reset), a provider goal (Resume, Clear),
 //! background work left running (Stop), and a local checkout whose branch
 //! changed since the thread ran there (Restore branch, once the composer
-//! holds a draft). Not ported yet: project clone, the usage-limits command
-//! and feedback notices.
+//! holds a draft), and a project being cloned (Cancel; failed or cancelled,
+//! Remove project and Retry). Not ported yet: the usage-limits command and
+//! feedback notices.
 
 use std::sync::Arc;
 
@@ -63,6 +64,11 @@ pub(crate) enum NoticeAction {
     /// Turns the usage limit's auto-resume (`true`) or snooze on or off.
     LimitRecovery {
         auto_resume: bool,
+    },
+    /// A project clone's Cancel, Retry or Remove project.
+    Clone {
+        project: String,
+        action: &'static str,
     },
 }
 
@@ -410,6 +416,18 @@ impl App {
             notice.description = Some("Update pluto-server to stay in sync".into());
             notice.dismissable = true;
             notice.dismiss_label = "Dismiss update notice";
+            notices.push(notice);
+        }
+        // The open project's clone (`ProjectCloneSnapshot`).
+        let project = thread
+            .as_ref()
+            .map(|t| t.project_id.clone())
+            .or_else(|| self.draft_project().map(|p| p.id));
+        if let Some(snapshot) = project
+            .as_ref()
+            .and_then(|id| self.clones.iter().find(|c| c["projectId"] == id.as_str()))
+            && let Some(notice) = clone_notice(snapshot)
+        {
             notices.push(notice);
         }
         if let Some(thread) = &thread {
@@ -812,18 +830,47 @@ impl App {
         }
     }
 
+    /// A project clone's Cancel, Retry or Remove project.
+    fn clone_action(&mut self, project: &str, action: &str) {
+        match action {
+            "remove" => {
+                let command = json!({
+                    "type": "project.delete",
+                    "commandId": uuid::Uuid::new_v4().to_string(),
+                    "projectId": project,
+                });
+                self.dispatch_titled(command, "Failed to remove project");
+            }
+            kind => {
+                let method = if kind == "cancel" {
+                    "projectClone.cancel"
+                } else {
+                    "projectClone.retry"
+                };
+                self.send_request(
+                    format!("clone-action:{kind}"),
+                    method,
+                    json!({"projectId": project}),
+                );
+            }
+        }
+    }
+
     fn notice_action(&mut self, notice: &Notice, action: NoticeAction) {
         let Some(thread) = self.current_thread() else {
             if let NoticeAction::ChangeServer = action {
                 self.change_server();
             } else if let NoticeAction::Reconnect = action {
                 self.reconnect_now();
+            } else if let NoticeAction::Clone { project, action } = action {
+                self.clone_action(&project, action);
             }
             return;
         };
         match action {
             NoticeAction::ChangeServer => self.change_server(),
             NoticeAction::Reconnect => self.reconnect_now(),
+            NoticeAction::Clone { project, action } => self.clone_action(&project, action),
             NoticeAction::OpenThread(id) => self.select_thread(Some(id)),
             NoticeAction::RestoreBranch(branch) => {
                 if self.restoring_branch.is_some() {
@@ -910,6 +957,76 @@ impl App {
         }
     }
 
+    /// `projectCloneSendBlockReason`: the open project is still cloning, or
+    /// its clone did not finish.
+    pub(crate) fn clone_send_block(&self) -> Option<&'static str> {
+        let project = self
+            .current_thread()
+            .map(|t| t.project_id.clone())
+            .or_else(|| self.draft_project().map(|p| p.id))?;
+        let clone = self
+            .clones
+            .iter()
+            .find(|c| c["projectId"] == project.as_str())?;
+        match clone["phase"].as_str() {
+            Some("running") => Some("Cloning repository"),
+            Some("done") => None,
+            _ => Some("Repository not cloned"),
+        }
+    }
+
+    /// `subscribeProjectClones` once, where the server tracks clones.
+    pub(crate) fn watch_project_clones(&mut self) {
+        if self.clones_streaming
+            || !self.connected()
+            || self.state.config["environment"]["capabilities"]["projectCloneTracking"] != true
+        {
+            return;
+        }
+        self.clones_streaming = true;
+        self.send(crate::protocol::Action::Stream {
+            key: "project-clones".into(),
+            method: "subscribeProjectClones",
+            payload: json!({}),
+        });
+    }
+
+    /// The clones' snapshots, and their actions' failures.
+    pub(crate) fn clone_result(
+        &mut self,
+        key: &str,
+        result: &Result<serde_json::Value, String>,
+    ) -> bool {
+        if key == "project-clones" {
+            match result {
+                Ok(value) => {
+                    self.clones = value
+                        .as_array()
+                        .or(value["clones"].as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                }
+                Err(_) => self.clones_streaming = false,
+            }
+            return true;
+        }
+        let Some(kind) = key.strip_prefix("clone-action:") else {
+            return false;
+        };
+        if let Err(error) = result {
+            let title = if kind == "cancel" {
+                "Failed to cancel clone"
+            } else {
+                "Failed to retry clone"
+            };
+            self.toasts.add(
+                crate::ui::toasts::Toast::new(crate::ui::toasts::Kind::Error, title)
+                    .description(error.clone()),
+            );
+        }
+        true
+    }
+
     /// The branch restore's answer: the thread follows the checkout, or
     /// the failure says why.
     pub(crate) fn notice_result(
@@ -958,6 +1075,103 @@ impl App {
     }
 }
 
+/// `projectCloneProgressSummary` and the clone's notice; none once done.
+fn clone_notice(snapshot: &serde_json::Value) -> Option<Notice> {
+    let project = snapshot["projectId"].as_str()?.to_owned();
+    let name = snapshot["repository"]["nameWithOwner"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| {
+            snapshot["destinationPath"]
+                .as_str()
+                .and_then(|p| p.trim_end_matches('/').rsplit('/').next())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "repository".into());
+    let id = format!("project-clone:{project}");
+    match snapshot["phase"].as_str()? {
+        "running" => {
+            let stage = match snapshot["stage"].as_str() {
+                Some("connecting") => Some("Connecting"),
+                Some("counting") => Some("Counting objects"),
+                Some("receiving") => Some("Receiving objects"),
+                Some("resolving") => Some("Resolving deltas"),
+                Some("checkout") => Some("Checking out files"),
+                _ => None,
+            };
+            let parts: Vec<String> = stage
+                .map(str::to_owned)
+                .into_iter()
+                .chain(
+                    snapshot["percent"]
+                        .as_f64()
+                        .map(|p| format!("{}%", p.round())),
+                )
+                .chain(
+                    snapshot["detail"]
+                        .as_str()
+                        .filter(|d| !d.is_empty())
+                        .map(str::to_owned),
+                )
+                .collect();
+            let mut notice = Notice::new(
+                id,
+                Variant::Info,
+                Priority::Activity,
+                "download",
+                format!("Cloning {name}"),
+            );
+            notice.description = (!parts.is_empty()).then(|| parts.join(" · "));
+            notice.actions.push((
+                "Cancel".into(),
+                NoticeAction::Clone {
+                    project,
+                    action: "cancel",
+                },
+            ));
+            Some(notice)
+        }
+        phase @ ("failed" | "cancelled") => {
+            let failed = phase == "failed";
+            let mut notice = Notice::new(
+                id,
+                Variant::Warning,
+                Priority::Activity,
+                "download",
+                if failed {
+                    format!("Failed to clone {name}")
+                } else {
+                    format!("Cancelled cloning {name}")
+                },
+            );
+            notice.description = Some(if failed {
+                snapshot["error"]
+                    .as_str()
+                    .unwrap_or("The clone failed.")
+                    .to_owned()
+            } else {
+                "Retry to bring in the repository.".into()
+            });
+            notice.actions.push((
+                "Remove project".into(),
+                NoticeAction::Clone {
+                    project: project.clone(),
+                    action: "remove",
+                },
+            ));
+            notice.actions.push((
+                "Retry".into(),
+                NoticeAction::Clone {
+                    project,
+                    action: "retry",
+                },
+            ));
+            Some(notice)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod presenter_tests {
     use super::*;
@@ -999,5 +1213,29 @@ mod presenter_tests {
         assert!(!server_behind("0.2.0-nightly", "0.1.0"));
         assert!(server_behind("dev", "0.1.0"));
         assert!(!server_behind("", "0.1.0"));
+    }
+
+    #[test]
+    fn clone_notice_follows_the_phase() {
+        let running = serde_json::json!({
+            "projectId": "p", "destinationPath": "/src/pluto/", "repository": null,
+            "phase": "running", "stage": "receiving", "percent": 45, "detail": "12 MiB",
+        });
+        let notice = clone_notice(&running).unwrap();
+        assert_eq!(notice.title, "Cloning pluto");
+        assert_eq!(
+            notice.description.as_deref(),
+            Some("Receiving objects · 45% · 12 MiB")
+        );
+        assert_eq!(notice.actions.len(), 1);
+        let failed = serde_json::json!({
+            "projectId": "p", "destinationPath": "/src/x", "repository": {"nameWithOwner": "a/b"},
+            "phase": "failed", "error": "denied",
+        });
+        let notice = clone_notice(&failed).unwrap();
+        assert_eq!(notice.title, "Failed to clone a/b");
+        assert_eq!(notice.description.as_deref(), Some("denied"));
+        assert_eq!(notice.actions.len(), 2);
+        assert!(clone_notice(&serde_json::json!({"projectId": "p", "phase": "done"})).is_none());
     }
 }

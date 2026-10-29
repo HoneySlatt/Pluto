@@ -47,6 +47,9 @@ pub struct App {
     pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
     pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
     pub(crate) composer_rect: Option<Rect>,
+    /// `subscribeProjectClones`: whether it is open, and the snapshots.
+    pub(crate) clones_streaming: bool,
+    pub(crate) clones: Vec<Value>,
     /// The permission notices shown this run.
     permission_notice_shown: std::collections::HashSet<String>,
     /// Panel tabs closed, newest first, with their thread.
@@ -530,6 +533,8 @@ impl App {
             quit_hold: Default::default(),
             closed_views: Vec::new(),
             permission_notice_shown: Default::default(),
+            clones_streaming: false,
+            clones: Vec::new(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
             composer_rect: None,
@@ -786,6 +791,11 @@ impl App {
 
     pub(crate) fn connected(&self) -> bool {
         self.connection.is_some() && self.synced && self.screen == Screen::Main
+    }
+
+    /// A connection open but not yet synced.
+    pub(crate) fn connecting(&self) -> bool {
+        self.connection.is_some() && !self.connected()
     }
 
     pub(crate) fn poll_events(&mut self) {
@@ -1781,6 +1791,7 @@ impl eframe::App for App {
         }
         self.sync_theme(ui.ctx());
         self.save_drafts_when_idle(ui.ctx());
+        self.watch_project_clones();
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
@@ -2248,6 +2259,7 @@ impl App {
             || self.notice_result(&key, &result)
             || self.secret_result(&key, &result)
             || self.auth_session_result(&key, &result)
+            || self.clone_result(&key, &result)
         {
             return;
         }
