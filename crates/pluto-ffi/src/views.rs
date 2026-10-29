@@ -366,31 +366,17 @@ fn unread(thread: &pluto_core::model::Thread) -> bool {
     }
 }
 
-/// `work_icon` (chat.rs).
+/// `work_icon` (pluto-core), with catalog icons for the desktop's own
+/// glyphs.
 fn work_icon(entry: &WorkEntry) -> &'static str {
-    match entry.item_type.as_deref() {
-        Some("command_execution") => return "terminal",
-        Some("file_change") => return "square-pen",
-        Some("web_search") => return "globe",
-        Some("mcp_tool_call") => return "wrench",
-        Some("dynamic_tool_call") => return "hammer",
-        _ => {}
-    }
-    if entry.label.eq_ignore_ascii_case("read file") {
-        return "eye";
-    }
-    if entry.command.is_some() {
-        return "terminal";
-    }
-    if !entry.changed_files.is_empty() {
-        return "square-pen";
-    }
-    match entry.tone.as_str() {
-        "error" => "circle-alert",
-        "thinking" => "brain",
-        "info" => "check",
-        "tool" => "wrench",
-        _ => "zap",
+    mobile_icon(pluto_core::timeline::work_icon(entry))
+}
+
+fn mobile_icon(icon: &'static str) -> &'static str {
+    match icon {
+        "browser-app" => "app-window",
+        "t3-code" => "orbit",
+        icon => icon,
     }
 }
 
@@ -602,6 +588,7 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
                 summary,
                 expanded,
                 has_failure,
+                ..
             } => fold(summary, expanded, group_id, false, has_failure),
             Row::AttemptFold {
                 attempt_id,

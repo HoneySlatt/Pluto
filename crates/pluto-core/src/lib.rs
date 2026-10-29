@@ -21,6 +21,7 @@ pub mod protocol;
 pub mod requests;
 pub mod spaces;
 pub mod timeline;
+pub mod tool_presentation;
 
 /// Asks the client's interface to redraw, now or after a delay; the
 /// connection worker calls it when an event arrives.

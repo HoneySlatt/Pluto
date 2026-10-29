@@ -982,6 +982,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "browser-app",
         "arrow-up-left",
         "bookmark",
         "shield-check",

@@ -149,7 +149,7 @@ impl App {
         } else {
             theme::muted_foreground()
         };
-        theme::paint_icon(
+        crate::ui::chat::paint_work_icon(
             ui,
             icon,
             Rect::from_center_size(

@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::model::{CheckpointFile, Detail, RunAttempt, RunSummary, Thread, TurnItem};
 
@@ -274,6 +274,8 @@ pub enum Row {
         summary: String,
         expanded: bool,
         has_failure: bool,
+        /// `toolGroupSummaryKind`, for its icon.
+        kind: &'static str,
     },
     /// Rows of an expanded tool group.
     WorkDetails {
@@ -636,7 +638,10 @@ fn work_entry(item: &Arc<TurnItem>, created_at: &str) -> WorkEntry {
             };
         }
         "file_search" => {
-            entry.label = or("Searched files".into());
+            entry.label = or(crate::tool_presentation::search_label(&Value::Object(
+                item.data.clone(),
+            ))
+            .unwrap_or_else(|| "Searched files".into()));
             entry.detail = text(item.get("pattern"));
         }
         "web_search" => {
@@ -697,7 +702,27 @@ fn work_entry(item: &Arc<TurnItem>, created_at: &str) -> WorkEntry {
                     entry.label = label.into();
                     entry.detail = text(&tool_arguments(item.get("input"))["text"]);
                 }
-                _ => entry.label = or(tool.unwrap_or_else(|| "Tool call".into())),
+                _ => {
+                    use crate::tool_presentation::{Activity, classify, read_label, search_label};
+                    let input = item.get("input");
+                    let fallback = tool.clone().unwrap_or_else(|| "Tool call".into());
+                    entry.label = or(
+                        match classify(Some("dynamic_tool_call"), None, None, tool.as_deref()) {
+                            Activity::Read => read_label(
+                                crate::tool_presentation::collect_file_paths(
+                                    &json!({"input": input}),
+                                )
+                                .first()
+                                .map_or("", String::as_str),
+                                0,
+                            ),
+                            Activity::Search => {
+                                search_label(&json!({"input": input})).unwrap_or(fallback)
+                            }
+                            _ => fallback,
+                        },
+                    );
+                }
             }
         }
         "approval_request" => {
@@ -851,6 +876,9 @@ pub fn live_label(entry: &WorkEntry, active: bool) -> String {
                 "Thought".into()
             }
         });
+    }
+    if let Some((label, _)) = t3_presentation(entry, Some(status)) {
+        return label;
     }
     if let Some(command) = entry
         .command
@@ -1425,30 +1453,188 @@ pub fn indicates_failure(entry: &WorkEntry) -> bool {
         .is_some_and(|d| !d.is_empty() && output_indicates_failure(d))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Action {
-    Read,
-    Edit,
-    Command,
-    Search,
-    Other,
-    Update,
+/// `workEntryToolName`: structured identity first.
+fn tool_name(entry: &WorkEntry) -> Option<String> {
+    let item = entry.item.as_ref()?;
+    if item.kind == "dynamic_tool"
+        && let Some(name) = item.str("toolName")
+    {
+        return Some(name.to_owned());
+    }
+    if item.kind != "dynamic_tool" {
+        if let (Some(server), Some(tool)) = (item.str("server"), item.str("tool")) {
+            return Some(format!("{server}.{tool}"));
+        }
+        if let Some(name) = item.str("toolName") {
+            return Some(name.to_owned());
+        }
+    }
+    let title = tool_title(entry);
+    if title
+        .as_deref()
+        .and_then(crate::tool_presentation::t3_tool)
+        .is_some()
+    {
+        return title;
+    }
+    Some(entry.label.clone())
 }
 
-fn action(entry: &WorkEntry) -> Action {
-    let title = entry.label.trim().to_lowercase();
-    if title == "read file" {
-        Action::Read
-    } else if entry.item_type.as_deref() == Some("file_change") || !entry.changed_files.is_empty() {
-        Action::Edit
-    } else if entry.item_type.as_deref() == Some("command_execution") || entry.command.is_some() {
-        Action::Command
-    } else if entry.item_type.as_deref() == Some("web_search") {
-        Action::Search
-    } else if is_tool_like(entry) {
-        Action::Other
+/// `toolTitle`: the call's heading, by item type.
+fn tool_title(entry: &WorkEntry) -> Option<String> {
+    let item = entry.item.as_ref()?;
+    let title = item
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned);
+    let fallback = match item.kind.as_str() {
+        "command_execution" => "Command",
+        "file_change" => "File change",
+        "file_search" => "File search",
+        "web_search" => "Web search",
+        "dynamic_tool" => item.str("toolName").unwrap_or("Tool"),
+        _ => return None,
+    };
+    Some(title.unwrap_or_else(|| fallback.to_owned()))
+}
+
+/// `toolData`: a dynamic tool's input and output, else the item.
+fn tool_data(entry: &WorkEntry) -> Value {
+    match &entry.item {
+        Some(item) if item.kind == "dynamic_tool" => {
+            json!({"input": item.get("input"), "output": item.get("output")})
+        }
+        Some(item) => Value::Object(item.data.clone()),
+        None => Value::Null,
+    }
+}
+
+/// `workEntryToolOutput`.
+fn tool_output(entry: &WorkEntry) -> Value {
+    let data = tool_data(entry);
+    ["output", "result", "rawOutput", "content"]
+        .iter()
+        .map(|key| &data[*key])
+        .find(|v| !v.is_null())
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// `resolveWorkEntryToolPresentation`: a T3 tool's tensed label, and its
+/// definition.
+pub fn t3_presentation(
+    entry: &WorkEntry,
+    fallback_status: Option<&str>,
+) -> Option<(String, &'static crate::tool_presentation::T3Tool)> {
+    use crate::tool_presentation::{t3_label, t3_result_failed, t3_tool};
+    let tool = t3_tool(&tool_name(entry)?)?;
+    let status = if t3_result_failed(&tool_output(entry)) {
+        "failed"
     } else {
-        Action::Update
+        fallback_status
+            .filter(|_| entry.status.is_none())
+            .or(entry.status.as_deref())
+            .unwrap_or("")
+    };
+    let data = tool_data(entry);
+    let input = ["arguments", "input", "rawInput"]
+        .iter()
+        .map(|key| &data[*key])
+        .find(|v| !v.is_null())
+        .unwrap_or(&Value::Null);
+    Some((t3_label(tool, status, input), tool))
+}
+
+/// `workLogEntryIsLocalCodeSearch`.
+fn local_code_search(entry: &WorkEntry) -> bool {
+    match entry.item_type.as_deref() {
+        Some("file_search") => true,
+        Some("web_search") => {
+            let heading = tool_title(entry).unwrap_or_else(|| entry.label.clone());
+            heading
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|word| word.eq_ignore_ascii_case("grep"))
+        }
+        _ => false,
+    }
+}
+
+/// `toolGroupAction`: `thread-create`, a PR action (`link-pr`,
+/// `unlink-pr`, `list-prs`, `watch-pr`, `unwatch-pr`), `browser`, `device`,
+/// `read`, `edit`, `command`, `search`, `code-search`, `other` or `update`.
+pub fn group_action(entry: &WorkEntry) -> &'static str {
+    use crate::tool_presentation::{Activity, classify};
+    let kind = entry.item_type.as_deref();
+    if kind == Some("thread_created") {
+        return "thread-create";
+    }
+    if let Some((_, tool)) = t3_presentation(entry, None) {
+        if matches!(
+            tool.summary,
+            "link-pr" | "unlink-pr" | "list-prs" | "watch-pr" | "unwatch-pr"
+        ) {
+            return tool.summary;
+        }
+        if matches!(tool.icon, "browser" | "device") {
+            return tool.icon;
+        }
+    }
+    let item = entry.item.as_ref();
+    if item.is_some_and(|i| i.str("viewedImagePath").is_some()) {
+        return "read";
+    }
+    if matches!(kind, Some("approval_request" | "user_input_request")) {
+        return if is_tool_like(entry) {
+            "other"
+        } else {
+            "update"
+        };
+    }
+    let data = tool_data(entry);
+    let tool_name = match item {
+        Some(i) if i.kind == "dynamic_tool" => i.str("toolName").map(str::to_owned),
+        _ => data["toolName"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| tool_title(entry)),
+    };
+    let classified = classify(
+        match kind {
+            Some(k @ ("command_execution" | "file_change" | "web_search")) => Some(k),
+            Some("dynamic_tool") => Some("dynamic_tool_call"),
+            _ => None,
+        },
+        None,
+        data["kind"].as_str(),
+        tool_name.as_deref(),
+    );
+    match classified {
+        Activity::Read => return "read",
+        Activity::FileChange => return "edit",
+        _ if kind == Some("file_change") => return "edit",
+        Activity::Command => return "command",
+        _ if kind == Some("command_execution") || entry.command.is_some() => return "command",
+        Activity::Search => {
+            return if kind == Some("web_search") && !local_code_search(entry) {
+                "search"
+            } else {
+                "code-search"
+            };
+        }
+        _ => {}
+    }
+    if local_code_search(entry) {
+        "code-search"
+    } else if kind == Some("web_search") {
+        "search"
+    } else if !entry.changed_files.is_empty() {
+        "edit"
+    } else if is_tool_like(entry) {
+        "other"
+    } else {
+        "update"
     }
 }
 
@@ -1456,20 +1642,76 @@ fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
-/// Port of `summarizeToolGroup`, e.g. "Ran 2 commands and changed 1 file".
+/// `toolGroupActionLabel`.
+fn group_action_label(action: &str, count: usize) -> String {
+    let pull_requests = plural(count, "pull request", "pull requests");
+    let times = plural(count, "time", "times");
+    match action {
+        "link-pr" => format!("Linked {pull_requests}"),
+        "unlink-pr" => format!("Unlinked {pull_requests}"),
+        "watch-pr" => format!("Watching {pull_requests}"),
+        "unwatch-pr" => format!("Stopped watching {pull_requests}"),
+        "list-prs" if count == 1 => "Checked linked pull requests".into(),
+        "list-prs" => format!("Checked linked pull requests {count} times"),
+        "read" => format!("Read {}", plural(count, "file", "files")),
+        "edit" => format!("Changed {}", plural(count, "file", "files")),
+        "command" => format!("Ran {}", plural(count, "command", "commands")),
+        "thread-create" => format!("Created {}", plural(count, "thread", "threads")),
+        "device" => format!("Used device controls {times}"),
+        "browser" => format!("Used browser {times}"),
+        "search" => format!("Searched the web {times}"),
+        "code-search" => format!("Searched code {times}"),
+        "other" => format!("Used {}", plural(count, "tool", "tools")),
+        _ => format!("Received {}", plural(count, "update", "updates")),
+    }
+}
+
+/// `summaryActionPriority`: effects first, then lookups, then the rest.
+fn summary_priority(action: &str) -> u8 {
+    match action {
+        "command" | "edit" | "delegate" | "task-cancel" | "thread-create" | "thread-send"
+        | "thread-interrupt" | "workflow-stop" | "schedule-create" | "schedule-update"
+        | "schedule-delete" | "schedule-run" | "thread-configure" | "thread-fork"
+        | "thread-merge" | "thread-organize" | "thread-update" | "queue-edit" | "queue-cancel"
+        | "queue-reorder" | "queue-steer" | "question-respond" | "worktree-handoff"
+        | "project-create" | "project-update" | "project-delete" | "project-clone"
+        | "environment-update" | "attachment-prepare" | "attachment-discard"
+        | "attachment-send" => 0,
+        "other" | "update" => 2,
+        _ => 1,
+    }
+}
+
+/// Port of `summarizeToolGroup`: at most two categories, by priority,
+/// then how many other calls there were ("Ran 2 commands and changed 1
+/// file"). T3 calls group by their summary action; their labels use the
+/// group action's until `summarizeT3ToolCalls` is ported.
 pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
-    let mut groups: Vec<(Action, Vec<&WorkEntry>)> = Vec::new();
-    for entry in entries {
-        let action = action(entry);
-        match groups.iter_mut().find(|(a, _)| *a == action) {
-            Some((_, list)) => list.push(entry),
-            None => groups.push((action, vec![entry])),
+    let tools: Vec<&WorkEntry> = entries
+        .iter()
+        .filter(|e| e.item_type.as_deref() != Some("reasoning"))
+        .collect();
+    if !entries.is_empty() && tools.is_empty() {
+        return if entries.len() == 1 {
+            "Thought".into()
+        } else {
+            format!("Thought (×{})", entries.len())
+        };
+    }
+    let mut groups: Vec<(&'static str, &'static str, Vec<&WorkEntry>)> = Vec::new();
+    for entry in &tools {
+        let action = group_action(entry);
+        let key = t3_presentation(entry, None).map_or(action, |(_, tool)| tool.summary);
+        match groups.iter_mut().find(|(k, _, _)| *k == key) {
+            Some((_, _, list)) => list.push(entry),
+            None => groups.push((key, action, vec![entry])),
         }
     }
-    let labels: Vec<String> = groups
+    let mut selected: Vec<(usize, u8, usize, String)> = groups
         .iter()
-        .map(|(action, list)| {
-            let count = if *action == Action::Edit {
+        .enumerate()
+        .map(|(index, (key, action, list))| {
+            let count = if *action == "edit" {
                 let mut files = HashSet::new();
                 let mut without = 0;
                 for entry in list {
@@ -1482,16 +1724,25 @@ pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
             } else {
                 list.len()
             };
-            match action {
-                Action::Read => format!("Read {}", plural(count, "file", "files")),
-                Action::Edit => format!("Changed {}", plural(count, "file", "files")),
-                Action::Command => format!("Ran {}", plural(count, "command", "commands")),
-                Action::Search => format!("Searched the web {}", plural(count, "time", "times")),
-                Action::Other => format!("Used {}", plural(count, "tool", "tools")),
-                Action::Update => format!("Received {}", plural(count, "update", "updates")),
-            }
+            (
+                index,
+                summary_priority(key),
+                list.len(),
+                group_action_label(action, count),
+            )
         })
         .collect();
+    selected.sort_by_key(|(index, priority, _, _)| (*priority, *index));
+    selected.truncate(2);
+    selected.sort_by_key(|(index, ..)| *index);
+    let mut labels: Vec<String> = selected.iter().map(|(.., label)| label.clone()).collect();
+    let remaining = tools.len() - selected.iter().map(|(_, _, count, _)| count).sum::<usize>();
+    if remaining > 0 {
+        labels.push(format!(
+            "Performed {}",
+            plural(remaining, "other action", "other actions")
+        ));
+    }
     let sentence: Vec<String> = labels
         .iter()
         .enumerate()
@@ -1515,6 +1766,151 @@ pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
     }
 }
 
+/// `toolGroupSummaryKind`: what the group toggle's icon stands for.
+pub fn group_summary_kind(entries: &[WorkEntry]) -> &'static str {
+    let tools: Vec<&WorkEntry> = entries
+        .iter()
+        .filter(|e| e.item_type.as_deref() != Some("reasoning"))
+        .collect();
+    if !entries.is_empty() && tools.is_empty() {
+        return "reasoning";
+    }
+    if !tools.is_empty()
+        && tools
+            .iter()
+            .all(|e| t3_presentation(e, None).is_some_and(|(_, t)| t.icon == "pull-request"))
+    {
+        return "pull-request";
+    }
+    let actions: HashSet<&str> = tools.iter().map(|e| group_action(e)).collect();
+    if actions.len() != 1 {
+        return "mixed";
+    }
+    let action = actions.into_iter().next().unwrap_or("mixed");
+    if action != "other" {
+        return action;
+    }
+    let kinds: HashSet<&str> = tools
+        .iter()
+        .map(|e| match (e.item_type.as_deref(), e.tone.as_str()) {
+            (Some("dynamic_tool"), _) => "dynamic-tool",
+            (Some("subagent"), _) | (_, "thinking") => "agent-tool",
+            (_, "tool") => "tone-tool",
+            _ => "other",
+        })
+        .collect();
+    if kinds.len() == 1 {
+        kinds.into_iter().next().unwrap_or("mixed")
+    } else {
+        "mixed"
+    }
+}
+
+/// `workEntryIconName`. `t3-code` stands for upstream's wordmark, which
+/// Pluto draws as its own mark; `browser-app` is upstream's
+/// `BrowserAppIcon`.
+pub fn work_icon(entry: &WorkEntry) -> &'static str {
+    let item = entry.item.as_deref();
+    if let Some(item) = item.filter(|i| i.kind == "notification") {
+        if item.str("outcome") == Some("failed") {
+            return "circle-alert";
+        }
+        let source = item.get("source");
+        return match source["kind"].as_str() {
+            Some("subagent" | "delegated_task") => "bot",
+            Some("background_task") if source["work"] == "subagent" => "bot",
+            Some("command" | "background_command") => "terminal",
+            Some("monitor") => "eye",
+            Some("system") => "t3-code",
+            _ => "zap",
+        };
+    }
+    if matches!(
+        entry.item_type.as_deref(),
+        Some("user_input_request" | "approval_request")
+    ) {
+        return "message-circle";
+    }
+    if let Some(item) = item {
+        let surface = item
+            .str("toolSurface")
+            .filter(|s| matches!(*s, "browser" | "computer"));
+        let source = item.get("toolSource")["kind"].as_str();
+        let dynamic_surface = (item.kind == "dynamic_tool")
+            .then(|| {
+                crate::tool_presentation::dynamic_tool_surface(
+                    item.str("toolName"),
+                    item.get("input"),
+                )
+            })
+            .flatten();
+        if surface.is_some()
+            || matches!(source, Some("browser" | "computer"))
+            || dynamic_surface.is_some()
+        {
+            return "browser-app";
+        }
+        if item.kind == "dynamic_tool" && crate::tool_presentation::is_js_repl(item.str("toolName"))
+        {
+            return "code-xml";
+        }
+    }
+    if let Some((_, tool)) = t3_presentation(entry, None) {
+        return summary_icon(tool.icon);
+    }
+    let action = group_action(entry);
+    if action != "other" {
+        return summary_icon(action);
+    }
+    match entry.item_type.as_deref() {
+        Some("dynamic_tool") => return "wrench",
+        Some("subagent") => return "bot",
+        _ => {}
+    }
+    match entry.tone.as_str() {
+        "error" => "circle-alert",
+        "thinking" => "brain",
+        "info" => "check",
+        _ => "zap",
+    }
+}
+
+/// `toolGroupSummaryIconName`, for a summary kind, a group action or a T3
+/// definition's icon.
+pub fn summary_icon(kind: &str) -> &'static str {
+    match kind {
+        "pull-request" | "link-pr" | "unlink-pr" | "list-prs" | "watch-pr" | "unwatch-pr" => {
+            "git-pull-request-arrow"
+        }
+        "read" => "eye",
+        "edit" => "square-pen",
+        "command" => "terminal",
+        "thread-create" | "t3-code" => "t3-code",
+        "browser" => "browser-app",
+        "device" => "smartphone",
+        "search" => "globe",
+        "code-search" => "search",
+        "other" => "wrench",
+        "reasoning" => "brain",
+        "agent-tool" => "bot",
+        "tone-tool" => "zap",
+        _ => "hammer",
+    }
+}
+
+/// `normalizeCompactToolLabel`.
+fn compact_tool_label(value: &str) -> &str {
+    let trimmed = value.trim_end();
+    for suffix in [" completed", " complete"] {
+        if trimmed.len() >= suffix.len()
+            && trimmed[trimmed.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        {
+            return trimmed[..trimmed.len() - suffix.len()].trim();
+        }
+    }
+    trimmed.trim()
+}
+
 /// `workEntryDisplayLabel`: what a standalone row shows.
 pub fn display_label(entry: &WorkEntry) -> String {
     if let Some(question) = &entry.question {
@@ -1528,31 +1924,125 @@ pub fn display_label(entry: &WorkEntry) -> String {
             return preview.join(" · ");
         }
     }
-    if entry.source_kind == "event" {
+    let kind = entry.item_type.as_deref();
+    if entry.source_kind == "event" || kind == Some("system_notice") {
         return entry.label.clone();
     }
-    entry
-        .command
-        .clone()
-        .or_else(|| entry.detail.clone())
-        .or_else(|| match entry.changed_files.as_slice() {
-            [] => None,
-            [one] => Some(one.clone()),
-            [first, rest @ ..] => Some(format!("{first} +{} more", rest.len())),
-        })
-        .unwrap_or_else(|| capitalize(entry.label.trim()))
-}
-
-fn single_tool_call_label(entry: &WorkEntry) -> String {
-    if let Some(command) = entry
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
-    {
+    if kind == Some("reasoning") || entry.tone == "thinking" {
+        let thought = entry
+            .detail
+            .as_deref()
+            .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|d| !d.is_empty());
+        return thought.unwrap_or_else(|| entry.label.clone());
+    }
+    if let Some((label, _)) = t3_presentation(entry, None) {
+        return label;
+    }
+    if let Some(command) = entry.command.as_deref().filter(|c| !c.trim().is_empty()) {
         return command.to_owned();
     }
-    capitalize(entry.label.trim())
+    let action = group_action(entry);
+    if matches!(action, "code-search" | "search") {
+        // Adapters title file searches with their target; the item keeps
+        // only the pattern.
+        let label = if kind == Some("file_search") {
+            Some(entry.label.clone())
+        } else {
+            crate::tool_presentation::search_label(&tool_data(entry))
+        };
+        if let Some(label) = label {
+            return label;
+        }
+    }
+    if action == "read" {
+        let paths = read_paths(entry);
+        if let Some(first) = paths.first() {
+            return crate::tool_presentation::read_label(first, paths.len() - 1);
+        }
+    }
+    let item = entry.item.as_ref();
+    let provider_retry = item.is_some_and(|i| i.kind == "error" && i.get("retry").is_object());
+    if let Some(title) = item.filter(|i| i.kind == "dynamic_tool").and_then(|i| {
+        crate::tool_presentation::dynamic_tool_title(
+            i.str("toolName"),
+            i.get("input"),
+            i.title.as_deref(),
+        )
+    }) {
+        return title;
+    }
+    let detail = entry
+        .detail
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    let search_output = matches!(action, "code-search" | "search")
+        && detail.is_some_and(|d| d.contains(['\r', '\n']));
+    if let Some(detail) = detail
+        && !provider_retry
+        && action != "read"
+        && !search_output
+    {
+        return detail.to_owned();
+    }
+    match entry.changed_files.as_slice() {
+        [] => {}
+        [one] => return one.clone(),
+        [first, rest @ ..] => return format!("{first} +{} more", rest.len()),
+    }
+    if action == "read" && item.is_none_or(|i| i.str("viewedImagePath").is_none()) {
+        return "Read file".into();
+    }
+    let heading = tool_title(entry)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| entry.label.clone());
+    capitalize(compact_tool_label(&heading))
+}
+
+/// `workEntryReadRawPaths`.
+fn read_paths(entry: &WorkEntry) -> Vec<String> {
+    if !entry.changed_files.is_empty() {
+        return entry.changed_files.clone();
+    }
+    if let Some(item) = entry.item.as_ref().filter(|i| i.kind == "dynamic_tool") {
+        let paths =
+            crate::tool_presentation::collect_file_paths(&json!({"input": item.get("input")}));
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+    crate::tool_presentation::collect_file_paths(&tool_data(entry))
+}
+
+/// `singleToolCallLabel`.
+fn single_tool_call_label(entry: &WorkEntry) -> String {
+    if entry.item_type.as_deref() == Some("reasoning") {
+        let thought = entry
+            .detail
+            .as_deref()
+            .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|d| !d.is_empty());
+        return thought.unwrap_or_else(|| "Thought".into());
+    }
+    if let Some((label, _)) = t3_presentation(entry, Some("completed")) {
+        return label;
+    }
+    let item = entry.item.as_ref();
+    if let Some(title) = item.filter(|i| i.kind == "dynamic_tool").and_then(|i| {
+        crate::tool_presentation::dynamic_tool_title(
+            i.str("toolName"),
+            i.get("input"),
+            i.title.as_deref(),
+        )
+    }) {
+        return title;
+    }
+    // A lone web search keeps its heading; the query stays in its detail.
+    if entry.item_type.as_deref() == Some("web_search") {
+        return tool_title(entry).unwrap_or_else(|| "Web search".into());
+    }
+    display_label(entry)
 }
 
 fn capitalize(text: &str) -> String {
@@ -2227,7 +2717,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                 }
                 let group_id = format!("work-group:{}", first.id);
                 if group.len() == 1 && is_tool_like(&group[0]) {
-                    let label = if action(&group[0]) == Action::Edit {
+                    let label = if group_action(&group[0]) == "edit" {
                         summarize_tool_group(&group)
                     } else {
                         single_tool_call_label(&group[0])
@@ -2248,6 +2738,7 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
                         group_id: group_id.clone(),
                         summary,
                         expanded,
+                        kind: group_summary_kind(&group),
                         has_failure: group
                             .iter()
                             .rev()
@@ -2349,6 +2840,54 @@ mod tests {
             item: Arc::new(item),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn tool_calls_read_like_upstream() {
+        let at = "2026-10-01T00:00:00.000Z";
+        let entry = |id: &str, kind: &str, extra: Value| {
+            work_entry(&item(id, kind, at, None, extra).item, at)
+        };
+        let delegate = entry(
+            "a",
+            "dynamic_tool",
+            json!({"toolName": "mcp__t3-code__delegate_task", "input": {}}),
+        );
+        assert_eq!(display_label(&delegate), "Delegated a child task");
+        assert_eq!(group_action(&delegate), "other");
+        let link = entry(
+            "b",
+            "dynamic_tool",
+            json!({"toolName": "t3-code.link_pull_request",
+            "input": {"url": "https://github.com/a/b/pull/7"}}),
+        );
+        assert_eq!(display_label(&link), "Linked PR #7");
+        assert_eq!(group_action(&link), "link-pr");
+        let grep = entry(
+            "c",
+            "dynamic_tool",
+            json!({"toolName": "Grep",
+            "input": {"pattern": "todo", "path": "/src/app"}}),
+        );
+        assert_eq!(grep.label, "Searched todo in app");
+        assert_eq!(group_action(&grep), "code-search");
+        let read = entry(
+            "d",
+            "dynamic_tool",
+            json!({"toolName": "Read", "input": {"file_path": "/a/b.rs"}}),
+        );
+        assert_eq!(display_label(&read), "Read /a/b.rs");
+        let command = entry("e", "command_execution", json!({"input": "ls"}));
+        let commands: Vec<WorkEntry> = (0..3).map(|_| command.clone()).collect();
+        let mut group = commands.clone();
+        group.extend([grep.clone(), read.clone(), delegate.clone()]);
+        // Two categories by priority, then the rest.
+        assert_eq!(
+            summarize_tool_group(&group),
+            "Ran 3 commands, used 1 tool, and performed 2 other actions"
+        );
+        assert_eq!(group_summary_kind(&commands), "command");
+        assert_eq!(group_summary_kind(&[link.clone(), link]), "pull-request");
     }
 
     #[test]

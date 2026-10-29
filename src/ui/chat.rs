@@ -1292,10 +1292,11 @@ impl App {
                 group_id,
                 summary,
                 expanded,
+                kind,
                 ..
             } => {
                 if self
-                    .work_row(ui, "hammer", summary, width, Some(group_id))
+                    .work_row(ui, summary_icon(kind), summary, width, Some(group_id))
                     .clicked()
                 {
                     if !self.expansion.groups.remove(group_id) {
@@ -2208,7 +2209,7 @@ impl App {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(6), theme::overlay(0.008));
         }
-        theme::paint_icon(
+        paint_work_icon(
             ui,
             icon,
             Rect::from_min_size(
@@ -2299,7 +2300,7 @@ impl App {
             Pos2::new(rect.left() + 2.0, rect.top() + pad),
             Vec2::new(width - 4.0, MESSAGE_LINE),
         );
-        theme::paint_icon(
+        paint_work_icon(
             ui,
             icon,
             Rect::from_min_size(line.min, Vec2::new(24.0, MESSAGE_LINE)),
@@ -3065,31 +3066,18 @@ fn scroll_to_end_pill(ui: &mut Ui, rect: Rect, bottom_padding: f32) -> bool {
     response.clicked()
 }
 
-pub(crate) fn work_icon(entry: &WorkEntry) -> &'static str {
-    match entry.item_type.as_deref() {
-        Some("command_execution") => return "terminal",
-        Some("file_change") => return "square-pen",
-        Some("web_search") => return "globe",
-        Some("mcp_tool_call") => return "wrench",
-        Some("dynamic_tool_call") => return "hammer",
-        _ => {}
-    }
-    if entry.label.eq_ignore_ascii_case("read file") {
-        return "eye";
-    }
-    if entry.command.is_some() || !entry.changed_files.is_empty() {
-        return if entry.command.is_some() {
-            "terminal"
-        } else {
-            "square-pen"
-        };
-    }
-    match entry.tone.as_str() {
-        "error" => "circle-alert",
-        "thinking" => "brain",
-        "info" => "check",
-        "tool" => "wrench",
-        _ => "zap",
+pub(crate) use pluto_core::timeline::{summary_icon, work_icon};
+
+/// A work icon: Pluto's mark for `t3-code`, else the lucide icon.
+pub(crate) fn paint_work_icon(ui: &Ui, icon: &str, rect: Rect, size: f32, color: egui::Color32) {
+    if icon == "t3-code" {
+        crate::ui::pixel_logo::paint(
+            ui,
+            Rect::from_center_size(rect.center(), Vec2::splat(size)),
+            0.0,
+        );
+    } else {
+        theme::paint_icon(ui, icon, rect, size, color);
     }
 }
 

@@ -36,36 +36,10 @@ fn is_html_render_tool(name: &str) -> bool {
     is_t3_tool(name, "html_render")
 }
 
-/// `resolveT3McpToolName`: whether `name` is T3's `tool` under any of the
+/// `resolveT3McpToolId`: whether `name` is T3's `tool` under any of the
 /// prefixes providers give T3's server (`mcp__t3-code__`, `t3-code.`, …).
 pub fn is_t3_tool(name: &str, tool: &str) -> bool {
-    let label = name.trim();
-    let label = label
-        .strip_suffix(" completed")
-        .or_else(|| label.strip_suffix(" complete"))
-        .unwrap_or(label)
-        .trim();
-    if let Some(rest) = label.strip_prefix("mcp__") {
-        return rest.split_once("__").is_some_and(|(server, rest_tool)| {
-            matches!(
-                server.to_lowercase().as_str(),
-                "t3-code" | "t3_code" | "t3code"
-            ) && rest_tool == tool
-        });
-    }
-    let lower = label.to_lowercase();
-    for server in ["t3-code", "t3_code", "t3code"] {
-        if let Some(rest) = lower.strip_prefix(server) {
-            let rest_tool = rest
-                .trim_start_matches(|c: char| ".:/ -_·".contains(c))
-                .trim();
-            if rest_tool == tool {
-                return true;
-            }
-        }
-    }
-    // OpenCode 2 names one server per thread: `t3-code-<thread>_html_render`.
-    label == tool || (lower.starts_with("t3-code-") && lower.ends_with(&format!("_{tool}")))
+    crate::tool_presentation::t3_tool(name).is_some_and(|t| t.name == tool)
 }
 
 /// `readHtmlRenderReference`.
