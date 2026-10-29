@@ -982,6 +982,9 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "bookmark",
+        "file",
+        "target",
         "wifi-off",
         "shield-question",
         "redo-2",

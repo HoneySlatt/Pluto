@@ -76,7 +76,7 @@ fn image_entry(image: &ComposerImage, encoded: &mut HashMap<String, String>) -> 
 }
 
 /// A composer's persisted form.
-fn draft_entry(
+pub(crate) fn draft_entry(
     text: &str,
     images: &[ComposerImage],
     files: &[ComposerFile],
@@ -115,7 +115,7 @@ fn stored_entry(draft: &ComposerDraft, encoded: &mut HashMap<String, String>) ->
     )
 }
 
-fn read_draft(entry: &Value) -> ComposerDraft {
+pub(crate) fn read_draft(entry: &Value) -> ComposerDraft {
     let images = entry["images"]
         .as_array()
         .into_iter()

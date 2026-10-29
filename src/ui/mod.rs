@@ -81,6 +81,7 @@ pub mod shortcuts;
 pub mod sidebar;
 pub mod snooze_dialog;
 pub mod source_control;
+pub mod stash;
 pub mod surfaces;
 pub mod tasks;
 pub mod terminal_drawer;

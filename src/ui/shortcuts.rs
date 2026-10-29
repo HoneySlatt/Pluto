@@ -228,6 +228,16 @@ impl App {
                 self.open_thread_find()
             }
             "sidebar.toggle" => self.toggle_sidebar(),
+            // With an approval or a running question, the stash waits.
+            "composer.stash"
+                if self.settings_page.is_none()
+                    && !matches!(
+                        self.composer_mode(self.selected.is_none()),
+                        crate::ui::composer::Mode::Approval(..)
+                    ) =>
+            {
+                self.stash_shortcut()
+            }
             "threadPanel.toggle" if self.thread_details_available() => {
                 use crate::ui::thread_details::MENU;
                 let open = self.open_menu.as_deref() == Some(MENU);

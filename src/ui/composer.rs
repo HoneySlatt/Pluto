@@ -348,7 +348,12 @@ impl App {
 
     /// Height the composer overlay covers above the window bottom, banner included.
     pub(crate) fn composer_overlay(&self, ui: &Ui, body: Rect, width: f32, mode: &Mode) -> f32 {
-        let banner = (self.banner_height(ui, width, mode) - OVERLAP).max(0.0);
+        let banner = (self.banner_height(ui, width, mode) - OVERLAP).max(0.0)
+            + if self.stash.entries.is_empty() {
+                0.0
+            } else {
+                crate::ui::stash::TAB
+            };
         // Measured: the list keeps 26px more than the composer overlay (pt-2 + clearance).
         body.bottom() - self.composer_layout_top(ui, body, width, mode) + banner + 26.0
     }
@@ -415,6 +420,17 @@ impl App {
                 surface.top()
             };
             self.paint_notices(ui, surface, bottom, &notices);
+        }
+
+        // The stash's tab rides on top of everything attached above.
+        if !matches!(mode, Mode::Approval(..)) {
+            let attached = (self.banner_height(ui, width, mode) - OVERLAP).max(0.0);
+            let bottom = if attached > 0.0 {
+                surface.top() - attached
+            } else {
+                surface.top()
+            };
+            self.stash_tab(ui, surface, bottom);
         }
 
         // Checkout strip, tucked 16px under the surface (`-mt-4`); only for a
