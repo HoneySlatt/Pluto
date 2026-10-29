@@ -28,24 +28,16 @@ import app.pluto.mobile.safeBars
 fun PageView(page: Page) {
     when (page) {
         is Page.Thread -> ThreadView(page.id, page = true)
-        else -> Column(Modifier.fillMaxSize().background(P.canvas).safeBars()) {
-            PageHead(pageTitle(page))
-            T("Not ported yet.", 15f, P.muted, modifier = Modifier.padding(24.dp))
-        }
+        Page.Settings -> SettingsPage()
+        is Page.Diff -> DiffPage(page.thread, page.run, page.focus)
+        Page.Projects -> ProjectsPage()
+        is Page.Project -> ProjectPage(page.id)
+        Page.Tasks -> TasksPage()
+        is Page.TaskEdit -> TaskEditPage(page.id)
+        Page.Usage -> UsagePage()
+        Page.Memory -> MemoryPage()
+        Page.Licenses -> LicensesPage()
     }
-}
-
-private fun pageTitle(page: Page) = when (page) {
-    Page.Settings -> "Settings"
-    is Page.Diff -> "Changes"
-    Page.Projects -> "Projects"
-    is Page.Project -> "Project"
-    Page.Tasks -> "Scheduled tasks"
-    is Page.TaskEdit -> if (page.id == null) "New task" else "Edit task"
-    Page.Usage -> "Usage"
-    Page.Memory -> "Personalization"
-    Page.Licenses -> "Licenses"
-    is Page.Thread -> ""
 }
 
 // A page's header: Back, the title, and an action or the space it keeps.

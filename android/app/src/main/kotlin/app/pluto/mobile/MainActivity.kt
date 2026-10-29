@@ -36,6 +36,14 @@ class MainActivity : ComponentActivity() {
         }
         model = (application as PlutoApplication).model
         setContent { PlutoApp(model) }
+        // A debug build opens a demo session (`--es demo <file in files/>`)
+        // to look at the screens without a server.
+        if (BuildConfig.DEBUG) {
+            intent.getStringExtra("demo")?.let { name ->
+                val error = model.core.loadDemo(java.io.File(filesDir, name).readText())
+                if (error != null) model.core.toast(error)
+            }
+        }
     }
 
     override fun onResume() {

@@ -1123,8 +1123,152 @@ impl Core {
         })
     }
 
+    /// Loads a session without a server, for looking at the screens in a
+    /// debug build: `{"config", "shell", "thread", "detail"}` as the server
+    /// streams them, `thread` opened with `detail`.
+    pub fn load_demo(&self, json: String) -> Option<String> {
+        let demo: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(value) => value,
+            Err(error) => return Some(error.to_string()),
+        };
+        self.update(|app, _| {
+            let s = &mut app.session;
+            s.server = "http://demo.invalid:3773".into();
+            s.state.config_event(&demo["config"]);
+            if let Err(error) = s.state.shell(&demo["shell"]) {
+                return Some(error);
+            }
+            s.listed = true;
+            s.net = Net::Connected;
+            if let Some(id) = demo["thread"].as_str() {
+                s.selected = Some(id.to_owned());
+                s.state.switch_detail(Some(id));
+                if let Err(error) = s.state.thread(id, &demo["detail"]) {
+                    return Some(error);
+                }
+            }
+            None
+        })
+    }
+
     /// Drops the replies under `prefix`.
     pub fn forget(&self, prefix: String) {
         self.update(|app, _| app.session.forget(&prefix));
     }
+
+    /// A one-shot request (`payload` as JSON); its reply arrives under
+    /// `key` (`reply_json`).
+    pub fn request(&self, key: String, method: String, payload: String) {
+        let payload = serde_json::from_str(&payload).unwrap_or_else(|_| json!({}));
+        self.update(|app, _| app.session.request(key, intern(&method), payload));
+    }
+
+    /// A request whose reply is only checked for failure (a toast).
+    pub fn mutate(&self, method: String, payload: String) {
+        let payload = serde_json::from_str(&payload).unwrap_or_else(|_| json!({}));
+        self.update(|app, _| app.session.mutate(intern(&method), payload));
+    }
+
+    /// The reply to `key`: its JSON, or its failure; `None` while none came.
+    pub fn reply_json(&self, key: String) -> Option<JsonReply> {
+        self.read(|app| {
+            app.session.replies.get(&key).map(|reply| match reply {
+                Ok(value) => JsonReply {
+                    ok: Some(value.to_string()),
+                    error: None,
+                },
+                Err(error) => JsonReply {
+                    ok: None,
+                    error: Some(error.clone()),
+                },
+            })
+        })
+    }
+
+    /// A command for `thread` with its id and time (`pluto_core::model::command`),
+    /// as JSON to complete before `dispatch`.
+    pub fn command_json(&self, kind: String, thread: String) -> String {
+        pluto_core::model::command(&kind, &thread).to_string()
+    }
+
+    /// Sends a command (JSON); its failure shows as a toast.
+    pub fn dispatch(&self, command: String) -> bool {
+        let Ok(command) = serde_json::from_str(&command) else {
+            return false;
+        };
+        self.update(|app, _| app.session.dispatch(command))
+    }
+
+    /// Sends a command (JSON) whose reply `reply_state` follows; the key.
+    pub fn dispatch_tracked(&self, command: String) -> String {
+        let command = serde_json::from_str(&command).unwrap_or_else(|_| json!({}));
+        self.update(|app, _| app.session.dispatch_tracked(command))
+    }
+
+    /// The server's settings (`config.settings`) as JSON.
+    pub fn settings_json(&self) -> String {
+        self.read(|app| app.session.settings().to_string())
+    }
+
+    /// The server's config (`providers`, `environment`, …) as JSON.
+    pub fn config_json(&self) -> String {
+        self.read(|app| app.session.state.config.to_string())
+    }
+
+    /// A `server.updateSettings` patch (`value` as JSON), applied locally at
+    /// once.
+    pub fn update_setting(&self, key: String, value: String) {
+        let value = serde_json::from_str(&value).unwrap_or(serde_json::Value::Null);
+        self.update(|app, _| app.session.update_setting(&key, value));
+    }
+
+    /// The phone's own settings (`prefs`) as JSON.
+    pub fn pref_json(&self, key: String) -> String {
+        self.read(|app| app.session.prefs.get(&key).to_string())
+    }
+
+    pub fn set_pref(&self, key: String, value: String) {
+        let value = serde_json::from_str(&value).unwrap_or(serde_json::Value::Null);
+        self.update(|app, _| app.session.prefs.set(&key, value));
+    }
+
+    /// The scheduled tasks once listed, as a JSON array, or their failure.
+    pub fn tasks_json(&self) -> Option<JsonReply> {
+        self.read(|app| {
+            app.session.tasks.as_ref().map(|tasks| match tasks {
+                Ok(list) => JsonReply {
+                    ok: Some(serde_json::Value::Array(list.clone()).to_string()),
+                    error: None,
+                },
+                Err(error) => JsonReply {
+                    ok: None,
+                    error: Some(error.clone()),
+                },
+            })
+        })
+    }
+
+    /// The code projects, by title, as badges.
+    pub fn code_projects(&self) -> Vec<Badge> {
+        self.read(|app| app.session.code_projects().into_iter().map(badge).collect())
+    }
+}
+
+/// A reply as JSON, or its failure.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct JsonReply {
+    pub ok: Option<String>,
+    pub error: Option<String>,
+}
+
+/// A method name the protocol keeps for the connection's life.
+pub fn intern(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(found) = names.iter().find(|n| **n == name) {
+        return found;
+    }
+    let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
+    names.push(leaked);
+    leaked
 }

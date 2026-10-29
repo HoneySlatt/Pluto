@@ -22,6 +22,15 @@ mod prefs;
 mod session;
 mod times;
 mod views;
+// The pages and sheets, each with its own `impl Core` block.
+mod diff;
+mod licenses;
+mod memory;
+mod projects;
+mod settings;
+mod sheets;
+mod tasks;
+mod usage;
 
 pub use badge::Badge;
 pub use compose::Target;

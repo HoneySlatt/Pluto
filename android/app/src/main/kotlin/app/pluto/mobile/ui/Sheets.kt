@@ -47,7 +47,8 @@ import app.pluto.mobile.LocalModel
 import app.pluto.mobile.Sheet
 import kotlinx.coroutines.launch
 
-// A sheet's title and body.
+// A sheet's title (empty: none).
+@Composable
 private fun title(sheet: Sheet): String = when (sheet) {
     Sheet.Model -> "Model"
     Sheet.Attach -> "Attach"
@@ -60,7 +61,12 @@ private fun title(sheet: Sheet): String = when (sheet) {
     is Sheet.MemoryEdit -> if (sheet.id != null) "Edit memory" else "Add a memory"
     is Sheet.MemoryMenu -> "Memory"
     Sheet.ClearMemories -> "Delete all memories"
-    else -> ""
+    is Sheet.ThreadMenu -> threadMenuTitle(sheet.id)
+    is Sheet.Setting -> settingTitle(sheet.key)
+    is Sheet.ProjectSetting -> projectSettingTitle(sheet.field)
+    is Sheet.TaskMenu -> taskMenuTitle(sheet.id)
+    is Sheet.TaskField -> taskFieldTitle(sheet.field)
+    is Sheet.License -> licenseTitle(sheet.key)
 }
 
 @Composable
@@ -134,5 +140,23 @@ fun SheetView(sheet: Sheet, open: Boolean) {
 
 @Composable
 private fun SheetBody(sheet: Sheet) {
-    T("Not ported yet.", 15f, P.muted, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+    when (sheet) {
+        Sheet.Model -> ModelSheet()
+        is Sheet.ThreadMenu -> ThreadMenuSheet(sheet.id)
+        Sheet.Attach -> AttachSheet()
+        Sheet.Project -> ProjectSheet()
+        Sheet.Workspace -> WorkspaceSheet()
+        Sheet.Branch -> BranchSheet()
+        is Sheet.Setting -> SettingSheet(sheet.key)
+        is Sheet.ProjectSetting -> ProjectSettingSheet(sheet.project, sheet.field)
+        is Sheet.RemoveProject -> RemoveProjectSheet(sheet.project)
+        is Sheet.DeleteThread -> DeleteThreadSheet(sheet.id)
+        is Sheet.Rename -> RenameSheet(sheet.id)
+        is Sheet.TaskMenu -> TaskMenuSheet(sheet.id)
+        is Sheet.TaskField -> TaskFieldSheet(sheet.field)
+        is Sheet.MemoryEdit -> MemoryEditSheet(sheet.id)
+        is Sheet.MemoryMenu -> MemoryMenuSheet(sheet.id)
+        Sheet.ClearMemories -> ClearMemoriesSheet()
+        is Sheet.License -> LicenseSheet(sheet.key)
+    }
 }
