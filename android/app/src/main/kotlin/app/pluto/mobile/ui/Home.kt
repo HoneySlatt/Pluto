@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -233,6 +235,7 @@ fun Composer(target: Target, placeholder: String) {
         }
     }
     var focused by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     val border by animateColorAsState(if (focused) P.focus else P.input, tween(150), label = "composer")
     val empty = text.isBlank()
     val shape = RoundedCornerShape(28.dp)
@@ -292,6 +295,7 @@ fun Composer(target: Target, placeholder: String) {
                 }
             } else {
                 SendButton(stop = false, enabled = !empty && view.online, label = "Send") {
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                     val outcome = core.send(target, text)
                     val error = outcome.error
                     if (error == null) {

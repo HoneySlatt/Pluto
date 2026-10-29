@@ -212,12 +212,19 @@ fun Toggle(checked: Boolean, label: String? = null, enabled: Boolean = true, onC
     val x by animateFloatAsState(if (checked) 20f else 0f, tween(180, easing = Ease), label = "knob")
     val track by animateColorAsState(if (checked) P.accent else P.input, tween(180), label = "track")
     val knob by animateColorAsState(if (checked) P.accentFg else P.muted2, tween(180), label = "knob")
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box(
         Modifier
             .size(52.dp, 32.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(track)
-            .tap(enabled = enabled, role = Role.Switch, label = label) { onChange(!checked) },
+            .tap(enabled = enabled, role = Role.Switch, label = label) {
+                haptic.performHapticFeedback(
+                    if (checked) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                    else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn,
+                )
+                onChange(!checked)
+            },
     ) {
         Box(
             Modifier

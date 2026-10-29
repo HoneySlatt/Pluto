@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -160,13 +162,25 @@ private fun Timeline(id: String, view: ThreadView, modifier: Modifier) {
                 item(key = "subagent") { SubagentCard(child) }
             }
             for (input in view.questions.reversed()) {
-                item(key = "q:${input.requestId}") { QuestionCardView(id, input, view.online) }
+                item(key = "q:${input.requestId}") {
+                    Box(Modifier.animateItem(fadeInSpec = tween(260), placementSpec = tween(260, easing = Enter), fadeOutSpec = tween(160))) {
+                        QuestionCardView(id, input, view.online)
+                    }
+                }
             }
             for (approval in view.approvals.reversed()) {
-                item(key = "p:${approval.requestId}") { ApprovalCardView(id, approval, view.online) }
+                item(key = "p:${approval.requestId}") {
+                    Box(Modifier.animateItem(fadeInSpec = tween(260), placementSpec = tween(260, easing = Enter), fadeOutSpec = tween(160))) {
+                        ApprovalCardView(id, approval, view.online)
+                    }
+                }
             }
             for (item in view.items.asReversed()) {
-                item(key = itemKey(item)) { TimelineItem(id, item, now) }
+                item(key = itemKey(item)) {
+                    Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(260, easing = Enter), fadeOutSpec = tween(160))) {
+                        TimelineItem(id, item, now)
+                    }
+                }
             }
             if (view.partial) {
                 item(key = "earlier") {
@@ -535,6 +549,7 @@ private fun answerState(key: String?): Pair<Boolean, String?> {
 @Composable
 private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boolean) {
     val core = LocalModel.current.core
+    val haptic = LocalHapticFeedback.current
     var sent by remember { mutableStateOf<String?>(null) }
     val (busy, error) = answerState(sent)
     val enabled = online && !busy
@@ -578,7 +593,10 @@ private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boo
                         Modifier.weight(1f),
                         tone = if (choice.decision == "accept") Tone.Primary else Tone.Plain,
                         enabled = enabled,
-                    ) { sent = core.respond(thread, approval.requestId, choice.decision) }
+                    ) {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        sent = core.respond(thread, approval.requestId, choice.decision)
+                    }
                 }
             }
         }

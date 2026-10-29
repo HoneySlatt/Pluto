@@ -302,18 +302,18 @@ private fun LazyListScope.content(
         !view.listed -> item(key = "loading") { Note("Loading…") }
         view.chat -> for (day in view.days) {
             item(key = "day:${day.label}") { Section(day.label, null, null) }
-            for (row in day.rows) item(key = row.id) { TRow(row, view) }
+            for (row in day.rows) item(key = row.id) { Box(Modifier.animateItem()) { TRow(row, view) } }
         }
         else -> {
             if (view.attention.isNotEmpty()) {
                 item(key = "s:attention") { Section("Needs you", attention.first, attention.second) }
-                if (attention.first) for (row in view.attention) item(key = "a:${row.id}") { AttentionRow(row) }
+                if (attention.first) for (row in view.attention) item(key = "a:${row.id}") { Box(Modifier.animateItem()) { AttentionRow(row) } }
             }
             item(key = "s:threads") { Section("Threads", threads.first, threads.second) }
-            if (threads.first) for (row in view.active) item(key = row.id) { TRow(row, view) }
+            if (threads.first) for (row in view.active) item(key = row.id) { Box(Modifier.animateItem()) { TRow(row, view) } }
             if (view.settled.isNotEmpty()) {
                 item(key = "s:settled") { Section("Settled (${view.settled.size})", settled.first, settled.second) }
-                if (settled.first) for (row in view.settled) item(key = row.id) { TRow(row, view) }
+                if (settled.first) for (row in view.settled) item(key = row.id) { Box(Modifier.animateItem()) { TRow(row, view) } }
             }
         }
     }
