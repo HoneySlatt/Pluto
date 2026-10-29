@@ -52,16 +52,19 @@ default sidebar's drag and drop (sections, sweep, auto-scroll, onto the
 composer), multi-select, undo, draft rows, hover cards, indicators,
 settle-and-advance, durations, colors, Woke; root coordinators and toasts.
 
-Still open:
+Also done: worktree setup card, prompt links on `pluto://`, sending to
+several models, video through ffmpeg, Mermaid (merman), the T3 tool table
+with image icons, created-thread and subagent cards, checkpoint rollback,
+the editor's Markdown rules (fences, lists, Tab, chip undo).
 
-- Edit from here with checkpoint rollback ("Revert files too").
-- The rich prompt editor (formatting, code blocks, list continuation, chip
-  undo), prompt links (`pluto://`), sending to several models.
-- Timeline: worktree setup card, the subagent hover card, image tool icons
-  (favicon, themed logo, native app), Mermaid, PR links (with milestone 3),
-  video through ffmpeg.
-- Sidebar list motion; browser tabs in reopen-closed; project clone toasts
-  away from the draft.
+Still open (polish, after the later milestones if time allows):
+
+- Sidebar list motion (FLIP glides and fades).
+- The editor's styled rendering and the code block language picker.
+- Worktree setup: Work locally and the background chip.
+- Fan-out: stacked provider icons, Allow retry, failed-model restore.
+- Video: fullscreen and the media menu.
+- PR links in answers (with milestone 3), cloning from a prompt link.
 
 ## 3. Pull requests
 
