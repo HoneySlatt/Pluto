@@ -307,6 +307,11 @@ impl TaskDraft {
 
 static DRAFT: Mutex<Option<TaskDraft>> = Mutex::new(None);
 
+/// Leaving the server drops the draft.
+pub fn reset() {
+    *DRAFT.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
 fn with_draft<R>(change: impl FnOnce(&mut Option<TaskDraft>) -> R) -> R {
     change(&mut DRAFT.lock().unwrap_or_else(|p| p.into_inner()))
 }

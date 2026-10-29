@@ -721,6 +721,7 @@ impl Core {
             app.answers.clear();
             crate::usage::reset();
             crate::memory::reset();
+            crate::tasks::reset();
         });
     }
 
