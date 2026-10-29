@@ -1,0 +1,3 @@
+[bindings.kotlin]
+package_name = "app.pluto.core"
+cdylib_name = "pluto_ffi"

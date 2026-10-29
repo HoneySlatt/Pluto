@@ -45,8 +45,19 @@ fn request(
 ) -> Option<(u16, String, Vec<u8>)> {
     let host = url.host_str()?.trim_matches(['[', ']']).to_owned();
     let port = url.port_or_known_default()?;
-    let address = (host.as_str(), port).to_socket_addrs().ok()?.next()?;
-    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).ok()?;
+    // Every address the name resolves to, in turn (a broken IPv6 route
+    // falls back to IPv4), like the socket's connection.
+    let stream = (host.as_str(), port)
+        .to_socket_addrs()
+        .ok()?
+        .find_map(|address| TcpStream::connect_timeout(&address, Duration::from_secs(5)).ok())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(if upload.is_some() {
+            120
+        } else {
+            10
+        })))
+        .ok()?;
     stream
         .set_read_timeout(Some(Duration::from_secs(if upload.is_some() {
             120
@@ -159,8 +170,10 @@ fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 fn dechunk(mut body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     while let Some(line) = body.windows(2).position(|w| w == b"\r\n") {
+        // The size, before any chunk extension (`1a;name=value`).
+        let head = String::from_utf8_lossy(&body[..line]);
         let size =
-            usize::from_str_radix(String::from_utf8_lossy(&body[..line]).trim(), 16).unwrap_or(0);
+            usize::from_str_radix(head.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
         if size == 0 || body.len() < line + 2 + size {
             break;
         }

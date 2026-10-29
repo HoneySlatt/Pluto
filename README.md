@@ -88,129 +88,85 @@ sits about 2px right, and "↻" (missing from Geist) comes from egui's fallback
 font, smaller than the browser's. Scrollbars stay visible at rest; upstream
 fades them in on hover or scroll, and fades the overflowing edge of the question card's options. The usage chart readout has no backdrop blur.
 
-## Android app (`mobile/`)
+## Android app (`android/`)
 
-A Dioxus app over `crates/pluto-core` (the connection, model, timeline,
-requests, diff, context references and Chat | Code spaces the desktop client
-uses too), laid out after the validated mobile prototype (Grok's Android
-layout, Pluto stock theme). Build it in the Nix shell:
+A Kotlin and Jetpack Compose app over a Rust core. `crates/pluto-ffi` holds
+the phone's session with the server and builds what each screen shows from
+`crates/pluto-core` (the connection, model, timeline, requests, diff, context
+references and Chat | Code spaces the desktop client uses too); UniFFI
+exposes it to Kotlin, and Compose draws it, laid out after the validated
+mobile prototype (Grok's Android layout, Pluto stock theme). Build it in the
+Nix shell:
 
 ```sh
 nix develop .#mobile
-scripts/mobile-apk.sh
-# installable APK: target/dx/Pluto/release/android/app/app/build/outputs/apk/debug/app-debug.apk
+scripts/android-apk.sh          # arm64; `x86_64` for the emulator
+# installable APK: android/app/build/outputs/apk/release/pluto-arm64-v8a.apk
 ```
 
-The script regenerates the license notice, drops the libraries an earlier
-build for another ABI left in dx's Gradle project, runs `dx bundle --release`
-and checks the APK carries one ABI only. The Rust code is a release build;
-the APK is signed with Gradle's debug key.
-
-`nix develop .#emulator` provides a headless x86_64 emulator for looking at
-the app on the computer (`scripts/mobile-apk.sh x86_64`; the computer's
-loopback is `10.0.2.2` there).
+Gradle builds the core for the ABI asked with cargo-ndk, generates its
+Kotlin bindings, writes the open source notice (cargo-about for the Rust
+crates, the Android libraries from Gradle's resolution) and minifies the app.
+The APK is signed with Gradle's debug key, for installing by hand.
+`nix develop .#emulator` provides a headless x86_64 emulator (the computer's
+loopback is `10.0.2.2` there); a debug build opens a demo session from a
+JSON file (`adb shell am start … --es demo demo.json`, the file in the app's
+files) to look at the timeline without a server.
 
 Wired to the server: the connection screen (plain http for private and
-Tailscale addresses only, the token sealed with an Android Keystore key when
-"Remember on this phone" is on, show and paste, the token command), the
-launch with a remembered server (a splash, then "Can't reach your server" with
-Try again and Change server), reconnection after a lost connection (three
-attempts, the floating bar, Retry; Send, Stop and the request cards wait while
-offline); the Chat | Code tabs (Chat first); the home drafts (Code: the project
-sheet, Local checkout or New worktree with its base ref from `vcs.listRefs`,
-Continue; Chat: Research and Image chats, temporary chats, Continue), launched
-with `orchestration.launchThread`; the drawer (the server header, the menu,
-Code's Needs you (pending approval or input), Threads with project, branch and
-state, Settled, Chat's chats by day, live search, Settings and New, the edge
-swipe and pull to refresh); the thread view (the core timeline: user bubbles
-with their context chips, work folds and rows, markdown, plans, the
-changed-files card, live work, Working for, earlier turns), approvals and
-questions answered with `runtime-request.respond`, follow-ups and Stop
-(`run.interrupt`); the model sheet (the server's models by provider, the
-model's effort trait, Code's Build | Plan and access, sent with the message);
-the thread actions (rename, pin, fork, changed files, copy the thread ID,
-settle, delete with the confirmation setting); the branch sheet on a thread
-(`vcs.switchRef`, `vcs.createRef`); the diff page (`orchestration.getTurnDiff`
-for a turn or the whole thread, unified, file chips, collapsible files after
-"Default diff file state", wrap); Settings (the chat space's default model,
-the server's new-thread model, permissions and workspace, response streaming,
-the phone's time format, whitespace, diff state and delete confirmation,
-Forget token, Disconnect, the server version); Projects and a project page
-(project icons like the desktop's: the chosen Lucide icon, emoji or monogram,
-else the favicon from `assets.createUrl`, fetched by the app since the
-WebView may not load plain http, else the derived monogram; threads, its New threads overrides in `projectSettingsOverrides`, removal);
-Scheduled tasks (the live list, pause, Run now, Edit, Delete, the editor saved
-with `scheduledTasks.upsert` and the desktop's checks); Usage (Limits from the
-providers' quota windows, refreshed with `server.refreshProviders`; Cost and
-Tokens from `server.getUsageSummary` with the bar chart and the split by
-provider). Android's back gesture closes the top layer (sheet, drawer, page,
-thread).
-
-Personalization (the drawer's Memory in Chat, Settings → Personalization)
-reads and writes the chat space's `.pluto/instructions.json` (written to every
-chat space, the temporary one included) and `.pluto/memory.json` through
-`projects.readFile` and `projects.writeFile`, like the desktop's
-`memory_settings.rs`: About you and How chats should respond with Cancel and
-Save, Use memory, Learn from chats, Add a memory, Delete all memories, and
-each saved memory's Edit and Forget. Open source licenses lists Pluto and
-pluto-core (MIT), Geist (OFL-1.1), Lucide (ISC), the provider marks, and the
-direct crates of `mobile/` and `pluto-core` with the licenses cargo-about
-finds in them: `scripts/mobile-notice.sh` (in `nix develop .#mobile`, before
-`dx bundle`) writes `mobile/notice/about.json`, and `mobile/build.rs` turns it
-into the page's data and the full notice of every crate the app links (a
-build without it says so). The app draws edge to edge through its own
-activity (`mobile/android/MainActivity.kt`), which hands the system bars'
-heights to the page and shrinks it for the keyboard.
+Tailscale addresses only, https through Android's root certificates (not yet
+tried against a server), the token
+sealed with an Android Keystore key when "Remember on this phone" is on, show
+and paste, the token command), the launch with a remembered server (the
+splash, then "Can't reach your server" with Try again and Change server),
+reconnection after a lost connection (three attempts, the floating bar,
+Retry; Send, Stop and the request cards wait while offline); the Chat | Code
+tabs; the home drafts (Code: the project sheet, Local checkout or New
+worktree with its base ref from `vcs.listRefs`, Continue; Chat: Research and
+Image chats, temporary chats, Continue), launched with
+`orchestration.launchThread`; the drawer (the server header, the menu,
+Code's Needs you, Threads with project, branch and state, Settled, Chat's
+chats by day, live search, Settings and New, the edge swipe and pull to
+refresh); the thread view (the core timeline: user bubbles with their context
+chips and images, work folds and rows, markdown, plans, the changed-files
+card, live work, Working for, earlier turns, and the images Codex generated
+through the server's `generatedImages.list`), approvals and questions
+answered with `runtime-request.respond`, follow-ups and Stop; the model
+sheet, the thread actions, the branch sheet, the diff page, Settings,
+Projects and a project page, Scheduled tasks and their editor, Usage, and
+Personalization, as the desktop's. Images, attached or generated, open full
+screen with pinch to zoom.
 
 How the session holds up: commands go out only once the server synchronized,
 and a reconnected session follows the open thread and the scheduled tasks
-again; a socket that stops answering for 45 s, or a probe that gets no answer
-within 6 s when the app comes back to the foreground or the list is pulled,
-counts as lost. A message the server refuses, or whose fate a dropped
-connection leaves open, comes back to its composer (nothing is sent again by
-itself); a refused launch leaves the thread screen for the draft. Leaving the
-server clears its drafts, replies and images. Temporary chats the phone
-started are deleted (`thread.delete`) once it leaves them, again after a
-reconnection if needed; a temporary chat open on the computer is left alone,
-and the computer likewise deletes only the temporary chats it showed, plus
-those nobody touched for 12 hours (a client closed before deleting them).
-The branch sheet records a thread's branch only once the checkout succeeded
-(the desktop's `branch_picker.rs`: remote refs, a worktree that has the ref
-already, the provider sessions detached when the worktree changes). Request
+again; a socket silent for 45 s, or a probe unanswered within 6 s when the
+app comes back to the foreground or the list is pulled, counts as lost. A
+message the server refuses, or whose fate a dropped connection leaves open,
+comes back to its composer; a refused launch leaves the thread screen for
+the draft. Leaving the server clears its drafts, replies and images.
+Temporary chats the phone started are deleted once it leaves them. Request
 cards show every option the provider offers with its warning and app, and
-the actions that change data (request answers, rename, fork, delete, project
-removal, task actions, memories, instructions) wait for the server and show
-its refusal where they were asked. Personalization reads the memory file
-again before each change; a read that failed for another reason than a
-missing file blocks changes until Retry. A user message shows its images
-(`assets.createUrl`), its files, and the context it carries without a link.
-The timeline follows its end through every change of height, offers a jump
-back to it, keeps the rows in view while earlier turns load, skips the layout
-of answers out of view and ticks its clock only while the thread works. Pages
-and sheets slide out as they close, the drawer and the sheets follow the
-finger, everything behind an open sheet or drawer is inert, and System
+the actions that change data wait for the server and show its refusal where
+they were asked. Pages, sheets and the drawer follow the finger and the
+back gesture (predictive back), rows and cards fade into place, and System
 default follows the phone's 12/24-hour clock.
 
-Not wired yet: attachments (the Attach sheet's Photos, Camera and Files show a
-notice), chat projects' own memories (the desktop's chat project pages),
-thread notifications and a
-background connection (the Settings row is hidden until they exist), creating
-the chat space from the phone (Chat needs it created once on the computer),
-the "ask" line of Needs you (it reads "Waiting for your approval" or "Waiting
-for your answer", not the request's text), unread state, snoozed threads
-(listed with the others), published pages, MCP apps and generated images in
-the timeline (a note points to the computer), the code blocks' copy button
-and syntax colors, a list window for very long threads (every row stays
-mounted; answers out of view only skip their layout), and https servers (the app finds no Android root
-certificates yet). Checked in the emulator against a
-disposable server (connection, drafts, drawer, sheets, Settings, projects,
-tasks, usage, reconnection, Personalization with a synthetic chat space,
-the licenses, the keyboard and the edge-to-edge layout on Android 14), and
-against a synthetic protocol server for threads (a 200-message timeline,
-request cards, an image-only message, refused launches, answers and branch
-switches, dropped and silent connections, temporary chats, unreadable
-memory files); the diff page was not seen there, and frame rates, latency
-and battery remain to be measured on a phone.
+Attachments come from the Attach sheet (Photos, Camera, Files): images the
+providers take go inline (a photo they do not take, or over 10 MiB, as a
+JPEG of at most 3072 px), other files up to 50 MiB are uploaded when
+attached (`attachments.createUploadUrl`) and sent by id; a refused message
+brings its attachments back with its text.
+
+Not wired yet: chat projects' own memories, thread notifications and a background
+connection, creating the chat space from the phone, the "ask" line of Needs
+you, snoozed threads, published pages and MCP apps in the
+timeline (a note points to the computer). Code blocks show their language,
+a copy button and light syntax colors (the core's `markdown::highlight`).
+Checked in the emulator against a disposable server
+(connection, drafts, drawer, sheets, Settings, projects, tasks, usage,
+Personalization, attachments' images) and a demo thread (timeline, markdown,
+request cards); `gradle testDebugUnitTest` runs the Kotlin unit tests; the diff page and generated images were not seen there, and
+frame rates, latency and battery remain to be measured on a phone.
 
 ## Development
 
