@@ -49,6 +49,8 @@ pub struct App {
     pub(crate) composer_rect: Option<Rect>,
     /// `subscribeProjectClones`: whether it is open, and the snapshots.
     pub(crate) clones_streaming: bool,
+    /// Threads whose Compact chip is turned off (`fullHistoryThreadKeys`).
+    pub(crate) keep_full_history: std::collections::HashSet<String>,
     pub(crate) clones: Vec<Value>,
     /// The permission notices shown this run.
     permission_notice_shown: std::collections::HashSet<String>,
@@ -534,6 +536,7 @@ impl App {
             closed_views: Vec::new(),
             permission_notice_shown: Default::default(),
             clones_streaming: false,
+            keep_full_history: Default::default(),
             clones: Vec::new(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),

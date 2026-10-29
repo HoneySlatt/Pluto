@@ -1053,6 +1053,90 @@ impl App {
         self.current_thread().is_some_and(|t| t.is_running())
     }
 
+    /// The Compact chip beside the send button: on, the next send compacts
+    /// `tokens` of history first; off, it keeps them. Returns its left edge.
+    fn compact_chip(&mut self, ui: &mut Ui, send: Rect, tokens: f64, keep_full: bool) -> f32 {
+        let count = crate::ui::context_meter::format_tokens(tokens);
+        let label = if keep_full { "Full" } else { "Compact" };
+        let font = theme::font(12.0, Weight::Regular);
+        let painter = ui.painter();
+        let text = painter.layout_no_wrap(label.into(), font.clone(), Color32::WHITE);
+        let number = painter.layout_no_wrap(count.clone(), font.clone(), Color32::WHITE);
+        let width = 10.0 + 14.0 + 6.0 + text.size().x + 6.0 + number.size().x + 10.0;
+        let rect = Rect::from_min_size(
+            Pos2::new(send.left() - 8.0 - width, send.top()),
+            Vec2::new(width, 32.0),
+        );
+        let response = ui.interact(rect, ui.id().with("compact-chip"), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                true,
+                !keep_full,
+                format!("Compact {count} tokens of history before sending"),
+            )
+        });
+        let hovered = response.hovered();
+        let (border, color) = if keep_full {
+            (
+                theme::border(),
+                if hovered {
+                    theme::foreground()
+                } else {
+                    theme::muted_foreground()
+                },
+            )
+        } else {
+            (theme::alpha(theme::warning(), 0.4), theme::warning())
+        };
+        let painter = ui.painter();
+        if hovered && !keep_full {
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(16),
+                theme::alpha(theme::warning(), 0.08),
+            );
+        }
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(16),
+            Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        let icon = Rect::from_center_size(
+            Pos2::new(rect.left() + 17.0, rect.center().y),
+            Vec2::splat(14.0),
+        );
+        theme::paint_icon(ui, "minimize-2", icon, 14.0, color);
+        let x = icon.right() + 6.0;
+        ui.painter().text(
+            Pos2::new(x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            color,
+        );
+        ui.painter().text(
+            Pos2::new(x + text.size().x + 6.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            &count,
+            font,
+            color,
+        );
+        let tip = if keep_full {
+            format!("Next send keeps all {count} tokens. Click to compact first")
+        } else {
+            format!("Next send compacts {count} tokens first. Click to keep full history")
+        };
+        if response.on_hover_text(tip).clicked()
+            && let Some(thread) = self.current_thread()
+            && !self.keep_full_history.remove(&thread.id)
+        {
+            self.keep_full_history.insert(thread.id.clone());
+        }
+        rect.left()
+    }
+
     /// The primary action (`ComposerPrimaryActions.tsx`): Stop while a turn
     /// runs and the composer is empty, Resume for a stopped thread, else
     /// the send button (queue or steer during a turn, update while a
@@ -1101,6 +1185,19 @@ impl App {
             self.clone_send_block()
         };
         let can_send = (has_content || resume) && status.is_none();
+        // `compactBeforeSendTokens`: a stale Claude session offers to compact
+        // first; the chip turns that off for the next send.
+        let compact = self
+            .resume_compaction_tokens()
+            .filter(|_| !resume && !editing && !draft);
+        let keep_full = self
+            .current_thread()
+            .is_some_and(|t| self.keep_full_history.contains(&t.id));
+        let compacts = compact.is_some() && !keep_full;
+        let mut left = send.left();
+        if let Some(tokens) = compact {
+            left = self.compact_chip(ui, send, tokens, keep_full);
+        }
         let response = ui.interact(
             send,
             ui.id().with("send"),
@@ -1138,6 +1235,8 @@ impl App {
             ("play-fill", "Resume thread")
         } else if editing {
             ("check", "Update queued message")
+        } else if compacts {
+            ("send-arrow", "Compact and send")
         } else if queuing {
             ("list-plus", "Queue message")
         } else if running {
@@ -1149,6 +1248,11 @@ impl App {
         theme::paint_icon(ui, icon, send, size, arrow);
         let tooltip = if let Some(status) = status {
             status.to_owned()
+        } else if let Some(tokens) = compact.filter(|_| compacts) {
+            format!(
+                "Summarize {} tokens of history, then send",
+                crate::ui::context_meter::format_tokens(tokens)
+            )
         } else if running && !editing {
             let shortcut = crate::ui::shortcuts::effective_shortcut_label(
                 &self.state.config["keybindings"],
@@ -1174,7 +1278,7 @@ impl App {
                 self.submit_message(draft, alternate);
             }
         }
-        send.left()
+        left
     }
 
     /// Previous / Next / Submit for a pending question. Returns the left edge.
@@ -1993,12 +2097,26 @@ impl App {
             let Some(thread) = self.current_thread() else {
                 return;
             };
-            let mut command = message_dispatch(&thread.id, &text, &model, mode);
+            // A stale Claude session compacts first; the message queues
+            // behind the `/compact` run, since steering into it is refused.
+            let compact = self.resume_compaction_tokens().is_some()
+                && !self.keep_full_history.remove(&thread.id)
+                && text.to_lowercase() != "/compact";
+            let mut command = message_dispatch(
+                &thread.id,
+                &text,
+                &model,
+                if compact { "queue" } else { mode },
+            );
             command["titleSeed"] = json!(title);
             crate::ui::composer_context::apply(&mut command, &text, &contexts, inline);
+            let mut before = self.mode_commands(&thread, &runtime, &interaction);
+            if compact {
+                before.push(message_dispatch(&thread.id, "/compact", &model, "auto"));
+            }
             TurnSend {
                 thread_id: thread.id.clone(),
-                before: self.mode_commands(&thread, &runtime, &interaction),
+                before,
                 message: command,
                 launch: false,
                 uploads,

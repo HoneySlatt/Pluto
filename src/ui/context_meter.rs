@@ -268,7 +268,93 @@ fn ring(ui: &Ui, center: Pos2, percent: f64) {
         .add(Shape::line(points, Stroke::new(width, color)));
 }
 
+/// `CLAUDE_RESUME_COMPACTION_TOKENS`, `CLAUDE_RESUME_COMPACTION_FALLBACK_MS`.
+const RESUME_COMPACTION_TOKENS: f64 = 100_000.0;
+const RESUME_COMPACTION_FALLBACK_MS: f64 = 70.0 * 60_000.0;
+
+/// `shouldOfferResumeCompaction` over the context's source: true once a
+/// large Claude context's prompt cache has expired, so the next turn would
+/// re-read all of it uncached. Returns the tokens.
+fn stale_context(detail: &Detail, now: chrono::DateTime<chrono::Utc>) -> Option<f64> {
+    let live = detail
+        .provider_turns
+        .iter()
+        .map(|turn| &turn["tokenUsage"])
+        .filter(|usage| usage.is_object())
+        .fold(None::<&Value>, |latest, usage| match latest {
+            Some(latest)
+                if crate::timeline::parse_time(usage["updatedAt"].as_str().unwrap_or(""))
+                    < crate::timeline::parse_time(latest["updatedAt"].as_str().unwrap_or("")) =>
+            {
+                Some(latest)
+            }
+            _ => Some(usage),
+        });
+    let (used, updated_at, ttl) = match live.filter(|u| number(&u["usedTokens"]).is_some()) {
+        Some(usage) => (
+            number(&usage["usedTokens"])?,
+            usage["updatedAt"].as_str()?,
+            number(&usage["promptCacheTtlMs"]),
+        ),
+        None => {
+            let active = &detail.thread["activeProviderThreadId"];
+            let thread = detail
+                .provider_threads
+                .iter()
+                .find(|t| !active.is_null() && t["id"] == *active)?;
+            (
+                number(&thread["contextUsage"]["usedTokens"])?,
+                thread["updatedAt"].as_str()?,
+                None,
+            )
+        }
+    };
+    let updated = chrono::DateTime::parse_from_rfc3339(updated_at).ok()?;
+    let age = (now - updated.with_timezone(&chrono::Utc)).num_milliseconds() as f64;
+    (used >= RESUME_COMPACTION_TOKENS && age >= ttl.unwrap_or(RESUME_COMPACTION_FALLBACK_MS))
+        .then_some(used)
+}
+
+/// `hasDismissedResumeCompaction`: the session's own compaction question
+/// was answered "Don't ask again".
+fn dismissed_resume_compaction(detail: &Detail) -> bool {
+    detail
+        .runtime_requests
+        .iter()
+        .filter(|r| r.kind == "user_input" && r.status == "resolved")
+        .filter_map(|r| r.answers.as_ref()?.as_object())
+        .flatten()
+        .any(|(question, answer)| {
+            question.starts_with("This session is ")
+                && question.contains(" old and uses ")
+                && question.ends_with(" tokens. Compact it before continuing?")
+                && answer == "Don't ask again"
+        })
+}
+
 impl App {
+    /// `resumeCompactionTokens`: the tokens a stale Claude session would
+    /// re-read on its next turn, unless held queues or a dismissal hide the
+    /// offer.
+    pub(crate) fn resume_compaction_tokens(&self) -> Option<f64> {
+        let thread = self.current_thread()?;
+        let detail = self
+            .state
+            .detail
+            .as_deref()
+            .filter(|d| d.id() == thread.id)?;
+        if self.composer_provider(false)?["driver"] != "claudeAgent"
+            || dismissed_resume_compaction(detail)
+            || detail
+                .runs
+                .iter()
+                .any(|run| run.status == "queued" && run.queue_held == Some(true))
+        {
+            return None;
+        }
+        stale_context(detail, chrono::Utc::now())
+    }
+
     fn meter_snapshot(&self) -> Option<Snapshot> {
         self.state
             .detail
@@ -584,6 +670,40 @@ mod tests {
 
     fn detail(value: Value) -> Detail {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn offers_compaction_once_the_cache_expired() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-27T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let live = |used: u64, at: &str, ttl: Option<u64>| {
+            detail(json!({"providerTurns": [{"tokenUsage": {
+                "usedTokens": used, "updatedAt": at, "promptCacheTtlMs": ttl,
+            }}]}))
+        };
+        assert_eq!(
+            stale_context(&live(150_000, "2026-10-27T10:00:00Z", None), now),
+            Some(150_000.0)
+        );
+        // Under 70 minutes, or under 100k tokens: no offer.
+        assert_eq!(
+            stale_context(&live(150_000, "2026-10-27T11:00:00Z", None), now),
+            None
+        );
+        assert_eq!(
+            stale_context(&live(90_000, "2026-10-27T10:00:00Z", None), now),
+            None
+        );
+        // The live report's own TTL wins.
+        assert!(
+            stale_context(&live(150_000, "2026-10-27T11:50:00Z", Some(300_000)), now).is_some()
+        );
+        let answered = detail(json!({"runtimeRequests": [{
+            "kind": "user_input", "status": "resolved",
+            "answers": {"This session is 2h 5m old and uses 150,000 tokens. Compact it before continuing?": "Don't ask again"},
+        }]}));
+        assert!(dismissed_resume_compaction(&answered));
     }
 
     #[test]
