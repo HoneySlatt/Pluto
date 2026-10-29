@@ -1701,9 +1701,19 @@ impl App {
                 let record = message.context["records"]
                     .as_array()
                     .and_then(|records| records.iter().find(|r| r["contextId"] == id.as_str()))
-                    .filter(|r| r["kind"] == "terminal")
                     .cloned();
-                if let (Some(rect), Some(record)) = (rect, record) {
+                // A thread chip opens that thread (`ThreadContextChip`).
+                let thread = record
+                    .as_ref()
+                    .filter(|r| r["kind"] == "thread")
+                    .and_then(|r| r["threadId"].as_str())
+                    .filter(|id| self.state.threads.iter().any(|t| t.id == *id))
+                    .map(str::to_owned);
+                if let Some(thread) = thread {
+                    self.select_thread(Some(thread));
+                } else if let (Some(rect), Some(record)) =
+                    (rect, record.filter(|r| r["kind"] == "terminal"))
+                {
                     self.bubble_popover = Some((rect, record));
                 }
             }

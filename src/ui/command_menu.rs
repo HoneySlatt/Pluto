@@ -317,11 +317,21 @@ fn invocable_skills(skills: &[Value]) -> Vec<Value> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ItemKind {
-    Path { path: String, directory: bool },
+    Path {
+        path: String,
+        directory: bool,
+    },
     Builtin(&'static str),
     ProviderCommand(String),
-    Skill { name: String, source: &'static str },
+    Skill {
+        name: String,
+        source: &'static str,
+    },
     PullRequest(Box<Value>),
+    /// Another thread (`composerThreadItems`).
+    Thread {
+        thread_id: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -622,16 +632,41 @@ impl App {
             TriggerKind::PullRequest => self.pull_request_items(trigger, draft),
             TriggerKind::Path => {
                 let query = trigger.query.trim();
+                // Threads whose title has the query, newest first, before
+                // the files; a bare `@` stays a file picker.
+                let lower = query.to_lowercase();
+                let mut threads: Vec<_> = self
+                    .state
+                    .threads
+                    .iter()
+                    .filter(|_| !query.is_empty())
+                    .filter(|t| t.archived_at.is_none() && t.deleted_at.is_none())
+                    .filter(|t| self.selected.as_deref() != Some(t.id.as_str()))
+                    .filter(|t| t.title.to_lowercase().contains(&lower))
+                    .collect();
+                threads.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                let thread_items: Vec<Item> = threads
+                    .into_iter()
+                    .take(5)
+                    .map(|t| Item {
+                        id: format!("thread:{}", t.id),
+                        label: t.title.clone(),
+                        description: "Thread".into(),
+                        kind: ItemKind::Thread {
+                            thread_id: t.id.clone(),
+                        },
+                    })
+                    .collect();
                 let Some(cwd) = self.workspace_cwd().filter(|_| !query.is_empty()) else {
-                    return (Vec::new(), false);
+                    return (thread_items, false);
                 };
                 match self.composer_path_search(&cwd, query) {
-                    None => (Vec::new(), true),
-                    Some(Err(_)) => (Vec::new(), false),
+                    None => (thread_items, true),
+                    Some(Err(_)) => (thread_items, false),
                     Some(Ok(entries)) => (
-                        entries
+                        thread_items
                             .into_iter()
-                            .map(|(path, directory)| {
+                            .chain(entries.into_iter().map(|(path, directory)| {
                                 let (folder, name) = path
                                     .rsplit_once('/')
                                     .map_or(("", path.as_str()), |(f, n)| (f, n));
@@ -644,7 +679,7 @@ impl App {
                                         directory,
                                     },
                                 }
-                            })
+                            }))
                             .collect(),
                         false,
                     ),
@@ -770,7 +805,9 @@ impl App {
                         command_score(command, &item.description, &query)?,
                         format!("1\0{command}"),
                     ),
-                    ItemKind::Path { .. } | ItemKind::PullRequest(_) => return None,
+                    ItemKind::Path { .. } | ItemKind::PullRequest(_) | ItemKind::Thread { .. } => {
+                        return None;
+                    }
                 };
                 Some((score, tie, item))
             })
@@ -886,6 +923,38 @@ impl App {
                     record["label"].as_str().unwrap_or_default(),
                 );
                 self.composer_contexts.push(record);
+                format!("{reference} ")
+            }
+            ItemKind::Thread { thread_id } => {
+                // The live title; a thread gone meanwhile adds nothing.
+                let Some(title) = self
+                    .state
+                    .threads
+                    .iter()
+                    .find(|t| &t.id == thread_id)
+                    .map(|t| t.title.clone())
+                else {
+                    return;
+                };
+                let environment = self.state.config["environment"]["environmentId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                let record =
+                    crate::ui::composer_context::thread_record(thread_id, &environment, &title);
+                let id = record["contextId"].as_str().unwrap_or_default().to_owned();
+                let reference = crate::ui::composer_context::format_reference(
+                    "thread",
+                    &id,
+                    record["label"].as_str().unwrap_or_default(),
+                );
+                if !self
+                    .composer_contexts
+                    .iter()
+                    .any(|r| r["contextId"] == id.as_str())
+                {
+                    self.composer_contexts.push(record);
+                }
                 format!("{reference} ")
             }
             ItemKind::Builtin(command) => {
@@ -1175,6 +1244,16 @@ fn command_row(ui: &Ui, row: Rect, item: &Item, trigger: TriggerKind) {
             Rect::from_min_size(Pos2::new(x, row.center().y - 8.0), Vec2::splat(16.0)),
             16.0,
             color,
+        );
+        x += 16.0 + 8.0;
+    }
+    if let ItemKind::Thread { .. } = &item.kind {
+        theme::paint_icon(
+            ui,
+            "messages-square",
+            Rect::from_min_size(Pos2::new(x, row.center().y - 8.0), Vec2::splat(16.0)),
+            16.0,
+            theme::secondary_label(),
         );
         x += 16.0 + 8.0;
     }

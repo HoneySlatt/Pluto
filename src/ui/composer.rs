@@ -47,6 +47,14 @@ pub fn runtime_label(mode: &str) -> (&'static str, &'static str) {
 }
 
 /// What the composer is waiting on, in upstream priority order.
+/// How a send goes (`ComposerSubmissionIntent`): in the background, or
+/// followed by a new thread.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SendIntent {
+    Background,
+    AndNewThread,
+}
+
 #[derive(Clone)]
 pub(crate) enum Mode {
     Normal,
@@ -553,11 +561,20 @@ impl App {
         let shortcut = self.client_setting("sendShortcut");
         let modifier = shortcut == "mod-enter"
             || (shortcut == "mod-enter-multiline" && self.composer.contains('\n'));
+        // `composer.sendBackground` (Mod+Enter, Mod+Alt+Enter on a draft)
+        // and `composer.sendAndNewThread` (Mod+Alt+Enter on a thread).
+        let alt_enter = focused
+            && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::Enter));
+        let mod_enter = focused && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+        self.send_intent = match (draft, alt_enter, mod_enter) {
+            (true, true, _) | (true, _, true) => Some(SendIntent::Background),
+            (false, true, _) => Some(SendIntent::AndNewThread),
+            _ => None,
+        };
         let submit = (focused
-            && ui.input_mut(|i| {
-                (!modifier && i.consume_key(Modifiers::NONE, Key::Enter))
-                    || i.consume_key(Modifiers::COMMAND, Key::Enter)
-            }))
+            && ui.input_mut(|i| !modifier && i.consume_key(Modifiers::NONE, Key::Enter)))
+            || alt_enter
+            || mod_enter
             || std::mem::take(&mut self.cite.send);
         if focused && normal && self.composer_images.is_empty() && self.composer_files.is_empty() {
             self.recall_prompt(ui, editor_id, text_rect.width());
@@ -1997,8 +2014,28 @@ impl App {
         self.start_turn(send);
         self.chat_mode.research = false;
         self.chat_mode.image = false;
-        if draft {
-            self.select_thread(Some(thread_id));
+        match (draft, self.send_intent.take()) {
+            // Started in the background: a fresh draft in the same
+            // project and workspace takes the composer.
+            (true, Some(SendIntent::Background)) => {
+                let (env, workspace) = (self.draft_env_mode.clone(), self.draft_workspace.clone());
+                let project = self.draft_project().map(|p| p.id);
+                self.start_draft(project);
+                self.draft_env_mode = env;
+                self.draft_workspace =
+                    workspace.map(|w| crate::ui::branch_picker::DraftWorkspace {
+                        worktree: None,
+                        ..w
+                    });
+                self.background_launches.insert(thread_id);
+            }
+            (true, _) => self.select_thread(Some(thread_id)),
+            // Sent, then a new thread in the same project.
+            (false, Some(SendIntent::AndNewThread)) => {
+                let project = self.current_thread().map(|t| t.project_id.clone());
+                self.start_draft(project);
+            }
+            (false, _) => {}
         }
     }
 
@@ -2069,7 +2106,20 @@ impl App {
     pub(crate) fn turn_send_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
         if let Some(thread) = key.strip_prefix("launch:") {
             match result {
-                Ok(_) => self.sent_done(key),
+                Ok(_) => {
+                    self.sent_done(key);
+                    if self.background_launches.remove(thread) {
+                        let mut toast = crate::ui::toasts::Toast::new(
+                            crate::ui::toasts::Kind::Success,
+                            "Started in background",
+                        );
+                        toast.action = Some((
+                            "Open".into(),
+                            crate::ui::toasts::Action::OpenThread(thread.to_owned()),
+                        ));
+                        self.toasts.add(toast);
+                    }
+                }
                 Err(error) => {
                     self.refused_send(key, thread, &format!("Could not start the thread: {error}"));
                 }

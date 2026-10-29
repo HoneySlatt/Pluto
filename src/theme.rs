@@ -983,6 +983,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
     }
     icons!(
         "bookmark",
+        "messages-square",
         "file",
         "target",
         "wifi-off",

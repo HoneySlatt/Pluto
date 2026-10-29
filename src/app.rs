@@ -172,6 +172,10 @@ pub struct App {
     /// Branch notices shown once (they stay while the mismatch lasts), and
     /// the thread whose branch is being restored.
     pub(crate) revealed_notices: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The way the next send goes, from its keys.
+    pub(crate) send_intent: Option<crate::ui::composer::SendIntent>,
+    /// Threads started in the background, until the server takes them.
+    pub(crate) background_launches: std::collections::HashSet<String>,
     /// Prompts put aside (`ui/stash.rs`).
     pub(crate) stash: crate::ui::stash::Stash,
     /// Holds a request back while the user types (`ui/typing_guard.rs`).
@@ -589,6 +593,8 @@ impl App {
             prompt_length_error: None,
             typing_guard: Default::default(),
             stash: crate::ui::stash::load(options.client_settings_path.as_deref()),
+            send_intent: None,
+            background_launches: Default::default(),
             restoring_branch: None,
             notice_busy: Default::default(),
             dismissed_thread_errors: Default::default(),

@@ -405,6 +405,21 @@ fn bounded_field(value: &str) -> String {
 
 /// `buildPullRequestReferenceContext` as its `reviewCommentContextRecord`:
 /// the composer's reference to a pull request (`#42`).
+/// `threadContextRecord`: another thread for the agent to read (one
+/// record per thread, so attaching it twice reuses the chip).
+pub fn thread_record(thread_id: &str, environment_id: &str, title: &str) -> Value {
+    let label = sanitize_label(title, "thread");
+    json!({
+        "version": 1,
+        "kind": "thread",
+        "contextId": kind_scoped_id("thread", thread_id),
+        "label": label,
+        "environmentId": environment_id,
+        "threadId": thread_id,
+        "title": label,
+    })
+}
+
 pub fn pull_request_record(entry: &Value) -> Value {
     let number = entry["number"].as_u64().unwrap_or(0);
     let field = |key: &str| bounded_field(entry[key].as_str().unwrap_or_default());
@@ -509,6 +524,7 @@ pub fn kind_accent(kind: &str) -> (f32, f32) {
         "pr-draft" => (0.02, 259.0),
         "pr-closed" => (0.16, 16.0),
         "skill" => (0.16, 322.0),
+        "thread" => (0.12, 190.0),
         _ => (0.16, 259.0),
     }
 }
@@ -524,6 +540,7 @@ pub fn kind_icon(kind: &str) -> &'static str {
         "image" => "image",
         "skill" => "skill-chip",
         "review-comment" => "message-square",
+        "thread" => "messages-square",
         // Pluto: a chat's deep research request (`chat_research`).
         "research" => "file-search",
         "image-request" => "image",
