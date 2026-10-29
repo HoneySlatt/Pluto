@@ -111,10 +111,9 @@ fun SettingsPage() {
                     core.toast("Token forgotten. Pluto will ask for it next time")
                 }
             }
+            // Leaving the server keeps a remembered token (Forget token
+            // drops it), like the Dioxus app.
             SetRow("log-out", "Disconnect", danger = true, chevron = false) {
-                // Leaving the server: the next launch asks for a token, with
-                // the address kept on the connection screen.
-                model.secret.forgetToken()
                 nav.disconnect()
             }
         }
