@@ -103,15 +103,23 @@ impl App {
     }
 
     /// `view.reopenClosed`: the last closed panel tab whose thread is
-    /// still there opens again, in that thread; false when none.
+    /// still there opens again, in that thread (a browser tab on its last
+    /// page); false when none.
     pub(crate) fn reopen_closed_view(&mut self) -> bool {
         while !self.closed_views.is_empty() {
-            let (thread, tab) = self.closed_views.remove(0);
+            let (thread, tab, url) = self.closed_views.remove(0);
             if !self.state.threads.iter().any(|t| t.id == thread) {
                 continue;
             }
             if self.selected.as_deref() != Some(thread.as_str()) {
                 self.select_thread(Some(thread));
+            }
+            if matches!(tab, crate::app::PanelTab::Browser { .. }) {
+                let Some(ctx) = self.egui_ctx.clone() else {
+                    return false;
+                };
+                self.open_browser_tab(&ctx, url);
+                return true;
             }
             if let Some(panel) = self.panel_mut() {
                 let wanted = tab.clone();
@@ -403,9 +411,22 @@ impl App {
             }
         } else if let Some(panel) = self.panel_mut() {
             if let Some(index) = close {
-                if let Some(crate::app::PanelTab::Browser { id }) = panel.tabs.get(index).cloned() {
+                if let Some(tab @ crate::app::PanelTab::Browser { id }) =
+                    panel.tabs.get(index).cloned()
+                {
                     panel.close(index);
+                    let url = self
+                        .preview
+                        .engine
+                        .as_ref()
+                        .and_then(|e| e.tab(id))
+                        .map(|state| state.url)
+                        .filter(|u| !u.trim().is_empty());
                     self.close_browser_tab(id);
+                    if let Some(thread) = self.selected.clone() {
+                        self.closed_views.insert(0, (thread, tab, url));
+                        self.closed_views.truncate(20);
+                    }
                     return;
                 }
                 // Diff, Files, Agents and Design can come back
@@ -416,8 +437,8 @@ impl App {
                     panel.close(index);
                     if let Some(thread) = self.selected.clone() {
                         self.closed_views
-                            .retain(|(t, v)| !(*t == thread && *v == tab));
-                        self.closed_views.insert(0, (thread, tab));
+                            .retain(|(t, v, _)| !(*t == thread && *v == tab));
+                        self.closed_views.insert(0, (thread, tab, None));
                         self.closed_views.truncate(20);
                     }
                     return;

@@ -61,7 +61,9 @@ pub struct App {
     /// The permission notices shown this run.
     permission_notice_shown: std::collections::HashSet<String>,
     /// Panel tabs closed, newest first, with their thread.
-    pub(crate) closed_views: Vec<(String, PanelTab)>,
+    /// Closed panel tabs by thread, newest first; a browser tab keeps its
+    /// page's address.
+    pub(crate) closed_views: Vec<(String, PanelTab, Option<String>)>,
     /// Ctrl+Q's hold (`ui/quit_hold.rs`).
     pub(crate) quit_hold: crate::ui::quit_hold::QuitHold,
     /// What the last parks can undo (`ui/undo.rs`).
