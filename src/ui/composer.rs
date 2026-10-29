@@ -544,13 +544,21 @@ impl App {
         }
 
         // Prompt editor.
-        let editor_id = ui.id().with("composer-editor");
+        let editor_id = ui.id().with((
+            "composer-editor",
+            &self.connect.server,
+            self.selected.as_deref().unwrap_or(&self.draft_key),
+            &self.question_request,
+            self.question_index,
+        ));
         self.cite.editor_id = Some(editor_id);
         let focused = ui.memory(|m| m.has_focus(editor_id));
         if normal {
             self.typing_guard.focus(focused);
         }
-        // The suggestion menu takes its keys first.
+        let rich = normal && self.client_setting("composerRichTextEnabled") != false;
+        self.prompt_editor_keys(ui, editor_id, rich, focused && !choice_only);
+        // The suggestion menu takes its keys after code-block editing.
         if normal {
             self.refresh_skill_metas(draft);
             self.command_menu_keys(ui, editor_id, draft);

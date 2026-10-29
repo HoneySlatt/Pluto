@@ -982,6 +982,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "workflow",
         "pause",
         "volume-2",
         "volume-x",

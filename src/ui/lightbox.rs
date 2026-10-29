@@ -107,6 +107,19 @@ impl App {
 
     /// The preview over everything (`DialogPopup variant="media"`).
     pub(crate) fn lightbox_dialog(&mut self, ui: &mut Ui, screen: Rect) {
+        if let Some((key, image)) = ui.data_mut(|data| {
+            data.remove_temp::<(String, Arc<image::RgbaImage>)>(egui::Id::new("expanded-mermaid"))
+        }) {
+            self.open_lightbox(
+                vec![Item {
+                    name: "Mermaid diagram".into(),
+                    key,
+                    image,
+                    source: None,
+                }],
+                0,
+            );
+        }
         let Some(mut lightbox) = self.lightbox.take() else {
             return;
         };

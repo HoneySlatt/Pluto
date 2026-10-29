@@ -254,6 +254,14 @@ impl App {
             failed,
             active,
         );
+        if let Some(item) = entry.item.as_deref() {
+            self.tool_image_icon(
+                ui,
+                Rect::from_min_size(line.min + Vec2::new(2.0, 0.0), Vec2::new(24.0, ROW)),
+                item,
+                !active,
+            );
+        }
         response
     }
 

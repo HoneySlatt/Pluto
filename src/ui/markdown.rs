@@ -2190,6 +2190,7 @@ pub struct Markdown<'a> {
     /// An answer in a project: a shell command can run in its terminal,
     /// and the one clicked lands here.
     pub(crate) can_run_shell: bool,
+    pub(crate) streaming: bool,
     pub(crate) run_command: Option<String>,
     /// How far right the drawn content reached from the column's left, for a
     /// bubble that fits its text.
@@ -2224,6 +2225,7 @@ impl<'a> Markdown<'a> {
             skill_chips: false,
             word_wrap: true,
             can_run_shell: false,
+            streaming: false,
             run_command: None,
             used_width: 0.0,
             origin_x: 0.0,
@@ -2981,6 +2983,105 @@ impl<'a> Markdown<'a> {
         );
     }
 
+    /// The diagram view: Show code and Copy over the diagram, scaled down
+    /// to the column; "Rendering diagram" meanwhile. False when it cannot
+    /// render (the code shows, under the error).
+    fn mermaid_block(&mut self, ui: &mut Ui, code: &str, width: f32, id: egui::Id) -> bool {
+        use crate::ui::md_mermaid::{Diagram, diagram};
+        let dark = theme::background().r() < 128;
+        let (key, state) = diagram(ui.ctx(), code, dark);
+        match state {
+            Diagram::Rendering => {
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 144.0), Sense::hover());
+                widgets::text_in(
+                    ui,
+                    Rect::from_center_size(
+                        rect.center(),
+                        Vec2::new(
+                            widgets::text_width(
+                                ui,
+                                "Rendering diagram",
+                                font(12.0, Weight::Regular),
+                            ) + 1.0,
+                            16.0,
+                        ),
+                    ),
+                    "Rendering diagram",
+                    font(12.0, Weight::Regular),
+                    theme::muted_foreground(),
+                );
+                true
+            }
+            Diagram::Failed(error) => {
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 20.0), Sense::hover());
+                widgets::text_in(
+                    ui,
+                    rect,
+                    &format!("Unable to render diagram: {error}"),
+                    font(12.0, Weight::Regular),
+                    theme::error(),
+                );
+                false
+            }
+            Diagram::Ready { image, size } => {
+                let (bar, _) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::hover());
+                let copy = Rect::from_min_size(
+                    Pos2::new(bar.right() - 6.0 - 24.0, bar.top() + 6.0),
+                    Vec2::splat(24.0),
+                );
+                widgets::copy_button(
+                    ui,
+                    copy,
+                    id.with("copy"),
+                    "Copy code",
+                    "Copied",
+                    theme::muted_foreground(),
+                    1.2,
+                    false,
+                    || code.to_owned(),
+                );
+                let toggle = Rect::from_min_size(
+                    Pos2::new(copy.left() - 2.0 - 24.0, copy.top()),
+                    Vec2::splat(24.0),
+                );
+                if widgets::icon_button(
+                    ui,
+                    toggle,
+                    id.with("mermaid-toggle"),
+                    "code-xml",
+                    12.0,
+                    theme::muted_foreground(),
+                    "Show code",
+                )
+                .clicked()
+                {
+                    ui.data_mut(|d| d.insert_temp(id.with("mermaid-code"), true));
+                }
+                let scale = (width / size.x).min(1.0);
+                let shown = size * scale;
+                let (row, _) = ui.allocate_exact_size(Vec2::new(width, shown.y), Sense::hover());
+                let rect = Rect::from_center_size(row.center(), shown);
+                let texture = crate::ui::md_mermaid::texture(ui.ctx(), key, &image);
+                ui.painter().image(
+                    texture.id(),
+                    rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                if ui
+                    .interact(rect, id.with("expand-diagram"), Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::ZoomIn)
+                    .on_hover_text("Expand diagram")
+                    .clicked()
+                {
+                    crate::ui::md_mermaid::expand(ui.ctx(), key, &image);
+                }
+                self.note_width(row.right());
+                true
+            }
+        }
+    }
+
     fn code_block(
         &mut self,
         ui: &mut Ui,
@@ -2990,6 +3091,19 @@ impl<'a> Markdown<'a> {
         width: f32,
         id: egui::Id,
     ) {
+        // A Mermaid fence shows its diagram once it renders; its toggle
+        // turns it back into code.
+        let mermaid = language.eq_ignore_ascii_case("mermaid") && !code.trim().is_empty();
+        let code_key = id.with("mermaid-code");
+        let show_code = ui.data(|d| d.get_temp::<bool>(code_key)).unwrap_or(false);
+        if mermaid
+            && !self.streaming
+            && self.find.is_none()
+            && !show_code
+            && self.mermaid_block(ui, code, width, id)
+        {
+            return;
+        }
         let line_height = theme::code_line(17.875); // 13px × leading-snug
         let inner_width = width - 2.0 - 28.8;
         // Wrapped by default (`wordWrap`), each block on its own after a
@@ -3068,6 +3182,23 @@ impl<'a> Markdown<'a> {
                 self.run_command = Some(code.trim().to_owned());
             }
             left = run.left() - 2.0;
+        }
+        if mermaid && !self.streaming {
+            let toggle = Rect::from_min_size(Pos2::new(left - 24.0, copy.top()), Vec2::splat(24.0));
+            if widgets::icon_button(
+                ui,
+                toggle,
+                id.with("mermaid-toggle"),
+                "workflow",
+                12.0,
+                theme::muted_foreground(),
+                "Show diagram",
+            )
+            .clicked()
+            {
+                ui.data_mut(|d| d.insert_temp(code_key, false));
+            }
+            left = toggle.left() - 2.0;
         }
         let wrap = Rect::from_min_size(Pos2::new(left - 24.0, copy.top()), Vec2::splat(24.0));
         let wrap_response = ui

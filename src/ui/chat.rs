@@ -2010,6 +2010,7 @@ impl App {
             markdown.media_thread = self.selected.clone();
             markdown.word_wrap = word_wrap;
             markdown.can_run_shell = !message.streaming && project.is_some();
+            markdown.streaming = message.streaming;
             markdown.show(ui, text, width - 8.0);
             let run_command = markdown.run_command.take();
             let opened_thread = markdown.opened_context.take();
@@ -2361,13 +2362,15 @@ impl App {
             Pos2::new(rect.left() + 2.0, rect.top() + pad),
             Vec2::new(width - 4.0, MESSAGE_LINE),
         );
-        paint_work_icon(
-            ui,
-            icon,
-            Rect::from_min_size(line.min, Vec2::new(24.0, MESSAGE_LINE)),
-            16.0,
-            icon_color,
-        );
+        let icon_rect = Rect::from_min_size(line.min, Vec2::new(24.0, MESSAGE_LINE));
+        let image_icon = !destructive
+            && entry
+                .item
+                .as_deref()
+                .is_some_and(|item| self.tool_image_icon(ui, icon_rect, item, true));
+        if !image_icon {
+            paint_work_icon(ui, icon, icon_rect, 16.0, icon_color);
+        }
         let (label_font, label_color) = if destructive {
             (font(14.0, Weight::Medium), DESTRUCTIVE)
         } else if tool_like {

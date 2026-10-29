@@ -193,7 +193,7 @@ fn call_lines(kind: &str, item: &Value) -> CallLines {
     }
     let args = &item["input"];
     if let Some(map) = args.as_object().filter(|_| !tool_images::summarized(args)) {
-        let lines: Vec<(String, String)> = map
+        let mut lines: Vec<(String, String)> = map
             .iter()
             .map(|(key, value)| {
                 let text = match value.as_str() {
@@ -203,6 +203,9 @@ fn call_lines(kind: &str, item: &Value) -> CallLines {
                 (key.clone(), text)
             })
             .collect();
+        // Keep the inspector's alphabetical order even when another crate
+        // enables serde_json's preserve_order feature.
+        lines.sort_by(|a, b| a.0.cmp(&b.0));
         return if lines.is_empty() {
             CallLines::None
         } else {
