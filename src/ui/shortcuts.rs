@@ -230,6 +230,7 @@ impl App {
             "sidebar.toggle" => self.toggle_sidebar(),
             // Mod+Z falls through when there is nothing to undo.
             "thread.undo" => return self.undo_last(),
+            "view.reopenClosed" => return self.reopen_closed_view(),
             // With an approval or a running question, the stash waits.
             "composer.stash"
                 if self.settings_page.is_none()

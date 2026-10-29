@@ -102,6 +102,27 @@ impl App {
         }
     }
 
+    /// `view.reopenClosed`: the last closed panel tab whose thread is
+    /// still there opens again, in that thread; false when none.
+    pub(crate) fn reopen_closed_view(&mut self) -> bool {
+        while !self.closed_views.is_empty() {
+            let (thread, tab) = self.closed_views.remove(0);
+            if !self.state.threads.iter().any(|t| t.id == thread) {
+                continue;
+            }
+            if self.selected.as_deref() != Some(thread.as_str()) {
+                self.select_thread(Some(thread));
+            }
+            if let Some(panel) = self.panel_mut() {
+                let wanted = tab.clone();
+                panel.show(tab, |t| *t == wanted);
+                panel.open = true;
+            }
+            return true;
+        }
+        false
+    }
+
     fn open_surface(&mut self, label: &str) {
         if label == "Diff" {
             if let Some(panel) = self.panel_mut() {
@@ -385,6 +406,20 @@ impl App {
                 if let Some(crate::app::PanelTab::Browser { id }) = panel.tabs.get(index).cloned() {
                     panel.close(index);
                     self.close_browser_tab(id);
+                    return;
+                }
+                // Diff, Files, Agents and Design can come back
+                // (`closedViewStore`, newest first, 20 at most).
+                if let Some(tab) = panel.tabs.get(index).cloned()
+                    && !matches!(tab, crate::app::PanelTab::Terminal { .. })
+                {
+                    panel.close(index);
+                    if let Some(thread) = self.selected.clone() {
+                        self.closed_views
+                            .retain(|(t, v)| !(*t == thread && *v == tab));
+                        self.closed_views.insert(0, (thread, tab));
+                        self.closed_views.truncate(20);
+                    }
                     return;
                 }
                 panel.close(index);

@@ -47,6 +47,8 @@ pub struct App {
     pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
     pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
     pub(crate) composer_rect: Option<Rect>,
+    /// Panel tabs closed, newest first, with their thread.
+    pub(crate) closed_views: Vec<(String, PanelTab)>,
     /// Ctrl+Q's hold (`ui/quit_hold.rs`).
     pub(crate) quit_hold: crate::ui::quit_hold::QuitHold,
     /// What the last parks can undo (`ui/undo.rs`).
@@ -524,6 +526,7 @@ impl App {
             pending_commands: Default::default(),
             undo: Default::default(),
             quit_hold: Default::default(),
+            closed_views: Vec::new(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
             composer_rect: None,
