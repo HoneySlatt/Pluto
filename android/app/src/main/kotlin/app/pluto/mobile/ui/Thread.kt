@@ -404,7 +404,7 @@ private fun WorkingRow(text: Pair<String, String?>) {
     }
 }
 
-private val images = HashMap<String, ImageBitmap>()
+private val images = HashMap<String, app.pluto.mobile.Viewed>()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -469,18 +469,21 @@ private fun UserMessage(item: Item.User) {
 @Composable
 private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
     val model = LocalModel.current
-    val bitmap = images[image.id] ?: run {
+    val viewed = images[image.id] ?: run {
         @Suppress("UNUSED_EXPRESSION") model.revision
         model.core.attachment(image.id)?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also { images[image.id] = it }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
+                app.pluto.mobile.Viewed(it, bytes, image.name).also { v -> images[image.id] = v }
+            }
         }
     }
+    val bitmap = viewed?.bitmap
     val shape = RoundedCornerShape(14.dp)
     Box(
         modifier
             .aspectRatio(4f / 3f)
             .card(P.chip, shape)
-            .then(if (bitmap != null) Modifier.tap(label = "Open ${image.name}") { model.viewer = bitmap } else Modifier),
+            .then(if (viewed != null) Modifier.tap(label = "Open ${image.name}") { model.viewer = viewed } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -497,21 +500,24 @@ private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
 private fun GeneratedImage(thread: String, path: String) {
     val model = LocalModel.current
     val key = "generated:$path"
-    val bitmap = images[key] ?: run {
+    val name = path.substringAfterLast('/')
+    val viewed = images[key] ?: run {
         @Suppress("UNUSED_EXPRESSION") model.revision
         model.core.generatedImage(thread, path)?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also { images[key] = it }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
+                app.pluto.mobile.Viewed(it, bytes, name).also { v -> images[key] = v }
+            }
         }
     }
+    val bitmap = viewed?.bitmap
     val shape = RoundedCornerShape(16.dp)
-    val name = path.substringAfterLast('/')
     Box(
         Modifier
             .padding(top = 4.dp, bottom = 16.dp)
             .fillMaxWidth()
             .then(if (bitmap != null) Modifier.aspectRatio(bitmap.width.toFloat() / bitmap.height) else Modifier.aspectRatio(1f))
             .card(P.chip, shape)
-            .then(if (bitmap != null) Modifier.tap(label = "Open $name") { model.viewer = bitmap } else Modifier),
+            .then(if (viewed != null) Modifier.tap(label = "Open $name") { model.viewer = viewed } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {

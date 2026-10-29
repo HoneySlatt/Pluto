@@ -55,5 +55,13 @@ class Model(context: Context) {
     val texts = mutableStateMapOf<String, String>()
 
     // The image shown full screen, over everything.
-    var viewer by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    var viewer by mutableStateOf<Viewed?>(null)
 }
+
+// An image to show full screen: its bitmap, and its bytes as they came
+// (saving keeps them as they are) with its name.
+class Viewed(
+    val bitmap: androidx.compose.ui.graphics.ImageBitmap,
+    val bytes: ByteArray,
+    val name: String,
+)
