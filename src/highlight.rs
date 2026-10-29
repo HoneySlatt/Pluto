@@ -23,6 +23,9 @@ use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 pub struct Highlighter {
     /// Spans by the hash of (light theme, language, code).
     cache: HashMap<u64, Highlighted>,
+    /// When each entry was last asked for (`uses`), to evict the oldest.
+    used: HashMap<u64, u64>,
+    uses: u64,
     /// Hashes sent to the worker and not back yet.
     pending: HashSet<u64>,
     worker: Option<Worker>,
@@ -156,15 +159,21 @@ impl Highlighter {
     /// Colored spans for `code` (plain foreground when the language is
     /// unknown), or None while the worker highlights it.
     pub fn spans(&mut self, code: &str, language: &str) -> Option<&[(String, Color32)]> {
-        // Every code block on screen asks each frame: entries are kept and
-        // spans are evicted all at once past this many.
+        // Every code block on screen asks each frame: past this many
+        // entries, the half asked for least recently goes.
         const MAX_ENTRIES: usize = 20_000;
         if let Some(worker) = &self.worker {
             while let Ok(done) = worker.results.try_recv() {
                 self.pending.remove(&done.request.key);
                 if self.cache.len() >= MAX_ENTRIES {
-                    self.cache.clear();
+                    let mut ages: Vec<u64> = self.used.values().copied().collect();
+                    let half = ages.len() / 2;
+                    let (_, &mut median, _) = ages.select_nth_unstable(half);
+                    self.used.retain(|_, used| *used > median);
+                    self.cache.retain(|key, _| self.used.contains_key(key));
                 }
+                self.uses += 1;
+                self.used.insert(done.request.key, self.uses);
                 self.cache.insert(done.request.key, done);
             }
         }
@@ -178,6 +187,8 @@ impl Highlighter {
                 && done.request.code == code
         });
         if found {
+            self.uses += 1;
+            self.used.insert(key, self.uses);
             return self.cache.get(&key).map(|done| done.spans.as_slice());
         }
         if self.pending.insert(key) {

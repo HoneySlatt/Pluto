@@ -120,7 +120,10 @@ impl AccentPicker {
         let anchor_clicked = ui.input(|i| i.pointer.any_pressed())
             && ui.rect_contains_pointer(anchor)
             && !area.response.contains_pointer();
-        if pressed_outside || anchor_clicked || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if pressed_outside
+            || anchor_clicked
+            || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
             return PickerEvent::Close(self.pending.take().map(|(v, _)| v));
         }
         if let Some((value, at)) = &self.pending {

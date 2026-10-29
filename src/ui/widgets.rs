@@ -157,6 +157,10 @@ pub fn icon_button(
     tooltip: &str,
 ) -> Response {
     let response = ui.interact(rect, ui.id().with(id), Sense::click());
+    // Screen readers name an icon by its tooltip.
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
+    });
     if response.hovered() {
         ui.painter()
             .rect_filled(rect, radius(theme::CONTROL_RADIUS as f32), theme::accent());
@@ -517,6 +521,9 @@ pub fn outline_button(
     corners: CornerRadius,
 ) -> Response {
     let response = ui.interact(rect, ui.id().with(id), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
     let fill = if response.hovered() {
         theme::overlay(0.06)
     } else {
@@ -858,7 +865,9 @@ pub fn popup(
     let pressed_outside = ui.input(|i| i.pointer.any_pressed())
         && !area.response.contains_pointer()
         && !ui.rect_contains_pointer(anchor);
-    if pressed_outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Escape closes this popup only: the dialog under it stays.
+    if pressed_outside || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
         *open = None;
     }
 }
@@ -1013,6 +1022,13 @@ pub fn menu_aligned(
                                 Sense::click()
                             },
                         );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                !item.disabled,
+                                item.label,
+                            )
+                        });
                         let response = match item.tooltip {
                             Some(tip) => response.on_hover_text(tip),
                             None => response,
@@ -1161,6 +1177,7 @@ pub fn primary_button(
             Sense::hover()
         },
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let fill = if response.hovered() && enabled {
         theme::primary_hover()
     } else {

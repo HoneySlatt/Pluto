@@ -26,38 +26,14 @@ milestones: raw HTML in answers (2, upstream parses sanitized HTML there),
 `.avif` and stale open files (4), `thread.undo` and `view.reopenClosed` (2),
 the preview keys (4), the composer settings tied to the rich editor (2).
 
-- Composer drafts are global: the text, images and files follow the user to
-  the next thread, and nothing survives a restart (chat.md).
-- A refused send clears the composer; the thread's `lastError` is never shown
-  (chat.md).
-- Any socket error drops back to the Connect screen: port the Android app's
-  reconnection (attempts, the bar, the thread and streams followed again,
-  the silence check of `pluto-core`).
-- Response streaming still offers v0.0.45's `token`, which v0.1.0 rejects;
-  five v0.1.0 keybinding defaults are missing (settings.md).
-- About 20 bound commands do nothing (`thread.undo`, navigation back and
-  forward, `view.reopenClosed`, `thread.copyReference`, `thread.stop`,
-  `modelPicker.toggle`, `preview.*`, `terminal.*`, `composer.*`,
-  `script.*.run`); four when-clause variables are faked (shell.md,
-  surfaces.md, pull-requests.md).
-- Settings saved but ignored: `timestampFormat`, Send shortcut, Rich text
-  composer, Collapse composer on scroll, proactive panels, Working shelf,
-  "Open preview automatically", the Browser rows (chat.md, shell.md,
-  surfaces.md, pull-requests.md).
-- Provider instances are saved by rewriting the whole map
-  (`mutateProviderInstance` upstream): concurrent edits are lost; the status
-  detail is computed and dropped (settings.md).
-- Raw HTML in markdown prints as text; `.avif` opens the image preview and
-  fails; open files stay stale after an agent edits them (chat.md,
-  surfaces.md).
-- Every PR host shows the GitHub icon; palette: Escape in Files/Content
-  closes it, the first ArrowDown after typing skips a row; Project settings
-  wrongly says "not implemented" (pull-requests.md, shell.md).
-- The connect card says "T3 CODE (ALPHA)"; the Agents surface is a v0.0.45
-  leftover v0.1.0 removed (settings.md, surfaces.md).
-- Around 56 `self.status` toasts are untyped (no success, warning or error).
-- README and module docs that claim or deny the wrong things (every report's
-  last section).
+Still open:
+
+- Settings saved but ignored: Collapse composer on scroll, proactive panels,
+  Working shelf, the Browser rows (chat.md, shell.md, surfaces.md,
+  pull-requests.md).
+- Bound commands without a handler beyond those moved above, and the
+  when-clause variables still faked (shell.md, surfaces.md).
+- The Agents surface is a v0.0.45 leftover v0.1.0 removed (surfaces.md).
 
 ## 2. The chat, the composer and the sidebar
 

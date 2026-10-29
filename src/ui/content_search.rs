@@ -470,6 +470,8 @@ impl App {
         let mut offset = 0;
         let mut marks = Vec::new();
         for (text, color) in spans {
+            // The span's line break is not drawn, but it is in `m.content`.
+            let next = offset + text.len();
             let text = text.trim_end_matches('\n');
             let end = offset + text.len();
             let mut cursor = offset;
@@ -501,7 +503,7 @@ impl App {
                     widgets::format(small.clone(), color, 16.0),
                 );
             }
-            offset = end;
+            offset = next;
         }
         let code = Rect::from_min_max(
             Pos2::new(row.left() + 64.0, row.top()),

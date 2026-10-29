@@ -713,7 +713,9 @@ impl App {
         let pressed_outside = ui.input(|i| i.pointer.any_pressed())
             && !area.response.contains_pointer()
             && !ui.rect_contains_pointer(anchor);
-        if pressed_outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if pressed_outside
+            || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
             open = None;
         }
         self.open_menu = open;

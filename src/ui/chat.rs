@@ -760,7 +760,7 @@ impl App {
         let detail = self.current_detail().unwrap_or_default();
         let revision = self.state.revision;
         let images = if self.server_is_local() {
-            crate::generated_images::images(&detail, &crate::repaint(ui.ctx()))
+            crate::generated_images::images(&detail, thread.is_running(), &crate::repaint(ui.ctx()))
         } else {
             Vec::new()
         };

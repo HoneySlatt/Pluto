@@ -68,12 +68,17 @@ fn scan(directory: &Path) -> Vec<GeneratedImage> {
 struct Directory {
     checked: Option<Instant>,
     scanning: bool,
+    /// A scan started after the turn ended came back: nothing new can come
+    /// until the next turn, so the polling stops.
+    settled: bool,
     images: Vec<GeneratedImage>,
 }
 
 /// Poll only this conversation's native Codex directories, including when a
 /// native image generation produced no server event to invalidate the timeline.
-pub fn images(detail: &Detail, repaint: &Repaint) -> Vec<GeneratedImage> {
+/// `running`: a turn is under way; once it ended and a last scan came back,
+/// the directory is read again only when a frame is drawn anyway.
+pub fn images(detail: &Detail, running: bool, repaint: &Repaint) -> Vec<GeneratedImage> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Directory>>> = OnceLock::new();
     const INTERVAL: Duration = Duration::from_secs(1);
     let cache = CACHE.get_or_init(Default::default);
@@ -83,11 +88,16 @@ pub fn images(detail: &Detail, repaint: &Repaint) -> Vec<GeneratedImage> {
     let Some(home) = home else { return Vec::new() };
     let mut out = Vec::new();
     for path in directories(detail, &home) {
-        repaint.after(INTERVAL);
         let Ok(mut cache_guard) = cache.lock() else {
             continue;
         };
         let entry = cache_guard.entry(path.clone()).or_default();
+        if running {
+            entry.settled = false;
+        }
+        if !entry.settled {
+            repaint.after(INTERVAL);
+        }
         out.extend(entry.images.clone());
         if entry.scanning || entry.checked.is_some_and(|at| at.elapsed() < INTERVAL) {
             continue;
@@ -102,6 +112,7 @@ pub fn images(detail: &Detail, repaint: &Repaint) -> Vec<GeneratedImage> {
                     Directory {
                         checked: Some(Instant::now()),
                         scanning: false,
+                        settled: !running,
                         images,
                     },
                 );

@@ -9,10 +9,11 @@ Ignored: Pluto additions (Chat mode, Kimi/Vibe/Z drivers, mobile), ACP registry,
 selectors (BranchToolbarEnvironmentSelector: the port connects to one environment on purpose),
 CommandBlock.tsx (used only by onboarding, outside the chat view).
 
-Spot-verified by grep: global composer state (src/app.rs:30-34, not swapped in `select_thread`);
-`sendShortcut`, `composerCollapseOnScroll`, `proactivePanelsEnabled` and "Rich text composer"
-are read only by src/ui/settings.rs; raw HTML pushed as literal text (src/ui/markdown.rs:421);
-`last_error` parsed (crates/pluto-core/src/model.rs:281) but never drawn; no revertCheckpoint, minimap or scroll-to-end.
+Since this report: drafts are kept per thread and server (src/ui/drafts.rs), a refused or
+lost message comes back with its attachments, the thread error banner is drawn
+(src/ui/thread_error.rs), `timestampFormat` and `sendShortcut` apply, and a subset of raw HTML
+renders (src/ui/md_html.rs). Still read only by src/ui/settings.rs: `composerCollapseOnScroll`,
+`proactivePanelsEnabled` and "Rich text composer"; no revertCheckpoint, minimap or scroll-to-end.
 
 ## 1. Done (brief)
 
@@ -68,12 +69,12 @@ Chat view shell
 | User bubble controls | `UserTimelineRow`, `UserMessageIntentMarker`, `AssistantMessageMeta`, promptLinks/copyPromptLink.ts | missing | Attribution ("Sent by automation" → task, "Sent by T3 Code", "Sent by another agent" → thread); "From queue"/"Steer" intent pill (core parses `input_intent`, UI never draws it); Copy prompt link button; red status pill on failed/interrupted items | chat.rs `user_row`, core timeline.rs:39 | S each |
 | User bubble files/videos | `UserTimelineRow`, `UserVideoAttachment`, SnapShotAttachmentDetails | partial | Files are Pluto chips. Missing: Preview (eye) / "Download <name>" row, unknown-attachment rows, video thumbnail and player, SnapShot details | chat.rs `user_row` | M |
 | User bubble context chips | `UserMessage*Chip`, `UserMessageElementDetails`, `UserMessagePreviewAnnotationDetails`, `UserMessageReviewCommentCard`, `UnavailableUserMessageContextChip` | partial | Only terminal chips react to a click. Missing: image expand, file open, thread open, element-details popover, preview-annotation popover with screenshot, review-comment card, PR context details, unavailable state, context-fragment clipboard flavor | markdown.rs `opened_context`, chat.rs:1536 | M |
-| Timestamps | `TimelineRowTimestamp`, `formatDayAwareTimestamp`, `formatChatTimestampTooltip` | partial | `clock_time` hard-coded to 12-hour and ignores `timestampFormat`; no full-date tooltip; no hover times on work rows / turn folds | widgets.rs:587 | S |
+| Timestamps | `TimelineRowTimestamp`, `formatDayAwareTimestamp`, `formatChatTimestampTooltip` | partial | `timestampFormat` applies; no full-date tooltip; no hover times on work rows / turn folds | widgets.rs:587 | S |
 | Work rows: thread actions | `WorkEntryLogRow`, V2LifecycleRow `thread_created` | partial | "Created thread" has no title and no "Open chat"; no "Open subagent thread"; no thread-read labels | chat.rs `work_entry_row`, core timeline.rs:537 | S |
 | Work rows: icons | `ToolActivityIconView`, `workEntryIconName`, `resolveWorkEntryToolPresentation` | partial | No website favicon / themed logo / native-app icons, no notification-source icons (bot, eye, t3-code), no `toolSurface` icons, no JS REPL icon; tool presentation names incomplete | chat.rs `work_icon` | M |
 | Work rows: reasoning, answers | `ReasoningTraceContent`, `QuestionAnswerHistory` | partial | Expanded thought is plain mono text clipped at 256 px (upstream: streaming ChatMarkdown); answered questions lose attachments/thumbnails | chat.rs ~2011 | S/M |
 | Inspector coverage | V2ItemInspector.tsx | partial | No panels for reasoning, file_change, file/web search, approval/input requests, notifications, todo, checkpoints, fork, handoff, subagent; no ShellCommandBlock or JSON token colours | inspector.rs | M |
-| Markdown: raw HTML | shared markdownPipeline (rehype-raw + sanitize), `MarkdownDetails` | missing | HTML printed as literal text: no `<details>/<summary>`, `<kbd>`, `<br>`, etc. | markdown.rs:421 | M |
+| Markdown: raw HTML | shared markdownPipeline (rehype-raw + sanitize), `MarkdownDetails` | partial | The GitHub-sanitized subset renders (`<br>`, `<b>`, `<i>`, `<s>`, `<code>`, `<kbd>`, `<a href>`, `<img>`, `<details>`, `<summary>`); other tags keep their text | md_html.rs | M |
 | Markdown: GFM extras | remark-gfm, markdownGithubAlerts | missing | Bare-URL autolinks, footnotes, GitHub alerts (`> [!NOTE]`) | markdown.rs:166 | S/M |
 | Markdown: links to threads/PRs/headings | chat/MarkdownThreadLink.tsx, ChatMarkdown link renderer, `resolvePullRequestPreviewTarget`, `rehypeHeadingIds` | missing | `t3-thread:` link chips; commit/PR autolinks with PR preview and "Link to thread / Unlink"; heading ids so `#fragment` links scroll | none | S / M / S |
 | Markdown: Codex directives | shared codexMarkdownDirectives, `CodexArtifactTemplateCard` | missing | `::artifact-template` card ("Use template"), `codex-file-citation`, `codex-followup` | none | M |
@@ -96,13 +97,13 @@ Chat view shell
 | Placeholders | ChatComposer ~7458-7473, composerPlaceholder | partial | Default should be "Ask anything, @tag files/folders, $use skills, or / for commands"; the port shows upstream's disconnected text. Missing "Choose an option above", "Choose a project above to start a thread", "Enable a provider in Settings to send a message" | composer.rs | S |
 | Resting (collapsed) composer | composerScrollGesture, restingComposerControlsMeasurement, composerFooterLayout `shouldUseRestingComposerLayout`, ChatView `onComposerRestingChange` | missing | Collapse to one line on timeline scroll, lift on interaction; `composerCollapseOnScroll` setting unread | settings.rs:833 only | M |
 | Banner stack and notices | ComposerBanner, ComposerBannerStack, ChatView `composerBannerItems`/`systemComposerBannerItems`, ComposerServerUpdateStatus | missing | No generic stack (priority, "Other notices" peek, dismiss). Missing items: environment offline/reconnecting with Reconnect/Disconnect (port drops to Connect screen, app.rs:739; no "Not connected: message not sent"); server update available; "Branch changed — was X" + "Restore branch"; project clone progress; child thread needs input ("Open approval/question"); Goal (Resume/Clear → `/goal resume`/`/goal clear`); background work with Stop | composer.rs, requests_panel.rs | L |
-| Thread error banner | chat/ThreadErrorBanner.tsx, ChatView `threadError` | missing | `runtime.lastError` and local send errors never shown in chat: 3-line clamp, tooltip, `usage_limit` warning variant ("ChatGPT usage limit reached"), "Dismiss error" remembered per thread/message. Port only toasts | model.rs:281 (parsed, unused) | M |
+| Thread error banner | chat/ThreadErrorBanner.tsx, ChatView `threadError` | done | Drawn by src/ui/thread_error.rs | thread_error.rs | — |
 | Provider status banner | chat/ProviderStatusBanner.tsx | partial | `provider_status_message` used only for the picker setup notice; no dismissible banner above the timeline ("X is unauthenticated", "known to be broken/unsupported") keyed by `getProviderStatusBannerKey` | pickers.rs:1053 | S |
 | Usage-limit banners | UsageLimitRecoveryBanner, ComposerUsageLimits | missing | "Usage limit reached / Resets …" with "Resume at reset", "Cancel auto-resume", "Snooze until reset"; `/usage-limits` filtered out (command_menu.rs:725) and its banner absent | none | S-M |
 | Provider update and feedback banners | useAutoBalanceUpdateBanner, ComposerFeedback | missing | "Update available for … / Update all / Manual update required"; Codex feedback thread-id notice | none | M / S |
 | Sync activity row | ComposerActivityStatus | missing | "Loading messages..." / "Syncing messages..." | none | S |
 | Send button states | ComposerPrimaryActions | partial | No "Sending..." / "Preparing worktree" / "Connecting" / "Environment disconnected" states; no "Compact" chip ("Compact and send", "Full" toggle); no "Implement" split menu in the primary slot | composer.rs `send_actions` | M |
-| Failed send recovery | ChatView `onSend` failure branch | missing | Composer cleared before the send and never restored on failure (text, images, files, contexts); no optimistic user row, no in-flight guard; only a toast | composer.rs:1781, app.rs:704 | M |
+| Failed send recovery | ChatView `onSend` failure branch | partial | A refused or lost message comes back to its composer with its images, files and contexts (drafts.rs `give_back`); no optimistic user row | drafts.rs | S |
 | Multi-model fan-out | ChatView `multipleModelSelections`, `fanoutStateAtom`, ModelPickerContent "Choose models" | missing | One thread per selected model, "Started N threads in background", "Each model starts in its own worktree.", "Select at least one model." | none | L |
 | Background send | composer-logic `composer.sendBackground`/`sendAndNewThread`, ChatView `submissionIntent` | missing | Send and stay on a fresh draft, "Started in background" toast with Open, "Background task failed" + "Open draft" | none | M |
 | Prompt length, large paste | composerSubmission, ComposerPromptLengthValidation | missing | "Prompt is N characters over the …-character limit" alert and send block; oversized paste folded into a text-file attachment | none | S |
@@ -138,7 +139,7 @@ Chat view shell
 - Header row (README line 32), "Breadcrumb": it is static text only (chat.rs ~270-300); the "New thread in X" button, parent crumb, title menu, double-click rename and header context menu are missing and not listed as gaps.
 - Composer row (line 35), "Prompt editor": reads as parity, but the "Rich text composer" setting is inert, `sendShortcut` is ignored (Enter and Ctrl+Enter always send), and the default placeholder is upstream's disconnected text.
 - Composer: README never says that the composer text and attachments are global and not kept per thread (app.rs:30-34).
-- Timeline row (line 33), "hover meta (time, copy)": the time ignores `timestampFormat` (fixed 12-hour in `widgets::clock_time`) and has no full-date tooltip.
+- Timeline row (line 33), "hover meta (time, copy)": the time has no full-date tooltip.
 - Timeline row, "context references": accurate, but only terminal chips react to a click (chat.rs:1536). The other chip kinds are inert.
 - Markdown row (line 34): it does not say raw HTML is drawn as literal text (markdown.rs:421). Bare autolinks, footnotes, GitHub alerts, Mermaid, thread links, PR autolinks, Codex directives, wrap/run-in-terminal buttons and table-cell expansion are missing but not listed.
 - Secret requests are described as "standalone work rows with their upstream labels". True, but the README doesn't say they cannot be answered.

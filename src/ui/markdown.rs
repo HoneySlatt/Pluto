@@ -144,6 +144,9 @@ fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
     }
 }
 
+/// A message's blocks and its file chips' suffixes (`Markdown::parsed`).
+type Parsed = (Arc<Vec<Block>>, Arc<HashMap<String, String>>);
+
 #[derive(Clone, Debug)]
 enum Block {
     Paragraph(Vec<Inline>),
@@ -1846,7 +1849,7 @@ pub struct Markdown<'a> {
     /// The lists and quotes around the block being drawn (copies).
     prefixes: Vec<md_copy::Prefix>,
     /// Parent-folder suffixes of file chips sharing a basename.
-    suffixes: HashMap<String, String>,
+    suffixes: Arc<HashMap<String, String>>,
     /// Inside a quote, text takes the muted color.
     quoted: bool,
     /// The workspace and thread images resolve against.
@@ -1885,7 +1888,7 @@ impl<'a> Markdown<'a> {
             highlight: None,
             find: None,
             prefixes: Vec::new(),
-            suffixes: HashMap::new(),
+            suffixes: Arc::default(),
             quoted: false,
             media_root: None,
             media_thread: None,
@@ -1917,6 +1920,38 @@ impl<'a> Markdown<'a> {
 
     /// Renders `text` into the column starting at `ui.cursor()`; returns its height.
     pub fn show(&mut self, ui: &mut Ui, text: &str, width: f32) -> f32 {
+        let (blocks, suffixes) = self.parsed(ui.ctx(), text);
+        self.suffixes = suffixes;
+        self.origin_x = ui.cursor().left();
+        self.used_width = 0.0;
+        let top = ui.cursor().top();
+        self.blocks(ui, &blocks, width, 0, self.id);
+        ui.cursor().top() - top
+    }
+
+    /// `text`'s blocks and chip suffixes, parsed once while it stays on
+    /// screen: a frame that redraws a thread parses only what changed.
+    fn parsed(&self, ctx: &egui::Context, text: &str) -> Parsed {
+        use std::hash::{Hash, Hasher};
+        thread_local! {
+            static PARSED: std::cell::RefCell<HashMap<u64, (Parsed, u64)>> =
+                Default::default();
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (text, self.line_breaks, self.skill_chips).hash(&mut hasher);
+        for record in &self.context_records {
+            record.to_string().hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        let frame = ctx.cumulative_frame_nr();
+        if let Some(parsed) = PARSED.with_borrow_mut(|cache| {
+            cache.get_mut(&key).map(|(parsed, used)| {
+                *used = frame;
+                parsed.clone()
+            })
+        }) {
+            return parsed;
+        }
         let mut blocks = parse_with(text, self.line_breaks);
         if self.skill_chips {
             skill_chip_blocks(&mut blocks);
@@ -1924,14 +1959,20 @@ impl<'a> Markdown<'a> {
         if !self.context_records.is_empty() {
             context_display_kinds(&mut blocks, &self.context_records);
         }
-        self.origin_x = ui.cursor().left();
-        self.used_width = 0.0;
         let mut files = Vec::new();
         collect_files(&blocks, &mut files);
-        self.suffixes = md_links::parent_suffixes(&files);
-        let top = ui.cursor().top();
-        self.blocks(ui, &blocks, width, 0, self.id);
-        ui.cursor().top() - top
+        let parsed = (
+            Arc::new(blocks),
+            Arc::new(md_links::parent_suffixes(&files)),
+        );
+        PARSED.with_borrow_mut(|cache| {
+            // Past this many, what the last frames did not draw goes.
+            if cache.len() >= 512 {
+                cache.retain(|_, (_, used)| *used + 1 >= frame);
+            }
+            cache.insert(key, (parsed.clone(), frame));
+        });
+        parsed
     }
 
     /// Block ids nest under `parent` so list items and quotes never collide.

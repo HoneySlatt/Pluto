@@ -39,6 +39,14 @@ pub struct App {
     /// The connection's server synchronized (its config arrived): until
     /// then commands fail at once and subscriptions wait (`send`).
     synced: bool,
+    /// The server the shell came from: connecting to another one clears it.
+    shell_server: Option<String>,
+    /// Whether the window had the focus last frame: coming back checks the
+    /// connection (`Action::Ping`).
+    focused: bool,
+    /// The window's size when not maximized, and whether it is: written at
+    /// exit for the next start (`saved_window`).
+    window: Option<([f32; 2], bool)>,
     /// A lost connection coming back: the attempt, when the next one goes,
     /// and its toast.
     reconnect: Option<Reconnect>,
@@ -471,6 +479,9 @@ impl App {
             },
             connection: None,
             synced: false,
+            shell_server: None,
+            focused: true,
+            window: None,
             reconnect: None,
             streams: Vec::new(),
             offline_failures: Vec::new(),
@@ -718,12 +729,16 @@ impl App {
             match event {
                 Event::Data(route, value) => match route {
                     Route::Config => {
+                        // Only the snapshot completes the handshake: the
+                        // worker refuses commands until it came.
+                        let snapshot = value["type"] == "snapshot";
                         self.state.config_event(&value);
-                        if !self.synced {
+                        if !self.synced && snapshot {
                             self.synced = true;
+                            self.shell_server = Some(self.connect.server.trim().to_owned());
                             self.reconnected();
                         }
-                        if self.connect.busy {
+                        if self.connect.busy && snapshot {
                             self.connect.busy = false;
                             self.screen = Screen::Main;
                             self.restore_open_draft();
@@ -1313,6 +1328,20 @@ impl App {
     }
 
     pub(crate) fn connect_now(&mut self, ctx: &egui::Context) {
+        // Another server: nothing of the last one's shell stays.
+        if self
+            .shell_server
+            .as_deref()
+            .is_some_and(|server| server != self.connect.server.trim())
+        {
+            self.shell_server = None;
+            self.state = State::default();
+            self.selected = None;
+            self.thread_retry = None;
+            self.streams.clear();
+            self.vcs = None;
+            self.watched_vcs = None;
+        }
         self.connect.error = None;
         self.connect.busy = true;
         self.synced = false;
@@ -1363,6 +1392,17 @@ impl App {
 impl eframe::App for App {
     fn on_exit(&mut self) {
         self.save_drafts_now();
+        if let (Some(path), Some(([width, height], maximized))) = (
+            window_path(self.client_settings_path.as_deref()),
+            self.window,
+        ) {
+            let value =
+                serde_json::json!({"width": width, "height": height, "maximized": maximized});
+            let temp = path.with_extension("json.tmp");
+            if std::fs::write(&temp, value.to_string()).is_ok() {
+                let _ = std::fs::rename(&temp, &path);
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1377,6 +1417,25 @@ impl eframe::App for App {
             ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));
         }
         self.now = chrono::Utc::now();
+        // Back in the window: a connection that died meanwhile (a suspend,
+        // a network change) shows within seconds rather than 45.
+        let focused = ui.ctx().input(|i| i.focused);
+        let (inner, maximized, fullscreen) = ui.ctx().input(|i| {
+            let viewport = i.viewport();
+            (viewport.inner_rect, viewport.maximized, viewport.fullscreen)
+        });
+        if let Some(maximized) = maximized {
+            let size = match (maximized || fullscreen == Some(true), inner) {
+                (false, Some(inner)) => Some([inner.width(), inner.height()]),
+                _ => self.window.map(|(size, _)| size),
+            };
+            self.window = size.map(|size| (size, maximized));
+        }
+        let back = focused && !self.focused;
+        self.focused = focused;
+        if back && let Some(connection) = &self.connection {
+            connection.send(Action::Ping);
+        }
         self.poll_events();
         self.poll_thread_find(ui.ctx());
         self.thread_notifications(ui.ctx());
@@ -2042,6 +2101,23 @@ impl App {
     pub fn renaming_thread(&self) -> Option<&str> {
         self.renaming.as_ref().map(|(id, _)| id.as_str())
     }
+}
+
+/// `window.json` beside the client settings file.
+fn window_path(settings: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    Some(settings?.with_file_name("window.json"))
+}
+
+/// The window's size and maximized state at the last exit.
+pub fn saved_window(settings: Option<&std::path::Path>) -> Option<([f32; 2], bool)> {
+    let text = std::fs::read_to_string(window_path(settings)?).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let size = [
+        value["width"].as_f64()? as f32,
+        value["height"].as_f64()? as f32,
+    ];
+    let sane = size.iter().all(|side| (100.0..=16384.0).contains(side));
+    sane.then_some((size, value["maximized"] == true))
 }
 
 /// `visited.json` beside the client settings file.

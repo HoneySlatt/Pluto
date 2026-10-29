@@ -12,7 +12,7 @@ pluto-core = { path = "crates/pluto-core" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 iana-time-zone = "0.1"
 libc = "0.2"
-eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts", "accesskit"] }
 egui_extras = { version = "0.36.2", features = ["svg", "image"] }
 image = { version = "0.25", default-features = false, features = ["png", "ico", "bmp", "jpeg", "gif", "webp"] }
 pulldown-cmark = { version = "0.13", default-features = false }

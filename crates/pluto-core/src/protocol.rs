@@ -709,6 +709,9 @@ fn run(
                         _ => {}
                     }
                 }
+                // Handing the values over waits while the client is busy
+                // (a full queue): that time is not the server's silence.
+                heard = Instant::now();
             }
             Ok(Message::Close(_)) => return Err("The server closed the connection".into()),
             Ok(_) => {}

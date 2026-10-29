@@ -28,10 +28,14 @@ fn main() -> eframe::Result<()> {
             _ => eprintln!("unknown argument: {arg}"),
         }
     }
+    // The window comes back as it was left.
+    let (size, maximized) = pluto::app::saved_window(options.client_settings_path.as_deref())
+        .unwrap_or(([1440.0, 900.0], false));
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_title("Pluto")
         .with_app_id("pluto")
-        .with_inner_size([1440.0, 900.0])
+        .with_inner_size(size)
+        .with_maximized(maximized)
         .with_min_inner_size([720.0, 480.0]);
     eframe::run_native(
         "pluto",
