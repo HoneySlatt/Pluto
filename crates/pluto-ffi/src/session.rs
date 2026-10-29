@@ -117,6 +117,9 @@ pub struct Session {
     /// Messages on their way, by request key or command id: their composer
     /// and text, given back if the server refuses them.
     sends: HashMap<String, (String, String, Vec<Attached>)>,
+    /// Messages waiting for their images to be stored
+    /// (`persist:{message id}`), with their key in `sends`.
+    persisting: HashMap<String, (Held, String)>,
     /// Settings changed here, before the change, until the server answers.
     setting_backups: HashMap<String, Value>,
     /// Each composer's attachments (`attachments.rs`).
@@ -176,6 +179,7 @@ impl Session {
             replies: HashMap::new(),
             pending: HashSet::new(),
             sends: HashMap::new(),
+            persisting: HashMap::new(),
             attachments: HashMap::new(),
             setting_backups: HashMap::new(),
             unsent: HashMap::new(),
@@ -330,6 +334,7 @@ impl Session {
 
     /// Hands every message on its way back to its composer.
     fn give_back_sends(&mut self) {
+        self.persisting.clear();
         for (_, (composer, text, attachments)) in std::mem::take(&mut self.sends) {
             self.give_back(composer, text, attachments);
         }
@@ -338,11 +343,12 @@ impl Session {
     /// A message the server did not take: its text and attachments go back
     /// to its composer.
     fn give_back(&mut self, composer: String, text: String, attachments: Vec<Attached>) {
+        // Added to what the composer holds since.
         if !attachments.is_empty() {
-            let list = self.attachments.entry(composer.clone()).or_default();
-            if list.is_empty() {
-                *list = attachments;
-            }
+            self.attachments
+                .entry(composer.clone())
+                .or_default()
+                .extend(attachments);
         }
         if !text.trim().is_empty() {
             self.unsent.entry(composer).or_default().push(text);
@@ -794,12 +800,17 @@ impl Session {
     }
 
     /// Sends a message from `composer`: refused, it comes back there.
-    pub fn send_message(&mut self, command: Value, composer: String, text: String) -> bool {
+    pub fn send_message(&mut self, mut command: Value, composer: String, text: String) -> bool {
         let id = command["commandId"].as_str().unwrap_or_default().to_owned();
         let attachments = self.attachments.remove(&composer).unwrap_or_default();
         self.sends
             .insert(id.clone(), (composer.clone(), text, attachments));
-        let sent = self.dispatch(command);
+        let uploads = take_uploads(&mut command["attachments"]);
+        let sent = if uploads.is_empty() {
+            self.dispatch(command)
+        } else {
+            self.persist(Held::Message(command), uploads, id.clone())
+        };
         if !sent && let Some((_, _, attachments)) = self.sends.remove(&id) {
             self.attachments.insert(composer, attachments);
         }
@@ -819,12 +830,88 @@ impl Session {
         let attachments = self.attachments.remove(&composer).unwrap_or_default();
         self.sends
             .insert(key.clone(), (composer.clone(), text, attachments));
-        self.request(key.clone(), "orchestration.launchThread", input);
-        let refused = self.replies.contains_key(&key);
+        let mut input = input;
+        let uploads = take_uploads(&mut input["initialMessage"]["attachments"]);
+        let refused = if uploads.is_empty() {
+            self.request(key.clone(), "orchestration.launchThread", input);
+            self.replies.contains_key(&key)
+        } else {
+            !self.persist(
+                Held::Launch(thread_id.to_owned(), input),
+                uploads,
+                key.clone(),
+            )
+        };
         if refused && let Some((_, _, attachments)) = self.sends.remove(&key) {
             self.attachments.insert(composer, attachments);
         }
         !refused
+    }
+
+    /// Stores a message's images (`assets.persistChatAttachments`, as
+    /// `startThreadTurn` does) before the message goes with what the server
+    /// kept: a message cannot carry them inline. False when it could not ask.
+    fn persist(&mut self, held: Held, uploads: Vec<Value>, sends_key: String) -> bool {
+        let (thread, message) = match &held {
+            Held::Message(command) => (command["threadId"].clone(), command["messageId"].clone()),
+            Held::Launch(thread, input) => {
+                (json!(thread), input["initialMessage"]["messageId"].clone())
+            }
+        };
+        let key = format!("persist:{}", message.as_str().unwrap_or_default());
+        self.request(
+            key.clone(),
+            "assets.persistChatAttachments",
+            json!({"threadId": thread, "messageId": message, "attachments": uploads}),
+        );
+        if self.replies.remove(&key).is_some() {
+            self.show_toast(NOT_CONNECTED);
+            return false;
+        }
+        // The new thread's screen waits on its launch meanwhile.
+        if let Held::Launch(thread, _) = &held {
+            self.pending.insert(format!("launch:{thread}"));
+        }
+        self.persisting.insert(key, (held, sends_key));
+        true
+    }
+
+    /// The images were stored (or refused): the message goes on with them.
+    fn persisted(&mut self, held: Held, sends_key: String, result: Result<Value, String>) {
+        let stored =
+            result.map(|value| value["attachments"].as_array().cloned().unwrap_or_default());
+        match (held, stored) {
+            (Held::Message(mut command), Ok(stored)) => {
+                add_attachments(&mut command["attachments"], stored);
+                if !self.dispatch(command)
+                    && let Some((composer, text, attachments)) = self.sends.remove(&sends_key)
+                {
+                    self.give_back(composer, text, attachments);
+                }
+            }
+            (Held::Message(_), Err(error)) => {
+                if let Some((composer, text, attachments)) = self.sends.remove(&sends_key) {
+                    self.give_back(composer, text, attachments);
+                }
+                self.show_toast(format!(
+                    "Message not sent: could not upload the images: {} Your text is back in the composer.",
+                    sentence(&error)
+                ));
+            }
+            (Held::Launch(_, mut input), Ok(stored)) => {
+                add_attachments(&mut input["initialMessage"]["attachments"], stored);
+                self.request(sends_key.clone(), "orchestration.launchThread", input);
+                if let Some(Err(error)) = self.replies.remove(&sends_key) {
+                    self.rpc_result(sends_key, Err(error));
+                }
+            }
+            (Held::Launch(..), Err(error)) => {
+                self.rpc_result(
+                    sends_key,
+                    Err(format!("could not upload the images: {error}")),
+                );
+            }
+        }
     }
 
     /// A one-shot request; its reply lands in `replies` under `key`.
@@ -948,6 +1035,10 @@ impl Session {
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
         self.pending.remove(&key);
+        if let Some((held, sends_key)) = self.persisting.remove(&key) {
+            self.persisted(held, sends_key, result);
+            return;
+        }
         // A setting the server refused goes back to what it was; one it took
         // keeps its new value.
         if let Some(setting) = key.strip_prefix("settings:") {
@@ -1067,6 +1158,34 @@ fn sentence(text: &str) -> String {
     }
 }
 
+/// A message held while its images are stored (`Session::persist`).
+enum Held {
+    Message(Value),
+    /// A new thread's id and its `orchestration.launchThread` input.
+    Launch(String, Value),
+}
+
+/// Takes the images to store (those carrying their bytes as a data URL)
+/// out of `attachments`; the files, already uploaded, stay.
+fn take_uploads(attachments: &mut Value) -> Vec<Value> {
+    let Some(list) = attachments.as_array_mut() else {
+        return Vec::new();
+    };
+    let (uploads, kept) = std::mem::take(list)
+        .into_iter()
+        .partition(|attachment| attachment.get("dataUrl").is_some());
+    *list = kept;
+    uploads
+}
+
+/// Appends the attachments the server stored.
+fn add_attachments(attachments: &mut Value, stored: Vec<Value>) {
+    match attachments.as_array_mut() {
+        Some(list) => list.extend(stored),
+        None => *attachments = Value::Array(stored),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1075,5 +1194,35 @@ mod tests {
     fn hosts_drop_the_scheme() {
         assert_eq!(url_host("http://192.168.1.20:3774/"), "192.168.1.20:3774");
         assert_eq!(url_host("pluto.example"), "pluto.example");
+    }
+
+    #[test]
+    fn images_are_stored_before_their_message() {
+        let mut attachments = json!([
+            {"type": "image", "name": "a.png", "dataUrl": "data:image/png;base64,AQID"},
+            {"type": "file", "id": "att-1", "name": "notes.pdf"},
+        ]);
+        let uploads = take_uploads(&mut attachments);
+        assert_eq!(uploads.len(), 1);
+        assert_eq!(
+            attachments,
+            json!([{"type": "file", "id": "att-1", "name": "notes.pdf"}])
+        );
+        add_attachments(
+            &mut attachments,
+            vec![json!({"type": "image", "id": "img-1"})],
+        );
+        assert_eq!(attachments[1]["id"], "img-1");
+
+        // Offline, the message and its image stay in the composer.
+        let mut session = Session::new(crate::prefs::Prefs::load(None));
+        session
+            .attach("chat", "a.png".into(), "image/png".into(), vec![1, 2, 3])
+            .unwrap();
+        let mut command = pluto_core::commands::message_dispatch("t", "hi", &json!({}), "auto");
+        command["attachments"] = json!(session.wire_attachments("chat").unwrap());
+        assert!(!session.send_message(command, "chat".into(), "hi".into()));
+        assert_eq!(session.attachments["chat"].len(), 1);
+        assert!(session.persisting.is_empty());
     }
 }

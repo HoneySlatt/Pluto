@@ -261,6 +261,8 @@ pub struct QuestionCard {
     pub dismissible: bool,
     /// Every question has an answer.
     pub ready: bool,
+    /// How many questions have one.
+    pub answered: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -689,6 +691,11 @@ fn question_card(app: &App, input: &PendingUserInput) -> QuestionCard {
         request_id: input.request_id.clone(),
         dismissible: input.dismissible,
         ready: requests::build_answers(&input.questions, drafts).is_some(),
+        answered: input
+            .questions
+            .iter()
+            .filter(|q| requests::resolve_answer(q, drafts.get(&q.id)).is_some())
+            .count() as u32,
         questions: input
             .questions
             .iter()

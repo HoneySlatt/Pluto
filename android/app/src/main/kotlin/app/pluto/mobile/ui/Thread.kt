@@ -790,8 +790,14 @@ private fun QuestionCardView(thread: String, input: QuestionCard, online: Boolea
             if (input.dismissible) {
                 Btn("Dismiss", Modifier.weight(1f), enabled = enabled) { if (!waiting(sent)) sent = core.dismissQuestion(thread, input.requestId) }
             }
+            // Several questions: the button says how many still wait.
+            val total = input.questions.size
             Btn(
-                if (busy) "Sending…" else "Submit",
+                when {
+                    busy -> "Sending…"
+                    !input.ready && total > 1 -> "Answered ${input.answered} of $total"
+                    else -> "Submit"
+                },
                 Modifier.weight(1f),
                 tone = Tone.Primary,
                 enabled = enabled && input.ready,
