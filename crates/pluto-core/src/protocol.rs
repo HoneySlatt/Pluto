@@ -201,6 +201,23 @@ impl Connection {
     /// it arrives as `Route::History`. A jump to `through` (an entry before
     /// the page) first loads the conversation rows up to it, then the
     /// complete page (`loadEarlier`'s two views).
+    /// `GET /api/auth/session` (the session's scopes and permissions), its
+    /// answer as `Route::Rpc(key)`.
+    pub fn load_auth_session(&self, key: &str) {
+        let (api, outbox, repaint) = (self.api.clone(), self.outbox.clone(), self.repaint.clone());
+        let key = key.to_owned();
+        let _ = std::thread::Builder::new()
+            .name("t3-auth-session".into())
+            .spawn(move || {
+                let event = match api.auth_session() {
+                    Ok(value) => Event::Data(Route::Rpc(key), value),
+                    Err(error) => Event::Failed(Route::Rpc(key), error),
+                };
+                let _ = outbox.send(event);
+                repaint.now();
+            });
+    }
+
     pub fn load_history(&self, thread_id: &str, cursor: &str, through: Option<&str>) {
         let (api, outbox, repaint) = (self.api.clone(), self.outbox.clone(), self.repaint.clone());
         let (thread_id, cursor) = (thread_id.to_owned(), cursor.to_owned());
@@ -249,6 +266,23 @@ impl Connection {
 impl Api {
     /// `GET /api/orchestration/threads/:threadId/history?cursor=`, with the
     /// optional `throughEntryId` and `view`.
+    fn auth_session(&self) -> Result<Value, String> {
+        let mut url = self.origin.clone();
+        url.path_segments_mut()
+            .map_err(|_| "Invalid server address")?
+            .clear()
+            .extend(["api", "auth", "session"]);
+        // Sized up front: a reallocation would leave a copy of the token.
+        let mut headers = Zeroizing::new(String::with_capacity(self.token.len() + 32));
+        if !self.token.trim().is_empty() {
+            headers.push_str("Authorization: Bearer ");
+            headers.push_str(self.token.trim());
+            headers.push_str("\r\n");
+        }
+        let body = crate::http::get_with_headers(&url, &headers)?;
+        serde_json::from_slice(&body).map_err(|e| e.to_string())
+    }
+
     fn history_page(
         &self,
         thread_id: &str,

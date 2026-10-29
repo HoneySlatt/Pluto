@@ -44,6 +44,8 @@ pub(crate) enum Action {
     OpenThread(String),
     /// Opens a file in the preferred editor (`shell.openInEditor`).
     OpenInEditor(String),
+    /// The permission notice answered: Open Connections (`true`) or Dismiss.
+    PermissionNotice(bool),
     /// Closes the toast and nothing else.
     Dismiss,
 }

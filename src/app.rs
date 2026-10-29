@@ -47,6 +47,8 @@ pub struct App {
     pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
     pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
     pub(crate) composer_rect: Option<Rect>,
+    /// The permission notices shown this run.
+    permission_notice_shown: std::collections::HashSet<String>,
     /// Panel tabs closed, newest first, with their thread.
     pub(crate) closed_views: Vec<(String, PanelTab)>,
     /// Ctrl+Q's hold (`ui/quit_hold.rs`).
@@ -527,6 +529,7 @@ impl App {
             undo: Default::default(),
             quit_hold: Default::default(),
             closed_views: Vec::new(),
+            permission_notice_shown: Default::default(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
             composer_rect: None,
@@ -809,6 +812,10 @@ impl App {
                         self.state.config_event(&value);
                         if !self.synced && snapshot {
                             self.synced = true;
+                            // The session's permissions, for the notice.
+                            if let Some(connection) = &self.connection {
+                                connection.load_auth_session("auth-session");
+                            }
                             self.shell_server = Some(self.connect.server.trim().to_owned());
                             self.reconnected();
                         }
@@ -1029,6 +1036,72 @@ impl App {
     pub(crate) fn use_connection_for_tests(&mut self, connection: Connection) {
         self.connection = Some(connection);
         self.synced = true;
+    }
+
+    /// `PermissionUpdateNotice`: a connection paired with the old
+    /// permissions says so, once per run until dismissed.
+    fn auth_session_result(&mut self, key: &str, result: &Result<Value, String>) -> bool {
+        if key != "auth-session" {
+            return false;
+        }
+        let Ok(session) = result else {
+            return true;
+        };
+        const LEGACY: [&str; 8] = [
+            "orchestration:read",
+            "orchestration:operate",
+            "terminal:operate",
+            "review:write",
+            "access:read",
+            "access:write",
+            "relay:read",
+            "relay:write",
+        ];
+        const PARENTS: [&str; 3] = [
+            "orchestration:read",
+            "orchestration:operate",
+            "terminal:operate",
+        ];
+        let Some(permissions) = session["permissions"].as_array() else {
+            return true;
+        };
+        let names: Vec<&str> = permissions.iter().filter_map(Value::as_str).collect();
+        let legacy = session["authenticated"] == true
+            && names.iter().all(|p| LEGACY.contains(p))
+            && names.iter().any(|p| PARENTS.contains(p));
+        let environment = self.state.config["environment"]["environmentId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let id = format!("permission-update:{environment}");
+        if !legacy
+            || self.dismissed_notices.contains(&id)
+            || !self.permission_notice_shown.insert(id)
+        {
+            return true;
+        }
+        let label = self.state.config["environment"]["label"]
+            .as_str()
+            .unwrap_or("this server")
+            .to_owned();
+        let mut toast = crate::ui::toasts::Toast::new(
+            crate::ui::toasts::Kind::Plain,
+            format!("Permissions have changed for {label}"),
+        )
+        .description(
+            "This connection still uses the old permissions, so some actions may no longer be available. Pair again using a new link with the permissions you need.",
+        );
+        toast.timeout = None;
+        toast.action = Some((
+            "Open Connections".into(),
+            crate::ui::toasts::Action::PermissionNotice(true),
+        ));
+        toast.secondary.push((
+            "Dismiss".into(),
+            crate::ui::toasts::Action::PermissionNotice(false),
+        ));
+        self.toasts.add(toast);
+        true
     }
 
     /// `KeybindingsUpdateToast`: the server reloaded `keybindings.json`.
@@ -1634,6 +1707,18 @@ impl App {
                     self.open_in_editor(&path, editor);
                 }
             }
+            Some(crate::ui::toasts::Action::PermissionNotice(open)) => {
+                let environment = self.state.config["environment"]["environmentId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                self.dismissed_notices
+                    .insert(format!("permission-update:{environment}"));
+                save_ui_state(self);
+                if open {
+                    self.open_settings_page(crate::ui::settings::CONNECTIONS_PAGE);
+                }
+            }
             Some(crate::ui::toasts::Action::Dismiss) | None => {}
         }
     }
@@ -2162,6 +2247,7 @@ impl App {
             || self.file_upload_result(&key, &result)
             || self.notice_result(&key, &result)
             || self.secret_result(&key, &result)
+            || self.auth_session_result(&key, &result)
         {
             return;
         }
@@ -2430,11 +2516,11 @@ pub(crate) fn save_ui_state(app: &App) {
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
         "stickyModels": app.sticky_models,
-        // Only the server version notices are kept across runs.
+        // Only the server version and permission notices are kept across runs.
         "dismissedNotices": app
             .dismissed_notices
             .iter()
-            .filter(|id| id.starts_with("server-version:"))
+            .filter(|id| id.starts_with("server-version:") || id.starts_with("permission-update:"))
             .collect::<Vec<_>>(),
     });
     let temp = path.with_extension("json.tmp");
