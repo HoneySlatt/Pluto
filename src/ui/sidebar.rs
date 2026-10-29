@@ -1267,37 +1267,192 @@ impl App {
             );
         }
 
-        // Row 3: branch, diff stat, provider glyph.
+        // Row 3: worktree, branch, running terminals, pull request; at the
+        // right the providers it ran on (`SidebarProviderStack`).
         let row3 = Rect::from_min_max(Pos2::new(x, top + 46.0), Pos2::new(right, top + 62.0));
-        // Upstream `latestTurnDiff` is a seam that always returns null for shells.
-        let branch_right = right - 20.0;
+        let center = row3.center().y;
+        // From the right: the current provider, then up to two before it.
+        let mut stack_left = right;
+        let current = thread.model_selection.instance_id.clone();
+        if let Some((icon, tint)) = self
+            .provider_driver(&current)
+            .and_then(|driver| crate::ui::pickers::provider_icon(&driver))
+        {
+            stack_left -= 14.0;
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_min_size(Pos2::new(stack_left, center - 7.0), Vec2::splat(14.0)),
+                14.0,
+                theme::alpha(tint, 0.6),
+            );
+            let previous: Vec<&String> = thread
+                .provider_instance_history
+                .iter()
+                .filter(|id| **id != current)
+                .collect();
+            for id in previous.iter().rev().take(2) {
+                if let Some((icon, _)) = self
+                    .provider_driver(id)
+                    .and_then(|driver| crate::ui::pickers::provider_icon(&driver))
+                {
+                    stack_left -= 6.0 + 12.0;
+                    theme::paint_icon(
+                        ui,
+                        icon,
+                        Rect::from_min_size(Pos2::new(stack_left, center - 6.0), Vec2::splat(12.0)),
+                        12.0,
+                        theme::alpha(theme::muted_foreground(), 0.35),
+                    );
+                }
+            }
+            stack_left -= 6.0;
+        }
+        let mut lx = row3.left();
+        // The worktree it runs in.
+        if let Some(path) = thread
+            .worktree_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            let name = path
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or(path);
+            let slot = Rect::from_min_size(Pos2::new(lx, center - 6.0), Vec2::splat(12.0));
+            crate::ui::lucide::paint(
+                ui,
+                slot,
+                "folder-git-2",
+                theme::alpha(theme::muted_foreground(), 0.4),
+            );
+            ui.interact(slot, ui.id().with(("worktree", &thread.id)), Sense::hover())
+                .on_hover_text(match &thread.branch {
+                    Some(branch) => format!("Worktree: {name} ({branch})"),
+                    None => format!("Worktree: {name}"),
+                });
+            lx += 12.0 + 6.0;
+        }
+        // Running terminals and the pull request sit after the branch.
+        let terminals = self
+            .terminal_metadata
+            .iter()
+            .filter(|((t, _), m)| *t == thread.id && m["hasRunningSubprocess"] == true)
+            .count();
+        let pull_request =
+            crate::ui::thread_pull_requests::current_link(&thread.pull_requests).cloned();
+        let pr_label = pull_request.as_ref().map(|link| {
+            let others = thread.pull_requests.len().saturating_sub(1);
+            let number = link["number"].as_u64().unwrap_or(0);
+            if others > 0 {
+                format!("#{number} +{others}")
+            } else {
+                format!("#{number}")
+            }
+        });
+        let pr_width = pr_label.as_ref().map_or(0.0, |l| {
+            12.0 + 4.0 + widgets::tabular_width(ui, l, font(12.0, Weight::Regular)) + 6.0
+        });
+        let terminal_width = if terminals > 0 { 14.0 + 6.0 } else { 0.0 };
+        let branch_right = stack_left - pr_width - terminal_width;
         // A search found by its messages shows the matching one instead.
+        let mut after_branch = lx;
         if let Some(found) = self.sidebar_excerpt(thread) {
             crate::ui::thread_search::paint_excerpt(
                 ui,
-                Rect::from_min_max(row3.min, Pos2::new(branch_right, row3.bottom())),
+                Rect::from_min_max(
+                    Pos2::new(lx, row3.top()),
+                    Pos2::new(branch_right, row3.bottom()),
+                ),
                 found,
             );
+            after_branch = branch_right;
         } else if let Some(branch) = &thread.branch {
-            widgets::text_in(
+            let width = widgets::text_in(
                 ui,
-                Rect::from_min_max(row3.min, Pos2::new(branch_right, row3.bottom())),
+                Rect::from_min_max(
+                    Pos2::new(lx, row3.top()),
+                    Pos2::new(branch_right, row3.bottom()),
+                ),
                 branch,
                 font(12.0, Weight::Regular),
                 theme::alpha(theme::sidebar_muted(), 0.4),
             );
+            after_branch = lx + width + 6.0;
         }
-        if let Some((icon, tint)) = self
-            .provider_driver(&thread.model_selection.instance_id)
-            .and_then(|driver| crate::ui::pickers::provider_icon(&driver))
-        {
+        let mut gx = after_branch.min(branch_right);
+        if terminals > 0 {
+            let alpha = crate::ui::legacy_sidebar::pulse_alpha(ui.input(|i| i.time));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+            let slot = Rect::from_min_size(Pos2::new(gx, center - 7.0), Vec2::splat(14.0));
+            theme::paint_icon(
+                ui,
+                "terminal",
+                slot,
+                14.0,
+                theme::alpha(crate::ui::legacy_sidebar::TEAL_300, 0.9 * alpha),
+            );
+            let label = if terminals == 1 {
+                "1 terminal process running. Open terminal".to_owned()
+            } else {
+                format!("{terminals} terminal processes running. Open terminal")
+            };
+            if ui
+                .interact(
+                    slot.expand(2.0),
+                    ui.id().with(("terminal", &thread.id)),
+                    Sense::click(),
+                )
+                .on_hover_text(label)
+                .clicked()
+            {
+                self.select_thread(Some(thread.id.clone()));
+                self.open_terminal_drawer(&thread.id);
+            }
+            gx += terminal_width;
+        }
+        if let (Some(link), Some(label)) = (&pull_request, &pr_label) {
+            let (icon, tone, tooltip) = crate::ui::thread_pull_requests::status(link).unwrap_or((
+                "git-pull-request-arrow",
+                theme::muted_foreground(),
+                format!(
+                    "PR #{}, status pending",
+                    link["number"].as_u64().unwrap_or(0)
+                ),
+            ));
+            let badge =
+                Rect::from_min_size(Pos2::new(gx, row3.top()), Vec2::new(pr_width - 6.0, 16.0));
             theme::paint_icon(
                 ui,
                 icon,
-                Rect::from_min_size(Pos2::new(right - 14.0, row3.top() + 1.0), Vec2::splat(14.0)),
-                14.0,
-                theme::alpha(tint, 0.6),
+                Rect::from_min_size(Pos2::new(gx, center - 6.0), Vec2::splat(12.0)),
+                12.0,
+                tone,
             );
+            widgets::tabular_text(
+                ui,
+                Pos2::new(gx + 16.0, row3.top()),
+                label,
+                font(12.0, Weight::Regular),
+                tone,
+                16.0,
+            );
+            if ui
+                .interact(
+                    badge,
+                    ui.id().with(("pr-badge", &thread.id)),
+                    Sense::click(),
+                )
+                .on_hover_text(tooltip)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+                && let Some(url) = link["url"].as_str()
+            {
+                widgets::open_external(url);
+            }
         }
 
         self.thread_hover_card(ui, rect, response.contains_pointer(), thread);

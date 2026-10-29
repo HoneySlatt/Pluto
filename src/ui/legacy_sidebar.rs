@@ -25,7 +25,7 @@ const SORT_MENU: &str = "legacy-sidebar-sort";
 const AMBER_300: Color32 = Color32::from_rgb(0xff, 0xd2, 0x30);
 const SKY_300: Color32 = Color32::from_rgb(0x74, 0xd4, 0xff);
 const VIOLET_300: Color32 = Color32::from_rgb(0xc4, 0xb4, 0xff);
-const TEAL_300: Color32 = Color32::from_rgb(0x46, 0xec, 0xd5);
+pub(crate) const TEAL_300: Color32 = Color32::from_rgb(0x46, 0xec, 0xd5);
 const EMERALD_400: Color32 = Color32::from_rgb(0x00, 0xd4, 0x92); // --success-foreground
 const ICON_MUTED: Color32 = Color32::from_rgb(84, 84, 84); // --icon-muted
 
@@ -159,7 +159,7 @@ fn grouping_description(mode: &str) -> &'static str {
 
 /// The status pulse (`animate-status-pulse`): 2s, full then half opacity,
 /// each change in six steps.
-fn pulse_alpha(time: f64) -> f32 {
+pub(crate) fn pulse_alpha(time: f64) -> f32 {
     let t = (time % 2.0) / 2.0;
     let step = |from: f64| ((t - from) / 0.1 * 6.0).floor() / 6.0;
     (match t {
