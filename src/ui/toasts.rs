@@ -36,8 +36,6 @@ pub(crate) enum Action {
     OpenUrl(String),
     /// Opens a thread (`ThreadNotificationCoordinator`'s "Open thread").
     OpenThread(String),
-    /// Leaves a server that does not answer for the connection screen.
-    ChangeServer,
 }
 
 #[derive(Clone, Debug)]

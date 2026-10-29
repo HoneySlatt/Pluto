@@ -282,7 +282,8 @@ impl App {
         }
     }
 
-    /// The attached banners' height: the queue's above the mode's banner.
+    /// The attached banners' height: the notices above the queue's, above
+    /// the mode's banner.
     fn banner_height(&self, ui: &Ui, width: f32, mode: &Mode) -> f32 {
         let lower = self.mode_banner_height(ui, width, mode);
         let queue = if self.selected.is_some() {
@@ -290,10 +291,18 @@ impl App {
         } else {
             0.0
         };
-        if queue > 0.0 && lower > 0.0 {
+        let below = if queue > 0.0 && lower > 0.0 {
             lower + queue - OVERLAP
         } else {
             lower + queue
+        };
+        let notices = Self::notices_height(&self.composer_notices(self.selected.is_none()));
+        if below > 0.0 && notices > 0.0 {
+            below + notices
+        } else if notices > 0.0 {
+            notices + OVERLAP
+        } else {
+            below
         }
     }
 
@@ -362,6 +371,27 @@ impl App {
             },
         }
         crate::ui::requests_panel::join_banners(false);
+        // The notices over everything attached below them.
+        let notices = self.composer_notices(draft);
+        if !notices.is_empty() {
+            let below = if draft {
+                0.0
+            } else {
+                let lower = self.mode_banner_height(ui, width, mode);
+                let queue = self.queue_banner_height(self.queue_workflow().as_ref());
+                if queue > 0.0 && lower > 0.0 {
+                    lower + queue - OVERLAP
+                } else {
+                    lower + queue
+                }
+            };
+            let bottom = if below > 0.0 {
+                surface.top() + OVERLAP - below
+            } else {
+                surface.top()
+            };
+            self.paint_notices(ui, surface, bottom, &notices);
+        }
 
         // Checkout strip, tucked 16px under the surface (`-mt-4`); only for a
         // repository (`shouldShowComposerContextStrip`, one environment).
@@ -1314,7 +1344,7 @@ impl App {
     }
 
     /// The checked-out branch the workspace status reports (`refName`).
-    fn workspace_branch(&self) -> Option<String> {
+    pub(crate) fn workspace_branch(&self) -> Option<String> {
         let cwd = self.workspace_cwd()?;
         self.vcs
             .as_ref()

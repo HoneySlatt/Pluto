@@ -16,7 +16,8 @@ use crate::timeline::Expansion;
 pub(crate) struct Reconnect {
     attempt: u32,
     next: std::time::Instant,
-    toast: u64,
+    /// Why the last attempt failed.
+    pub(crate) error: String,
 }
 
 /// "192.168.1.20:3774" from "http://192.168.1.20:3774/".
@@ -143,6 +144,8 @@ pub struct App {
     pub(crate) nav_back: Vec<Option<String>>,
     pub(crate) nav_forward: Vec<Option<String>>,
     pub(crate) navigating: bool,
+    /// Composer notices dismissed for the run, by id.
+    pub(crate) dismissed_notices: std::collections::HashSet<String>,
     /// Thread errors dismissed for the run, by thread and message.
     pub(crate) dismissed_thread_errors: std::collections::HashSet<String>,
     pub(crate) favorite_models: std::collections::BTreeSet<String>,
@@ -528,6 +531,7 @@ impl App {
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
             navigating: false,
+            dismissed_notices: Default::default(),
             dismissed_thread_errors: Default::default(),
             favorite_models: Default::default(),
             panels: Default::default(),
@@ -833,33 +837,23 @@ impl App {
         }
     }
 
-    /// The connection dropped: the next attempt is due shortly, and a toast
-    /// says so until the server is back.
+    /// The connection dropped: the next attempt is due shortly; the
+    /// composer's notice says so until the server is back.
     fn lost(&mut self, error: String) {
         let attempt = self.reconnect.as_ref().map_or(0, |r| r.attempt) + 1;
         let delay = (1500u64 << (attempt - 1).min(4)).min(15_000);
-        let host = server_host(&self.connect.server);
-        let mut toast = crate::ui::toasts::Toast::new(
-            crate::ui::toasts::Kind::Loading,
-            format!("Reconnecting to {host}…"),
-        )
-        .description(format!("Attempt {attempt} · {error}"));
-        toast.action = Some((
-            "Change server".into(),
-            crate::ui::toasts::Action::ChangeServer,
-        ));
-        let id = match &self.reconnect {
-            Some(r) => {
-                self.toasts.update(r.toast, toast);
-                r.toast
-            }
-            None => self.toasts.add(toast),
-        };
         self.reconnect = Some(Reconnect {
             attempt,
             next: std::time::Instant::now() + std::time::Duration::from_millis(delay),
-            toast: id,
+            error,
         });
+    }
+
+    /// The server's address while the connection comes back.
+    pub(crate) fn reconnecting_host(&self) -> Option<(String, String)> {
+        self.reconnect
+            .as_ref()
+            .map(|r| (server_host(&self.connect.server), r.error.clone()))
     }
 
     /// Opens the next attempt once it is due (every frame).
@@ -890,10 +884,11 @@ impl App {
         let Some(reconnect) = self.reconnect.take() else {
             return;
         };
+        let _ = reconnect;
         let mut toast =
             crate::ui::toasts::Toast::new(crate::ui::toasts::Kind::Success, "Reconnected");
         toast.timeout = Some(3.0);
-        self.toasts.update(reconnect.toast, toast);
+        self.toasts.add(toast);
         for (key, method, payload) in self.streams.clone() {
             self.send(Action::Stream {
                 key,
@@ -909,9 +904,7 @@ impl App {
 
     /// Gives up on a server that does not answer, for the connection screen.
     pub(crate) fn change_server(&mut self) {
-        if let Some(reconnect) = self.reconnect.take() {
-            self.toasts.close(reconnect.toast);
-        }
+        self.reconnect = None;
         self.connection = None;
         self.synced = false;
         self.screen = Screen::Connect;
@@ -1303,9 +1296,7 @@ impl App {
         self.connect.error = None;
         self.connect.busy = true;
         self.synced = false;
-        if let Some(reconnect) = self.reconnect.take() {
-            self.toasts.close(reconnect.toast);
-        }
+        self.reconnect = None;
         let token = self.connect.token.clone();
         match Connection::open(&self.connect.server, token, crate::repaint(ctx)) {
             Ok(connection) => self.connection = Some(connection),
@@ -1344,7 +1335,6 @@ impl App {
                 self.settings_page = None;
                 self.select_thread(Some(thread_id));
             }
-            Some(crate::ui::toasts::Action::ChangeServer) => self.change_server(),
             None => {}
         }
     }
@@ -2186,6 +2176,7 @@ mod thread_retry_tests {
         app.poll_events();
         assert!(app.screen == Screen::Main);
         assert!(app.reconnect.is_some() && !app.connected());
+        assert_eq!(app.composer_notices(true).len(), 1);
         // Meanwhile a command fails at once instead of ending the next connection.
         app.send(Action::Request {
             key: "mutation:x".into(),

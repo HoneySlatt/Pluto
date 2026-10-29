@@ -974,6 +974,8 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "wifi-off",
+        "shield-question",
         "redo-2",
         "octagon-alert",
         "message-square-warning",
