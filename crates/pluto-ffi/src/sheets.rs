@@ -36,23 +36,6 @@ pub struct EffortView {
     pub chosen: String,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct ModelChoice {
-    pub slug: String,
-    pub label: String,
-    pub checked: bool,
-}
-
-/// A provider instance and its models (`catalog::providers`).
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct ProviderModels {
-    pub instance_id: String,
-    pub name: String,
-    /// Its mark (`mark_png`).
-    pub mark: Option<String>,
-    pub models: Vec<ModelChoice>,
-}
-
 /// The model sheet.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ModelSheetView {
@@ -64,7 +47,7 @@ pub struct ModelSheetView {
     /// The access's description (`.seg-note`).
     pub access_note: String,
     pub accesses: Vec<Labeled>,
-    pub providers: Vec<ProviderModels>,
+    pub providers: Vec<catalog::ModelGroup>,
 }
 
 /// A thread's actions sheet.
@@ -297,24 +280,7 @@ impl Core {
                         label: (*label).into(),
                     })
                     .collect(),
-                providers: catalog::providers(s.providers(), chat)
-                    .into_iter()
-                    .map(|p| ProviderModels {
-                        mark: catalog::mark(&p.driver).map(str::to_owned),
-                        models: p
-                            .models
-                            .iter()
-                            .map(|(slug, label)| ModelChoice {
-                                checked: current.instance_id == p.instance_id
-                                    && current.model == *slug,
-                                slug: slug.clone(),
-                                label: label.clone(),
-                            })
-                            .collect(),
-                        instance_id: p.instance_id,
-                        name: p.name,
-                    })
-                    .collect(),
+                providers: catalog::model_groups(s.providers(), chat, Some(&current)),
             }
         })
     }

@@ -50,6 +50,18 @@ object P {
     val star = Color(0xFFEDE9FE)
 }
 
+// `prefers-reduced-motion`: Android's "Remove animations" (an animator
+// duration scale of 0) stills the endless animations (moon, orb, dots,
+// spinners).
+val LocalReduceMotion = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+fun reduceMotion(context: android.content.Context): Boolean =
+    android.provider.Settings.Global.getFloat(
+        context.contentResolver,
+        android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+    ) == 0f
+
 // `--ease`, `--enter` and `--exit`.
 val Ease = CubicBezierEasing(.2f, .8f, .2f, 1f)
 val Enter = CubicBezierEasing(.32f, .72f, 0f, 1f)
@@ -74,6 +86,30 @@ fun style(
     line: Float = 1.5f,
     track: Float = 0f,
     mono: Boolean = false,
+): TextStyle = styles.getOrPut(StyleKey(size, weight, color, line, track, mono)) {
+    makeStyle(size, weight, color, line, track, mono)
+}
+
+// The styles made so far: a screen asks for the same few again and again
+// (built on the main thread only).
+private data class StyleKey(
+    val size: Float,
+    val weight: FontWeight,
+    val color: Color,
+    val line: Float,
+    val track: Float,
+    val mono: Boolean,
+)
+
+private val styles = HashMap<StyleKey, TextStyle>()
+
+private fun makeStyle(
+    size: Float,
+    weight: FontWeight,
+    color: Color,
+    line: Float,
+    track: Float,
+    mono: Boolean,
 ) = TextStyle(
     fontFamily = if (mono) GeistMono else Geist,
     fontSize = size.sp,

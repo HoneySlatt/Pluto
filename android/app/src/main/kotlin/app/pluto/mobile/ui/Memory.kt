@@ -53,7 +53,7 @@ fun MemoryPage() {
     val model = LocalModel.current
     val core = model.core
     // The page reads the files again each time it opens.
-    remember { core.personalizationLoad() }
+    LaunchedEffect(Unit) { core.personalizationLoad() }
     LaunchedEffect(model.revision) { core.personalizationFollow() }
     val view = remember(model.revision) { core.personalization() }
     PageFrame("Personalization") {

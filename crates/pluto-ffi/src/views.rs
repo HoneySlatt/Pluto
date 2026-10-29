@@ -100,6 +100,8 @@ pub struct ThreadRow {
     /// `working`, `approval` or `input`.
     pub status: Option<String>,
     pub when: String,
+    /// A run finished since the thread was last read (`.trow.unread`).
+    pub unread: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -342,6 +344,23 @@ fn thread_row(
         } else {
             relative_time(last_activity(t), now)
         },
+        unread: unread(t),
+    }
+}
+
+/// `hasUnseenCompletion` with the server's visit watermark: a run that
+/// finished after the last visit; never-visited threads count as read.
+fn unread(thread: &pluto_core::model::Thread) -> bool {
+    let completed = thread
+        .latest_run
+        .as_ref()
+        .and_then(|r| r.completed_at.as_deref())
+        .and_then(timeline::parse_time);
+    match (completed, &thread.last_visited_at) {
+        (Some(completed), Some(Some(visited))) => {
+            timeline::parse_time(visited).is_none_or(|visited| completed > visited)
+        }
+        _ => false,
     }
 }
 
@@ -1106,6 +1125,32 @@ impl Core {
         });
     }
 
+    /// Reading a thread clears its unread state: the server takes the
+    /// thread's time as the visit (`thread.visit`), once per time and not
+    /// while a turn streams.
+    pub fn visit(&self, thread: String) {
+        let visit = self.read(|app| {
+            let s = &app.session;
+            let t = s.thread(&thread)?;
+            let tracked = t.last_visited_at.is_some();
+            let seen =
+                t.last_visited_at.clone().flatten().as_deref() == Some(t.updated_at.as_str());
+            (tracked && !seen && !t.is_running() && s.net.online()).then(|| t.updated_at.clone())
+        });
+        if let Some(at) = visit {
+            self.update(|app, _| {
+                if app.session.visited.as_ref() == Some(&(thread.clone(), at.clone())) {
+                    return;
+                }
+                app.session.visited = Some((thread.clone(), at.clone()));
+                let mut command = pluto_core::model::command("thread.visit", &thread);
+                command["visitedAt"] = json!(at);
+                app.session
+                    .send(pluto_core::protocol::Action::Dispatch(command));
+            });
+        }
+    }
+
     pub fn load_earlier(&self, thread: String) {
         self.update(|app, _| app.session.load_earlier(&thread));
     }
@@ -1387,7 +1432,9 @@ pub struct JsonReply {
     pub error: Option<String>,
 }
 
-/// A method name the protocol keeps for the connection's life.
+/// A method name the protocol keeps for the connection's life (it wants a
+/// `&'static str`): leaked once per distinct name Kotlin asks for, a fixed
+/// handful in practice.
 pub fn intern(name: &str) -> &'static str {
     static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
     let mut names = NAMES.lock().unwrap_or_else(|p| p.into_inner());

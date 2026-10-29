@@ -198,12 +198,12 @@ fun Btn(
 // `.spin`: a loader turning once a second.
 @Composable
 fun Spinner(tint: Color, size: Dp = 22.dp, name: String = "loader-circle") {
-    val turn by rememberInfiniteTransition(label = "spin").animateFloat(
+    val turn = if (LocalReduceMotion.current) 0f else rememberInfiniteTransition(label = "spin").animateFloat(
         0f,
         360f,
         infiniteRepeatable(tween(1000, easing = androidx.compose.animation.core.LinearEasing)),
         label = "spin",
-    )
+    ).value
     Icon(name, tint, Modifier.graphicsLayer { rotationZ = turn }, size = size)
 }
 
@@ -287,7 +287,7 @@ fun Planet(modifier: Modifier = Modifier, moon: Boolean = true, glow: Boolean = 
             androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(.6f) },
         )
     } else null
-    val step = if (moon) {
+    val step = if (moon && !LocalReduceMotion.current) {
         val t by rememberInfiniteTransition(label = "moon").animateFloat(
             0f,
             1f,

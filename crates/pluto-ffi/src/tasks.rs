@@ -15,7 +15,8 @@ use pluto_core::model::ModelSelection;
 use serde_json::{Value, json};
 
 use crate::badge::{Badge, badge};
-use crate::projects::{DefaultModelGroup, model_groups};
+use crate::catalog::ModelGroup;
+use crate::projects::model_groups;
 use crate::{App, Core, catalog};
 
 /// `WEEKDAY_LABELS`: 0 is Sunday.
@@ -617,7 +618,7 @@ impl Core {
     }
 
     /// The task field sheet's models, the draft's checked.
-    pub fn task_models(&self) -> Vec<DefaultModelGroup> {
+    pub fn task_models(&self) -> Vec<ModelGroup> {
         self.read(|app| {
             let current = with_draft(|d| d.as_ref().and_then(|d| d.model.clone()));
             model_groups(&app.session, current.as_ref())

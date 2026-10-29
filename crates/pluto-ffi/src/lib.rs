@@ -163,10 +163,10 @@ pub fn elapsed(seconds: i64) -> String {
     times::elapsed(seconds)
 }
 
-/// Markdown as blocks.
+/// "192.168.1.20:3774" from "http://192.168.1.20:3774/".
 #[uniffi::export]
-pub fn markdown_blocks(text: String) -> Vec<Block> {
-    markdown::blocks(&text)
+pub fn server_host(server: String) -> String {
+    session::url_host(&server)
 }
 
 /// Whether `address` is one the app connects to (plain http only for

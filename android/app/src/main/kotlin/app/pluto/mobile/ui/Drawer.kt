@@ -381,7 +381,8 @@ private fun TRow(row: ThreadRow, view: DrawerView) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            T(row.title, 17f, line = 1.35f, lines = 2)
+            // `.trow.unread`: a run finished since it was last read.
+            T(row.title, 17f, weight = if (row.unread) FontWeight.SemiBold else FontWeight.Normal, line = 1.35f, lines = 2)
             Row(
                 Modifier.padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,

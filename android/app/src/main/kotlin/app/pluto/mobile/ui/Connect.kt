@@ -68,8 +68,8 @@ import app.pluto.mobile.safeBars
 private const val TOKEN_COMMAND =
     "pluto-server auth session issue --base-dir ~/.pluto --label phone --token-only"
 
-// "192.168.1.20:3774" from "http://192.168.1.20:3774/".
-fun urlHost(server: String) = server.substringAfter("://").trimEnd('/')
+// "192.168.1.20:3774" from "http://192.168.1.20:3774/" (the core's).
+fun urlHost(server: String) = app.pluto.core.serverHost(server)
 
 // A field in its pill (`.inbox`): its border lights when focused, reddens
 // when wrong.

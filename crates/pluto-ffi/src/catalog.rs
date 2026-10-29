@@ -93,6 +93,67 @@ fn model_entry<'a>(all: &'a [Value], selection: &ModelSelection) -> Option<&'a V
         .find(|m| m["slug"] == selection.model.as_str())
 }
 
+/// A model in a list (the model sheet, Settings' and a project's defaults,
+/// the task editor), `checked` when it is the current one.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct ModelOption {
+    pub instance_id: String,
+    pub slug: String,
+    pub label: String,
+    pub checked: bool,
+}
+
+/// A provider instance and its models, with its mark (`mark_png`).
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct ModelGroup {
+    pub instance_id: String,
+    pub name: String,
+    pub mark: Option<String>,
+    pub models: Vec<ModelOption>,
+}
+
+/// The models a chat (or a code thread) can pick, by provider, `current`
+/// checked.
+pub fn model_groups(
+    all: &[Value],
+    chat: bool,
+    current: Option<&ModelSelection>,
+) -> Vec<ModelGroup> {
+    providers(all, chat)
+        .into_iter()
+        .map(|provider| ModelGroup {
+            mark: mark(&provider.driver).map(str::to_owned),
+            models: provider
+                .models
+                .iter()
+                .map(|(slug, label)| ModelOption {
+                    instance_id: provider.instance_id.clone(),
+                    checked: current
+                        .is_some_and(|c| c.instance_id == provider.instance_id && &c.model == slug),
+                    slug: slug.clone(),
+                    label: label.clone(),
+                })
+                .collect(),
+            instance_id: provider.instance_id,
+            name: provider.name,
+        })
+        .collect()
+}
+
+/// `NEW_THREAD_WORKSPACES`: value, label, detail.
+pub const WORKSPACES: [(&str, &str, &str); 2] = [
+    (
+        "local",
+        "Local checkout",
+        "Work in the project’s own folder",
+    ),
+    (
+        "worktree",
+        "New worktree",
+        "A fresh branch in its own folder",
+    ),
+];
+
 /// The model's label and its instance's mark.
 pub fn label(all: &[Value], selection: &ModelSelection) -> (String, String) {
     let label = model_entry(all, selection)

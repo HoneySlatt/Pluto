@@ -32,6 +32,9 @@ sealed interface Page {
     data object Licenses : Page
 }
 
+// A page on its way out.
+data class Leaving(val index: Int, val page: Page, val serial: Long)
+
 sealed interface Sheet {
     data object Model : Sheet
     data class ThreadMenu(val id: String) : Sheet
@@ -76,8 +79,9 @@ class Nav(private val model: Model) {
     var sheet by mutableStateOf<Sheet?>(null)
         private set
     // The page and the sheet on their way out.
-    var leavingPage by mutableStateOf<Page?>(null)
-        private set
+    // Pages sliding out, each at the index it had (its composition's key):
+    // two closed quickly both play their exit.
+    val leavingPages = mutableStateListOf<Leaving>()
     var leavingSheet by mutableStateOf<Sheet?>(null)
         private set
     private var exits = 0L
@@ -111,7 +115,7 @@ class Nav(private val model: Model) {
             is Layer.View -> core.select(layer.prev)
             is Layer.Page -> {
                 val serial = ++exits
-                leavingPage = pages.removeLastOrNull()
+                pages.removeLastOrNull()?.let { leavingPages.add(Leaving(pages.size, it, serial)) }
                 // A thread page keeps its thread while it slides out.
                 restore = if (layer.restores) serial to layer.prev else null
                 finishExit(serial)
@@ -130,10 +134,8 @@ class Nav(private val model: Model) {
     private fun finishExit(serial: Long) {
         scope.launch {
             delay(EXIT_MS)
-            if (exits == serial) {
-                leavingPage = null
-                leavingSheet = null
-            }
+            leavingPages.removeAll { it.serial == serial }
+            if (exits == serial) leavingSheet = null
             restore?.takeIf { it.first == serial }?.let {
                 restore = null
                 core.select(it.second)
@@ -166,7 +168,7 @@ class Nav(private val model: Model) {
 
     // A page still leaving gives its place, and its selection, at once.
     private fun settle() {
-        leavingPage = null
+        leavingPages.clear()
         restore?.let {
             restore = null
             core.select(it.second)
@@ -225,7 +227,7 @@ class Nav(private val model: Model) {
         drawer = false
         pages.clear()
         sheet = null
-        leavingPage = null
+        leavingPages.clear()
         leavingSheet = null
         restore = null
     }

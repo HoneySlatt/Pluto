@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -45,7 +46,9 @@ import app.pluto.core.CodeToken
 import app.pluto.core.BlockKind
 import app.pluto.core.Span
 
-fun spans(spans: List<Span>, codeSize: Float = 14f): AnnotatedString = buildAnnotatedString {
+// `boxed`: the inline code's box is drawn around it (`Paragraph`), else
+// its fill marks it.
+fun spans(spans: List<Span>, codeSize: Float = 14f, boxed: Boolean = false): AnnotatedString = buildAnnotatedString {
     for (span in spans) {
         val style = SpanStyle(
             fontWeight = if (span.bold) FontWeight.SemiBold else null,
@@ -53,7 +56,7 @@ fun spans(spans: List<Span>, codeSize: Float = 14f): AnnotatedString = buildAnno
             textDecoration = if (span.strike) TextDecoration.LineThrough else null,
             fontFamily = if (span.code) GeistMono else null,
             fontSize = if (span.code) codeSize.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
-            background = if (span.code) P.chip else androidx.compose.ui.graphics.Color.Unspecified,
+            background = if (span.code && !boxed) P.chip else androidx.compose.ui.graphics.Color.Unspecified,
         )
         val link = span.link
         if (link != null) {
@@ -131,8 +134,45 @@ private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
 
 @Composable
 private fun Paragraph(content: List<Span>, style: androidx.compose.ui.text.TextStyle) {
-    val text = remember(content) { spans(content) }
-    BasicText(text, style = style)
+    val text = remember(content) { spans(content, boxed = true) }
+    // `.a code`: each inline code sits in a rounded box, its fill and a
+    // 1px border, drawn behind its text line by line.
+    val codes = remember(content) {
+        var at = 0
+        content.mapNotNull { span ->
+            val range = at until at + span.text.length
+            at += span.text.length
+            range.takeIf { span.code && !it.isEmpty() }
+        }
+    }
+    var layout by remember { androidx.compose.runtime.mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    BasicText(
+        text,
+        Modifier.drawBehind {
+            val laid = layout ?: return@drawBehind
+            val pad = 3.dp.toPx()
+            val height = 14.sp.toPx() * 1.45f
+            val radius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx())
+            for (range in codes) {
+                val end = minOf(range.last + 1, laid.layoutInput.text.length)
+                if (range.first >= end) continue
+                for (line in laid.getLineForOffset(range.first)..laid.getLineForOffset(end - 1)) {
+                    val from = maxOf(range.first, laid.getLineStart(line))
+                    val to = minOf(end, laid.getLineEnd(line, visibleEnd = true))
+                    if (from >= to) continue
+                    val left = laid.getHorizontalPosition(from, true) - pad
+                    val right = laid.getHorizontalPosition(to, true) + pad
+                    val middle = (laid.getLineTop(line) + laid.getLineBottom(line)) / 2f
+                    val topLeft = androidx.compose.ui.geometry.Offset(left, middle - height / 2f)
+                    val size = androidx.compose.ui.geometry.Size(right - left, height)
+                    drawRoundRect(P.chip, topLeft, size, radius)
+                    drawRoundRect(P.border, topLeft, size, radius, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                }
+            }
+        },
+        style = style,
+        onTextLayout = { layout = it },
+    )
 }
 
 // The spec's code colors: `.k`, `.s`, `.f` and `.c`.

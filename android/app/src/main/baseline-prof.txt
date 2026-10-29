@@ -1,0 +1,7 @@
+# The app's startup profile: its own code compiled ahead of time at install
+# (the Compose and AndroidX libraries ship theirs). Broad rules: every class
+# and method of the app and of the core's bindings.
+HSPLapp/pluto/mobile/**->**(**)**
+Lapp/pluto/mobile/**;
+HSPLapp/pluto/core/**->**(**)**
+Lapp/pluto/core/**;

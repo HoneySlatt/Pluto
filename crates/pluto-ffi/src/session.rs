@@ -132,6 +132,8 @@ pub struct Session {
     serial: u64,
     /// The open thread to follow again once the shell lists it.
     resubscribe: Option<String>,
+    /// The last visit sent (`thread.visit`), by thread and time.
+    pub visited: Option<(String, String)>,
     /// Why the last connection failed, for the unreachable screen.
     pub last_error: Option<String>,
     /// Why the open thread could not be followed, by thread id.
@@ -148,6 +150,15 @@ pub struct Session {
 
 impl Session {
     pub fn new(prefs: Prefs) -> Self {
+        // The temporary chats this phone left before it closed, still to
+        // delete.
+        let temporary = prefs
+            .get("temporaryChats")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect();
         Self {
             state: State::default(),
             net: Net::Disconnected { error: None },
@@ -175,10 +186,11 @@ impl Session {
             serial: 0,
             resubscribe: None,
             last_error: None,
+            visited: None,
             thread_error: None,
             assets: HashMap::new(),
             generated: HashMap::new(),
-            temporary: HashSet::new(),
+            temporary,
             deleted: HashSet::new(),
         }
     }
@@ -297,6 +309,18 @@ impl Session {
                 false
             })
             .cloned()
+    }
+
+    /// Keeps the temporary chats still to delete in the phone's settings,
+    /// so a chat left when the app was killed goes on the next connection.
+    fn keep_temporary(&mut self) {
+        let mut ids: Vec<&String> = self.temporary.iter().collect();
+        ids.sort();
+        let ids: Vec<&String> = ids.into_iter().rev().take(50).collect();
+        let value = json!(ids);
+        if *self.prefs.get("temporaryChats") != value {
+            self.prefs.set("temporaryChats", value);
+        }
     }
 
     fn is_temporary(&self, id: &str) -> bool {
@@ -543,6 +567,7 @@ impl Session {
                     && self.is_temporary(&id)
                 {
                     self.temporary.insert(id);
+                    self.keep_temporary();
                 }
                 self.sweep_temporary();
             }
@@ -857,6 +882,7 @@ impl Session {
             && self.is_temporary(id)
         {
             self.temporary.insert(id.clone());
+            self.keep_temporary();
         }
         // Offline, the thread is followed once the server is back.
         let online = self.net.online();
@@ -876,6 +902,7 @@ impl Session {
     /// Marks a temporary chat started here, deleted once the phone leaves it.
     pub fn opened_temporary(&mut self, id: &str) {
         self.temporary.insert(id.to_owned());
+        self.keep_temporary();
     }
 
     /// Deletes the temporary chats opened here that the phone left
@@ -898,6 +925,7 @@ impl Session {
             ))) {
                 self.deleted.insert(id.clone());
                 self.temporary.remove(&id);
+                self.keep_temporary();
             }
         }
     }

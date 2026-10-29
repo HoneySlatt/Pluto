@@ -93,13 +93,18 @@ fun ThreadView(id: String, page: Boolean) {
     val nav = model.nav
     val view = remember(model.revision, id) { core.thread(id) }
     // Codex's images land on the server's disk without an event: they are
-    // asked for while the thread is on screen, often while it works.
+    // asked for when the thread opens and when a run ends, and every few
+    // seconds while one works.
     LaunchedEffect(id, view.running, view.loaded) {
-        while (view.loaded) {
+        if (!view.loaded) return@LaunchedEffect
+        core.watchGenerated(id)
+        while (view.running) {
+            delay(3_000)
             core.watchGenerated(id)
-            delay(if (view.running) 3_000 else 20_000)
         }
     }
+    // Reading the thread clears its unread state (once per change).
+    LaunchedEffect(model.revision, id) { core.visit(id) }
     Box(Modifier.fillMaxSize().background(P.canvas)) {
         Glow(dim = true)
         Column(Modifier.fillMaxSize().safeBars().imePadding()) {
@@ -363,8 +368,11 @@ private fun WorkLine(work: Work) {
 // "Working for 6m 40s" or "Thinking…", with the pulsing orb.
 @Composable
 private fun WorkingRow(text: Pair<String, String?>) {
-    val pulse = rememberInfiniteTransition(label = "orb")
-    val phase by pulse.animateFloat(0f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "orb")
+    val still = LocalReduceMotion.current
+    val phase = if (still) 0f else {
+        val pulse = rememberInfiniteTransition(label = "orb")
+        pulse.animateFloat(0f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "orb").value
+    }
     Row(
         Modifier.padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -386,12 +394,12 @@ private fun WorkingRow(text: Pair<String, String?>) {
             T(label + time, 15f, P.muted2)
         } else {
             // `.dots`: the ellipsis types itself out.
-            val dots by rememberInfiniteTransition(label = "dots").animateFloat(
+            val dots = if (still) 3f else rememberInfiniteTransition(label = "dots").animateFloat(
                 0f,
                 4f,
                 infiniteRepeatable(tween(1400, easing = androidx.compose.animation.core.LinearEasing)),
                 label = "dots",
-            )
+            ).value
             val shown = dots.toInt().coerceIn(0, 3)
             val line = androidx.compose.ui.text.buildAnnotatedString {
                 append(label)

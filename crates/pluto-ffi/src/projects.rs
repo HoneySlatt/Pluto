@@ -9,19 +9,7 @@ use crate::badge::{Badge, badge};
 use crate::session::{Session, last_activity};
 use crate::{App, Core, catalog};
 
-/// `NEW_THREAD_WORKSPACES`: value, label, detail.
-pub const WORKSPACES: [(&str, &str, &str); 2] = [
-    (
-        "local",
-        "Local checkout",
-        "Work in the project’s own folder",
-    ),
-    (
-        "worktree",
-        "New worktree",
-        "A fresh branch in its own folder",
-    ),
-];
+use crate::catalog::WORKSPACES;
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct ProjectRow {
@@ -62,22 +50,6 @@ pub struct DefaultOption {
     pub checked: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct DefaultModelChoice {
-    pub instance_id: String,
-    pub model: String,
-    pub label: String,
-    pub checked: bool,
-}
-
-/// A provider's models in a default's model list.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct DefaultModelGroup {
-    pub name: String,
-    pub mark: Option<String>,
-    pub models: Vec<DefaultModelChoice>,
-}
-
 /// A project's New threads default sheet: Default first, then the
 /// options, or the models by provider.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -85,7 +57,7 @@ pub struct ProjectSettingView {
     /// No override: Default is checked.
     pub default: bool,
     pub options: Vec<DefaultOption>,
-    pub groups: Vec<DefaultModelGroup>,
+    pub groups: Vec<catalog::ModelGroup>,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -117,25 +89,8 @@ fn label_of(value: &str) -> &'static str {
 pub fn model_groups(
     session: &Session,
     current: Option<&pluto_core::model::ModelSelection>,
-) -> Vec<DefaultModelGroup> {
-    catalog::providers(session.providers(), false)
-        .into_iter()
-        .map(|provider| DefaultModelGroup {
-            mark: catalog::mark(&provider.driver).map(str::to_owned),
-            models: provider
-                .models
-                .iter()
-                .map(|(slug, label)| DefaultModelChoice {
-                    instance_id: provider.instance_id.clone(),
-                    model: slug.clone(),
-                    label: label.clone(),
-                    checked: current
-                        .is_some_and(|c| c.instance_id == provider.instance_id && &c.model == slug),
-                })
-                .collect(),
-            name: provider.name,
-        })
-        .collect()
+) -> Vec<catalog::ModelGroup> {
+    catalog::model_groups(session.providers(), false, current)
 }
 
 /// Writes the project's override `key` (or removes it for Default), at

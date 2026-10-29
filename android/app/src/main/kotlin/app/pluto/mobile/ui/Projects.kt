@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.pluto.core.Badge
-import app.pluto.core.DefaultModelGroup
+import app.pluto.core.ModelGroup
 import app.pluto.mobile.LocalModel
 import app.pluto.mobile.Page
 import app.pluto.mobile.Sheet
@@ -156,7 +156,7 @@ fun projectSettingTitle(field: String): String = when (field) {
 
 // A provider's models as checked rows (`ModelList`), or why there are none.
 @Composable
-fun DefaultModels(groups: List<DefaultModelGroup>, onPick: (instance: String, model: String) -> Unit) {
+fun DefaultModels(groups: List<ModelGroup>, onPick: (instance: String, model: String) -> Unit) {
     if (groups.isEmpty()) {
         SheetNote("No provider is ready on the server.")
         return
@@ -164,7 +164,7 @@ fun DefaultModels(groups: List<DefaultModelGroup>, onPick: (instance: String, mo
     for (group in groups) {
         SheetLabel(group.name)
         for (choice in group.models) {
-            Choice(choice.label, choice.checked, mark = group.mark) { onPick(choice.instanceId, choice.model) }
+            Choice(choice.label, choice.checked, mark = group.mark) { onPick(choice.instanceId, choice.slug) }
         }
     }
 }

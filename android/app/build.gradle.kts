@@ -98,8 +98,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.core:core-splashscreen:1.2.0")
+    // Installs the app's startup profile (src/main/baseline-prof.txt).
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }
 
 apply(from = "notice.gradle.kts")

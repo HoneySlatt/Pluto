@@ -106,6 +106,7 @@ fun PlutoApp(model: Model) {
         LocalModel provides model,
         androidx.compose.foundation.text.selection.LocalTextSelectionColors provides selection,
         LocalGate provides gate,
+        app.pluto.mobile.ui.LocalReduceMotion provides app.pluto.mobile.ui.reduceMotion(androidx.compose.ui.platform.LocalContext.current),
     ) {
         // A remembered server connects at once.
         LaunchedEffect(Unit) {
@@ -176,8 +177,8 @@ private fun Session(net: Net) {
         else if (nav.top == "drawer" && nav.drawer && !dragging) progress.animateTo(1f, tween(200, easing = Enter))
     }
     val pages = nav.pages.toList()
-    val leaving = nav.leavingPage
-    val threadPage = (pages + listOfNotNull(leaving)).any { it is Page.Thread }
+    val leaving = nav.leavingPages.toList()
+    val threadPage = (pages + leaving.map { it.page }).any { it is Page.Thread }
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = with(density) { maxWidth.toPx() }
@@ -244,8 +245,8 @@ private fun Session(net: Net) {
             for ((index, page) in pages.withIndex()) {
                 androidx.compose.runtime.key(index, page) { PageLayer(page, leaving = false, top = index == pages.lastIndex) }
             }
-            if (leaving != null) {
-                androidx.compose.runtime.key(pages.size, leaving) { PageLayer(leaving, leaving = true, top = false) }
+            for (out in leaving) {
+                androidx.compose.runtime.key(out.index, out.page) { PageLayer(out.page, leaving = true, top = false) }
             }
             NetBar(net, shell.host, shell.attempts.toInt())
             Box(

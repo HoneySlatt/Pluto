@@ -76,11 +76,10 @@ private fun Num(text: String, size: Float, color: Color = P.text, weight: FontWe
 fun UsagePage() {
     val model = LocalModel.current
     val core = model.core
-    // The page's windows start from its opening.
-    val periods = remember {
-        core.usageOpen()
-        core.usagePeriods()
-    }
+    // The page's windows start from its opening (an effect, run once
+    // before the ones that follow them).
+    LaunchedEffect(Unit) { core.usageOpen() }
+    val periods = remember { core.usagePeriods() }
     val zone = remember { java.util.TimeZone.getDefault().id }
     var metric by rememberSaveable { mutableIntStateOf(LIMITS) }
     var period by rememberSaveable { mutableIntStateOf(2) }

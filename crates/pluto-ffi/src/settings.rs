@@ -39,18 +39,6 @@ const STREAMING: [(&str, &str, &str); 3] = [
         "Every token repaints the answer as it arrives. Slower and harder to read.",
     ),
 ];
-const WORKSPACES: [(&str, &str, &str); 2] = [
-    (
-        "local",
-        "Local checkout",
-        "Work in the project’s own folder",
-    ),
-    (
-        "worktree",
-        "New worktree",
-        "A fresh branch in its own folder",
-    ),
-];
 const DIFF_STATES: [(&str, &str, &str); 2] =
     [("expanded", "Expanded", ""), ("collapsed", "Collapsed", "")];
 
@@ -96,28 +84,12 @@ pub struct SettingChoice {
     pub checked: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct SettingModel {
-    pub slug: String,
-    pub label: String,
-    pub checked: bool,
-}
-
-/// A provider's models in a model choice.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct SettingProvider {
-    pub instance_id: String,
-    pub name: String,
-    pub mark: Option<String>,
-    pub models: Vec<SettingModel>,
-}
-
 /// What a choice sheet offers: options, or models by provider; `note`
 /// when there is nothing to pick.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct SettingSheetView {
     pub choices: Vec<SettingChoice>,
-    pub providers: Vec<SettingProvider>,
+    pub providers: Vec<catalog::ModelGroup>,
     pub note: Option<String>,
 }
 
@@ -189,7 +161,7 @@ fn settings_view(session: &Session) -> SettingsView {
             .1
             .into(),
         workspace: label_of(
-            &WORKSPACES,
+            &catalog::WORKSPACES,
             setting(session, "defaultThreadEnvMode", "local"),
         )
         .into(),
@@ -226,24 +198,8 @@ fn options(list: &[(&str, &str, &str)], current: &str) -> Vec<SettingChoice> {
         .collect()
 }
 
-fn models(session: &Session, chat: bool, current: &ModelSelection) -> Vec<SettingProvider> {
-    catalog::providers(session.providers(), chat)
-        .into_iter()
-        .map(|provider| SettingProvider {
-            mark: catalog::mark(&provider.driver).map(str::to_owned),
-            models: provider
-                .models
-                .iter()
-                .map(|(slug, label)| SettingModel {
-                    checked: current.instance_id == provider.instance_id && current.model == *slug,
-                    slug: slug.clone(),
-                    label: label.clone(),
-                })
-                .collect(),
-            instance_id: provider.instance_id,
-            name: provider.name,
-        })
-        .collect()
+fn models(session: &Session, chat: bool, current: &ModelSelection) -> Vec<catalog::ModelGroup> {
+    catalog::model_groups(session.providers(), chat, Some(current))
 }
 
 fn sheet_view(session: &Session, key: &str) -> SettingSheetView {
@@ -281,7 +237,7 @@ fn sheet_view(session: &Session, key: &str) -> SettingSheetView {
         }
         "workspace" => {
             view.choices = options(
-                &WORKSPACES,
+                &catalog::WORKSPACES,
                 setting(session, "defaultThreadEnvMode", "local"),
             )
         }
