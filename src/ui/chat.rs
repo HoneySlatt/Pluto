@@ -120,13 +120,25 @@ impl App {
                 0.0,
                 theme::background(),
             );
-            self.composer(
-                ui,
-                Pos2::new(column_left, composer_top),
-                column,
-                false,
-                &mode,
-            );
+            // The provider owns a native subagent's conversation: a bar
+            // takes the composer's place (`ProviderSubagentBar`).
+            match self
+                .current_thread()
+                .filter(|t| t.is_provider_native_subagent())
+            {
+                Some(subagent) => {
+                    // At the composer's foot: 20 + 32 below it, like the card.
+                    let top = body.bottom() - 20.0 - 32.0 - 48.0;
+                    self.provider_subagent_bar(ui, Pos2::new(column_left, top), column, &subagent)
+                }
+                None => self.composer(
+                    ui,
+                    Pos2::new(column_left, composer_top),
+                    column,
+                    false,
+                    &mode,
+                ),
+            }
             self.thread_find_bar(ui, body);
             self.thread_error_banner(ui, body);
         } else if let Some(project) = draft_project.clone().filter(|p| self.is_chat_project(p)) {
@@ -887,7 +899,13 @@ impl App {
             .zip(&keys)
             .map(|(row, key)| view.height(*key, row, column))
             .collect();
-        let history_height = history_control_height(&detail.history);
+        // A subagent's thread opens on "Subagent of" its parent.
+        let subagent_header = if thread.is_subagent() {
+            8.0 + 42.0
+        } else {
+            0.0
+        };
+        let history_height = history_control_height(&detail.history) + subagent_header;
         let status_line = self.thread_status_line(&thread);
         let footer = if status_line.is_some() { 24.0 } else { 0.0 };
         let content_height =
@@ -976,8 +994,14 @@ impl App {
                     Vec2::new(column, f32::INFINITY),
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                    if history_height > 0.0 && self.history_control(ui, &detail.history, column) {
+                    if history_control_height(&detail.history) > 0.0
+                        && self.history_control(ui, &detail.history, column)
+                    {
                         load_earlier = true;
+                    }
+                    if subagent_header > 0.0 {
+                        ui.add_space(8.0);
+                        self.subagent_header(ui, &thread, column);
                     }
                     for ((row, key), guess) in rows.iter().zip(&keys).zip(guesses.iter().copied()) {
                         let top = ui.cursor().top() - origin;

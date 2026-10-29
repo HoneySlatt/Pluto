@@ -800,3 +800,177 @@ mod tests {
         );
     }
 }
+
+impl App {
+    /// "Subagent of · <parent>", opening the parent (`MessagesTimeline`'s
+    /// list header for a subagent thread).
+    pub(crate) fn subagent_header(
+        &mut self,
+        ui: &mut Ui,
+        thread: &crate::model::Thread,
+        width: f32,
+    ) {
+        let parent = thread.lineage.parent_thread_id.clone();
+        let title = parent
+            .as_deref()
+            .and_then(|id| self.state.threads.iter().find(|t| t.id == id))
+            .map_or_else(|| "Parent thread".to_owned(), |t| t.title.clone());
+        let muted = theme::muted_foreground();
+        let pieces = [
+            Piece::Icon("bot", muted),
+            Piece::Gap(6.0),
+            Piece::Text(
+                "Subagent of".into(),
+                font(11.0, Weight::Medium),
+                muted,
+                f32::INFINITY,
+            ),
+            Piece::Gap(4.0),
+            Piece::Text(
+                format!("· {title}"),
+                font(11.0, Weight::Regular),
+                theme::alpha(muted, 0.7),
+                320.0,
+            ),
+        ];
+        let response = divider(
+            ui,
+            width,
+            &pieces,
+            parent.as_ref().map(|_| "Open parent thread"),
+        );
+        if response.clicked() && parent.is_some() {
+            self.select_thread(parent);
+        }
+    }
+
+    /// `ProviderSubagentBar`: the model, its effort and what the subagent
+    /// does, "Runs on its own", and Open parent, where the composer was.
+    pub(crate) fn provider_subagent_bar(
+        &mut self,
+        ui: &mut Ui,
+        top_left: Pos2,
+        width: f32,
+        thread: &crate::model::Thread,
+    ) {
+        let bar = Rect::from_min_size(top_left, Vec2::new(width, 48.0));
+        ui.painter().rect(
+            bar,
+            CornerRadius::same(22),
+            theme::card(),
+            Stroke::new(1.0, theme::border()),
+            StrokeKind::Inside,
+        );
+        let center = bar.center().y;
+        let mut x = bar.left() + 20.0;
+        let provider = self
+            .providers()
+            .iter()
+            .find(|p| p["instanceId"] == thread.model_selection.instance_id.as_str())
+            .cloned();
+        if let Some((icon, color)) = provider.as_ref().and_then(|p| {
+            crate::ui::pickers::provider_icon(p["driver"].as_str().unwrap_or_default())
+        }) {
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_center_size(Pos2::new(x + 8.0, center), Vec2::splat(16.0)),
+                16.0,
+                color,
+            );
+            x += 16.0 + 12.0;
+        }
+        let (model, _) = self.model_label(&thread.model_selection);
+        let text = |ui: &Ui, x: &mut f32, text: &str, weight: Weight, color: Color32| {
+            let width = widgets::text_width(ui, text, font(14.0, weight));
+            widgets::text(
+                ui,
+                Pos2::new(*x, center - 10.0),
+                text,
+                font(14.0, weight),
+                color,
+                20.0,
+            );
+            *x += width + 12.0;
+        };
+        text(ui, &mut x, &model, Weight::Medium, theme::foreground());
+        if let Some(effort) = self.traits_label(&thread.model_selection) {
+            text(
+                ui,
+                &mut x,
+                &effort,
+                Weight::Regular,
+                theme::muted_foreground(),
+            );
+        }
+        let detail = self.state.detail.clone().filter(|d| d.id() == thread.id);
+        let (status, active) = detail
+            .as_deref()
+            .map_or(("Starting".to_owned(), true), |d| {
+                crate::timeline::provider_subagent_status(d, self.now)
+            });
+        if active {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
+        }
+        text(
+            ui,
+            &mut x,
+            &status,
+            Weight::Regular,
+            theme::muted_foreground(),
+        );
+        // Open parent at the right, "Runs on its own" before it.
+        let mut right = bar.right() - 8.0;
+        if let Some(parent) = thread.lineage.parent_thread_id.clone() {
+            let label = "Open parent";
+            let button_width =
+                9.0 + 16.0 + 6.0 + widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 9.0;
+            let button = Rect::from_min_size(
+                Pos2::new(right - button_width, center - 14.0),
+                Vec2::new(button_width, 28.0),
+            );
+            let response = ui
+                .interact(button, ui.id().with("subagent-open-parent"), Sense::click())
+                .on_hover_cursor(CursorIcon::PointingHand);
+            if response.hovered() {
+                ui.painter()
+                    .rect_filled(button, CornerRadius::same(8), theme::accent());
+            }
+            theme::paint_icon(
+                ui,
+                "arrow-up-left",
+                Rect::from_center_size(
+                    Pos2::new(button.left() + 9.0 + 8.0, center),
+                    Vec2::splat(16.0),
+                ),
+                16.0,
+                theme::foreground(),
+            );
+            widgets::text(
+                ui,
+                Pos2::new(button.left() + 9.0 + 16.0 + 6.0, center - 10.0),
+                label,
+                font(14.0, Weight::Medium),
+                theme::foreground(),
+                20.0,
+            );
+            if response.clicked() {
+                self.select_thread(Some(parent));
+            }
+            right = button.left() - 12.0;
+        }
+        let own = "Runs on its own";
+        let own_width = widgets::text_width(ui, own, font(14.0, Weight::Regular));
+        if width >= 640.0 && right - own_width > x {
+            widgets::text(
+                ui,
+                Pos2::new(right - own_width, center - 10.0),
+                own,
+                font(14.0, Weight::Regular),
+                theme::muted_foreground(),
+                20.0,
+            );
+        }
+    }
+}

@@ -1564,6 +1564,61 @@ fn capitalize(text: &str) -> String {
 }
 
 /// Port of `@t3tools/shared/orchestrationTiming.formatDuration`.
+/// `deriveProviderSubagentStatus` and `formatProviderSubagentStatus`: what
+/// a provider-native subagent is doing, from its runless root turn node
+/// ("Working 12s", "Completed in 3m 4s", "Starting" before it exists),
+/// and whether it is still active.
+pub fn provider_subagent_status(
+    detail: &crate::model::Detail,
+    now: chrono::DateTime<chrono::Utc>,
+) -> (String, bool) {
+    let Some(node) = detail
+        .nodes
+        .iter()
+        .rev()
+        .find(|n| n.kind == "root_turn" && n.run_id.is_none())
+    else {
+        return ("Starting".into(), true);
+    };
+    let label = match node.status.as_str() {
+        "idle" => "Idle",
+        "pending" | "running" => "Working",
+        "waiting" => "Waiting",
+        "completed" => "Completed",
+        "interrupted" => "Interrupted",
+        "failed" => "Failed",
+        "cancelled" | "rolled_back" => "Cancelled",
+        other => other,
+    }
+    .to_owned();
+    let active = matches!(node.status.as_str(), "pending" | "running" | "waiting");
+    let elapsed = |end: chrono::DateTime<chrono::Utc>| {
+        node.started_at
+            .as_deref()
+            .and_then(parse_time)
+            .map(|start| format_duration(((end - start).num_seconds().max(1)) * 1000))
+    };
+    let text = if active {
+        match elapsed(now) {
+            Some(duration) => format!("{label} {duration}"),
+            None => label,
+        }
+    } else if node.status == "completed" {
+        match node
+            .completed_at
+            .as_deref()
+            .and_then(parse_time)
+            .and_then(elapsed)
+        {
+            Some(duration) => format!("Completed in {duration}"),
+            None => label,
+        }
+    } else {
+        label
+    };
+    (text, active)
+}
+
 pub fn format_duration(ms: i64) -> String {
     if ms < 0 {
         return "0ms".into();
@@ -2761,5 +2816,39 @@ mod tests {
         assert_eq!(format_duration(3_723_000), "1h 2m 3s");
         assert_eq!(format_tokens(12_400), "12.4K");
         assert_eq!(format_tokens(1_500_000), "1.5M");
+    }
+
+    #[test]
+    fn provider_subagent_status_reads_its_root_turn() {
+        let now = parse_time("2026-10-29T10:01:05.000Z").unwrap();
+        let mut detail = crate::model::Detail::default();
+        assert_eq!(
+            provider_subagent_status(&detail, now),
+            ("Starting".into(), true)
+        );
+        let node = |status: &str, completed: Option<&str>| crate::model::Node {
+            id: "n".into(),
+            root_node_id: "n".into(),
+            kind: "root_turn".into(),
+            status: status.into(),
+            started_at: Some("2026-10-29T10:00:00.000Z".into()),
+            completed_at: completed.map(Into::into),
+            ..Default::default()
+        };
+        detail.nodes = vec![node("running", None)];
+        assert_eq!(
+            provider_subagent_status(&detail, now),
+            ("Working 1m 5s".into(), true)
+        );
+        detail.nodes = vec![node("completed", Some("2026-10-29T10:00:30.000Z"))];
+        assert_eq!(
+            provider_subagent_status(&detail, now),
+            ("Completed in 30s".into(), false)
+        );
+        detail.nodes = vec![node("rolled_back", None)];
+        assert_eq!(
+            provider_subagent_status(&detail, now),
+            ("Cancelled".into(), false)
+        );
     }
 }

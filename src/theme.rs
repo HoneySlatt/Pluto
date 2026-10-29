@@ -982,6 +982,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "arrow-up-left",
         "bookmark",
         "messages-square",
         "file",
