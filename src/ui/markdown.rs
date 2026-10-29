@@ -66,6 +66,31 @@ fn code_inline(code: &str) -> Inline {
 /// A link drawn as a chip: an assistant citation, a context reference
 /// (labelled by the link's text from `events`) or a file reference.
 fn link_chip(href: &str, events: &[Event]) -> Option<Inline> {
+    // A link to another thread (`t3-thread://v1/<id>`): its chip opens it.
+    // Pluto draws it as a thread chip, where upstream draws a link with
+    // the project's favicon.
+    if let Some(id) = href
+        .strip_prefix("t3-thread://v1/")
+        .filter(|id| !id.is_empty())
+    {
+        let mut label = String::new();
+        for event in events {
+            match event {
+                Event::End(TagEnd::Link) => break,
+                Event::Text(t) | Event::Code(t) => label.push_str(t),
+                _ => {}
+            }
+        }
+        let id = id.to_owned();
+        if label.trim().is_empty() {
+            label = id.clone();
+        }
+        return Some(Inline::Context {
+            kind: "thread".into(),
+            label: crate::ui::composer_context::sanitize_label(&label, "thread"),
+            id,
+        });
+    }
     if let Some(rest) = href.strip_prefix("t3-context://v1/")
         && let Some((kind, id)) = rest.split_once('/')
     {

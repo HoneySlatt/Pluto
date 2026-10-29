@@ -1913,6 +1913,7 @@ impl App {
             markdown.can_run_shell = !message.streaming && project.is_some();
             markdown.show(ui, text, width - 8.0);
             let run_command = markdown.run_command.take();
+            let opened_thread = markdown.opened_context.take();
             let marks = markdown.find.take();
             plugin.lock().source = None;
             let opened_file = markdown.opened_file.take();
@@ -1930,6 +1931,12 @@ impl App {
             }
             if let Some(citation) = opened_citation {
                 self.open_citation_source(&citation);
+            }
+            // A thread link's chip opens that thread.
+            if let Some(id) =
+                opened_thread.filter(|id| self.state.threads.iter().any(|t| &t.id == id))
+            {
+                self.select_thread(Some(id));
             }
             // `runShellCommand`: the code block's command in the terminal.
             if let (Some(command), Some(project)) = (run_command, project) {
