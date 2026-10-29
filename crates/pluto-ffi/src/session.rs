@@ -127,6 +127,8 @@ pub struct Session {
     serial: u64,
     /// The open thread to follow again once the shell lists it.
     resubscribe: Option<String>,
+    /// Why the last connection failed, for the unreachable screen.
+    pub last_error: Option<String>,
     /// Why the open thread could not be followed, by thread id.
     pub thread_error: Option<(String, String)>,
     pub assets: HashMap<String, Asset>,
@@ -165,6 +167,7 @@ impl Session {
             toast: None,
             serial: 0,
             resubscribe: None,
+            last_error: None,
             thread_error: None,
             assets: HashMap::new(),
             generated: HashMap::new(),
@@ -398,6 +401,7 @@ impl Session {
 
     /// The connection ended or never started.
     fn failed(&mut self, hub: &Arc<Hub>, error: String, remembered: bool) {
+        self.last_error = Some(error.clone());
         if !self.sends.is_empty() {
             self.give_back_sends();
             self.show_toast(
@@ -474,6 +478,7 @@ impl Session {
     fn apply(&mut self, hub: &Arc<Hub>, event: Event) {
         match event {
             Event::Data(Route::Config, value) => {
+                self.last_error = None;
                 self.state.config_event(&value);
                 if !self.net.online() {
                     let back = self.established;

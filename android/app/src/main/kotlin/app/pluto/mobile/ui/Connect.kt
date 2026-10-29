@@ -59,7 +59,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.pluto.core.Net
 import app.pluto.core.checkAddress
+import app.pluto.mobile.LocalGate
 import app.pluto.mobile.LocalModel
+import app.pluto.mobile.LocalNetwork
 import app.pluto.mobile.safeBars
 
 private const val TOKEN_COMMAND =
@@ -141,6 +143,7 @@ fun Connect() {
     var localError by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var help by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+    val gate = LocalGate.current
     val busy = shell.net is Net.Connecting
     // The connection's own failure goes under the address.
     val error = localError ?: (shell.net as? Net.Disconnected)?.error?.let { it to true }
@@ -167,7 +170,7 @@ fun Connect() {
             model.secret.forget()
         }
         token = ""
-        core.connect(address, secret, false)
+        gate.connect(address) { core.connect(address, secret, false) }
     }
     val badServer = error?.second == true
     val badToken = error?.second == false
@@ -267,6 +270,7 @@ fun Connect() {
                 }
                 Toggle(remember, "Remember on this phone") { remember = it }
             }
+            if (error != null) LocalNetworkNotice(server)
             if (error != null) {
                 Row(
                     Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp),
@@ -341,6 +345,7 @@ fun Unreachable() {
     val model = LocalModel.current
     val shell = remember(model.revision) { model.core.shell() }
     val busy = shell.net is Net.Connecting
+    val gate = LocalGate.current
     Column(
         Modifier
             .fillMaxSize()
@@ -353,7 +358,7 @@ fun Unreachable() {
             Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 40.dp, bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Planet(Modifier.size(104.dp, 87.dp).alpha(.45f), moon = false)
+            Planet(Modifier.size(104.dp, 87.dp), moon = false, dim = true)
             Spacer(height = 20.dp)
             T("Can’t reach your server", 26f, weight = FontWeight.SemiBold, line = 1.25f, track = -.02f, align = TextAlign.Center)
             Spacer(height = 8.dp)
@@ -369,7 +374,12 @@ fun Unreachable() {
                 Modifier.widthIn(max = ch(30, 16f)),
                 style = style(16f, color = P.muted2).copy(textAlign = TextAlign.Center),
             )
+            // What the connection answered, for telling the causes apart.
+            if (!busy) shell.error?.let { cause ->
+                T(cause, 12.5f, P.muted, mono = true, align = TextAlign.Center, modifier = Modifier.padding(top = 10.dp))
+            }
         }
+        LocalNetworkNotice(shell.host) { model.core.retry() }
         val shape = RoundedCornerShape(24.dp)
         Column(Modifier.padding(top = 8.dp).fillMaxWidth().card(P.surface, shape).padding(vertical = 4.dp)) {
             Check("server", "The Pluto server runs on the computer", "systemctl --user status pluto-server")
@@ -385,7 +395,7 @@ fun Unreachable() {
             fontSize = 17f,
             icon = if (busy) "loader-circle" else null,
             spin = busy,
-        ) { model.core.retry() }
+        ) { gate.connect(shell.host) { model.core.retry() } }
         Btn(
             "Change server",
             Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -403,6 +413,47 @@ private fun Check(icon: String, text: String, detail: String? = null) {
         Column {
             T(text, 15f, P.muted2)
             if (detail != null) T(detail, 12.5f, P.muted, mono = true, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
+
+// Android 17 keeps the app off the home network until it is allowed
+// (LocalNetwork.kt): when that is why, this says so and asks again, or
+// points to the app's settings once Android stopped asking.
+@Composable
+fun LocalNetworkNotice(server: String, onAllowed: () -> Unit = {}) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val gate = LocalGate.current
+    // Read again when the app comes back from its settings.
+    var resumed by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { resumed++ }
+    val missing = remember(server, resumed) { LocalNetwork.missing(context, server) }
+    if (!missing) return
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth()
+            .card(P.warning.copy(alpha = .08f), shape, P.warning.copy(alpha = .28f))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon("triangle-alert", P.warning, Modifier.padding(top = 1.dp), size = 18.dp)
+            T(
+                "Android keeps Pluto off your home network until you allow it (Nearby devices).",
+                14f,
+                P.warning,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("Allow", height = 40.dp, fontSize = 14f, tone = Tone.Primary) {
+                gate.connect(server) {
+                    resumed++
+                    if (!LocalNetwork.missing(context, server)) onAllowed()
+                }
+            }
+            Btn("Open settings", height = 40.dp, fontSize = 14f) { LocalNetwork.openSettings(context) }
         }
     }
 }

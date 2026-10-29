@@ -277,7 +277,15 @@ private val planetPaths by lazy {
 // The pixel planet (`pixel_logo.rs`, viewBox 72 72 384 320), with its
 // orbiting moon on the hero (`steps(4)` over 6s, back and forth).
 @Composable
-fun Planet(modifier: Modifier = Modifier, moon: Boolean = true, glow: Boolean = true) {
+fun Planet(modifier: Modifier = Modifier, moon: Boolean = true, glow: Boolean = true, dim: Boolean = false) {
+    // `.dim-planet`: faded and partly grey, its glow with it (an alpha
+    // layer would clip the glow to the planet's box).
+    val fade = if (dim) .45f else 1f
+    val grey = if (dim) {
+        androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+            androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(.6f) },
+        )
+    } else null
     val step = if (moon) {
         val t by rememberInfiniteTransition(label = "moon").animateFloat(
             0f,
@@ -299,6 +307,8 @@ fun Planet(modifier: Modifier = Modifier, moon: Boolean = true, glow: Boolean = 
                     ),
                     radius = size.width * .75f,
                     center = Offset(size.width / 2, size.height / 2 + 8.dp.toPx()),
+                    alpha = fade,
+                    colorFilter = grey,
                 )
             }
         },
@@ -307,14 +317,14 @@ fun Planet(modifier: Modifier = Modifier, moon: Boolean = true, glow: Boolean = 
         scale(s, s, pivot = Offset.Zero) {
             translate(-72f, -72f) {
                 val p = planetPaths
-                drawPath(p[0], P.accent, style = Stroke(18f))
-                drawPath(p[1], P.star)
-                drawPath(p[2], P.star)
-                drawPath(p[3], P.accent)
-                drawPath(p[4], P.accent)
-                drawPath(p[5], Color.White)
-                drawPath(p[6], Color(0xFF6D28D9), style = Stroke(20f))
-                drawRect(Color(0xFFF5F3FF), topLeft = Offset(392f, 144f + step * 24f), size = Size(28f, 28f))
+                drawPath(p[0], P.accent, alpha = fade, style = Stroke(18f), colorFilter = grey)
+                drawPath(p[1], P.star, alpha = fade, colorFilter = grey)
+                drawPath(p[2], P.star, alpha = fade, colorFilter = grey)
+                drawPath(p[3], P.accent, alpha = fade, colorFilter = grey)
+                drawPath(p[4], P.accent, alpha = fade, colorFilter = grey)
+                drawPath(p[5], Color.White, alpha = fade, colorFilter = grey)
+                drawPath(p[6], Color(0xFF6D28D9), alpha = fade, style = Stroke(20f), colorFilter = grey)
+                drawRect(Color(0xFFF5F3FF), topLeft = Offset(392f, 144f + step * 24f), size = Size(28f, 28f), alpha = fade, colorFilter = grey)
             }
         }
     }

@@ -100,13 +100,18 @@ fun PlutoApp(model: Model) {
         handleColor = P.accent,
         backgroundColor = P.accent.copy(alpha = .35f),
     )
+    // Connections to the home network ask Android first (LocalNetwork.kt).
+    val gate = rememberLocalNetworkGate()
     CompositionLocalProvider(
         LocalModel provides model,
         androidx.compose.foundation.text.selection.LocalTextSelectionColors provides selection,
+        LocalGate provides gate,
     ) {
         // A remembered server connects at once.
         LaunchedEffect(Unit) {
-            model.secret.load()?.let { (server, token) -> model.core.connect(server, token, true) }
+            model.secret.load()?.let { (server, token) ->
+                gate.connect(server) { model.core.connect(server, token, true) }
+            }
         }
         val shell = remember(model.revision) { model.core.shell() }
         Box(Modifier.fillMaxSize().background(P.canvas)) {

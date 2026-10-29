@@ -36,6 +36,8 @@ pub struct ShellView {
     pub selected: Option<String>,
     pub toast: Option<Toast>,
     pub attempts: u8,
+    /// Why the last connection failed.
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -689,6 +691,7 @@ impl Core {
                 selected: s.selected.clone(),
                 toast: s.toast.clone().map(|(text, serial)| Toast { text, serial }),
                 attempts: crate::session::ATTEMPTS,
+                error: s.last_error.clone(),
             }
         })
     }
