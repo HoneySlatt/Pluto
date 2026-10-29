@@ -2396,16 +2396,55 @@ impl App {
             trailing = time_rect.left() - 8.0;
         }
         let text_right = trailing;
-        let label_width = widgets::text_in(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(line.left() + 30.0, line.top()),
-                Pos2::new(text_right, line.bottom()),
-            ),
-            label,
-            label_font,
-            label_color,
+        let label_rect = Rect::from_min_max(
+            Pos2::new(line.left() + 30.0, line.top()),
+            Pos2::new(text_right, line.bottom()),
         );
+        let label_width = match self.thread_read_label(entry, label) {
+            // The read thread's title links to it, the quotes outside.
+            Some((prefix, title, target)) => {
+                let lead = format!("{prefix} \u{201c}");
+                let x = label_rect.left()
+                    + widgets::text_in(ui, label_rect, &lead, label_font.clone(), label_color);
+                let quote = widgets::text_width(ui, "\u{201d}", label_font.clone());
+                let title_rect = Rect::from_min_max(
+                    Pos2::new(x, line.top()),
+                    Pos2::new(text_right - quote, line.bottom()),
+                );
+                let title_width = widgets::text_in(
+                    ui,
+                    title_rect,
+                    &title,
+                    label_font.clone(),
+                    theme::foreground(),
+                );
+                let link =
+                    Rect::from_min_size(title_rect.min, Vec2::new(title_width, MESSAGE_LINE));
+                let response = ui
+                    .interact(
+                        link,
+                        ui.id().with(("thread-read", &entry.id)),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.hovered() {
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(link.left(), link.bottom() - 3.0),
+                            Pos2::new(link.right(), link.bottom() - 3.0),
+                        ],
+                        egui::Stroke::new(1.0, theme::foreground()),
+                    );
+                }
+                if response.clicked() {
+                    self.select_thread(Some(target));
+                }
+                let end = Rect::from_min_max(Pos2::new(link.right(), line.top()), line.max);
+                let close = widgets::text_in(ui, end, "\u{201d}", label_font, label_color);
+                link.right() + close - label_rect.left()
+            }
+            None => widgets::text_in(ui, label_rect, label, label_font, label_color),
+        };
         if let Some(answer) = entry.question.as_ref().filter(|q| !q.answers.is_empty()) {
             let x = line.left() + 30.0 + label_width + 6.0;
             if x < text_right {
@@ -3067,6 +3106,24 @@ fn scroll_to_end_pill(ui: &mut Ui, rect: Rect, bottom_padding: f32) -> bool {
 }
 
 pub(crate) use pluto_core::timeline::{summary_icon, work_icon};
+
+impl App {
+    /// `threadReadTargetTitle`: a `t3_thread_read` row names the thread it
+    /// read, unless that thread is archived, deleted or untitled. Returns
+    /// the label's prefix, the title and the thread.
+    pub(crate) fn thread_read_label(
+        &self,
+        entry: &WorkEntry,
+        label: &str,
+    ) -> Option<(String, String, String)> {
+        let target = timeline::thread_read_target(entry)?;
+        let prefix = timeline::thread_read_prefix(label)?;
+        let thread = self.state.threads.iter().find(|t| t.id == target)?;
+        let title = thread.title.trim();
+        (thread.archived_at.is_none() && thread.deleted_at.is_none() && !title.is_empty())
+            .then(|| (prefix, title.to_owned(), target))
+    }
+}
 
 /// A work icon: Pluto's mark for `t3-code`, else the lucide icon.
 pub(crate) fn paint_work_icon(ui: &Ui, icon: &str, rect: Rect, size: f32, color: egui::Color32) {

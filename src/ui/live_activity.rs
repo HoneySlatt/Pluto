@@ -238,7 +238,12 @@ impl App {
         let text = if thought_is_status {
             if active { "Thinking" } else { "Thought" }.to_owned()
         } else {
-            timeline::live_label(entry, active)
+            let label = timeline::live_label(entry, active);
+            // The live row names a read thread without linking it.
+            match self.thread_read_label(entry, &label) {
+                Some((prefix, title, _)) => format!("{prefix} \u{201c}{title}\u{201d}"),
+                None => label,
+            }
         };
         let failed = timeline::indicates_failure(entry);
         self.live_line(

@@ -1924,6 +1924,26 @@ pub fn summary_icon(kind: &str) -> &'static str {
     }
 }
 
+/// `threadReadTargetId`: the thread a `t3_thread_read` call reads.
+pub fn thread_read_target(entry: &WorkEntry) -> Option<String> {
+    let item = entry.item.as_ref().filter(|i| i.kind == "dynamic_tool")?;
+    let tool = crate::tool_presentation::t3_tool(item.str("toolName")?)?;
+    (tool.summary == "thread-read")
+        .then(|| item.get("input")["threadId"].as_str())
+        .flatten()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
+/// `threadReadLabelPrefix`: "Read a T3 thread" names its thread instead
+/// (`Read thread`), in the label's tense.
+pub fn thread_read_prefix(label: &str) -> Option<String> {
+    label
+        .strip_suffix(" a T3 thread")
+        .map(|prefix| format!("{prefix} thread"))
+}
+
 /// `normalizeCompactToolLabel`.
 fn compact_tool_label(value: &str) -> &str {
     let trimmed = value.trim_end();
@@ -2913,6 +2933,18 @@ mod tests {
             "Ran 3 commands, delegated 1 task, and performed 2 other actions"
         );
         assert_eq!(group_summary_kind(&commands), "command");
+        let read_thread = entry(
+            "f",
+            "dynamic_tool",
+            json!({"toolName": "t3_thread_read",
+            "input": {"threadId": " other "}}),
+        );
+        assert_eq!(thread_read_target(&read_thread).as_deref(), Some("other"));
+        assert_eq!(display_label(&read_thread), "Read a T3 thread");
+        assert_eq!(
+            thread_read_prefix("Reading a T3 thread").as_deref(),
+            Some("Reading thread")
+        );
         assert_eq!(group_summary_kind(&[link.clone(), link]), "pull-request");
     }
 
