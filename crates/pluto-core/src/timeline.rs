@@ -1729,9 +1729,30 @@ pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
         };
     }
     let mut groups: Vec<(&'static str, &'static str, Vec<&WorkEntry>)> = Vec::new();
+    // Calls from a named source (`toolSource`, not T3's) say who ran them.
+    let mut sources: Vec<(String, String, String)> = Vec::new();
+    let mut sourced = 0;
     for entry in &tools {
+        let t3 = t3_presentation(entry, None);
+        let source = entry
+            .item
+            .as_ref()
+            .map(|i| i.get("toolSource"))
+            .filter(|s| s["key"].is_string() && s["name"].is_string());
+        if let (Some(source), None) = (source, &t3) {
+            sourced += 1;
+            let key = source["key"].as_str().unwrap_or_default().to_owned();
+            if !sources.iter().any(|(k, ..)| *k == key) {
+                sources.push((
+                    key,
+                    source["name"].as_str().unwrap_or_default().to_owned(),
+                    source["kind"].as_str().unwrap_or_default().to_owned(),
+                ));
+            }
+            continue;
+        }
         let action = group_action(entry);
-        let key = t3_presentation(entry, None).map_or(action, |(_, tool)| tool.summary);
+        let key = t3.map_or(action, |(_, tool)| tool.summary);
         match groups.iter_mut().find(|(k, _, _)| *k == key) {
             Some((_, _, list)) => list.push(entry),
             None => groups.push((key, action, vec![entry])),
@@ -1768,7 +1789,28 @@ pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
     selected.truncate(2);
     selected.sort_by_key(|(index, ..)| *index);
     let mut labels: Vec<String> = selected.iter().map(|(.., label)| label.clone()).collect();
-    let remaining = tools.len() - selected.iter().map(|(_, _, count, _)| count).sum::<usize>();
+    if !sources.is_empty() {
+        let mut names: Vec<String> = Vec::new();
+        for (_, name, _) in &sources {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        let joined = match names.len() {
+            1 => names[0].clone(),
+            2 => names.join(" and "),
+            n => format!("{}, and {}", names[..n - 1].join(", "), names[n - 1]),
+        };
+        let integrations = sources.iter().all(|(.., kind)| kind == "integration");
+        let suffix = match (integrations, names.len()) {
+            (true, 1) => " integration",
+            (true, _) => " integrations",
+            _ => "",
+        };
+        labels.insert(0, format!("Used {joined}{suffix}"));
+    }
+    let remaining =
+        tools.len() - sourced - selected.iter().map(|(_, _, count, _)| count).sum::<usize>();
     if remaining > 0 {
         labels.push(format!(
             "Performed {}",
@@ -3010,6 +3052,16 @@ mod tests {
             "Ran 3 commands, delegated 1 task, and performed 2 other actions"
         );
         assert_eq!(group_summary_kind(&commands), "command");
+        let linear = entry(
+            "g",
+            "dynamic_tool",
+            json!({"toolName": "linear.search",
+            "toolSource": {"key": "linear", "name": "Linear", "kind": "integration"}}),
+        );
+        assert_eq!(
+            summarize_tool_group(&[linear, command.clone()]),
+            "Used Linear integration and ran 1 command"
+        );
         let read_thread = entry(
             "f",
             "dynamic_tool",

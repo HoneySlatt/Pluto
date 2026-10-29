@@ -2301,6 +2301,17 @@ impl App {
         if self.notification_card(ui, entry, width) {
             return;
         }
+        // `formatWorkspaceRelativePath`: a read inside the workspace names
+        // its path from there.
+        let relative;
+        let label = match self.workspace_cwd() {
+            Some(root) if label.starts_with("Read ") => {
+                let root = format!("{}/", root.trim_end_matches('/'));
+                relative = label.replacen(&format!("Read {root}"), "Read ", 1);
+                relative.as_str()
+            }
+            _ => label,
+        };
         let key = format!("entry:{}", entry.id);
         let expanded = self.expansion.groups.contains(&key);
         let failed = timeline::indicates_failure(entry);
