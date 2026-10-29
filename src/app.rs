@@ -1416,7 +1416,8 @@ impl App {
             self.toasts.notice(kind, message);
         }
         self.tick_git_toast(ui.ctx());
-        match self.toasts.show(ui, rect) {
+        let open = self.selected.clone();
+        match self.toasts.show(ui, rect, open.as_deref()) {
             Some(crate::ui::toasts::Action::GitAction(action)) => {
                 self.run_git_action(crate::ui::git_actions::Run {
                     action,
@@ -1430,7 +1431,7 @@ impl App {
                 self.settings_page = None;
                 self.select_thread(Some(thread_id));
             }
-            None => {}
+            Some(crate::ui::toasts::Action::Dismiss) | None => {}
         }
     }
 }
