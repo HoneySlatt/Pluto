@@ -538,11 +538,10 @@ pub fn highlight(language: &str, text: &str) -> Vec<CodeToken> {
 /// Whether the quote at `i` opens a Rust char literal (`'a'`, `'\n'`),
 /// not a lifetime (`'a`).
 fn char_literal(chars: &[(usize, char)], i: usize) -> bool {
-    match (chars.get(i + 1), chars.get(i + 2), chars.get(i + 3)) {
-        (Some((_, '\\')), _, _) => true,
-        (Some(_), Some((_, '\'')), _) => true,
-        _ => false,
-    }
+    matches!(
+        (chars.get(i + 1), chars.get(i + 2)),
+        (Some((_, '\\')), _) | (Some(_), Some((_, '\'')))
+    )
 }
 
 #[cfg(test)]
