@@ -21,6 +21,9 @@ pub enum Route {
     /// A one-shot request, identified by a caller-chosen key.
     Rpc(String),
     Vcs(String),
+    /// The server's lifecycle (`subscribeServerLifecycle`: welcome, ready,
+    /// the legacy thread migration); optional.
+    Lifecycle,
     /// An older page of a thread's timeline, by the cursor that asked for
     /// it; a jump's conversation page comes first, not `complete`.
     History {
@@ -64,6 +67,39 @@ pub enum Event {
     Data(Route, Value),
     Failed(Route, String),
     Disconnected(String),
+    /// The requests waiting longer than their threshold, sent again when
+    /// the list changes (`requestLatencyState.ts`); empty once none is.
+    Slow(Vec<SlowRequest>),
+}
+
+/// A request that takes longer than usual.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlowRequest {
+    pub method: &'static str,
+    pub started: std::time::SystemTime,
+    /// How long it may take before it counts as slow.
+    pub threshold: Duration,
+}
+
+/// `SLOW_RPC_ACK_THRESHOLD_MS`, and the long-running methods' own; `None`
+/// for the requests not watched (subscriptions, pull requests, usage).
+fn slow_threshold(method: &str) -> Option<Duration> {
+    if method.contains("subscribe")
+        || method.starts_with("pullRequests.")
+        || method == "server.getUsageSummary"
+    {
+        return None;
+    }
+    Some(Duration::from_secs(
+        if matches!(
+            method,
+            "server.updateProvider" | "server.refreshProviders" | "server.updateServer"
+        ) {
+            120
+        } else {
+            15
+        },
+    ))
 }
 
 pub struct Connection {
@@ -445,6 +481,9 @@ fn run(
     drop(token);
     let mut next_id = 1_u64;
     let mut pending: BTreeMap<u64, (Route, Option<Instant>)> = BTreeMap::new();
+    // Requests timed for the slow-request notice, and the last list sent.
+    let mut watched: BTreeMap<u64, SlowRequest> = BTreeMap::new();
+    let mut reported_slow: Vec<SlowRequest> = Vec::new();
     let mut subscribe =
         |socket: &mut Socket, pending: &mut BTreeMap<_, _>, route, method, payload, stream| {
             let id = next_id;
@@ -522,7 +561,7 @@ fn run(
                         method,
                         payload,
                     } => {
-                        subscribe(
+                        let id = subscribe(
                             &mut socket,
                             &mut pending,
                             Route::Rpc(key),
@@ -530,6 +569,16 @@ fn run(
                             payload,
                             false,
                         )?;
+                        if let Some(threshold) = slow_threshold(method) {
+                            watched.insert(
+                                id,
+                                SlowRequest {
+                                    method,
+                                    started: std::time::SystemTime::now(),
+                                    threshold,
+                                },
+                            );
+                        }
                     }
                     Action::Stream {
                         key,
@@ -596,9 +645,29 @@ fn run(
                 }
             }
         }
+        // A request no longer pending is no longer watched.
+        watched.retain(|id, _| pending.contains_key(id));
+        let slow: Vec<SlowRequest> = watched
+            .values()
+            .filter(|r| r.started.elapsed().is_ok_and(|e| e > r.threshold))
+            .cloned()
+            .collect();
+        if slow != reported_slow {
+            reported_slow = slow.clone();
+            if !emit(Event::Slow(slow)) {
+                return Ok(());
+            }
+        }
+        // No receipt after 30 s: a command may have been accepted; the
+        // long-running requests get a minute past their threshold.
         let expired: Vec<_> = pending
             .iter()
-            .filter(|(_, (_, at))| at.is_some_and(|at| at.elapsed() > Duration::from_secs(30)))
+            .filter(|(id, (_, at))| {
+                let limit = watched.get(id).map_or(Duration::from_secs(30), |r| {
+                    (r.threshold + Duration::from_secs(60)).max(Duration::from_secs(30))
+                });
+                at.is_some_and(|at| at.elapsed() > limit)
+            })
             .map(|(id, _)| *id)
             .collect();
         for id in expired {
@@ -678,6 +747,14 @@ fn run(
                                         json!({}),
                                         true,
                                     )?;
+                                    subscribe(
+                                        &mut socket,
+                                        &mut pending,
+                                        Route::Lifecycle,
+                                        "subscribeServerLifecycle",
+                                        json!({}),
+                                        true,
+                                    )?;
                                     negotiated = true;
                                 }
                                 if !emit(Event::Data(route.clone(), value)) {
@@ -688,7 +765,7 @@ fn run(
                         Some("Exit") => {
                             pending.remove(&id);
                             if frame["exit"]["_tag"] == "Success" {
-                                if matches!(route, Route::Vcs(_)) {
+                                if matches!(route, Route::Vcs(_) | Route::Lifecycle) {
                                     continue;
                                 }
                                 if !matches!(route, Route::Command(_) | Route::Rpc(_)) {

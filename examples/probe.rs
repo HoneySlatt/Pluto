@@ -50,6 +50,7 @@ fn main() {
                 eprintln!("disconnected: {error}");
                 break;
             }
+            Ok(Event::Slow(requests)) => eprintln!("{} slow requests", requests.len()),
             Err(_) => {}
         }
     }

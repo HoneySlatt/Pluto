@@ -43,6 +43,12 @@ pub struct App {
     pub(crate) pending_commands: std::collections::HashMap<String, crate::ui::park::Continuation>,
     /// The open thread's move once its park shows (`ui/park.rs`).
     pub(crate) advance: Option<crate::ui::park::Advance>,
+    /// "Some requests are slow" while any is.
+    slow_toast: Option<u64>,
+    /// "Restoring your threads…" while the server migrates them.
+    migration_toast: Option<u64>,
+    /// When "Keybindings updated" last showed (a 2 s cooldown).
+    keybindings_toast_at: Option<std::time::Instant>,
     /// The server the shell came from: connecting to another one clears it.
     shell_server: Option<String>,
     /// Whether the window had the focus last frame: coming back checks the
@@ -485,6 +491,9 @@ impl App {
             synced: false,
             pending_commands: Default::default(),
             advance: None,
+            migration_toast: None,
+            slow_toast: None,
+            keybindings_toast_at: None,
             shell_server: None,
             focused: true,
             window: None,
@@ -738,6 +747,9 @@ impl App {
                         // Only the snapshot completes the handshake: the
                         // worker refuses commands until it came.
                         let snapshot = value["type"] == "snapshot";
+                        if self.synced && value["type"] == "keybindingsUpdated" {
+                            self.keybindings_reloaded(&value["payload"]);
+                        }
                         self.state.config_event(&value);
                         if !self.synced && snapshot {
                             self.synced = true;
@@ -783,6 +795,7 @@ impl App {
                         }
                     }
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
+                    Route::Lifecycle => self.lifecycle_event(&value),
                     Route::Command(id) => {
                         self.command_settled(&id, None);
                         self.finish_reply(&id);
@@ -813,6 +826,8 @@ impl App {
                     self.state.history_failed(&thread_id, &cursor, message);
                 }
                 Event::Failed(Route::Vcs(_), _) => self.vcs = None,
+                // A server without the lifecycle stream: nothing to show.
+                Event::Failed(Route::Lifecycle, _) => {}
                 Event::Failed(Route::Rpc(key), message) => {
                     // A stream that failed is not opened again.
                     self.streams.retain(|(open, ..)| *open != key);
@@ -848,6 +863,7 @@ impl App {
                 }
                 Event::Failed(_, message) => self.notify(crate::ui::toasts::Kind::Error, message),
                 Event::Disconnected(message) => disconnected = Some(message),
+                Event::Slow(requests) => self.slow_requests(&requests),
             }
         }
         if let Some((id, _, due)) = &mut self.thread_retry {
@@ -952,6 +968,107 @@ impl App {
     pub(crate) fn use_connection_for_tests(&mut self, connection: Connection) {
         self.connection = Some(connection);
         self.synced = true;
+    }
+
+    /// `KeybindingsUpdateToast`: the server reloaded `keybindings.json`.
+    fn keybindings_reloaded(&mut self, payload: &Value) {
+        use crate::ui::toasts::{Action, Kind, Toast};
+        let issue = payload["issues"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|issue| {
+                issue["kind"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("keybindings."))
+            });
+        if let Some(issue) = issue {
+            let mut toast = Toast::new(Kind::Warning, "Invalid keybindings configuration")
+                .description(issue["message"].as_str().unwrap_or_default());
+            if let Some(path) = self.state.config["keybindingsConfigPath"].as_str()
+                && self.preferred_editor().is_some()
+            {
+                toast.secondary.push((
+                    "Open keybindings.json".into(),
+                    Action::OpenInEditor(path.to_owned()),
+                ));
+            }
+            self.toasts.add(toast);
+            return;
+        }
+        if self
+            .keybindings_toast_at
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(2))
+        {
+            return;
+        }
+        self.keybindings_toast_at = Some(std::time::Instant::now());
+        self.toasts.add(
+            Toast::new(Kind::Success, "Keybindings updated")
+                .description("Keybindings configuration reloaded successfully."),
+        );
+    }
+
+    /// `SlowRpcRequestToastCoordinator`: one toast while requests are slow.
+    fn slow_requests(&mut self, requests: &[crate::protocol::SlowRequest]) {
+        use crate::ui::toasts::{Kind, Toast};
+        let Some(threshold) = requests.iter().map(|r| r.threshold).min() else {
+            if let Some(id) = self.slow_toast.take() {
+                self.toasts.close(id);
+            }
+            return;
+        };
+        let count = requests.len();
+        let mut toast = Toast::new(Kind::Warning, "Some requests are slow").description(format!(
+            "{count} request{} waiting longer than {}s.",
+            if count == 1 { "" } else { "s" },
+            threshold.as_secs()
+        ));
+        toast.timeout = None;
+        toast.details = Some(
+            requests
+                .iter()
+                .map(|r| {
+                    let started: chrono::DateTime<chrono::Local> = r.started.into();
+                    format!("{}\nStarted {}", r.method, started.format("%X"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+        toast.details_labels = ("Show requests", "Hide requests");
+        match self.slow_toast {
+            Some(id) => self.toasts.update(id, toast),
+            None => self.slow_toast = Some(self.toasts.add(toast)),
+        }
+    }
+
+    /// `LegacyThreadMigrationToast`: the server imports the previous
+    /// version's threads; a loading toast says so until it is done.
+    fn lifecycle_event(&mut self, value: &Value) {
+        use crate::ui::toasts::{Kind, Toast};
+        if value["type"] != "legacyThreadMigration" {
+            return;
+        }
+        let payload = &value["payload"];
+        if payload["status"] != "running" {
+            if let Some(id) = self.migration_toast.take() {
+                self.toasts.close(id);
+            }
+            return;
+        }
+        if self.migration_toast.is_some() {
+            return;
+        }
+        let count = payload["totalThreadCount"].as_u64().unwrap_or(0);
+        let description = format!(
+            "Migrating {} {} from the previous version. You can keep working while this finishes.",
+            group_digits(count),
+            if count == 1 { "thread" } else { "threads" }
+        );
+        self.migration_toast = Some(
+            self.toasts
+                .add(Toast::new(Kind::Loading, "Restoring your threads…").description(description)),
+        );
     }
 
     /// Gives up on a server that does not answer, for the connection screen.
@@ -1430,6 +1547,11 @@ impl App {
             Some(crate::ui::toasts::Action::OpenThread(thread_id)) => {
                 self.settings_page = None;
                 self.select_thread(Some(thread_id));
+            }
+            Some(crate::ui::toasts::Action::OpenInEditor(path)) => {
+                if let Some(editor) = self.preferred_editor() {
+                    self.open_in_editor(&path, editor);
+                }
             }
             Some(crate::ui::toasts::Action::Dismiss) | None => {}
         }
@@ -2148,6 +2270,19 @@ impl App {
     pub fn renaming_thread(&self) -> Option<&str> {
         self.renaming.as_ref().map(|(id, _)| id.as_str())
     }
+}
+
+/// `toLocaleString()`'s digit groups: 1234 → "1,234".
+fn group_digits(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// `window.json` beside the client settings file.

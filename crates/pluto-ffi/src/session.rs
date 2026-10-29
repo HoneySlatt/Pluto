@@ -661,7 +661,8 @@ impl Session {
                 }
             }
             Event::Failed(_, message) => self.show_toast(message),
-            Event::Data(..) | Event::Disconnected(_) => {}
+            // The phone shows no slow-request notice.
+            Event::Data(..) | Event::Disconnected(_) | Event::Slow(_) => {}
         }
     }
 

@@ -42,6 +42,8 @@ pub(crate) enum Action {
     OpenUrl(String),
     /// Opens a thread (`ThreadNotificationCoordinator`'s "Open thread").
     OpenThread(String),
+    /// Opens a file in the preferred editor (`shell.openInEditor`).
+    OpenInEditor(String),
     /// Closes the toast and nothing else.
     Dismiss,
 }
@@ -55,8 +57,10 @@ pub(crate) struct Toast {
     pub action: Option<(String, Action)>,
     /// Outline buttons before it (`additionalActions`, `secondaryActionProps`).
     pub secondary: Vec<(String, Action)>,
-    /// Text under "Show details" (`expandableContent`).
+    /// Text under "Show details" (`expandableContent`), and the toggle's
+    /// labels to open and close it (`expandableLabels`).
     pub details: Option<String>,
+    pub details_labels: (&'static str, &'static str),
     /// Shown only while this thread is open (`threadRef`).
     pub thread: Option<String>,
     /// No "Copy error" button (`hideCopyButton`).
@@ -74,6 +78,7 @@ impl Toast {
             action: None,
             secondary: Vec::new(),
             details: None,
+            details_labels: ("Show details", "Hide details"),
             thread: None,
             hide_copy: false,
             timeout: (kind != Kind::Loading).then_some(DEFAULT_TIMEOUT),
@@ -479,7 +484,11 @@ fn paint_card(ui: &mut Ui, rect: Rect, toast: &Toast, id: u64) -> Option<Action>
     }
     if let Some(details) = &toast.details {
         let open = details_open(ui, id);
-        let label = if open { "Hide details" } else { "Show details" };
+        let label = if open {
+            toast.details_labels.1
+        } else {
+            toast.details_labels.0
+        };
         let label_width = widgets::text_width(ui, label, font(12.0, Weight::Medium));
         let toggle = Rect::from_min_size(
             Pos2::new(left, y + 2.0),
