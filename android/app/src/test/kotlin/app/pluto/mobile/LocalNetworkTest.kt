@@ -9,7 +9,7 @@ class LocalNetworkTest {
     @Test
     fun privateAddressesAndLocalNamesAreLocal() {
         for (server in listOf(
-            "http://192.168.1.74:3774",
+            "http://192.168.1.20:3774",
             "http://10.0.0.2:3774/",
             "http://172.20.1.1:3774",
             "http://169.254.3.4",
