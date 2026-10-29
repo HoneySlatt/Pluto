@@ -84,6 +84,12 @@ fun SheetView(sheet: Sheet, open: Boolean) {
             if (open) offset.animateTo(0f, tween(380, easing = Enter))
             else offset.animateTo(height, tween(EXIT_MS.toInt() - 20, easing = Exit))
         }
+        // The open sheet follows the back gesture down a little.
+        val back = if (open && nav.top == "sheet") nav.backProgress else 0f
+        LaunchedEffect(back) {
+            if (back > 0f) offset.snapTo(back * height * .25f)
+            else if (open && !offset.value.isNaN() && offset.value > 0f && !offset.isRunning) offset.animateTo(0f, tween(250, easing = Enter))
+        }
         val bars = WindowInsets.systemBars.asPaddingValues()
         val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
         val drag = Modifier.pointerInput(open) {

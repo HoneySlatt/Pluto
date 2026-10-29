@@ -13,7 +13,7 @@ package app.pluto.mobile
 // back closes it, the view behind moving and dimming with it; a sheet
 // pulled down by its top closes. Back closes the top layer.
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -146,7 +146,21 @@ private fun Session(net: Net) {
             progress.animateTo(if (open) 1f else 0f, tween(if (open) 420 else 260, easing = if (open) Enter else Exit))
         }
     }
-    BackHandler(nav.canGoBack) { nav.back() }
+    // Predictive back: the top layer follows the back gesture, and goes
+    // once it is let go (or comes back when cancelled).
+    PredictiveBackHandler(nav.canGoBack) { events ->
+        try {
+            events.collect { event -> nav.backProgress = event.progress }
+            nav.back()
+        } finally {
+            nav.backProgress = 0f
+        }
+    }
+    // The drawer follows the back gesture too.
+    LaunchedEffect(nav.backProgress) {
+        if (nav.top == "drawer" && nav.backProgress > 0f) progress.snapTo(1f - nav.backProgress)
+        else if (nav.top == "drawer" && nav.drawer && !dragging) progress.animateTo(1f, tween(200, easing = Enter))
+    }
     val pages = nav.pages.toList()
     val leaving = nav.leavingPage
     val threadPage = (pages + listOfNotNull(leaving)).any { it is Page.Thread }
@@ -214,10 +228,10 @@ private fun Session(net: Net) {
                 }
             }
             for ((index, page) in pages.withIndex()) {
-                androidx.compose.runtime.key(index, page) { PageLayer(page, leaving = false) }
+                androidx.compose.runtime.key(index, page) { PageLayer(page, leaving = false, top = index == pages.lastIndex) }
             }
             if (leaving != null) {
-                androidx.compose.runtime.key(pages.size, leaving) { PageLayer(leaving, leaving = true) }
+                androidx.compose.runtime.key(pages.size, leaving) { PageLayer(leaving, leaving = true, top = false) }
             }
             NetBar(net, shell.host, shell.attempts.toInt())
             Box(
@@ -236,11 +250,20 @@ private fun Session(net: Net) {
 
 // A page sliding in from the right (380ms), out quicker (240ms).
 @Composable
-private fun PageLayer(page: Page, leaving: Boolean) {
+private fun PageLayer(page: Page, leaving: Boolean, top: Boolean) {
+    val nav = LocalModel.current.nav
     val shift = remember { Animatable(1f) }
     LaunchedEffect(leaving) {
         if (leaving) shift.animateTo(1f, tween(EXIT_MS.toInt(), easing = Exit))
         else shift.animateTo(0f, tween(380, easing = Enter))
+    }
+    // The top page follows the back gesture, and settles back if it is
+    // cancelled.
+    val back = if (top && nav.top == "page") nav.backProgress else 0f
+    LaunchedEffect(back) {
+        if (leaving) return@LaunchedEffect
+        if (back > 0f) shift.snapTo(back * .9f)
+        else if (shift.value > 0f && shift.targetValue != 0f) shift.animateTo(0f, tween(200, easing = Enter))
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = constraints.maxWidth.toFloat()

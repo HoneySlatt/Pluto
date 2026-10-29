@@ -6,6 +6,7 @@ package app.pluto.mobile
 // screen for its exit animation.
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -88,6 +89,20 @@ class Nav(private val model: Model) {
     private fun selected(): String? = core.shell().selected
 
     val canGoBack get() = layers.isNotEmpty()
+
+    // The back gesture's progress over the top layer, 0 to 1, while the
+    // finger holds it (predictive back): the layer follows it.
+    var backProgress by mutableFloatStateOf(0f)
+
+    // The top layer's kind: `drawer`, `page`, `sheet` or `view`.
+    val top: String?
+        get() = when (layers.lastOrNull()) {
+            Layer.Drawer -> "drawer"
+            is Layer.Page -> "page"
+            Layer.Sheet -> "sheet"
+            is Layer.View -> "view"
+            null -> null
+        }
 
     // Closes the top layer, the way the back gesture does.
     fun back() {
