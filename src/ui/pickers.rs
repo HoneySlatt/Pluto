@@ -337,6 +337,12 @@ impl App {
         let selection = self.composer_model_selection(draft);
         let chat = self.chat_context(draft);
         let locked = if draft { None } else { self.locked_driver() };
+        // A new thread can start on several models (Shift+click), where the
+        // server bootstraps worktrees itself.
+        self.fanout_picking = draft
+            && !chat
+            && self.state.config["environment"]["capabilities"]["requiredWorktreeBootstrap"]
+                == true;
         if let Some(chosen) = self.model_picker_popup(
             ui,
             anchor,
@@ -348,6 +354,39 @@ impl App {
         ) {
             self.set_selection(draft, chosen);
         }
+    }
+
+    /// `toggleModelSelection`: Shift+click adds `pick` to the draft's models
+    /// or takes it out; one model left is the draft's model again.
+    pub(crate) fn toggle_fanout(&mut self, pick: ModelSelection, current: &ModelSelection) {
+        let key = self.draft_key.clone();
+        let mut models = self
+            .fanout
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| vec![current.clone()]);
+        let same = |a: &ModelSelection| a.instance_id == pick.instance_id && a.model == pick.model;
+        if models.iter().any(same) {
+            models.retain(|m| !same(m));
+        } else {
+            models.push(pick);
+        }
+        if models.len() > 1 {
+            self.fanout.insert(key, models);
+        } else {
+            self.fanout.remove(&key);
+            if let Some(last) = models.pop() {
+                self.set_selection(true, last);
+            }
+        }
+    }
+
+    /// The draft's models when it starts on several.
+    pub(crate) fn fanout_models(&self, draft: bool) -> Option<&Vec<ModelSelection>> {
+        draft
+            .then(|| self.fanout.get(&self.draft_key))
+            .flatten()
+            .filter(|m| m.len() > 1)
     }
 
     /// `deriveLockedProvider`: a started thread keeps its provider's driver
@@ -477,6 +516,16 @@ impl App {
         let mut chosen: Option<ModelSelection> = None;
         let mut switch_provider: Option<String> = None;
         let mut toggle_favorite: Option<String> = None;
+        let fanout_picking = self.fanout_picking && menu == "model-picker";
+        let fanout: Vec<ModelSelection> = if fanout_picking {
+            self.fanout
+                .get(&self.draft_key)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut fanout_toggle: Option<ModelSelection> = None;
         let mut open = self.open_menu.take();
         let query = self.picker_query.clone();
         let mut new_query = query.clone();
@@ -788,6 +837,9 @@ impl App {
                         );
                         let is_selected =
                             selection.instance_id == *provider_id && selection.model == slug;
+                        let fanned = fanout
+                            .iter()
+                            .any(|s| s.instance_id == *provider_id && s.model == slug);
                         if is_selected {
                             ui.painter().rect_filled(
                                 row,
@@ -843,6 +895,18 @@ impl App {
                             Pos2::new(row.right() - 28.0, row.center().y - 12.0),
                             Vec2::splat(24.0),
                         );
+                        if fanned {
+                            theme::paint_icon(
+                                ui,
+                                "check",
+                                Rect::from_center_size(
+                                    Pos2::new(star_rect.left() - 12.0, row.center().y),
+                                    Vec2::splat(14.0),
+                                ),
+                                14.0,
+                                theme::foreground(),
+                            );
+                        }
                         let favorite = favorites.contains(&key);
                         let shortcut = (index < 9)
                             .then(|| {
@@ -877,11 +941,17 @@ impl App {
                         {
                             toggle_favorite = Some(key);
                         } else if response.clicked() {
-                            chosen = Some(ModelSelection {
+                            let pick = ModelSelection {
                                 instance_id: provider_id.clone(),
                                 model: slug.to_owned(),
                                 options: None,
-                            });
+                            };
+                            // Shift+click adds or removes a model.
+                            if fanout_picking && ui.input(|i| i.modifiers.shift) {
+                                fanout_toggle = Some(pick);
+                            } else {
+                                chosen = Some(pick);
+                            }
                         }
                         ui.add_space(2.0);
                     }
@@ -944,6 +1014,9 @@ impl App {
                 self.favorite_models.insert(key);
             }
             self.save_favorites();
+        }
+        if let Some(pick) = fanout_toggle {
+            self.toggle_fanout(pick, &selection);
         }
         if chosen.is_some() {
             self.open_menu = None;
@@ -1317,6 +1390,36 @@ mod tests {
             provider_status_message(&provider),
             "Open provider setup to install Opencode on this environment."
         );
+    }
+
+    #[test]
+    fn shift_picks_gather_models_and_one_left_is_the_model_again() {
+        use crate::app::{App, Options};
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+        let app = harness.state_mut();
+        let pick = |model: &str| ModelSelection {
+            instance_id: "codex".into(),
+            model: model.into(),
+            options: None,
+        };
+        app.toggle_fanout(pick("b"), &pick("a"));
+        assert_eq!(app.fanout_models(true).map(Vec::len), Some(2));
+        app.toggle_fanout(pick("c"), &pick("a"));
+        assert_eq!(app.fanout_models(true).map(Vec::len), Some(3));
+        app.toggle_fanout(pick("b"), &pick("a"));
+        app.toggle_fanout(pick("a"), &pick("a"));
+        assert!(app.fanout_models(true).is_none());
+        assert_eq!(app.composer_model_selection(true).model, "c");
     }
 
     #[test]

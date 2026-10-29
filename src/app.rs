@@ -116,6 +116,11 @@ pub struct App {
     pub(crate) draft_listed: bool,
     /// A draft row's menu, by draft key.
     pub(crate) draft_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// `draftFanoutStateAtom`: the models a draft starts at once, by draft
+    /// key (two or more; in memory only), and whether the open picker takes
+    /// Shift+click for them.
+    pub(crate) fanout: std::collections::HashMap<String, Vec<crate::model::ModelSelection>>,
+    pub(crate) fanout_picking: bool,
     /// Where the open draft starts, when picked (`DraftThreadEnvMode`):
     /// `local` or `worktree`, by project.
     pub(crate) draft_env_mode: Option<(String, String)>,
@@ -602,6 +607,8 @@ impl App {
             draft_key: "draft".into(),
             draft_listed: false,
             draft_menu: None,
+            fanout: Default::default(),
+            fanout_picking: false,
             draft_env_mode: None,
             draft_workspace: None,
             branch_picker: Default::default(),

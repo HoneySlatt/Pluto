@@ -754,7 +754,16 @@ impl App {
 
         let mut x = surface.left() + 7.0;
         let selection = self.composer_model_selection(draft);
-        let (model_label, provider_icon) = self.model_label(&selection);
+        let (mut model_label, mut provider_icon) = self.model_label(&selection);
+        // Several models: "A, B" and ", N more" (`ProviderModelPicker`).
+        if let Some(models) = self.fanout_models(draft).cloned() {
+            let names: Vec<String> = models.iter().map(|m| self.model_label(m).0).collect();
+            model_label = names[..names.len().min(2)].join(", ");
+            if names.len() > 2 {
+                model_label.push_str(&format!(", {} more", names.len() - 2));
+            }
+            provider_icon = self.model_label(&models[0]).1;
+        }
         let trait_label = self.traits_label(&selection);
         let runtime = self.composer_runtime_mode(draft);
         let (runtime_text, runtime_icon) = runtime_label(&runtime);
@@ -1593,6 +1602,10 @@ impl App {
         let Some(project) = self.draft_project() else {
             return "local".into();
         };
+        // Each model starts in its own worktree.
+        if self.fanout_models(true).is_some() {
+            return "worktree".into();
+        }
         // A draft in an existing worktree works there (`resolveEffectiveEnvMode`).
         if self.draft_workspace().is_some_and(|w| w.worktree.is_some()) {
             return "local".into();
@@ -2055,6 +2068,10 @@ impl App {
             let Some(project) = self.draft_project() else {
                 return;
             };
+            if let Some(models) = self.fanout_models(true).cloned() {
+                self.send_fanout(&project, &models, &text, &title, &contexts, inline, files);
+                return;
+            }
             // Pluto: the chat space keeps the last chat model as its default,
             // so Chat mode has its own default model.
             if self.is_chats(&project) && project.default_model_selection.as_ref() != Some(&chosen)
@@ -2189,6 +2206,103 @@ impl App {
             }
             (false, _) => {}
         }
+    }
+
+    /// `ChatView`'s fan-out: one new thread per model, each in its own
+    /// worktree off the draft's base branch, started in the background;
+    /// the user stays on the draft, which keeps its models.
+    #[allow(clippy::too_many_arguments)]
+    fn send_fanout(
+        &mut self,
+        project: &crate::model::Project,
+        models: &[crate::model::ModelSelection],
+        text: &str,
+        title: &str,
+        contexts: &[Value],
+        inline: bool,
+        files: Vec<Value>,
+    ) {
+        use crate::ui::toasts::{Kind, Toast};
+        let Some(branch) = self
+            .draft_worktree_base()
+            .filter(|_| self.workspace_is_repo())
+        else {
+            self.toasts.add(
+                Toast::new(Kind::Warning, "Choose models and a base branch").description(
+                    "Multiple models need a new thread in a Git project. Each gets its own worktree.",
+                ),
+            );
+            return;
+        };
+        for selection in models {
+            let ready = self.providers().iter().any(|p| {
+                p["instanceId"] == selection.instance_id.as_str()
+                    && p["enabled"] != false
+                    && p["status"] == "ready"
+                    && p["availability"] != "unavailable"
+            });
+            if !ready {
+                let name = self.model_label(selection).0;
+                self.toasts.add(Toast::new(
+                    Kind::Error,
+                    format!("Provider for {name} is unavailable."),
+                ));
+                return;
+            }
+        }
+        let runtime = self.composer_runtime_mode(true);
+        let interaction = self.composer_interaction_mode(true);
+        let uploads = crate::ui::attachments::upload_payload(&self.composer_images);
+        let from_origin = self.draft_start_from_origin();
+        let composer = self.composer_key(true);
+        let mut held = Some(self.take_composer());
+        for selection in models {
+            let thread_id = uuid::Uuid::new_v4().to_string();
+            let mut model = json!({"instanceId": selection.instance_id, "model": selection.model});
+            if let Some(options) = &selection.options {
+                model["options"] = options.clone();
+            }
+            let mut input = launch_input(
+                &thread_id,
+                &project.id,
+                title,
+                text,
+                &model,
+                &runtime,
+                &interaction,
+            );
+            crate::ui::composer_context::apply(
+                &mut input["initialMessage"],
+                text,
+                contexts,
+                inline,
+            );
+            input["workspaceStrategy"] = json!({"type": "worktree", "baseRef": branch});
+            if from_origin {
+                input["workspaceStrategy"]["startFromOrigin"] = json!(true);
+            }
+            let mut send = TurnSend {
+                thread_id: thread_id.clone(),
+                before: Vec::new(),
+                message: input,
+                launch: true,
+                uploads: uploads.clone(),
+            };
+            send.set_attachments(json!(files));
+            // The draft comes back if the first launch is refused.
+            if let Some(draft) = held.take() {
+                self.hold_sent(send.send_key(), composer.clone(), draft);
+            }
+            self.start_turn(send);
+        }
+        let count = models.len();
+        self.toasts.add(Toast::new(
+            Kind::Success,
+            format!(
+                "Started {count} thread{} in background",
+                if count == 1 { "" } else { "s" }
+            ),
+        ));
     }
 
     /// `persistThreadSettingsForNextTurn`: the thread takes the composer's
