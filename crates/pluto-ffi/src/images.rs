@@ -16,7 +16,11 @@ pub fn icon_paths(markup: &str) -> Vec<String> {
         let tag = tag.trim().trim_end_matches('/').trim();
         let (name, attributes) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
         let get = |key: &str| attribute(attributes, key);
-        let num = |key: &str| get(key).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+        let num = |key: &str| {
+            get(key)
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .unwrap_or(0.0)
+        };
         let path = match name {
             "path" => get("d"),
             "circle" => Some(ellipse(num("cx"), num("cy"), num("r"), num("r"))),

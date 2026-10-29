@@ -8,8 +8,8 @@ use pluto_core::model::{ModelSelection, Project};
 use pluto_core::spaces::Space;
 use serde_json::{Value, json};
 
-use crate::catalog;
 use crate::App;
+use crate::catalog;
 use crate::session::Session;
 
 /// A composer: the Chat or Code draft, or a thread.
@@ -89,7 +89,12 @@ pub fn project_default(session: &Session, project: &Project) -> Value {
         .unwrap_or_else(|| settings["defaultModelSelection"].clone())
 }
 
-pub fn model(session: &Session, drafts: &Drafts, target: &Target, project: Option<&str>) -> ModelSelection {
+pub fn model(
+    session: &Session,
+    drafts: &Drafts,
+    target: &Target,
+    project: Option<&str>,
+) -> ModelSelection {
     if let Some(picked) = drafts.models.get(&target.key()) {
         return picked.clone();
     }
@@ -117,7 +122,12 @@ pub fn model(session: &Session, drafts: &Drafts, target: &Target, project: Optio
 }
 
 /// The runtime mode: chats ask before anything that would write or run.
-pub fn access(session: &Session, drafts: &Drafts, target: &Target, project: Option<&str>) -> String {
+pub fn access(
+    session: &Session,
+    drafts: &Drafts,
+    target: &Target,
+    project: Option<&str>,
+) -> String {
     match target {
         Target::Chat => return "approval-required".into(),
         Target::Thread { id }

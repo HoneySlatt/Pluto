@@ -31,6 +31,11 @@ const COMPATIBLE_SINCE: i64 = 4;
 /// The windows the page asked for, by period.
 static WINDOWS: Mutex<[Option<Value>; 4]> = Mutex::new([None, None, None, None]);
 
+/// Leaving the server forgets what its page showed.
+pub fn reset() {
+    *WINDOWS.lock().unwrap_or_else(|p| p.into_inner()) = [None, None, None, None];
+}
+
 fn period_index(period: u32) -> usize {
     (period as usize).min(PERIODS.len() - 1)
 }

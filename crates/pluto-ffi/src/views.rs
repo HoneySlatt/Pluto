@@ -295,7 +295,13 @@ pub struct ReplyState {
     pub error: Option<String>,
 }
 
-fn thread_row(session: &Session, t: &pluto_core::model::Thread, chat: bool, now: chrono::DateTime<chrono::Utc>, clock_24h: bool) -> ThreadRow {
+fn thread_row(
+    session: &Session,
+    t: &pluto_core::model::Thread,
+    chat: bool,
+    now: chrono::DateTime<chrono::Utc>,
+    clock_24h: bool,
+) -> ThreadRow {
     let format = session
         .prefs
         .get("timestampFormat")
@@ -484,16 +490,15 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
         if !seen.insert(key.clone()) {
             key = format!("{key}#{index}");
         }
-        let fold = |label: String, expanded: bool, toggle: String, turn: bool, failure: bool| {
-            Item::Fold {
+        let fold =
+            |label: String, expanded: bool, toggle: String, turn: bool, failure: bool| Item::Fold {
                 key: key.clone(),
                 label,
                 expanded,
                 toggle,
                 turn,
                 failure,
-            }
-        };
+            };
         out.push(match row {
             Row::User(message) => user_item(key, &message),
             Row::Assistant {
@@ -649,7 +654,12 @@ fn question_card(app: &App, input: &PendingUserInput) -> QuestionCard {
 
 /// The open thread's pending user input `request`.
 fn pending_input(app: &App, thread: &str, request: &str) -> Option<PendingUserInput> {
-    let detail = app.session.state.detail.as_ref().filter(|d| d.id() == thread)?;
+    let detail = app
+        .session
+        .state
+        .detail
+        .as_ref()
+        .filter(|d| d.id() == thread)?;
     requests::derive(detail)
         .user_inputs
         .into_iter()
@@ -675,7 +685,12 @@ impl Core {
 
     pub fn dismiss_toast(&self, serial: u64) {
         self.update(|app, _| {
-            if app.session.toast.as_ref().is_some_and(|(_, s)| *s == serial) {
+            if app
+                .session
+                .toast
+                .as_ref()
+                .is_some_and(|(_, s)| *s == serial)
+            {
                 app.session.toast = None;
             }
         });
@@ -704,6 +719,8 @@ impl Core {
             app.session.disconnect();
             app.drafts = Default::default();
             app.answers.clear();
+            crate::usage::reset();
+            crate::memory::reset();
         });
     }
 
@@ -808,9 +825,7 @@ impl Core {
                 code: match &target {
                     Target::Chat => false,
                     Target::Code => true,
-                    Target::Thread { .. } => {
-                        thread.as_ref().is_some_and(|t| !s.space(t).is_chat())
-                    }
+                    Target::Thread { .. } => thread.as_ref().is_some_and(|t| !s.space(t).is_chat()),
                 },
             }
         })
@@ -877,7 +892,8 @@ impl Core {
                 })
                 .collect();
             let row = |t: &pluto_core::model::Thread| thread_row(s, t, chat, now, app.clock_24h);
-            let settled = |t: &pluto_core::model::Thread| t.settled_override.as_deref() == Some("settled");
+            let settled =
+                |t: &pluto_core::model::Thread| t.settled_override.as_deref() == Some("settled");
             let waits = |t: &pluto_core::model::Thread| {
                 t.has_pending_approvals
                     || t.has_pending_user_input
@@ -926,7 +942,11 @@ impl Core {
                     .map(|t| row(t))
                     .collect(),
                 active: active.into_iter().map(|t| row(t)).collect(),
-                settled: visible.iter().filter(|t| settled(t)).map(|t| row(t)).collect(),
+                settled: visible
+                    .iter()
+                    .filter(|t| settled(t))
+                    .map(|t| row(t))
+                    .collect(),
                 days,
                 empty: visible.is_empty(),
             }
@@ -949,7 +969,10 @@ impl Core {
                 .filter(|(failed, _)| *failed == id)
                 .map(|(_, message)| message.clone());
             let launching = s.waiting(&format!("launch:{id}"));
-            let pending = detail.as_ref().map(|d| requests::derive(d)).unwrap_or_default();
+            let pending = detail
+                .as_ref()
+                .map(|d| requests::derive(d))
+                .unwrap_or_default();
             ThreadView {
                 listed: thread.is_some(),
                 title: thread

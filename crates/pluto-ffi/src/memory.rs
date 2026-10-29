@@ -56,6 +56,11 @@ struct Personalization {
 
 static STATE: Mutex<Option<Personalization>> = Mutex::new(None);
 
+/// Leaving the server forgets what its page showed.
+pub fn reset() {
+    *STATE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
 fn with_state<R>(change: impl FnOnce(&mut Personalization) -> R) -> R {
     let mut state = STATE.lock().unwrap_or_else(|p| p.into_inner());
     change(state.get_or_insert_with(Default::default))

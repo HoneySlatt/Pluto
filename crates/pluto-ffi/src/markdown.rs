@@ -19,10 +19,18 @@ pub struct Span {
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum BlockKind {
     Paragraph,
-    Heading { level: u8 },
-    Code { language: String, text: String },
+    Heading {
+        level: u8,
+    },
+    Code {
+        language: String,
+        text: String,
+    },
     Rule,
-    Table { header: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
+    Table {
+        header: Vec<Vec<Span>>,
+        rows: Vec<Vec<Vec<Span>>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -55,8 +63,12 @@ struct Builder {
     quote: u8,
     heading: Option<u8>,
     code: Option<(String, String)>,
-    table: Option<(Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>, Vec<Vec<Span>>, bool)>,
+    table: Option<Table>,
 }
+
+/// A table being read: its header, its rows, the row being read, and
+/// whether that row is the header's.
+type Table = (Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>, Vec<Vec<Span>>, bool);
 
 impl Builder {
     fn push_text(&mut self, text: &str, code: bool) {
@@ -130,9 +142,11 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 Tag::CodeBlock(kind) => {
                     b.flush(BlockKind::Paragraph);
                     let language = match kind {
-                        CodeBlockKind::Fenced(info) => {
-                            info.split_whitespace().next().unwrap_or_default().to_owned()
-                        }
+                        CodeBlockKind::Fenced(info) => info
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned(),
                         CodeBlockKind::Indented => String::new(),
                     };
                     b.code = Some((language, String::new()));
@@ -271,12 +285,23 @@ mod tests {
 
     #[test]
     fn agent_html_stays_text() {
-        let out = blocks("Hi <script>alert(1)</script> [x](javascript:alert(1)) [a](https://x.dev)");
+        let out =
+            blocks("Hi <script>alert(1)</script> [x](javascript:alert(1)) [a](https://x.dev)");
         assert_eq!(out.len(), 1);
         let text: String = out[0].spans.iter().map(|s| s.text.as_str()).collect();
         assert!(text.contains("<script>"), "{text}");
-        assert!(out[0].spans.iter().all(|s| s.link.as_deref() != Some("javascript:alert(1)")));
-        assert!(out[0].spans.iter().any(|s| s.link.as_deref() == Some("https://x.dev")));
+        assert!(
+            out[0]
+                .spans
+                .iter()
+                .all(|s| s.link.as_deref() != Some("javascript:alert(1)"))
+        );
+        assert!(
+            out[0]
+                .spans
+                .iter()
+                .any(|s| s.link.as_deref() == Some("https://x.dev"))
+        );
     }
 
     #[test]

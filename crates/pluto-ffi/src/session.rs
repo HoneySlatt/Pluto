@@ -34,12 +34,16 @@ pub const NOT_CONNECTED: &str = "Not connected to the server: nothing was sent."
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum Net {
     /// No session yet: the connection screen, with the last failure.
-    Disconnected { error: Option<String> },
+    Disconnected {
+        error: Option<String>,
+    },
     /// The first connection of this server is on its way.
     Connecting,
     Connected,
     /// Lost after it was established: this attempt is on its way.
-    Reconnecting { attempt: u8 },
+    Reconnecting {
+        attempt: u8,
+    },
     /// Every attempt failed; Retry starts over.
     Offline,
     /// Just reconnected; the bar says so for a moment.
@@ -317,7 +321,13 @@ impl Session {
 
     /// Connects to `server` with `token`; a launch from remembered
     /// credentials shows the unreachable page when it fails.
-    pub fn connect(&mut self, hub: &Arc<Hub>, server: String, token: Zeroizing<String>, remembered: bool) {
+    pub fn connect(
+        &mut self,
+        hub: &Arc<Hub>,
+        server: String,
+        token: Zeroizing<String>,
+        remembered: bool,
+    ) {
         self.server = server;
         self.token = Some(token);
         self.established = false;
@@ -624,9 +634,12 @@ impl Session {
     }
 
     fn fetch_asset(&mut self, hub: &Arc<Hub>, key: &str, reply: &Value) {
-        let url = reply["relativeUrl"]
-            .as_str()
-            .and_then(|relative| url::Url::parse(self.server.trim()).ok()?.join(relative).ok());
+        let url = reply["relativeUrl"].as_str().and_then(|relative| {
+            url::Url::parse(self.server.trim())
+                .ok()?
+                .join(relative)
+                .ok()
+        });
         // The server's marker for a project without a favicon keeps the
         // monogram for the session.
         let Some(url) = url.filter(|u| {
@@ -651,7 +664,9 @@ impl Session {
                 }
                 match image {
                     Some(bytes) => {
-                        app.session.assets.insert(key, Asset::Ready(Arc::new(bytes)));
+                        app.session
+                            .assets
+                            .insert(key, Asset::Ready(Arc::new(bytes)));
                     }
                     // A failed download is tried again a little later.
                     None => {
@@ -702,7 +717,13 @@ impl Session {
 
     /// Starts a thread from `composer`'s draft (`orchestration.launchThread`):
     /// refused, the text comes back there.
-    pub fn launch(&mut self, thread_id: &str, input: Value, composer: String, text: String) -> bool {
+    pub fn launch(
+        &mut self,
+        thread_id: &str,
+        input: Value,
+        composer: String,
+        text: String,
+    ) -> bool {
         let key = format!("launch:{thread_id}");
         self.sends.insert(key.clone(), (composer, text));
         self.request(key.clone(), "orchestration.launchThread", input);

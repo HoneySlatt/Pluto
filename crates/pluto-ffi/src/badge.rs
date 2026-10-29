@@ -135,7 +135,8 @@ fn rgb(hex: &str) -> u32 {
 pub fn badge(project: &Project) -> Badge {
     let icon = project.project_icon.as_ref();
     let kind = icon.and_then(|i| i["kind"].as_str());
-    let monogram_icon = icon.is_some_and(|i| i["kind"] == "monogram" || i["monogramText"].is_string());
+    let monogram_icon =
+        icon.is_some_and(|i| i["kind"] == "monogram" || i["monogramText"].is_string());
     let named = |value: &serde_json::Value| {
         value["color"]
             .as_str()
