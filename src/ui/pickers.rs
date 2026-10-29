@@ -1042,10 +1042,91 @@ fn driver_kind_label(driver: &str) -> String {
 }
 
 /// `hasProviderSetup`.
-fn has_provider_setup(provider: &Value) -> bool {
+pub(crate) fn has_provider_setup(provider: &Value) -> bool {
     provider["driver"] == "antigravity"
         || provider["setup"]["canAuthenticate"] == true
         || provider["setup"]["canInstall"] == true
+}
+
+/// `getProviderStatusBannerKey`: what identifies the provider's status
+/// worth a banner; `None` when it is ready (or disabled).
+pub(crate) fn provider_status_key(provider: &Value) -> Option<String> {
+    let status = provider["status"].as_str()?;
+    if status == "disabled" {
+        return None;
+    }
+    let unauthenticated = provider["auth"]["status"] == "unauthenticated";
+    let advisory = &provider["compatibilityAdvisory"];
+    let incompatible = !(status == "error" && unauthenticated)
+        && (advisory["status"] == "broken"
+            || (advisory["status"] == "unsupported" && status == "ready"));
+    let instance = provider["instanceId"].as_str().unwrap_or_default();
+    if incompatible {
+        return Some(
+            [
+                instance,
+                advisory["status"].as_str().unwrap_or_default(),
+                provider["version"].as_str().unwrap_or_default(),
+                advisory["message"].as_str().unwrap_or_default(),
+            ]
+            .join("\u{0}"),
+        );
+    }
+    if status == "ready" {
+        return None;
+    }
+    if provider["driver"] == "antigravity"
+        && provider["installed"] == true
+        && status == "warning"
+        && provider["auth"]["status"] == "unknown"
+    {
+        return None;
+    }
+    Some(
+        [
+            instance,
+            status,
+            provider["auth"]["status"].as_str().unwrap_or_default(),
+            provider["message"].as_str().unwrap_or_default(),
+        ]
+        .join("\u{0}"),
+    )
+}
+
+/// `ProviderStatusBanner`'s title, message and whether it is a warning
+/// (rather than an error).
+pub(crate) fn provider_status_banner(provider: &Value) -> (String, String, bool) {
+    let driver = provider["driver"].as_str().unwrap_or_default();
+    let name = provider["displayName"]
+        .as_str()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| driver_kind_label(driver));
+    let status = provider["status"].as_str().unwrap_or_default();
+    let unauthenticated = provider["auth"]["status"] == "unauthenticated";
+    let advisory = &provider["compatibilityAdvisory"];
+    let broken = advisory["status"] == "broken";
+    let incompatible = !(status == "error" && unauthenticated)
+        && (broken || (advisory["status"] == "unsupported" && status == "ready"));
+    let title = if status == "error" && unauthenticated {
+        format!("{name} is unauthenticated")
+    } else if incompatible {
+        format!(
+            "{name} {} is known to be {}",
+            provider["version"].as_str().unwrap_or_default(),
+            if broken { "broken" } else { "unsupported" }
+        )
+    } else {
+        format!("{name} provider status")
+    };
+    let message = advisory["message"]
+        .as_str()
+        .filter(|m| !m.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| provider_status_message(provider));
+    let warning = !broken && (status == "warning" || incompatible);
+    (title, message, warning)
 }
 
 /// `getProviderStatusMessage`: broken-version guidance first, then the

@@ -172,6 +172,8 @@ pub struct App {
     /// Branch notices shown once (they stay while the mismatch lasts), and
     /// the thread whose branch is being restored.
     pub(crate) revealed_notices: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The provider status banner dismissed, by its key.
+    pub(crate) dismissed_provider_status: Option<String>,
     pub(crate) restoring_branch: Option<String>,
     /// Notices whose command is on its way ("Stopping...", "Saving...").
     pub(crate) notice_busy: std::collections::HashSet<String>,
@@ -577,6 +579,7 @@ impl App {
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect(),
             revealed_notices: Default::default(),
+            dismissed_provider_status: None,
             restoring_branch: None,
             notice_busy: Default::default(),
             dismissed_thread_errors: Default::default(),
