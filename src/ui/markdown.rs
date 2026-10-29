@@ -156,6 +156,7 @@ fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
             Block::Paragraph(i) | Block::Heading(_, i) => inlines(i, out),
             Block::List { items, .. } => items.iter().for_each(|item| collect_files(item, out)),
             Block::Quote(blocks) | Block::Alert(_, blocks) => collect_files(blocks, out),
+            Block::Footnotes(list) => collect_files(std::slice::from_ref(list.as_ref()), out),
             Block::Details {
                 summary, blocks, ..
             } => {
@@ -203,6 +204,9 @@ enum Block {
         blocks: Vec<Block>,
     },
     Rule,
+    /// `section[data-footnotes]`: the definitions' list, set apart under a
+    /// rule in small muted text.
+    Footnotes(Box<Block>),
     /// A fragment target (`user-content-<id>`) at the next block's top: a
     /// heading's slug, a footnote definition's `fn-<label>`.
     Anchor(String),
@@ -239,17 +243,32 @@ fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
     let mut definitions = FOOTNOTES.with_borrow_mut(Footnotes::take);
     if !definitions.is_empty() {
         definitions.sort_by_key(|(number, _)| *number);
-        blocks.push(Block::Rule);
-        blocks.push(Block::List {
+        blocks.push(Block::Footnotes(Box::new(Block::List {
             start: Some(1),
             items: definitions
                 .into_iter()
                 .map(|(_, (label, mut blocks))| {
                     blocks.insert(0, Block::Anchor(format!("fn-{label}")));
+                    // The back-reference closes the definition's last paragraph.
+                    let backref = Inline::Text(
+                        "\u{21a9}".into(),
+                        Style {
+                            link: Some(format!("#user-content-fnref-{label}")),
+                            bold: true,
+                            ..Style::default()
+                        },
+                    );
+                    match blocks.last_mut() {
+                        Some(Block::Paragraph(inlines)) => {
+                            inlines.push(Inline::Text(" ".into(), Style::default()));
+                            inlines.push(backref);
+                        }
+                        _ => blocks.push(Block::Paragraph(vec![backref])),
+                    }
                     blocks
                 })
                 .collect(),
-        });
+        })));
     }
     autolink_blocks(&mut blocks);
     heading_anchors(
@@ -280,6 +299,24 @@ fn heading_anchors(
 ) {
     let mut index = 0;
     while index < blocks.len() {
+        // The first reference to a footnote is its back-reference's target.
+        if let Block::Paragraph(inlines) | Block::Heading(_, inlines) = &blocks[index] {
+            let refs: Vec<String> = inlines
+                .iter()
+                .filter_map(|i| match i {
+                    Inline::Text(_, style) => {
+                        style.link.as_deref()?.strip_prefix("#user-content-fn-")
+                    }
+                    _ => None,
+                })
+                .map(|label| format!("fnref-{label}"))
+                .filter(|id| taken.insert(id.clone()))
+                .collect();
+            for id in refs {
+                blocks.insert(index, Block::Anchor(id));
+                index += 1;
+            }
+        }
         match &mut blocks[index] {
             Block::Heading(_, inlines) => {
                 let slug = heading_slug(&plain(inlines));
@@ -305,6 +342,13 @@ fn heading_anchors(
                 heading_anchors(children, next, taken)
             }
             Block::Details { blocks, .. } => heading_anchors(blocks, next, taken),
+            Block::Footnotes(list) => {
+                if let Block::List { items, .. } = list.as_mut() {
+                    for item in items {
+                        heading_anchors(item, next, taken);
+                    }
+                }
+            }
             _ => {}
         }
         index += 1;
@@ -736,6 +780,7 @@ fn autolink_blocks(blocks: &mut [Block]) {
             Block::Paragraph(list) | Block::Heading(_, list) => autolink(list),
             Block::List { items, .. } => items.iter_mut().for_each(|item| autolink_blocks(item)),
             Block::Quote(children) | Block::Alert(_, children) => autolink_blocks(children),
+            Block::Footnotes(list) => autolink_blocks(std::slice::from_mut(list.as_mut())),
             Block::Details {
                 summary, blocks, ..
             } => {
@@ -2048,6 +2093,7 @@ fn skill_chip_blocks(blocks: &mut [Block]) {
             Block::Paragraph(list) | Block::Heading(_, list) => inlines(list),
             Block::List { items, .. } => items.iter_mut().for_each(|item| skill_chip_blocks(item)),
             Block::Quote(children) | Block::Alert(_, children) => skill_chip_blocks(children),
+            Block::Footnotes(list) => skill_chip_blocks(std::slice::from_mut(list.as_mut())),
             Block::Details {
                 summary, blocks, ..
             } => {
@@ -2081,6 +2127,9 @@ fn context_display_kinds(blocks: &mut [Block], records: &[serde_json::Value]) {
                 .for_each(|item| context_display_kinds(item, records)),
             Block::Quote(children) | Block::Alert(_, children) => {
                 context_display_kinds(children, records)
+            }
+            Block::Footnotes(list) => {
+                context_display_kinds(std::slice::from_mut(list.as_mut()), records)
             }
             Block::Details {
                 summary, blocks, ..
@@ -2146,6 +2195,8 @@ pub struct Markdown<'a> {
     /// bubble that fits its text.
     pub(crate) used_width: f32,
     origin_x: f32,
+    /// Inside the footnotes: 12px text.
+    small: bool,
 }
 
 impl<'a> Markdown<'a> {
@@ -2176,6 +2227,16 @@ impl<'a> Markdown<'a> {
             run_command: None,
             used_width: 0.0,
             origin_x: 0.0,
+            small: false,
+        }
+    }
+
+    /// Body text size and line height: 12px in the footnotes.
+    fn body(&self) -> (f32, f32) {
+        if self.small {
+            (12.0, 19.5)
+        } else {
+            (BODY, BODY_LINE)
         }
     }
 
@@ -2305,11 +2366,12 @@ impl<'a> Markdown<'a> {
         };
         match block {
             Block::Paragraph(inlines) => {
+                let (body, body_line) = self.body();
                 let laid = layout_inlines(
                     ui,
                     inlines,
-                    BODY,
-                    BODY_LINE,
+                    body,
+                    body_line,
                     Weight::Regular,
                     paragraph_color,
                     width,
@@ -2370,7 +2432,8 @@ impl<'a> Markdown<'a> {
             Block::List { start, items } => {
                 for (number, item) in items.iter().enumerate() {
                     if number > 0 {
-                        ui.add_space(4.0); // li + li
+                        // li + li; `.footnotes li + li` is roomier.
+                        ui.add_space(if self.small { 5.6 } else { 4.0 });
                     }
                     let top = ui.cursor().top();
                     let left = ui.cursor().left();
@@ -2390,16 +2453,17 @@ impl<'a> Markdown<'a> {
                         |ui| self.blocks(ui, item, width - 20.0, depth + 1, id.with(number)),
                     );
                     self.prefixes.pop();
-                    let marker_center = Pos2::new(left + 6.5, top + BODY_LINE / 2.0);
+                    let (body, body_line) = self.body();
+                    let marker_center = Pos2::new(left + 6.5, top + body_line / 2.0);
                     match start {
                         Some(first) => {
                             let label = format!("{}.", first + number as u64);
                             let galley = widgets::galley(
                                 ui,
                                 &label,
-                                font(BODY, Weight::Regular),
+                                font(body, Weight::Regular),
                                 paragraph_color,
-                                BODY_LINE,
+                                body_line,
                                 f32::INFINITY,
                             );
                             let x = left + 20.0 - 6.0 - galley.size().x;
@@ -2470,6 +2534,17 @@ impl<'a> Markdown<'a> {
             } => self.details(ui, summary, *open, blocks, width, depth, id),
             // Registered by `blocks` at the next block's top.
             Block::Anchor(_) => {}
+            Block::Footnotes(list) => {
+                let (rule, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
+                ui.painter().rect_filled(rule, 0.0, theme::border());
+                ui.add_space(12.0);
+                let (small, quoted) = (self.small, self.quoted);
+                self.small = true;
+                self.quoted = true;
+                self.block(ui, list, width, depth, id.with("footnotes"));
+                self.small = small;
+                self.quoted = quoted;
+            }
             Block::Rule => {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, theme::border());
@@ -3413,6 +3488,7 @@ fn margins(block: &Block) -> (f32, f32) {
     match block {
         Block::Heading(..) => (20.0, 8.0),
         Block::Rule => (16.0, 16.0),
+        Block::Footnotes(_) => (20.0, BLOCK_MARGIN),
         Block::Alert(..) => (4.0, 4.0),
         Block::Details { .. } => (8.0, 8.0),
         _ => (BLOCK_MARGIN, BLOCK_MARGIN),
@@ -3585,7 +3661,8 @@ mod tests {
             false,
         );
         assert!(matches!(&blocks[0], Block::Alert("warning", children) if children.len() == 1));
-        let Block::Paragraph(inlines) = &blocks[1] else {
+        assert!(matches!(&blocks[1], Block::Anchor(id) if id == "fnref-1"));
+        let Block::Paragraph(inlines) = &blocks[2] else {
             panic!("{blocks:?}")
         };
         let links = texts(inlines);
@@ -3594,8 +3671,8 @@ mod tests {
             Some("https://example.dev/a".into())
         )));
         assert!(links.iter().any(|(t, _)| t == "1"));
-        assert!(matches!(blocks[2], Block::Rule));
-        assert!(matches!(&blocks[3], Block::List { start: Some(1), items } if items.len() == 1));
+        assert!(matches!(&blocks[3], Block::Footnotes(list)
+            if matches!(list.as_ref(), Block::List { start: Some(1), items } if items.len() == 1)));
         // A definition nothing refers to is left out.
         let unreferenced = parse_with("Text.\n\n[^x]: Unused.", false);
         assert_eq!(unreferenced.len(), 1);
@@ -3638,11 +3715,24 @@ See[^n].
                 _ => None,
             })
             .collect();
-        assert_eq!(anchors, ["setup", "setup-1"]);
-        let Some(Block::List { items, .. }) = blocks.last() else {
+        assert_eq!(anchors, ["setup", "setup-1", "fnref-n"]);
+        let Some(Block::Footnotes(list)) = blocks.last() else {
             panic!("{blocks:?}")
         };
+        let Block::List { items, .. } = list.as_ref() else {
+            panic!("{list:?}")
+        };
         assert!(matches!(&items[0][0], Block::Anchor(id) if id == "fn-n"));
+        // The back-reference returns to the reference's paragraph.
+        assert!(
+            blocks
+                .iter()
+                .any(|b| matches!(b, Block::Anchor(id) if id == "fnref-n"))
+        );
+        let Block::Paragraph(note) = &items[0][1] else {
+            panic!("{items:?}")
+        };
+        assert!(texts(note).contains(&("\u{21a9}".into(), Some("#user-content-fnref-n".into()))));
     }
 
     #[test]
