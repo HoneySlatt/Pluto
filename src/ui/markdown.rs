@@ -1497,6 +1497,38 @@ fn layout_inlines(
     }
 }
 
+/// A cell's inlines on one line, cut with an ellipsis past `max_width`
+/// (`text-overflow: ellipsis`).
+fn layout_line(
+    ui: &Ui,
+    inlines: &[Inline],
+    line_height: f32,
+    weight: Weight,
+    color: Color32,
+    max_width: f32,
+    suffixes: &HashMap<String, String>,
+) -> Inlines {
+    let (mut job, mut laid, _) = build_inlines(
+        ui,
+        inlines,
+        12.0,
+        line_height,
+        weight,
+        color,
+        suffixes,
+        &Default::default(),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    laid.galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
+    laid.source = inlines.to_vec();
+    laid
+}
+
 /// Section index of every character of the galley's text.
 fn char_sections(galley: &Galley) -> Vec<usize> {
     galley
@@ -1962,6 +1994,9 @@ fn paint_inlines(
     }
     opened
 }
+
+/// `.chat-markdown td { max-width: 24rem }`.
+const CELL_MAX: f32 = 384.0;
 
 /// The temp-data key of the last clicked chip's rect.
 pub(crate) const CLICKED_CHIP: &str = "markdown-clicked-chip";
@@ -3018,14 +3053,23 @@ impl<'a> Markdown<'a> {
             .size()
             .x
         };
-        // Auto table layout: columns share the width by their content width.
+        // Expanded cells wrap within 384px; collapsed ones keep one line,
+        // cut at 384px. Headers never wrap. Starts as `wordWrap` says.
+        let expanded_key = id.with("table-expanded");
+        let expanded = ui
+            .data(|d| d.get_temp::<bool>(expanded_key))
+            .unwrap_or(self.word_wrap);
+        // Auto table layout (`width:100%; min-width:max-content`): columns
+        // share the width by their content width; wider tables scroll.
         let mut natural = vec![0.0f32; columns];
         for (i, cell) in head.iter().enumerate() {
-            natural[i] = natural[i].max(measure(ui, cell, Weight::SemiBold) + 24.0);
+            let w = measure(ui, cell, Weight::SemiBold) + 24.0;
+            natural[i] = natural[i].max(if expanded { w } else { w.min(CELL_MAX) });
         }
         for row in rows {
             for (i, cell) in row.iter().enumerate() {
-                natural[i] = natural[i].max(measure(ui, cell, Weight::Regular) + 24.0);
+                natural[i] =
+                    natural[i].max((measure(ui, cell, Weight::Regular) + 24.0).min(CELL_MAX));
             }
         }
         let total: f32 = natural.iter().sum();
@@ -3035,8 +3079,9 @@ impl<'a> Markdown<'a> {
                 .map(|w| w + (width - total) * (w / total))
                 .collect()
         } else {
-            natural.iter().map(|w| w * width / total).collect()
+            natural.clone()
         };
+        let table_width = total.max(width);
         let border = theme::overlay(0.036);
         let prefixes = self.prefixes.clone();
         let mut row_index = 0;
@@ -3052,16 +3097,22 @@ impl<'a> Markdown<'a> {
             let laid: Vec<Inlines> = (0..columns)
                 .map(|i| {
                     let cell = cells.get(i).map(Vec::as_slice).unwrap_or(&[]);
-                    layout_inlines(
-                        ui,
-                        cell,
-                        12.0,
-                        cell_line,
-                        weight,
-                        color,
-                        widths[i] - 24.0,
-                        &suffixes,
-                    )
+                    let wrap = match (header, expanded) {
+                        (true, true) => f32::INFINITY,
+                        (_, false) => {
+                            return layout_line(
+                                ui,
+                                cell,
+                                cell_line,
+                                weight,
+                                color,
+                                widths[i] - 24.0,
+                                &suffixes,
+                            );
+                        }
+                        (false, true) => widths[i] - 24.0,
+                    };
+                    layout_inlines(ui, cell, 12.0, cell_line, weight, color, wrap, &suffixes)
                 })
                 .collect();
             // CSS line boxes are fractional; epaint rounds each row to whole pixels.
@@ -3072,7 +3123,7 @@ impl<'a> Markdown<'a> {
                 .unwrap_or(1)
                 .max(1);
             let height = lines as f32 * cell_line + pad_y * 2.0 + 1.0;
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(table_width, height), Sense::hover());
             let mut x = rect.left();
             for (i, cell) in laid.iter().enumerate() {
                 let cell_width = cell.galley.size().x;
@@ -3110,11 +3161,23 @@ impl<'a> Markdown<'a> {
                 border,
             );
         };
-        if !head.is_empty() {
-            paint_row(ui, head, true);
-        }
-        for row in rows {
-            paint_row(ui, row, false);
+        let mut paint_all = |ui: &mut Ui| {
+            if !head.is_empty() {
+                paint_row(ui, head, true);
+            }
+            for row in rows {
+                paint_row(ui, row, false);
+            }
+        };
+        if table_width > width + 0.5 {
+            let area = Rect::from_min_size(ui.cursor().min, Vec2::new(width, f32::INFINITY));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+                egui::ScrollArea::horizontal()
+                    .id_salt(id.with("table-scroll"))
+                    .show(ui, |ui| paint_all(ui));
+            });
+        } else {
+            paint_all(ui);
         }
         self.find = find;
         if let Some(chip) = opened {
@@ -3124,9 +3187,31 @@ impl<'a> Markdown<'a> {
         ui.add_space(2.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
         let expand = Rect::from_min_size(bar.min, Vec2::splat(24.0));
-        ui.painter()
-            .rect_filled(expand, CornerRadius::same(8), theme::muted());
-        theme::paint_icon(ui, "minimize-2", expand, 12.0, theme::foreground());
+        if expanded {
+            ui.painter()
+                .rect_filled(expand, CornerRadius::same(8), theme::muted());
+        }
+        if widgets::icon_button(
+            ui,
+            expand,
+            id.with("table-expand"),
+            if expanded { "minimize-2" } else { "maximize-2" },
+            12.0,
+            if expanded {
+                theme::foreground()
+            } else {
+                theme::muted_foreground()
+            },
+            if expanded {
+                "Collapse table cells"
+            } else {
+                "Expand table cells"
+            },
+        )
+        .clicked()
+        {
+            ui.data_mut(|d| d.insert_temp(expanded_key, !expanded));
+        }
         // Copy opens "Copy as Markdown" / "Copy as CSV"; the check shows 1.2s.
         let copy = Rect::from_min_size(Pos2::new(bar.right() - 24.0, bar.top()), Vec2::splat(24.0));
         let menu_id = format!("table-copy-{id:?}");
