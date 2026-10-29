@@ -144,6 +144,8 @@ pub struct App {
     pub(crate) nav_back: Vec<Option<String>>,
     pub(crate) nav_forward: Vec<Option<String>>,
     pub(crate) navigating: bool,
+    /// Edit from here: its dialog, then the rollback on its way.
+    pub(crate) rewind: Option<crate::ui::rewind::Rewind>,
     /// Composer notices dismissed for the run, by id.
     pub(crate) dismissed_notices: std::collections::HashSet<String>,
     /// Thread errors dismissed for the run, by thread and message.
@@ -531,6 +533,7 @@ impl App {
             nav_back: Vec::new(),
             nav_forward: Vec::new(),
             navigating: false,
+            rewind: None,
             dismissed_notices: Default::default(),
             dismissed_thread_errors: Default::default(),
             favorite_models: Default::default(),
@@ -746,6 +749,7 @@ impl App {
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
                     Route::Command(id) => {
                         self.finish_reply(&id);
+                        self.rewind_done(&id, None);
                         self.sent_done(&format!("command:{id}"));
                         self.turn_command_done(&id, true);
                     }
@@ -779,6 +783,7 @@ impl App {
                 }
                 Event::Failed(Route::Command(id), message) => {
                     self.finish_reply(&id);
+                    self.rewind_done(&id, Some(&message));
                     let waiting = self.turn_command_done(&id, false);
                     let text = if waiting || self.give_back(&format!("command:{id}")) {
                         format!("Message not sent: {message} Your text is back in the composer.")
@@ -1376,6 +1381,7 @@ impl eframe::App for App {
                 self.status_toast(ui, rect);
                 self.memory_edit_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
+                self.rewind_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
@@ -1495,6 +1501,7 @@ impl eframe::App for App {
                 self.chat_project_dialog(ui, rect);
                 self.memory_edit_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
+                self.rewind_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);

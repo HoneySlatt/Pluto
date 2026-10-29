@@ -57,7 +57,7 @@ Chat view shell
 
 | Feature | Upstream file(s) | Status | What is missing | Port location | Size |
 |---|---|---|---|---|---|
-| Edit from here (rewind) | MessagesTimeline `RevertUserMessageButton`, ChatView `onRevertToTurnCount` | missing | No Undo2 button on user messages, no "Edit from here?" dialog ("Revert files too" / "Revert and keep changes"), no `revertCheckpoint{turnCount,restoreFiles}`, prompt and attachments not restored to the composer, no "Interrupt the current turn before reverting checkpoints." guard. Pluto's "Edit message" exists only in Chat mode | chat.rs `user_row` (none) | L |
+| Edit from here (rewind) | MessagesTimeline `RevertUserMessageButton`, ChatView `onRevertToTurnCount` | done | The message's attachments do not return to the composer with its prompt | src/ui/rewind.rs, chat.rs `user_row` | - |
 | Checkpoint rollback from inspector | V2ItemInspector, ChatView `onRollbackCheckpoint` | missing | "Roll back this thread to the selected checkpoint?" + `revertCheckpoint{checkpointId,scopeId}` | none | M |
 | Timeline minimap | MessagesTimeline `TimelineMinimap`, timelineMinimapItems.ts, timelineMinimapWheel.ts | missing | Turn strip, hover preview of user/assistant text, Previous/Next turn, wheel and scrub | none | M |
 | Scroll-to-end pill, page scroll | ChatView (pill), timelineScrollTarget.ts, pageScrollController.ts, ChatView `handleKeyDown` | missing | Pill shown after scrolling away from the live edge; PageUp/PageDown/Home/End (and ArrowUp at top) from the composer scrolling the timeline | chat.rs `timeline` | S |
@@ -145,7 +145,7 @@ Chat view shell
 - Protocol 2 "Not ported" list (lines ~58-85) is stale in both directions:
   - Lists "non-image files" / "file attachments in user messages", but both are ported (attachments.rs uploads via `attachments.createUploadUrl` and draws chips).
   - `/compact` is listed, but compaction works from the meter's "Compact session" (only the slash item is hidden, command_menu.rs:725).
-  - Omits: Edit from here / checkpoint revert, ThreadErrorBanner, ThreadStatusLine, minimap, scroll-to-end pill, worktree setup card, the ChatView banners (child input, goal, background work, branch mismatch, clone, offline), the branch switch dialog, multi-model fan-out, background send, failed-send restore, user-row controls (intent pill, attribution, prompt link, status pill), the "Subagent of" header and ProviderSubagentBar.
+  - Omits: checkpoint revert from the inspector, ThreadErrorBanner, ThreadStatusLine, minimap, scroll-to-end pill, worktree setup card, the ChatView banners (child input, goal, background work, branch mismatch, clone, offline), the branch switch dialog, multi-model fan-out, background send, failed-send restore, user-row controls (intent pill, attribution, prompt link, status pill), the "Subagent of" header and ProviderSubagentBar.
 - Settings that do nothing: "Collapse composer on scroll" (`composerCollapseOnScroll`), proactive panels (`proactivePanelsEnabled`), "Rich text composer", "Send shortcut" are all editable in Settings but read only by settings.rs.
 - Keybindings: composer.*, modelPicker.toggle, thread.copyReference, thread.stop, rightPanel.toggleMaximized and `script.*.run` show on the Keybindings page but are not dispatched. The shortcuts.rs doc mentions the composer controls only.
 - Stale module docs, not README:

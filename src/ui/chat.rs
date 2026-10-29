@@ -1754,12 +1754,42 @@ impl App {
                 true,
                 || message.text.clone(),
             );
+            // `RevertUserMessageButton`: Edit from here.
+            let mut time_right = copy.left();
+            if self.rewind_checkpoint(message).is_some() {
+                let revert = Rect::from_min_size(
+                    Pos2::new(copy.left() - 2.0 - 24.0, meta_top),
+                    Vec2::splat(24.0),
+                );
+                let busy =
+                    self.rewinding() || self.current_thread().is_some_and(|t| t.is_running());
+                let tint = if busy {
+                    theme::alpha(theme::muted_foreground(), 0.5)
+                } else {
+                    theme::muted_foreground()
+                };
+                if widgets::icon_button(
+                    ui,
+                    revert,
+                    ("revert-user", &message.id),
+                    "undo-2",
+                    12.0,
+                    tint,
+                    "Edit from here",
+                )
+                .clicked()
+                    && !busy
+                {
+                    self.request_rewind(message);
+                }
+                time_right = revert.left();
+            }
             let time = widgets::clock_time(&message.created_at, self.now);
             let time_width = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
             widgets::text_in(
                 ui,
                 Rect::from_min_size(
-                    Pos2::new(copy.left() - 8.0 - time_width, meta_top),
+                    Pos2::new(time_right - 8.0 - time_width, meta_top),
                     Vec2::new(time_width + 1.0, 24.0),
                 ),
                 &time,

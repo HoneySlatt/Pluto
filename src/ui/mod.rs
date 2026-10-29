@@ -68,6 +68,7 @@ pub mod publish;
 pub mod pull_requests;
 pub mod queue;
 pub mod requests_panel;
+pub mod rewind;
 pub mod scheduled_tasks;
 pub mod scratch;
 pub mod script_import;
