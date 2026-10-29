@@ -346,6 +346,22 @@ impl App {
                 );
                 search.shortcut = Some("Ctrl+Shift+F");
                 actions.push(search);
+                // `Copy prompt link` from the composer's draft, with the
+                // project's GitHub repository and the model when it has one.
+                if crate::ui::prompt_links::prompt_link_for(&self.composer).is_some() {
+                    actions.push(Item::new(
+                        "link",
+                        "Copy prompt link",
+                        Action::Call(App::copy_prompt_link),
+                    ));
+                    if self.current_github_repo().is_some() {
+                        actions.push(Item::new(
+                            "link",
+                            "Copy prompt link with repo and model",
+                            Action::Call(App::copy_prompt_link_with_repo),
+                        ));
+                    }
+                }
                 actions.push(Item::new(
                     "folder-git-2",
                     "New project",

@@ -53,6 +53,8 @@ pub(crate) enum Action {
     },
     /// Opens a new thread in a project (a clone's "Open project").
     OpenProject(String),
+    /// A linked prompt replaces the composer's draft.
+    ReplaceDraft(String),
     /// Closes the toast and nothing else.
     Dismiss,
 }

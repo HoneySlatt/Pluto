@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pluto
+Comment=Native client for the Pluto server
+Exec=pluto %u
+Icon=pluto
+Terminal=false
+Categories=Development;
+MimeType=x-scheme-handler/pluto;
+StartupWMClass=pluto

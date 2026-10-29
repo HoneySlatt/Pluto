@@ -65,6 +65,7 @@ pub mod project_icon;
 pub mod project_scope;
 pub mod projects_page;
 pub mod prompt_history;
+pub mod prompt_links;
 pub mod providers;
 pub mod publish;
 pub mod pull_requests;

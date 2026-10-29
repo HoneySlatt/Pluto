@@ -52,6 +52,9 @@ pub struct App {
     pub(crate) composer_rect: Option<Rect>,
     /// `subscribeProjectClones`: whether it is open, and the snapshots.
     pub(crate) clones_streaming: bool,
+    /// Prompt links: from later launches, and those waiting to connect.
+    pub(crate) link_inbox: Option<std::sync::mpsc::Receiver<String>>,
+    pub(crate) pending_links: Vec<String>,
     /// `subscribeWorktreeSetup`: the held snapshot by thread, and the
     /// threads subscribed.
     pub(crate) worktree_setups:
@@ -536,6 +539,13 @@ pub struct Options {
 }
 
 impl App {
+    /// Prompt links given on the command line, opened once connected.
+    pub fn queue_links(&mut self, links: Vec<String>) {
+        self.pending_links.extend(links);
+    }
+}
+
+impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, options: Options) -> Self {
         theme::install(&cc.egui_ctx);
         cc.egui_ctx
@@ -557,6 +567,13 @@ impl App {
             closed_views: Vec::new(),
             permission_notice_shown: Default::default(),
             clones_streaming: false,
+            // Only the app proper takes links (not tests and snapshots).
+            link_inbox: options
+                .client_settings_path
+                .is_some()
+                .then(|| crate::ui::prompt_links::listen(cc.egui_ctx.clone()))
+                .flatten(),
+            pending_links: Vec::new(),
             worktree_setups: Default::default(),
             worktree_streams: Default::default(),
             keep_full_history: Default::default(),
@@ -1770,6 +1787,9 @@ impl App {
             Some(crate::ui::toasts::Action::Clone { project, action }) => {
                 self.clone_action(&project, action);
             }
+            Some(crate::ui::toasts::Action::ReplaceDraft(prompt)) => {
+                self.composer = prompt;
+            }
             Some(crate::ui::toasts::Action::OpenProject(project)) => {
                 self.settings_page = None;
                 self.start_draft(Some(project));
@@ -1838,6 +1858,7 @@ impl eframe::App for App {
         self.save_drafts_when_idle(ui.ctx());
         self.watch_project_clones();
         self.watch_worktree_setup();
+        self.poll_prompt_links();
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);

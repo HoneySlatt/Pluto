@@ -1843,11 +1843,36 @@ impl App {
                 true,
                 || message.text.clone(),
             );
-            // `RevertUserMessageButton`: Edit from here.
+            // `MessageCopyButton` "Copy prompt link", for a prompt a link
+            // can carry.
             let mut time_right = copy.left();
+            let link = crate::ui::prompt_links::prompt_link_for(
+                &crate::ui::prompt_links::plain_prompt(&message.text),
+            );
+            if let Some(link) = link {
+                let button = Rect::from_min_size(
+                    Pos2::new(time_right - 2.0 - 24.0, meta_top),
+                    Vec2::splat(24.0),
+                );
+                if widgets::icon_button(
+                    ui,
+                    button,
+                    ("prompt-link", &message.id),
+                    "link",
+                    12.0,
+                    theme::muted_foreground(),
+                    "Copy prompt link",
+                )
+                .clicked()
+                {
+                    self.copy_link(Some(link));
+                }
+                time_right = button.left();
+            }
+            // `RevertUserMessageButton`: Edit from here.
             if self.rewind_checkpoint(message).is_some() {
                 let revert = Rect::from_min_size(
-                    Pos2::new(copy.left() - 2.0 - 24.0, meta_top),
+                    Pos2::new(time_right - 2.0 - 24.0, meta_top),
                     Vec2::splat(24.0),
                 );
                 let busy =

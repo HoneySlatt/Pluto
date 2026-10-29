@@ -118,7 +118,7 @@ Chat view shell
 | Typing guard | composerTypingGuard, useComposerTypingGuard, pendingDraftWork | done | 1.5 s hold (`typing_guard.rs`) | typing_guard.rs | - |
 | Context window meter | ContextWindowMeter(.logic) | partial (redesigned) | Missing "Cost" and "Total processed" rows, compaction-disabled reasons, loading placeholder | context_meter.rs | S |
 | Queue extras | QueuedRunsControl | partial | No arrow-key reorder, no rows still in flight, no editing of attachments | queue.rs | S |
-| Prompt links | promptLinks/* (copyPromptLink, linkedPrompt, NewThreadLinkView, ThreadLinkPrompt, HostedPromptLinkLanding) | missing | No prompt deep links: "Prompt link copied", "Linked prompt ready / Replace draft", hidden-characters warning, new-thread link view (clone or "No project") | none | M |
+| Prompt links | promptLinks/* (copyPromptLink, linkedPrompt, NewThreadLinkView, ThreadLinkPrompt, HostedPromptLinkLanding) | partial | On `pluto://` (decision): Copy prompt link (bubble, palette, with repo and model), receiving through `pluto %u` and a running instance, sanitizing, Replace draft. Missing: cloning the linked repository, PR checkout | prompt_links.rs | M |
 
 ### Chat view shell, header, branch toolbar
 
