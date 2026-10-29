@@ -1551,8 +1551,17 @@ impl App {
         // queued or steering message's marker.
         let markers = user_markers(message);
         let markers_height = markers.len() as f32 * (16.0 + 4.0);
+        // A message that did not complete says how it ended, in red.
+        let status_pill = !matches!(
+            message.status.as_str(),
+            "" | "completed" | "pending" | "waiting"
+        );
+        let pill_height = if status_pill { 4.0 + 20.0 } else { 0.0 };
         let (row_rect, response) = ui.allocate_exact_size(
-            Vec2::new(width, markers_height + bubble_size.y + 4.0 + 24.0),
+            Vec2::new(
+                width,
+                markers_height + bubble_size.y + pill_height + 4.0 + 24.0,
+            ),
             Sense::hover(),
         );
         if let Some(target) = self.paint_user_markers(ui, &message.id, &markers, row_rect) {
@@ -1742,7 +1751,15 @@ impl App {
                 }
             }
         }
-        let meta_top = bubble.bottom() + 4.0;
+        if status_pill {
+            status_pill_at(
+                ui,
+                Pos2::new(row_rect.right() - 4.0, bubble.bottom() + 4.0),
+                &message.status,
+                true,
+            );
+        }
+        let meta_top = bubble.bottom() + pill_height + 4.0;
         // Pluto: a chat message's versions, and its Edit button.
         let mut meta_right = row_rect.right() - 4.0;
         if let Some((versions, at, original)) = self.message_versions(&message.id) {
@@ -1882,6 +1899,8 @@ impl App {
             // The message's text can be cited (`data-assistant-citation-source`).
             plugin.lock().source = Some(message.id.clone());
             let marks = self.find_marks(&message.id);
+            let word_wrap = self.client_setting("wordWrap") != false;
+            let project = self.current_thread().map(|t| t.project_id.clone());
             let mut markdown = Markdown::new(
                 &mut self.highlighter,
                 ui.id().with(("markdown", &message.id)),
@@ -1890,7 +1909,10 @@ impl App {
             markdown.find = marks;
             markdown.media_root = workspace;
             markdown.media_thread = self.selected.clone();
+            markdown.word_wrap = word_wrap;
+            markdown.can_run_shell = !message.streaming && project.is_some();
             markdown.show(ui, text, width - 8.0);
+            let run_command = markdown.run_command.take();
             let marks = markdown.find.take();
             plugin.lock().source = None;
             let opened_file = markdown.opened_file.take();
@@ -1908,6 +1930,15 @@ impl App {
             }
             if let Some(citation) = opened_citation {
                 self.open_citation_source(&citation);
+            }
+            // `runShellCommand`: the code block's command in the terminal.
+            if let (Some(command), Some(project)) = (run_command, project) {
+                let script = serde_json::json!({
+                    "id": "chat-code-block",
+                    "name": "Chat code block",
+                    "command": command,
+                });
+                self.run_project_script(&project, &script);
             }
             if let Some((turn_id, files)) = changes {
                 ui.add_space(16.0);
@@ -1937,10 +1968,19 @@ impl App {
             let (meta, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
             let row_rect = Rect::from_min_max(Pos2::new(left, top), meta.max);
             if ui.rect_contains_pointer(row_rect) {
-                let copy = Rect::from_min_size(
-                    Pos2::new(meta.left() + 4.0, meta.top()),
-                    Vec2::splat(24.0),
-                );
+                // An answer that did not complete says how it ended first.
+                let mut x = meta.left() + 4.0;
+                if !matches!(message.status.as_str(), "" | "completed") {
+                    let width = status_pill_width(ui, &message.status, false);
+                    status_pill_at(
+                        ui,
+                        Pos2::new(x + width, meta.top() + 2.0),
+                        &message.status,
+                        false,
+                    );
+                    x += width + 8.0;
+                }
+                let copy = Rect::from_min_size(Pos2::new(x, meta.top()), Vec2::splat(24.0));
                 widgets::copy_button(
                     ui,
                     copy,
@@ -2913,4 +2953,55 @@ fn expanded_body(entry: &WorkEntry, label: &str) -> Option<String> {
         add(Some(&files.join("\n")));
     }
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+fn pill_font(user: bool) -> egui::FontId {
+    if user {
+        font(10.0, Weight::Medium)
+    } else {
+        theme::mono(10.0)
+    }
+}
+
+/// The status pill's width (`px-1.5` and its border).
+pub(crate) fn status_pill_width(ui: &Ui, status: &str, user: bool) -> f32 {
+    widgets::text_width(ui, status, pill_font(user)) + 12.0 + 2.0
+}
+
+/// A message's status pill, its right edge at `right_top`: red for a user
+/// message (`text-destructive`), neutral and mono on an answer's meta row.
+/// Returns its width.
+pub(crate) fn status_pill_at(ui: &Ui, right_top: Pos2, status: &str, user: bool) -> f32 {
+    let text_font = pill_font(user);
+    let width = status_pill_width(ui, status, user);
+    let rect = Rect::from_min_size(
+        Pos2::new(right_top.x - width, right_top.y),
+        Vec2::new(width, 20.0),
+    );
+    let (fill, stroke, color) = if user {
+        let red = theme::error();
+        (theme::alpha(red, 0.08), theme::alpha(red, 0.25), red)
+    } else {
+        (
+            egui::Color32::TRANSPARENT,
+            theme::alpha(theme::border(), 0.7),
+            theme::muted_foreground(),
+        )
+    };
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(10),
+        fill,
+        egui::Stroke::new(1.0, stroke),
+        egui::StrokeKind::Inside,
+    );
+    widgets::text(
+        ui,
+        Pos2::new(rect.left() + 7.0, rect.top() + 3.0),
+        status,
+        text_font,
+        color,
+        14.0,
+    );
+    width
 }

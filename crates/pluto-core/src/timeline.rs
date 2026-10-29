@@ -43,6 +43,8 @@ pub struct Message {
     pub attribution: Option<String>,
     pub scheduled_task_id: Option<String>,
     pub sender_thread_id: Option<String>,
+    /// The turn item's status (`failed`, `interrupted`, `completed`…).
+    pub status: String,
 }
 
 /// `resolveUserMessagePresentation`: the sender of a user message, and its
@@ -1268,6 +1270,7 @@ fn entries(detail: &Detail) -> Vec<Entry> {
                     attribution,
                     scheduled_task_id,
                     sender_thread_id: item.str("senderThreadId").map(str::to_owned),
+                    status: item.status.clone(),
                 }));
             }
             "proposed_plan" => {

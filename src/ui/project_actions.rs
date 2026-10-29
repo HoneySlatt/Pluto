@@ -459,7 +459,8 @@ impl App {
         let Some(thread) = self.selected.clone() else {
             return;
         };
-        if let Some(id) = script["id"].as_str() {
+        // A chat code block's command is not remembered as the last script.
+        if let Some(id) = script["id"].as_str().filter(|id| *id != "chat-code-block") {
             self.last_script
                 .insert(project_id.to_owned(), id.to_owned());
         }

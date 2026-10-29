@@ -158,6 +158,8 @@ enum Block {
     Code {
         language: String,
         code: String,
+        /// The info string after the language (`title="…"`, a file name).
+        meta: String,
     },
     Table {
         alignments: Vec<Alignment>,
@@ -640,11 +642,14 @@ fn parse_blocks_until(
                 });
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                let language = match kind {
+                let (language, meta) = match kind {
                     CodeBlockKind::Fenced(info) => {
-                        info.split_whitespace().next().unwrap_or("").to_owned()
+                        let info = info.trim();
+                        let (language, meta) =
+                            info.split_once(char::is_whitespace).unwrap_or((info, ""));
+                        (language.to_owned(), meta.trim().to_owned())
                     }
-                    CodeBlockKind::Indented => String::new(),
+                    CodeBlockKind::Indented => (String::new(), String::new()),
                 };
                 let mut code = String::new();
                 while *index < events.len() {
@@ -666,6 +671,7 @@ fn parse_blocks_until(
                         language
                     },
                     code,
+                    meta,
                 });
             }
             Event::Start(Tag::Table(alignments)) => {
@@ -1872,6 +1878,12 @@ pub struct Markdown<'a> {
     pub(crate) line_breaks: bool,
     pub(crate) text_color: Option<Color32>,
     pub(crate) skill_chips: bool,
+    /// Code blocks start wrapped (the `wordWrap` setting).
+    pub(crate) word_wrap: bool,
+    /// An answer in a project: a shell command can run in its terminal,
+    /// and the one clicked lands here.
+    pub(crate) can_run_shell: bool,
+    pub(crate) run_command: Option<String>,
     /// How far right the drawn content reached from the column's left, for a
     /// bubble that fits its text.
     pub(crate) used_width: f32,
@@ -1901,6 +1913,9 @@ impl<'a> Markdown<'a> {
             line_breaks: false,
             text_color: None,
             skill_chips: false,
+            word_wrap: true,
+            can_run_shell: false,
+            run_command: None,
             used_width: 0.0,
             origin_x: 0.0,
         }
@@ -2137,7 +2152,11 @@ impl<'a> Markdown<'a> {
                     }
                 }
             }
-            Block::Code { language, code } => self.code_block(ui, language, code, width, id),
+            Block::Code {
+                language,
+                code,
+                meta,
+            } => self.code_block(ui, language, code, meta, width, id),
             Block::Table {
                 alignments,
                 head,
@@ -2547,9 +2566,23 @@ impl<'a> Markdown<'a> {
         );
     }
 
-    fn code_block(&mut self, ui: &mut Ui, language: &str, code: &str, width: f32, id: egui::Id) {
+    fn code_block(
+        &mut self,
+        ui: &mut Ui,
+        language: &str,
+        code: &str,
+        meta: &str,
+        width: f32,
+        id: egui::Id,
+    ) {
         let line_height = theme::code_line(17.875); // 13px × leading-snug
         let inner_width = width - 2.0 - 28.8;
+        // Wrapped by default (`wordWrap`), each block on its own after a
+        // click; unwrapped lines scroll sideways.
+        let wrap_id = id.with("wrap");
+        let wrapped = ui
+            .data(|d| d.get_temp::<bool>(wrap_id))
+            .unwrap_or(self.word_wrap);
         let mut job = LayoutJob::default();
         // Plain until the worker has highlighted it: the same glyphs, so
         // nothing moves when the colors arrive.
@@ -2562,16 +2595,20 @@ impl<'a> Markdown<'a> {
                 widgets::format(theme::code_font(), *color, line_height),
             );
         }
-        job.wrap.max_width = inner_width; // wrapping is on by default upstream
+        job.wrap.max_width = if wrapped { inner_width } else { f32::INFINITY };
         let galley = widgets::center_rows(ui.fonts_mut(|f| f.layout_job(job)));
         let height = 1.0 + 30.0 + 12.8 + galley.size().y + 12.8 + 1.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(10), theme::control_surface());
-        // Header: language, wrap toggle (pressed), copy.
+        // Header: the fence's title (or its language), then Wrap, Run, Copy.
         let header_color = theme::alpha(theme::code_foreground(), 0.72);
-        let header = Rect::from_min_size(rect.min + Vec2::new(13.0, 7.0), Vec2::new(200.0, 24.0));
-        if let Some((icon, color)) = language_icon(language) {
+        let header = Rect::from_min_size(
+            rect.min + Vec2::new(13.0, 7.0),
+            Vec2::new((width - 13.0 - 100.0).max(40.0), 24.0),
+        );
+        if let Some(title) = fence_title(meta) {
+            let (icon, color) = crate::ui::files::file_icon(&title);
             theme::paint_icon(
                 ui,
                 icon,
@@ -2579,6 +2616,18 @@ impl<'a> Markdown<'a> {
                 14.0,
                 color,
             );
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(header.min + Vec2::new(20.0, 0.0), header.max),
+                &title,
+                theme::mono(11.0),
+                header_color,
+            );
+        } else if let Some((icon, color)) = language_icon(language) {
+            let icon_rect = Rect::from_min_size(header.min, Vec2::new(14.0, 24.0));
+            theme::paint_icon(ui, icon, icon_rect, 14.0, color);
+            ui.interact(icon_rect, id.with("language"), Sense::hover())
+                .on_hover_text(language);
         } else {
             widgets::text_in(ui, header, language, theme::mono(11.0), header_color);
         }
@@ -2586,10 +2635,54 @@ impl<'a> Markdown<'a> {
             Pos2::new(rect.right() - 31.0, rect.top() + 7.0),
             Vec2::splat(24.0),
         );
-        let wrap = copy.translate(Vec2::new(-26.0, 0.0));
-        ui.painter()
-            .rect_filled(wrap, CornerRadius::same(8), theme::muted());
-        theme::paint_icon(ui, "text-wrap", wrap, 12.0, theme::foreground());
+        let mut left = copy.left() - 2.0;
+        // "Run in terminal": a single closed shell command in an answer.
+        if self.can_run_shell && runnable_shell(language, code) {
+            let run = Rect::from_min_size(Pos2::new(left - 24.0, copy.top()), Vec2::splat(24.0));
+            if widgets::icon_button(
+                ui,
+                run,
+                id.with("run"),
+                "play",
+                12.0,
+                theme::muted_foreground(),
+                "Run in terminal",
+            )
+            .clicked()
+            {
+                self.run_command = Some(code.trim().to_owned());
+            }
+            left = run.left() - 2.0;
+        }
+        let wrap = Rect::from_min_size(Pos2::new(left - 24.0, copy.top()), Vec2::splat(24.0));
+        let wrap_response = ui
+            .interact(wrap, id.with("wrap-toggle"), Sense::click())
+            .on_hover_text(if wrapped {
+                "Disable line wrap"
+            } else {
+                "Wrap lines"
+            });
+        if wrapped {
+            ui.painter()
+                .rect_filled(wrap, CornerRadius::same(8), theme::muted());
+        } else if wrap_response.hovered() {
+            ui.painter()
+                .rect_filled(wrap, CornerRadius::same(8), theme::accent());
+        }
+        theme::paint_icon(
+            ui,
+            "text-wrap",
+            wrap,
+            12.0,
+            if wrapped {
+                theme::foreground()
+            } else {
+                theme::muted_foreground()
+            },
+        );
+        if wrap_response.clicked() {
+            ui.data_mut(|d| d.insert_temp(wrap_id, !wrapped));
+        }
         widgets::copy_button(
             ui,
             copy,
@@ -2602,16 +2695,34 @@ impl<'a> Markdown<'a> {
             || code.to_owned(),
         );
         let pos = rect.min + Vec2::new(1.0 + 14.4, 1.0 + 30.0 + 12.8);
-        let marks = self.find.as_mut().map(|find| find.mark(ui, pos, &galley));
-        widgets::selectable_galley(
-            ui,
-            id.with("code"),
-            pos,
-            galley.clone(),
-            theme::foreground(),
-        );
-        if let Some(marks) = &marks {
-            FindMarks::recolor(ui, pos, &galley, marks);
+        if wrapped || galley.size().x <= inner_width {
+            let marks = self.find.as_mut().map(|find| find.mark(ui, pos, &galley));
+            widgets::selectable_galley(
+                ui,
+                id.with("code"),
+                pos,
+                galley.clone(),
+                theme::foreground(),
+            );
+            if let Some(marks) = &marks {
+                FindMarks::recolor(ui, pos, &galley, marks);
+            }
+        } else {
+            // Long lines scroll sideways inside the block.
+            let area = Rect::from_min_size(pos, Vec2::new(inner_width, galley.size().y + 8.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(area));
+            egui::ScrollArea::horizontal()
+                .id_salt(id.with("scroll"))
+                .show(&mut child, |ui| {
+                    let (inner, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
+                    widgets::selectable_galley(
+                        ui,
+                        id.with("code"),
+                        inner.min,
+                        galley.clone(),
+                        theme::foreground(),
+                    );
+                });
         }
         ui.ctx()
             .plugin::<widgets::CopyCleanup>()
@@ -3032,6 +3143,62 @@ pub(crate) fn language_icon(language: &str) -> Option<(&'static str, Color32)> {
     })
 }
 
+/// `extractFenceTitle`: a `title=`/`file=`/`filename=` value, else the
+/// first token that looks like a file name with an extension.
+fn fence_title(meta: &str) -> Option<String> {
+    let meta = meta.trim();
+    if meta.is_empty() {
+        return None;
+    }
+    let lower = meta.to_ascii_lowercase();
+    for key in ["title=", "filename=", "file="] {
+        let mut from = 0;
+        while let Some(found) = lower[from..].find(key) {
+            let at = from + found;
+            // The key starts a token.
+            if at == 0 || meta[..at].ends_with(char::is_whitespace) {
+                let value = &meta[at + key.len()..];
+                let parsed = match value.chars().next() {
+                    Some(q @ ('"' | '\'')) => value[1..].split(q).next().map(str::to_owned),
+                    _ => value.split_whitespace().next().map(str::to_owned),
+                };
+                if let Some(title) = parsed.filter(|t| !t.is_empty()) {
+                    return Some(title);
+                }
+            }
+            from = at + key.len();
+        }
+    }
+    meta.split_whitespace()
+        .find(|token| {
+            let first = token
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '@');
+            let allowed = token
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '@' | '.' | '/' | '-'));
+            let extension = token.rsplit_once('.').is_some_and(|(stem, ext)| {
+                !stem.is_empty()
+                    && !ext.is_empty()
+                    && ext.chars().all(|c| c.is_ascii_alphanumeric())
+            });
+            first && allowed && extension
+        })
+        .map(str::to_owned)
+}
+
+/// A fence "Run in terminal" can take: a shell language and one plain
+/// command line (no control or format characters, no continuation).
+fn runnable_shell(language: &str, code: &str) -> bool {
+    matches!(language, "sh" | "bash" | "zsh" | "fish" | "shell" | "powershell" | "pwsh")
+        && !code.trim().is_empty()
+        && !code.trim_end().ends_with('\\')
+        && !code
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{feff}'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3131,5 +3298,24 @@ mod tests {
             panic!()
         };
         assert!(texts(inlines).iter().any(|(t, _)| t == "<b>"));
+    }
+
+    #[test]
+    fn fence_titles_and_runnable_commands() {
+        assert_eq!(
+            fence_title(r#"title="src/main.rs" lines"#).as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(fence_title("file=app.ts").as_deref(), Some("app.ts"));
+        assert_eq!(
+            fence_title("src/lib/a.ts {1,3}").as_deref(),
+            Some("src/lib/a.ts")
+        );
+        assert_eq!(fence_title("showLineNumbers"), None);
+        assert!(runnable_shell("bash", "cargo test --workspace"));
+        assert!(!runnable_shell("bash", "cd a\ncargo test"));
+        assert!(!runnable_shell("bash", "make \\"));
+        assert!(!runnable_shell("rust", "cargo test"));
+        assert!(!runnable_shell("Bash", "ls"));
     }
 }
