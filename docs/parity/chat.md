@@ -81,7 +81,7 @@ Chat view shell
 | Markdown: code blocks | `MarkdownCodeBlock`, chat/MermaidDiagram.tsx | partial | Copy, Wrap lines, Run in terminal, fence titles done; Mermaid missing | markdown.rs | L |
 | Markdown: tables | `MarkdownTable` | done | Expand / Collapse cells, 384px cap, sideways scroll | markdown.rs | - |
 | Link menus and target | chat/externalLinkContextMenu.ts, `MarkdownFileLink`, `browserLinkTarget` | partial | External links: only "Copy Link" (no "Open in integrated/system browser"), clicks ignore `browserLinkTarget`. File chips: no "File options" menu (Open in editor, Open HTML in browser, Reveal, Copy relative/full path, Preview media); `file:`/Windows paths not handled | md_links.rs, text_menu.rs | M |
-| Video playback | media/MediaVideoPlayer.tsx, media/OpenMediaLink.tsx, `ChatMarkdownVideo` | missing | Video in markdown, user attachments and lightbox (README admits it) | lightbox.rs | L |
+| Video playback | media/MediaVideoPlayer.tsx, media/OpenMediaLink.tsx, `ChatMarkdownVideo` | partial | Through `ffprobe`/`ffmpeg` (decision; needs them in PATH): markdown videos in place, user video attachments with poster and play disc opening large, play/pause, seek, time, mute, sound to PulseAudio. Missing: fullscreen, the media menu, Retry on a failed URL | video.rs | S |
 | HTML render full screen | chat/HtmlRenderDialog.tsx | partial (deliberate) | No full-screen dialog with zoom controls; replaced by "Open in Design" | html_render.rs | S |
 | MCP app extras | chat/McpAppFrame.tsx | partial | No full screen, downloads refused, theme variables not passed (README notes) | mcp_apps.rs | M |
 | Citation stale quote | AssistantCitationSource.tsx | partial | No "The quoted text has changed" / "Showing the source response…" notice | cite.rs ~690 | S |

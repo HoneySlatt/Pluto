@@ -520,7 +520,13 @@ impl App {
         media_menu: Option<(crate::ui::media::Source, Pos2)>,
     ) {
         for (key, payload) in asset_requests {
-            self.send_request(format!("attachment:{key}"), "assets.createUrl", payload);
+            // A video plays from its URL; an image is fetched and decoded.
+            let request = if key.starts_with("md-video:") {
+                format!("video-url:{key}")
+            } else {
+                format!("attachment:{key}")
+            };
+            self.send_request(request, "assets.createUrl", payload);
         }
         if let Some((source, image)) = opened_media {
             self.open_lightbox(

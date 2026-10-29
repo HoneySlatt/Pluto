@@ -1565,16 +1565,27 @@ impl App {
         };
         let footer = if can_collapse { 6.0 + 24.0 } else { 0.0 };
         let text_size = Vec2::new(measured.x, body_height + footer);
-        // Image attachments sit above the text (`mb-2`).
+        // Image attachments sit above the text (`mb-2`); videos share the
+        // grid (`UserVideoAttachment`).
         let images = attachments::images(&message.attachments);
-        let (grid_height, cell) = attachments::grid_size(images.len(), max_width - 24.0);
-        let grid = if images.is_empty() {
+        let all_files = attachments::files(&message.attachments);
+        let is_video = |file: &&serde_json::Value| {
+            crate::ui::video::is_video(
+                file["name"].as_str().unwrap_or_default(),
+                file["mimeType"].as_str(),
+            )
+        };
+        let videos: Vec<&serde_json::Value> = all_files.iter().copied().filter(is_video).collect();
+        let (grid_height, cell) =
+            attachments::grid_size(images.len() + videos.len(), max_width - 24.0);
+        let grid = if images.is_empty() && videos.is_empty() {
             Vec2::ZERO
         } else {
             Vec2::new(2.0 * cell.x + 8.0, grid_height + 8.0)
         };
         // Pluto: file attachments as chips under the images.
-        let files = attachments::files(&message.attachments);
+        let files: Vec<&serde_json::Value> =
+            all_files.iter().copied().filter(|f| !is_video(f)).collect();
         let (files_per_row, files_block) = attachments::file_grid(files.len(), max_width - 24.0);
         let files_size = if files.is_empty() {
             Vec2::ZERO
@@ -1647,6 +1658,24 @@ impl App {
                     }
                 }
                 self.open_lightbox(items, start);
+            }
+        }
+        for (offset, video) in videos.iter().enumerate() {
+            let index = images.len() + offset;
+            let cell_rect = Rect::from_min_size(
+                bubble.min
+                    + Vec2::splat(12.0)
+                    + Vec2::new(
+                        (index % 2) as f32 * (cell.x + 8.0),
+                        (index / 2) as f32 * (cell.y + 8.0),
+                    ),
+                cell,
+            );
+            if let Some(key) = self.attachment_video(video) {
+                let name = video["name"].as_str().unwrap_or("video").to_owned();
+                if crate::ui::video::player(ui, &key, cell_rect, &name, true) {
+                    self.video_overlay = Some((key, name));
+                }
             }
         }
         for (index, file) in files.iter().enumerate() {

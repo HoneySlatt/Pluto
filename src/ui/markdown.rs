@@ -2735,10 +2735,71 @@ impl<'a> Markdown<'a> {
     /// 16:9 slot (or the size the server read) holds its place while it
     /// loads and says "Image unavailable" if it fails. A click expands it;
     /// a right click opens its menu.
+    /// `ChatMarkdownVideo`: 30rem at most, framed, playing in place.
+    fn video_block(&mut self, ui: &mut Ui, src: &str, alt: &str, width: f32) {
+        use crate::ui::media::{self, ImageSource};
+        const MAX: f32 = 480.0;
+        let classified = media::classify(
+            src,
+            self.image_base.as_deref().or(self.media_root.as_deref()),
+        );
+        let key = match &classified {
+            ImageSource::Direct(uri) => {
+                let key = format!("md-video:{uri}");
+                if !crate::ui::video::known(&key) {
+                    crate::ui::video::set_source(&key, Some(uri.clone()));
+                }
+                key
+            }
+            ImageSource::File(path) => {
+                let thread = self.media_thread.clone().unwrap_or_default();
+                let key = format!("md-video:{thread}:{path}");
+                if !crate::ui::video::requested(&key) && !thread.is_empty() {
+                    crate::ui::video::mark_requested(&key);
+                    self.asset_requests.push((
+                        key.clone(),
+                        serde_json::json!({"resource": {
+                            "_tag": "media-file", "threadId": thread, "path": path,
+                        }}),
+                    ));
+                }
+                key
+            }
+            ImageSource::Blocked => {
+                self.image_unavailable_chip(ui, alt);
+                return;
+            }
+        };
+        let limit = width.min(MAX);
+        let size = crate::ui::video::natural_size(&key).map_or(
+            Vec2::new(limit, (limit * 9.0 / 16.0).round()),
+            |(w, h)| {
+                let (w, h) = (w.max(1) as f32, h.max(1) as f32);
+                let scale = 1.0_f32.min(limit / w).min(MAX / h);
+                Vec2::new((w * scale).round(), (h * scale).round())
+            },
+        );
+        let (row, _) = ui.allocate_exact_size(Vec2::new(width, size.y), Sense::hover());
+        let rect = Rect::from_min_size(row.min, size);
+        self.note_width(rect.right());
+        crate::ui::video::player(ui, &key, rect, alt.trim(), false);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(8),
+            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.4)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
     fn image_block(&mut self, ui: &mut Ui, src: &str, alt: &str, width: f32, id: egui::Id) {
         use crate::ui::attachments::{self, MediaState};
         use crate::ui::media::{self, ImageSource};
         const MAX: f32 = 480.0; // 30rem
+        // `mediaKindFromPath`: a video plays instead.
+        if crate::ui::video::is_video_path(src) {
+            self.video_block(ui, src, alt, width);
+            return;
+        }
         let classified = media::classify(
             src,
             self.image_base.as_deref().or(self.media_root.as_deref()),

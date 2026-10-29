@@ -140,6 +140,8 @@ pub struct App {
     pub(crate) typography: crate::ui::typography::Typography,
     /// The expanded image preview.
     pub(crate) lightbox: Option<crate::ui::lightbox::Lightbox>,
+    /// A video attachment opened large (its player key and name).
+    pub(crate) video_overlay: Option<(String, String)>,
     /// Messages on their way: waiting for their images to persist
     /// (`persist:<message id>`) or for a command's receipt (`after:<command id>`).
     pub(crate) turn_sends: std::collections::HashMap<String, crate::ui::composer::TurnSend>,
@@ -621,6 +623,7 @@ impl App {
             turn_sends: Default::default(),
             drafts: crate::ui::drafts::load(options.client_settings_path.as_deref()),
             lightbox: None,
+            video_overlay: None,
             typography: Default::default(),
             block_turn_starts: options.block_turn_starts,
             status: None,
@@ -1866,6 +1869,7 @@ impl eframe::App for App {
         self.watch_project_clones();
         self.watch_worktree_setup();
         self.poll_prompt_links();
+        crate::ui::video::sweep();
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
@@ -1890,6 +1894,7 @@ impl eframe::App for App {
                 // The image preview takes its keys before the rest of the
                 // window; its layer stays on top.
                 self.lightbox_dialog(ui, rect);
+                self.video_dialog(ui, rect);
                 self.palette_shortcuts(ui);
                 // Below `md` the sidebar leaves the layout and opens as a sheet.
                 self.mobile = rect.width() < 768.0;
@@ -2347,6 +2352,13 @@ impl App {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.favicon_url(project, result, &ctx);
             }
+        } else if let Some(video) = key.strip_prefix("video-url:") {
+            let base = url::Url::parse(self.connect.server.trim()).ok();
+            let url = result.ok().and_then(|r| {
+                let relative = r["relativeUrl"].as_str()?.to_owned();
+                Some(base?.join(&relative).ok()?.to_string())
+            });
+            crate::ui::video::set_source(video, url);
         } else if let Some(id) = key.strip_prefix("attachment:") {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.attachment_url(id, result, &ctx);
