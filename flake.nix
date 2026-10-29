@@ -67,14 +67,13 @@
         mobile = pkgs.mkShell {
           packages = [
             rust
-            pkgs.dioxus-cli
-            # The Compose app (android/): Gradle, and the Rust core built
-            # for each ABI.
+            # The app (android/): Gradle, and the Rust core built for each
+            # ABI.
             pkgs.gradle_9
             pkgs.cargo-ndk
-            # The app's license notice (scripts/mobile-notice.sh).
+            # The app's license notice (android/app/notice.gradle.kts).
             pkgs.cargo-about
-            # The APK's ABI check (scripts/mobile-apk.sh).
+            # The APK's ABI check (scripts/android-apk.sh).
             pkgs.unzip
             pkgs.jdk17
             android.androidsdk

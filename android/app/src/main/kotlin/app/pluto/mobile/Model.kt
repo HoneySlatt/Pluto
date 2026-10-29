@@ -24,6 +24,14 @@ class Model(context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val posted = AtomicBoolean(false)
 
+    init {
+        // The core's TLS (rustls) reads the system's root certificates from
+        // SSL_CERT_DIR: Android's own stores, for https servers.
+        val roots = listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts")
+            .filter { java.io.File(it).isDirectory }
+        if (roots.isNotEmpty()) android.system.Os.setenv("SSL_CERT_DIR", roots.joinToString(":"), true)
+    }
+
     val core: Core = Core(
         context.filesDir.absolutePath,
         DateFormat.is24HourFormat(context),

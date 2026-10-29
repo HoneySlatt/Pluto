@@ -28,6 +28,9 @@ android {
     }
     buildTypes {
         getByName("release") {
+            // Signed with Gradle's debug key, for installing by hand; a
+            // published build needs its own key.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
