@@ -39,6 +39,10 @@ pub struct App {
     /// The connection's server synchronized (its config arrived): until
     /// then commands fail at once and subscriptions wait (`send`).
     synced: bool,
+    /// Commands whose receipt something waits on (`ui/park.rs`).
+    pub(crate) pending_commands: std::collections::HashMap<String, crate::ui::park::Continuation>,
+    /// The open thread's move once its park shows (`ui/park.rs`).
+    pub(crate) advance: Option<crate::ui::park::Advance>,
     /// The server the shell came from: connecting to another one clears it.
     shell_server: Option<String>,
     /// Whether the window had the focus last frame: coming back checks the
@@ -479,6 +483,8 @@ impl App {
             },
             connection: None,
             synced: false,
+            pending_commands: Default::default(),
+            advance: None,
             shell_server: None,
             focused: true,
             window: None,
@@ -714,7 +720,7 @@ impl App {
         self.connection.is_some() && self.synced && self.screen == Screen::Main
     }
 
-    fn poll_events(&mut self) {
+    pub(crate) fn poll_events(&mut self) {
         let mut events = std::mem::take(&mut self.offline_failures);
         let mut disconnected = None;
         if let Some(connection) = &self.connection {
@@ -778,6 +784,7 @@ impl App {
                     }
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
                     Route::Command(id) => {
+                        self.command_settled(&id, None);
                         self.finish_reply(&id);
                         self.rewind_done(&id, None);
                         self.sent_done(&format!("command:{id}"));
@@ -811,6 +818,8 @@ impl App {
                     self.streams.retain(|(open, ..)| *open != key);
                     self.rpc_result(key, Err(message))
                 }
+                Event::Failed(Route::Command(id), message)
+                    if self.command_settled(&id, Some(&message)) => {}
                 Event::Failed(Route::Command(id), message) => {
                     self.finish_reply(&id);
                     self.rewind_done(&id, Some(&message));
@@ -852,6 +861,7 @@ impl App {
         }
         self.poll_scratch();
         self.poll_chat_mode();
+        self.poll_advance();
         if let Some(message) = disconnected {
             // What was on its way may not have arrived: it comes back.
             if self.give_back_all() > 0 {
@@ -935,6 +945,13 @@ impl App {
         if let Some(id) = self.selected.clone() {
             self.thread_retry = Some((id, 0, true));
         }
+    }
+
+    /// A synchronized fake connection, for the tests of other modules.
+    #[cfg(test)]
+    pub(crate) fn use_connection_for_tests(&mut self, connection: Connection) {
+        self.connection = Some(connection);
+        self.synced = true;
     }
 
     /// Gives up on a server that does not answer, for the connection screen.

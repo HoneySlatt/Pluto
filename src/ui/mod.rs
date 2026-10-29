@@ -52,6 +52,7 @@ pub mod memory_settings;
 pub mod mentions;
 pub mod open_in;
 pub mod palette;
+pub mod park;
 pub mod pickers;
 pub mod pixel_logo;
 pub mod plan_card;

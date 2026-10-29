@@ -129,7 +129,20 @@ impl App {
                 .separated(),
         );
         if self.capability("threadTitleRegeneration") {
-            items.push(Item::new("regenerate-title", "Regenerate title").icon("refresh-cw"));
+            // Disabled while the server writes a new one.
+            let regenerating = thread.title_regeneration.is_some();
+            items.push(Item {
+                disabled: regenerating,
+                ..Item::new(
+                    "regenerate-title",
+                    if regenerating {
+                        "Regenerating…"
+                    } else {
+                        "Regenerate title"
+                    },
+                )
+                .icon("refresh-cw")
+            });
         }
         items.push(Item::new("mark-unread", "Mark unread").icon("mail-open"));
         // Pluto: a chat can be saved as Markdown (`chat_export`).
@@ -213,7 +226,7 @@ impl App {
                 Some(preset) => {
                     let mut cmd = command("thread.snooze", id);
                     cmd["snoozedUntil"] = json!(crate::snooze::until_iso(preset));
-                    self.dispatch(cmd);
+                    self.park(id, cmd, crate::ui::park::Park::Snooze, &[]);
                 }
                 None => self.request_custom_snooze(vec![thread.id.clone()]),
             }
@@ -239,24 +252,32 @@ impl App {
                     pinned.collect()
                 };
                 for version in versions {
-                    let command = if action == "pin" {
-                        self.pin_command(&version)
+                    if action == "pin" {
+                        let pin = self.pin_command(&version);
+                        self.dispatch_titled(pin, "Failed to pin thread");
                     } else {
-                        command("thread.unpin", &version)
-                    };
-                    self.dispatch(command);
+                        self.dispatch_titled(
+                            command("thread.unpin", &version),
+                            "Failed to unpin thread",
+                        );
+                    }
                 }
             }
-            "settle" => self.dispatch(command("thread.settle", id)),
+            "settle" => self.park(
+                id,
+                command("thread.settle", id),
+                crate::ui::park::Park::Settle,
+                &[],
+            ),
             "unsettle" => {
                 let mut cmd = command("thread.unsettle", id);
                 cmd["reason"] = json!("user");
-                self.dispatch(cmd);
+                self.dispatch_titled(cmd, "Failed to un-settle thread");
             }
             "unsnooze" => {
                 let mut cmd = command("thread.unsnooze", id);
                 cmd["reason"] = json!("user");
-                self.dispatch(cmd);
+                self.dispatch_titled(cmd, "Failed to wake thread");
             }
             "auto-settle:enabled" | "auto-settle:disabled" => {
                 let mut cmd = command("thread.auto-settle.set", id);

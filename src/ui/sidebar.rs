@@ -147,6 +147,46 @@ pub(crate) fn top_pin_key(threads: &[std::sync::Arc<Thread>]) -> Option<String> 
     }
 }
 
+impl App {
+    /// The pen of a thread with an unsent draft (`text-warning-foreground`).
+    fn draft_pen(&self, ui: &Ui, at: Pos2, thread_id: &str) {
+        let rect = Rect::from_min_size(at, Vec2::splat(12.0));
+        theme::paint_icon(ui, "square-pen", rect, 12.0, theme::warning_foreground());
+        ui.interact(rect, ui.id().with(("draft-pen", thread_id)), Sense::hover())
+            .on_hover_text("Unsent draft");
+    }
+
+    /// A pinned thread's pin; it unpins on a click where pinning is offered,
+    /// showing pin-off on hover.
+    fn pin_glyph(&mut self, ui: &Ui, at: Pos2, thread: &Thread) {
+        let rect = Rect::from_min_size(at, Vec2::splat(12.0));
+        let muted = theme::alpha(theme::muted_foreground(), 0.65);
+        if !self.capability("threadPinning") {
+            theme::paint_icon(ui, "pin", rect, 12.0, muted);
+            ui.interact(rect, ui.id().with(("pin", &thread.id)), Sense::hover())
+                .on_hover_text("Pinned");
+            return;
+        }
+        let response = ui
+            .interact(
+                rect.expand(2.0),
+                ui.id().with(("pin", &thread.id)),
+                Sense::click(),
+            )
+            .on_hover_text("Unpin thread");
+        let (icon, color) = if response.hovered() {
+            ("pin-off", theme::foreground())
+        } else {
+            ("pin", muted)
+        };
+        theme::paint_icon(ui, icon, rect, 12.0, color);
+        if response.clicked() {
+            let unpin = crate::model::command("thread.unpin", &thread.id);
+            self.dispatch_titled(unpin, "Failed to unpin thread");
+        }
+    }
+}
+
 /// `formatWorkingDurationLabel`: "42s", "5m", "1h 5m".
 fn working_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
@@ -964,12 +1004,17 @@ impl App {
         let right = rect.right() - 10.0;
         let top = rect.top() + 8.0;
 
-        // Row 1: project icon, project name, status or time.
+        // Row 1: unsent draft, project icon, project name, pin, status or time.
+        let draft = !active && self.has_draft(&thread.id);
+        if draft {
+            self.draft_pen(ui, Pos2::new(x, top + 4.0), &thread.id);
+        }
+        let lead = if draft { 18.0 } else { 0.0 };
         let project = self.state.project(&thread.project_id).cloned();
         if let Some(project) = &project {
             project_icon::paint(
                 ui,
-                Rect::from_min_size(Pos2::new(x, top + 2.0), Vec2::splat(16.0)),
+                Rect::from_min_size(Pos2::new(x + lead, top + 2.0), Vec2::splat(16.0)),
                 project,
             );
         }
@@ -1031,7 +1076,8 @@ impl App {
                 color,
             );
             if settle_response.clicked() {
-                self.dispatch(crate::model::command("thread.settle", &thread.id));
+                let settle = crate::model::command("thread.settle", &thread.id);
+                self.park(&thread.id, settle, crate::ui::park::Park::Settle, &[]);
             }
             slot_right = settle.left();
             if show_snooze {
@@ -1142,11 +1188,25 @@ impl App {
             );
             status_width = width;
         }
+        let pinned = thread.pinned_at.is_some();
         if let Some(project) = &project {
             let name_rect = Rect::from_min_max(
-                Pos2::new(x + 22.0, top),
-                Pos2::new(right - status_width - 6.0, top + 20.0),
+                Pos2::new(x + lead + 22.0, top),
+                Pos2::new(
+                    right - status_width - 6.0 - if pinned { 16.0 } else { 0.0 },
+                    top + 20.0,
+                ),
             );
+            if pinned {
+                let name_width =
+                    widgets::text_width(ui, &project.title, font(12.0, Weight::Medium))
+                        .min(name_rect.width());
+                self.pin_glyph(
+                    ui,
+                    Pos2::new(name_rect.left() + name_width + 4.0, top + 4.0),
+                    thread,
+                );
+            }
             widgets::text_in(
                 ui,
                 name_rect,
@@ -1172,6 +1232,12 @@ impl App {
             theme::alpha(theme::sidebar_foreground(), 0.95)
         } else {
             theme::alpha(theme::sidebar_foreground(), 0.9)
+        };
+        // A title the server rewrites dims meanwhile.
+        let title_color = if thread.title_regeneration.is_some() {
+            theme::alpha(title_color, 0.55)
+        } else {
+            title_color
         };
         let title_rect = Rect::from_min_max(Pos2::new(x, top + 24.0), Pos2::new(right, top + 44.0));
         if !self.rename_editor(ui, &thread.id, title_rect) {
@@ -1257,7 +1323,7 @@ impl App {
             Some(index) if index < presets.len() => {
                 let mut cmd = crate::model::command("thread.snooze", &thread.id);
                 cmd["snoozedUntil"] = serde_json::json!(crate::snooze::until_iso(&presets[index]));
-                self.dispatch(cmd);
+                self.park(&thread.id, cmd, crate::ui::park::Park::Snooze, &[]);
             }
             Some(_) => self.request_custom_snooze(vec![thread.id.clone()]),
             None => {}
@@ -1353,12 +1419,44 @@ impl App {
         } else {
             theme::alpha(theme::secondary_label(), 0.7)
         };
+        let title_color = if thread.title_regeneration.is_some() {
+            theme::alpha(title_color, 0.55)
+        } else {
+            title_color
+        };
+        // After the favicon: an unsent draft; after the title: the pin.
+        let draft = !active && self.has_draft(&thread.id);
+        if draft {
+            self.draft_pen(ui, Pos2::new(x + 24.0, rect.center().y - 6.0), &thread.id);
+        }
+        let title_left = x + 26.0 + if draft { 18.0 } else { 0.0 };
+        let pinned = thread.pinned_at.is_some();
+        let title_rect = Rect::from_min_max(
+            Pos2::new(title_left, rect.top()),
+            Pos2::new(
+                label_right - label_width.max(32.0) - 8.0 - if pinned { 16.0 } else { 0.0 },
+                rect.bottom(),
+            ),
+        );
+        if pinned {
+            let title_font = font(
+                14.0,
+                if recede {
+                    Weight::Regular
+                } else {
+                    Weight::Medium
+                },
+            );
+            let width = widgets::text_width(ui, &thread.title, title_font).min(title_rect.width());
+            self.pin_glyph(
+                ui,
+                Pos2::new(title_left + width + 4.0, rect.center().y - 6.0),
+                thread,
+            );
+        }
         widgets::text_in(
             ui,
-            Rect::from_min_max(
-                Pos2::new(x + 26.0, rect.top()),
-                Pos2::new(label_right - label_width.max(32.0) - 8.0, rect.bottom()),
-            ),
+            title_rect,
             &thread.title,
             font(
                 14.0,
@@ -1439,7 +1537,12 @@ impl App {
                 };
                 let mut cmd = crate::model::command(kind, &thread.id);
                 cmd["reason"] = serde_json::json!("user");
-                self.dispatch(cmd);
+                let failure = if snoozed {
+                    "Failed to wake thread"
+                } else {
+                    "Failed to un-settle thread"
+                };
+                self.dispatch_titled(cmd, failure);
             }
         }
         if response.clicked() {

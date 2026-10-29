@@ -198,6 +198,14 @@ impl App {
         self.composer_contexts = draft.contexts;
     }
 
+    /// `useThreadHasUnsentDraft`: a thread not open keeps a draft.
+    pub(crate) fn has_draft(&self, thread_id: &str) -> bool {
+        self.drafts
+            .stored
+            .get(&self.draft_scope(thread_id))
+            .is_some_and(|draft| !draft.is_empty())
+    }
+
     /// The open composer goes to `from`'s draft and `to`'s comes back.
     pub(crate) fn swap_drafts(&mut self, from: &str, to: &str) {
         if from == to {

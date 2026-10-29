@@ -619,7 +619,7 @@ impl App {
                     for thread in &dialog.threads {
                         let mut cmd = crate::model::command("thread.snooze", thread);
                         cmd["snoozedUntil"] = json!(until);
-                        self.dispatch(cmd);
+                        self.park(thread, cmd, crate::ui::park::Park::Snooze, &dialog.threads);
                     }
                     return;
                 }

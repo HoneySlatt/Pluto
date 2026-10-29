@@ -401,21 +401,23 @@ impl App {
                 if thread.settled_override.as_deref() == Some("settled") {
                     let mut cmd = crate::model::command("thread.unsettle", &thread.id);
                     cmd["reason"] = json!("user");
-                    self.dispatch(cmd);
+                    self.dispatch_titled(cmd, "Failed to un-settle thread");
                 } else {
-                    self.dispatch(crate::model::command("thread.settle", &thread.id));
+                    let settle = crate::model::command("thread.settle", &thread.id);
+                    self.park(&thread.id, settle, crate::ui::park::Park::Settle, &[]);
                 }
             }
             "thread.pin" if self.capability("threadPinning") => {
                 let Some(thread) = thread else {
                     return false;
                 };
-                let command = if thread.pinned_at.is_some() {
-                    crate::model::command("thread.unpin", &thread.id)
+                if thread.pinned_at.is_some() {
+                    let unpin = crate::model::command("thread.unpin", &thread.id);
+                    self.dispatch_titled(unpin, "Failed to unpin thread");
                 } else {
-                    self.pin_command(&thread.id)
-                };
-                self.dispatch(command);
+                    let pin = self.pin_command(&thread.id);
+                    self.dispatch_titled(pin, "Failed to pin thread");
+                }
             }
             "usage.cost" | "usage.tokens" | "usage.limits" if self.usage_open => {
                 let metric = ["usage.cost", "usage.tokens", "usage.limits"]

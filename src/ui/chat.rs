@@ -2731,7 +2731,12 @@ impl App {
                 };
                 let mut command = crate::model::command(kind, thread_id);
                 command["reason"] = serde_json::json!("user");
-                self.dispatch(command);
+                let failure = if kind == "thread.unsnooze" {
+                    "Failed to wake thread"
+                } else {
+                    "Failed to un-settle thread"
+                };
+                self.dispatch_titled(command, failure);
             }
             StatusAction::Dismiss(at) => self.acknowledge_woke(thread_id, at),
         }
