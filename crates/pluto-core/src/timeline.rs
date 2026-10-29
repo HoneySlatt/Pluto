@@ -11,8 +11,8 @@
 //! by `ui/live_activity.rs`), or "Thinking" (`thinking`).
 //! Compactions are dividers (`context-compaction`), and the output of an
 //! attempt a steer cut off folds behind `attempt-fold`.
-//! Not ported from v0.1.0's rows yet: MCP apps, and the secret request card,
-//! which shows as a standalone work row with its upstream label.
+//! A secret request is a lifecycle event row, drawn by the client as its
+//! card.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -553,10 +553,7 @@ fn event_presentation(item: &TurnItem) -> (String, Option<String>) {
                 .map(str::to_owned),
         ),
         "secret_request" => (
-            format!(
-                "Secret requested: {}",
-                item.str("label").unwrap_or_default()
-            ),
+            item.str("label").unwrap_or("Secret").to_owned(),
             item.str("reason").map(str::to_owned),
         ),
         _ => (item.kind.replace('_', " "), message),
@@ -1122,7 +1119,7 @@ pub fn is_card(entry: &WorkEntry) -> bool {
     entry.source_kind == "event"
         && matches!(
             entry.item_type.as_deref(),
-            Some("run_interrupt_result" | "handoff" | "fork" | "subagent")
+            Some("run_interrupt_result" | "handoff" | "fork" | "subagent" | "secret_request")
         )
 }
 

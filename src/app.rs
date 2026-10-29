@@ -176,6 +176,8 @@ pub struct App {
     pub(crate) send_intent: Option<crate::ui::composer::SendIntent>,
     /// Threads started in the background, until the server takes them.
     pub(crate) background_launches: std::collections::HashSet<String>,
+    /// Secret request cards' fields (`ui/secret_request.rs`).
+    pub(crate) secrets: crate::ui::secret_request::Secrets,
     /// Prompts put aside (`ui/stash.rs`).
     pub(crate) stash: crate::ui::stash::Stash,
     /// Holds a request back while the user types (`ui/typing_guard.rs`).
@@ -594,6 +596,7 @@ impl App {
             typing_guard: Default::default(),
             stash: crate::ui::stash::load(options.client_settings_path.as_deref()),
             send_intent: None,
+            secrets: Default::default(),
             background_launches: Default::default(),
             restoring_branch: None,
             notice_busy: Default::default(),
@@ -2132,6 +2135,7 @@ impl App {
             || self.chat_versions_result(&key, &result)
             || self.file_upload_result(&key, &result)
             || self.notice_result(&key, &result)
+            || self.secret_result(&key, &result)
         {
             return;
         }

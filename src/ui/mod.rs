@@ -73,6 +73,7 @@ pub mod rewind;
 pub mod scheduled_tasks;
 pub mod scratch;
 pub mod script_import;
+pub mod secret_request;
 pub mod setting_inheritance;
 pub mod settings;
 pub mod settings_scope;

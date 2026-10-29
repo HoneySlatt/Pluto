@@ -813,15 +813,38 @@ fn run(
 }
 
 fn remote_error(exit: &Value) -> String {
-    exit["cause"]
-        .as_array()
-        .and_then(|causes| {
-            causes
-                .iter()
-                .find_map(|cause| cause["error"]["message"].as_str())
-        })
+    let errors = || {
+        exit["cause"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|cause| &cause["error"])
+    };
+    // A secret request's failure carries a reason, its message being a
+    // client-side getter (`SecretRequestError`).
+    if let Some(reason) = errors()
+        .find(|e| e["_tag"] == "SecretRequestError")
+        .and_then(|e| e["reason"].as_str())
+    {
+        return secret_request_error(reason).to_owned();
+    }
+    errors()
+        .find_map(|error| error["message"].as_str())
         .unwrap_or("The server rejected the request")
         .to_owned()
+}
+
+/// `SecretRequestError`'s messages by reason.
+fn secret_request_error(reason: &str) -> &'static str {
+    match reason {
+        "load_failed" => "Could not load the secret request.",
+        "not_found" => "This secret request no longer exists.",
+        "already_answered" => "This secret request was already answered.",
+        "agent_stopped" => "The agent that asked has stopped, so this secret can't be used.",
+        "store_failed" => "Could not store the secret.",
+        "record_failed" => "Saved the secret, but could not update the request.",
+        _ => "Could not answer the request. Try again.",
+    }
 }
 
 #[cfg(test)]

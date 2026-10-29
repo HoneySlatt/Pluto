@@ -317,6 +317,7 @@ impl App {
                 "subagent" => self.subagent_card(ui, first, &detail, width, 0.0),
                 "fork" => self.fork_divider(ui, first, width),
                 "handoff" => self.handoff_divider(ui, first, &detail, width),
+                "secret_request" => self.secret_request(ui, first, width),
                 _ => {
                     // `run_interrupt_result`.
                     let mut pieces = vec![
