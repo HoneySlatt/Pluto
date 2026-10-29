@@ -1300,6 +1300,7 @@ impl App {
             );
         }
 
+        self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);
         }
@@ -1564,6 +1565,7 @@ impl App {
                 self.dispatch_titled(cmd, failure);
             }
         }
+        self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);
         }

@@ -91,6 +91,7 @@ pub mod text_menu;
 pub mod thread_details;
 pub mod thread_error;
 pub mod thread_find;
+pub mod thread_hover;
 pub mod thread_menu;
 pub mod thread_notifications;
 pub mod thread_pull_requests;
