@@ -100,6 +100,7 @@ pub mod toasts;
 pub mod tool_images;
 pub mod typing_guard;
 pub mod typography;
+pub mod undo;
 pub mod usage;
 pub mod usage_prices;
 pub mod usage_summary;

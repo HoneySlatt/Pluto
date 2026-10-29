@@ -255,11 +255,10 @@ impl App {
                     if action == "pin" {
                         let pin = self.pin_command(&version);
                         self.dispatch_titled(pin, "Failed to pin thread");
-                    } else {
-                        self.dispatch_titled(
-                            command("thread.unpin", &version),
-                            "Failed to unpin thread",
-                        );
+                    } else if let Some(thread) =
+                        self.state.threads.iter().find(|t| t.id == version).cloned()
+                    {
+                        self.unpin(&thread);
                     }
                 }
             }
@@ -323,7 +322,7 @@ impl App {
             "export-markdown" => self.request_chat_export(id),
             "archive" => {
                 for version in self.chat_family(id) {
-                    self.dispatch(command("thread.archive", &version));
+                    self.archive(&version);
                 }
             }
             // `confirmThreadDelete` asks first unless it was turned off.

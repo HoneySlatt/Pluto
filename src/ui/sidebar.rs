@@ -181,8 +181,7 @@ impl App {
         };
         theme::paint_icon(ui, icon, rect, 12.0, color);
         if response.clicked() {
-            let unpin = crate::model::command("thread.unpin", &thread.id);
-            self.dispatch_titled(unpin, "Failed to unpin thread");
+            self.unpin(thread);
         }
     }
 }
@@ -599,9 +598,16 @@ impl App {
         );
 
         // Thread list.
+        // The undo notice heads the footer.
+        let notice = self.undo_notice(
+            ui,
+            left + 10.0,
+            rect.right() - 10.0,
+            rect.bottom() - FOOTER_HEIGHT,
+        );
         let list_rect = Rect::from_min_max(
             Pos2::new(left, LIST_TOP),
-            Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER_HEIGHT),
+            Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER_HEIGHT - notice),
         );
         self.thread_list(ui, list_rect);
     }
@@ -1712,8 +1718,7 @@ impl App {
         match clicked.as_str() {
             "unpin" => {
                 for thread in threads.iter().filter(|t| t.pinned_at.is_some()) {
-                    let unpin = crate::model::command("thread.unpin", &thread.id);
-                    self.dispatch_titled(unpin, "Failed to unpin thread");
+                    self.unpin(thread);
                 }
                 clear(self);
             }

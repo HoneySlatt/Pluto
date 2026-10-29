@@ -228,6 +228,8 @@ impl App {
                 self.open_thread_find()
             }
             "sidebar.toggle" => self.toggle_sidebar(),
+            // Mod+Z falls through when there is nothing to undo.
+            "thread.undo" => return self.undo_last(),
             // With an approval or a running question, the stash waits.
             "composer.stash"
                 if self.settings_page.is_none()
@@ -422,8 +424,7 @@ impl App {
                     return false;
                 };
                 if thread.pinned_at.is_some() {
-                    let unpin = crate::model::command("thread.unpin", &thread.id);
-                    self.dispatch_titled(unpin, "Failed to unpin thread");
+                    self.unpin(&thread);
                 } else {
                     let pin = self.pin_command(&thread.id);
                     self.dispatch_titled(pin, "Failed to pin thread");

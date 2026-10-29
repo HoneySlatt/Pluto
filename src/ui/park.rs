@@ -33,6 +33,8 @@ pub(crate) struct Continuation {
     pub advance: Option<(String, Park, Next)>,
     /// The notice waiting on it (`App::notice_busy`), freed either way.
     pub busy: Option<String>,
+    /// What the undo notice offers once the server took it.
+    pub undo: Option<crate::ui::undo::Undoable>,
 }
 
 /// A move waiting for the shell to show the thread parked.
@@ -52,6 +54,49 @@ impl App {
                 failure,
                 advance: None,
                 busy: None,
+                undo: None,
+            },
+        );
+    }
+
+    /// Unpins `thread`, offering to pin it back where it was.
+    pub(crate) fn unpin(&mut self, thread: &crate::model::Thread) {
+        let mut pin = crate::model::command("thread.pin", &thread.id);
+        if let Some(key) = &thread.pin_order_key {
+            pin["orderKey"] = serde_json::json!(key);
+        }
+        self.dispatch_with(
+            crate::model::command("thread.unpin", &thread.id),
+            Continuation {
+                failure: "Failed to unpin thread",
+                advance: None,
+                busy: None,
+                undo: Some(crate::ui::undo::Undoable {
+                    action: "Unpinned",
+                    kind: "pin",
+                    thread: thread.id.clone(),
+                    commands: vec![pin],
+                    failure: "Failed to undo unpin",
+                }),
+            },
+        );
+    }
+
+    /// Archives `thread`, offering to bring it back.
+    pub(crate) fn archive(&mut self, thread_id: &str) {
+        self.dispatch_with(
+            crate::model::command("thread.archive", thread_id),
+            Continuation {
+                failure: "Failed to archive thread",
+                advance: None,
+                busy: None,
+                undo: Some(crate::ui::undo::Undoable {
+                    action: "Archived",
+                    kind: "archive",
+                    thread: thread_id.to_owned(),
+                    commands: vec![crate::model::command("thread.unarchive", thread_id)],
+                    failure: "Failed to undo archive",
+                }),
             },
         );
     }
@@ -66,6 +111,7 @@ impl App {
                 failure,
                 advance: None,
                 busy: Some(busy.to_owned()),
+                undo: None,
             },
         );
     }
@@ -87,12 +133,65 @@ impl App {
         let advance = self
             .next_after_park(thread_id, batch)
             .map(|next| (thread_id.to_owned(), park, next));
+        // What puts it back: unsettle, then the pin and the snooze it had.
+        let thread = self
+            .state
+            .threads
+            .iter()
+            .find(|t| t.id == thread_id)
+            .cloned();
+        let undo = thread.map(|thread| {
+            let mut unpark = crate::model::command(
+                match park {
+                    Park::Settle => "thread.unsettle",
+                    Park::Snooze => "thread.unsnooze",
+                },
+                thread_id,
+            );
+            unpark["reason"] = serde_json::json!("user");
+            let mut commands = vec![unpark];
+            if park == Park::Settle {
+                if thread.pinned_at.is_some() {
+                    let mut pin = crate::model::command("thread.pin", thread_id);
+                    if let Some(key) = &thread.pin_order_key {
+                        pin["orderKey"] = serde_json::json!(key);
+                    }
+                    commands.push(pin);
+                }
+                if let Some(until) = thread
+                    .snoozed_until
+                    .clone()
+                    .filter(|_| crate::snooze::effective_snoozed(&thread, self.now))
+                {
+                    let mut snooze = crate::model::command("thread.snooze", thread_id);
+                    snooze["snoozedUntil"] = serde_json::json!(until);
+                    commands.push(snooze);
+                }
+            }
+            crate::ui::undo::Undoable {
+                action: match park {
+                    Park::Settle => "Settled",
+                    Park::Snooze => "Snoozed",
+                },
+                kind: match park {
+                    Park::Settle => "settle",
+                    Park::Snooze => "snooze",
+                },
+                thread: thread_id.to_owned(),
+                commands,
+                failure: match park {
+                    Park::Settle => "Failed to undo settle",
+                    Park::Snooze => "Failed to wake thread",
+                },
+            }
+        });
         self.dispatch_with(
             command,
             Continuation {
                 failure,
                 advance,
                 busy: None,
+                undo,
             },
         );
     }
@@ -155,6 +254,9 @@ impl App {
                 );
             }
             None => {
+                if let Some(undoable) = continuation.undo {
+                    self.undo.push(undoable);
+                }
                 if let Some((thread, park, next)) = continuation.advance {
                     self.advance = Some(Advance {
                         thread,

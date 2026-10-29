@@ -2070,7 +2070,7 @@ impl App {
         }
         if archive {
             self.legacy_confirm_archive = None;
-            self.dispatch(crate::model::command("thread.archive", &thread.id));
+            self.archive(&thread.id);
             return;
         }
         if response.clicked() {

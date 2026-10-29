@@ -42,6 +42,8 @@ pub struct App {
     /// The connection's server synchronized (its config arrived): until
     /// then commands fail at once and subscriptions wait (`send`).
     synced: bool,
+    /// What the last parks can undo (`ui/undo.rs`).
+    pub(crate) undo: crate::ui::undo::Undo,
     /// Commands whose receipt something waits on (`ui/park.rs`).
     pub(crate) pending_commands: std::collections::HashMap<String, crate::ui::park::Continuation>,
     /// The open thread's move once its park shows (`ui/park.rs`).
@@ -513,6 +515,7 @@ impl App {
             connection: None,
             synced: false,
             pending_commands: Default::default(),
+            undo: Default::default(),
             advance: None,
             migration_toast: None,
             slow_toast: None,
@@ -1386,6 +1389,11 @@ impl App {
     /// Sends a command: project mutations go to `projects.mutate`, thread
     /// commands to `orchestration.dispatchCommand`.
     pub(crate) fn dispatch(&mut self, command: Value) {
+        // An opposite action expires what could be undone.
+        if let (Some(kind), Some(thread)) = (command["type"].as_str(), command["threadId"].as_str())
+        {
+            self.undo.invalidate(kind, thread);
+        }
         if self.block_turn_starts && command["type"] == "message.dispatch" {
             self.notify(
                 crate::ui::toasts::Kind::Warning,
