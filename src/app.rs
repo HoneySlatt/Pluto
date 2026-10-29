@@ -55,6 +55,9 @@ pub struct App {
     /// Threads whose Compact chip is turned off (`fullHistoryThreadKeys`).
     pub(crate) keep_full_history: std::collections::HashSet<String>,
     pub(crate) clones: Vec<Value>,
+    /// `ProjectCloneToastCoordinator`'s toasts: by project, the toast, what
+    /// it shows and its phase.
+    pub(crate) clone_toasts: std::collections::HashMap<String, (u64, String, String)>,
     /// The permission notices shown this run.
     permission_notice_shown: std::collections::HashSet<String>,
     /// Panel tabs closed, newest first, with their thread.
@@ -550,6 +553,7 @@ impl App {
             keep_full_history: Default::default(),
             question_advance: None,
             clones: Vec::new(),
+            clone_toasts: Default::default(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
             sidebar_sweep: None,
@@ -1753,6 +1757,13 @@ impl App {
                 if open {
                     self.open_settings_page(crate::ui::settings::CONNECTIONS_PAGE);
                 }
+            }
+            Some(crate::ui::toasts::Action::Clone { project, action }) => {
+                self.clone_action(&project, action);
+            }
+            Some(crate::ui::toasts::Action::OpenProject(project)) => {
+                self.settings_page = None;
+                self.start_draft(Some(project));
             }
             Some(crate::ui::toasts::Action::Dismiss) | None => {}
         }

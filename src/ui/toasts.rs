@@ -46,6 +46,13 @@ pub(crate) enum Action {
     OpenInEditor(String),
     /// The permission notice answered: Open Connections (`true`) or Dismiss.
     PermissionNotice(bool),
+    /// A project clone's Cancel, Retry or Remove project.
+    Clone {
+        project: String,
+        action: &'static str,
+    },
+    /// Opens a new thread in a project (a clone's "Open project").
+    OpenProject(String),
     /// Closes the toast and nothing else.
     Dismiss,
 }

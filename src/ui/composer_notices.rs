@@ -831,7 +831,7 @@ impl App {
     }
 
     /// A project clone's Cancel, Retry or Remove project.
-    fn clone_action(&mut self, project: &str, action: &str) {
+    pub(crate) fn clone_action(&mut self, project: &str, action: &str) {
         match action {
             "remove" => {
                 let command = json!({
@@ -975,8 +975,136 @@ impl App {
         }
     }
 
+    /// `ProjectCloneToastCoordinator`: a clone's progress, success or
+    /// failure as a toast, except while its project's draft is open (the
+    /// composer notice shows it there).
+    fn sync_clone_toasts(&mut self) {
+        use crate::ui::toasts::{Action, Kind, Toast};
+        let viewing = self
+            .selected
+            .is_none()
+            .then(|| self.draft_project().map(|p| p.id))
+            .flatten();
+        let mut seen = std::collections::HashSet::new();
+        for clone in self.clones.clone() {
+            let Some(project) = clone["projectId"].as_str().map(str::to_owned) else {
+                continue;
+            };
+            seen.insert(project.clone());
+            let tracked = self.clone_toasts.get(&project).cloned();
+            if viewing.as_deref() == Some(project.as_str()) {
+                if let Some((id, ..)) = tracked {
+                    self.toasts.close(id);
+                    self.clone_toasts.remove(&project);
+                }
+                continue;
+            }
+            let text = |key: &str| clone[key].as_str().unwrap_or_default().to_owned();
+            let phase = text("phase");
+            let key = format!(
+                "{phase}:{}:{}:{}:{}",
+                text("stage"),
+                clone["percent"]
+                    .as_f64()
+                    .map(|p| p.to_string())
+                    .unwrap_or_default(),
+                text("detail"),
+                text("error")
+            );
+            if tracked.as_ref().is_some_and(|(_, k, _)| *k == key) {
+                continue;
+            }
+            if !matches!(phase.as_str(), "running" | "done" | "failed" | "cancelled") {
+                continue;
+            }
+            let name = clone_name(&clone);
+            let toast = match phase.as_str() {
+                "running" => {
+                    let mut toast = Toast::new(Kind::Loading, format!("Cloning {name}"));
+                    toast.description = clone_progress(&clone);
+                    toast.action = Some((
+                        "Cancel".into(),
+                        Action::Clone {
+                            project: project.clone(),
+                            action: "cancel",
+                        },
+                    ));
+                    toast.hide_copy = true;
+                    toast.timeout = None;
+                    toast
+                }
+                "done" => {
+                    let mut toast = Toast::new(Kind::Success, format!("Cloned {name}"))
+                        .description(text("destinationPath"));
+                    toast.timeout = Some(8.0);
+                    toast.action =
+                        Some(("Open project".into(), Action::OpenProject(project.clone())));
+                    toast.hide_copy = true;
+                    toast
+                }
+                _ => {
+                    let cancelled = phase == "cancelled";
+                    let mut toast = if cancelled {
+                        Toast::new(Kind::Info, format!("Cancelled cloning {name}"))
+                            .description(text("destinationPath"))
+                    } else {
+                        Toast::new(Kind::Error, format!("Failed to clone {name}")).description(
+                            clone["error"]
+                                .as_str()
+                                .unwrap_or("The clone failed.")
+                                .to_owned(),
+                        )
+                    };
+                    toast.timeout = None;
+                    toast.hide_copy = cancelled;
+                    toast.action = Some((
+                        "Retry".into(),
+                        Action::Clone {
+                            project: project.clone(),
+                            action: "retry",
+                        },
+                    ));
+                    toast.secondary = vec![(
+                        "Remove project".into(),
+                        Action::Clone {
+                            project: project.clone(),
+                            action: "remove",
+                        },
+                    )];
+                    toast
+                }
+            };
+            let id = match tracked {
+                Some((id, ..)) => {
+                    self.toasts.update(id, toast);
+                    id
+                }
+                None => self.toasts.add(toast),
+            };
+            self.clone_toasts.insert(project, (id, key, phase));
+        }
+        // A clone the server stopped tracking takes its toast, unless it
+        // settled into a timed success toast.
+        let gone: Vec<String> = self
+            .clone_toasts
+            .keys()
+            .filter(|p| !seen.contains(*p))
+            .cloned()
+            .collect();
+        for project in gone {
+            if let Some((id, _, phase)) = self.clone_toasts.remove(&project)
+                && phase != "done"
+            {
+                self.toasts.close(id);
+            }
+        }
+    }
+
     /// `subscribeProjectClones` once, where the server tracks clones.
     pub(crate) fn watch_project_clones(&mut self) {
+        if !self.clones.is_empty() || !self.clone_toasts.is_empty() {
+            self.sync_clone_toasts();
+        }
         if self.clones_streaming
             || !self.connected()
             || self.state.config["environment"]["capabilities"]["projectCloneTracking"] != true
@@ -1075,10 +1203,9 @@ impl App {
     }
 }
 
-/// `projectCloneProgressSummary` and the clone's notice; none once done.
-fn clone_notice(snapshot: &serde_json::Value) -> Option<Notice> {
-    let project = snapshot["projectId"].as_str()?.to_owned();
-    let name = snapshot["repository"]["nameWithOwner"]
+/// `projectCloneDisplayName`: `owner/repo`, else the folder cloned into.
+fn clone_name(snapshot: &serde_json::Value) -> String {
+    snapshot["repository"]["nameWithOwner"]
         .as_str()
         .map(str::to_owned)
         .or_else(|| {
@@ -1087,33 +1214,44 @@ fn clone_notice(snapshot: &serde_json::Value) -> Option<Notice> {
                 .and_then(|p| p.trim_end_matches('/').rsplit('/').next())
                 .map(str::to_owned)
         })
-        .unwrap_or_else(|| "repository".into());
+        .unwrap_or_else(|| "repository".into())
+}
+
+/// `projectCloneProgressSummary`: `Receiving objects · 45% · 12.3 MiB`.
+fn clone_progress(snapshot: &serde_json::Value) -> Option<String> {
+    let stage = match snapshot["stage"].as_str() {
+        Some("connecting") => Some("Connecting"),
+        Some("counting") => Some("Counting objects"),
+        Some("receiving") => Some("Receiving objects"),
+        Some("resolving") => Some("Resolving deltas"),
+        Some("checkout") => Some("Checking out files"),
+        _ => None,
+    };
+    let parts: Vec<String> = stage
+        .map(str::to_owned)
+        .into_iter()
+        .chain(
+            snapshot["percent"]
+                .as_f64()
+                .map(|p| format!("{}%", p.round())),
+        )
+        .chain(
+            snapshot["detail"]
+                .as_str()
+                .filter(|d| !d.is_empty())
+                .map(str::to_owned),
+        )
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// The clone's notice; none once done.
+fn clone_notice(snapshot: &serde_json::Value) -> Option<Notice> {
+    let project = snapshot["projectId"].as_str()?.to_owned();
+    let name = clone_name(snapshot);
     let id = format!("project-clone:{project}");
     match snapshot["phase"].as_str()? {
         "running" => {
-            let stage = match snapshot["stage"].as_str() {
-                Some("connecting") => Some("Connecting"),
-                Some("counting") => Some("Counting objects"),
-                Some("receiving") => Some("Receiving objects"),
-                Some("resolving") => Some("Resolving deltas"),
-                Some("checkout") => Some("Checking out files"),
-                _ => None,
-            };
-            let parts: Vec<String> = stage
-                .map(str::to_owned)
-                .into_iter()
-                .chain(
-                    snapshot["percent"]
-                        .as_f64()
-                        .map(|p| format!("{}%", p.round())),
-                )
-                .chain(
-                    snapshot["detail"]
-                        .as_str()
-                        .filter(|d| !d.is_empty())
-                        .map(str::to_owned),
-                )
-                .collect();
             let mut notice = Notice::new(
                 id,
                 Variant::Info,
@@ -1121,7 +1259,7 @@ fn clone_notice(snapshot: &serde_json::Value) -> Option<Notice> {
                 "download",
                 format!("Cloning {name}"),
             );
-            notice.description = (!parts.is_empty()).then(|| parts.join(" · "));
+            notice.description = clone_progress(snapshot);
             notice.actions.push((
                 "Cancel".into(),
                 NoticeAction::Clone {
