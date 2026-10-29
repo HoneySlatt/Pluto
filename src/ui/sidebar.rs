@@ -1496,6 +1496,7 @@ impl App {
         }
 
         self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
+        self.row_file_drop(ui, rect, thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);
         }
@@ -1762,6 +1763,7 @@ impl App {
             }
         }
         self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
+        self.row_file_drop(ui, rect, thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);
         }
@@ -1782,6 +1784,32 @@ impl App {
 impl App {
     /// Select on click; a second click on the same row within 400ms renames
     /// it (upstream renames on double click).
+    /// Files dragged over a row ring it; dropped, they open its thread and
+    /// join its composer.
+    fn row_file_drop(&mut self, ui: &Ui, rect: Rect, thread: &Thread) {
+        let pointer_in = ui
+            .input(|i| i.pointer.latest_pos())
+            .is_some_and(|p| rect.contains(p));
+        if !pointer_in {
+            return;
+        }
+        if ui.input(|i| !i.raw.hovered_files.is_empty()) {
+            ui.painter().rect_stroke(
+                rect,
+                widgets::radius(8.0),
+                Stroke::new(1.0, theme::alpha(theme::primary(), 0.7)),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let dropped = ui.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            if self.selected.as_deref() != Some(thread.id.as_str()) {
+                self.select_thread(Some(thread.id.clone()));
+            }
+            crate::ui::attachments::add_dropped_files(&self.incoming_images, ui.ctx(), dropped);
+        }
+    }
+
     /// `handleThreadClick`: Ctrl toggles the row in the selection, Shift
     /// selects from the anchor, a plain click clears it and opens the thread.
     fn sidebar_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
