@@ -17,12 +17,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.AnnotatedString
@@ -37,6 +40,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pluto.core.Block
+import app.pluto.core.TokenKind
+import app.pluto.core.CodeToken
 import app.pluto.core.BlockKind
 import app.pluto.core.Span
 
@@ -116,7 +121,7 @@ private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
                     block.spans,
                     style(headingSize(kind.level.toInt()), FontWeight.SemiBold, color, line = 1.35f, track = if (kind.level.toInt() == 3) -.01f else 0f),
                 )
-                is BlockKind.Code -> CodeBlock(kind.text)
+                is BlockKind.Code -> CodeBlock(kind.language, kind.text, kind.tokens)
                 is BlockKind.Rule -> Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(P.input))
                 is BlockKind.Table -> Table(kind.header, kind.rows)
             }
@@ -130,19 +135,69 @@ private fun Paragraph(content: List<Span>, style: androidx.compose.ui.text.TextS
     BasicText(text, style = style)
 }
 
+// The spec's code colors: `.k`, `.s`, `.f` and `.c`.
+private fun tokenColor(kind: TokenKind) = when (kind) {
+    TokenKind.KEYWORD -> P.accentHover
+    TokenKind.STRING -> androidx.compose.ui.graphics.Color(0xFF5EE9B5)
+    TokenKind.FUNCTION -> P.info
+    TokenKind.COMMENT -> P.icon
+}
+
+// A code block (`.code`): its language and a copy button over the code,
+// colored by the core, scrolling sideways.
 @Composable
-fun CodeBlock(text: String) {
+fun CodeBlock(language: String, text: String, tokens: List<CodeToken>) {
+    val model = app.pluto.mobile.LocalModel.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var copied by remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
+        }
+    }
+    val colored = remember(text, tokens) {
+        buildAnnotatedString {
+            append(text)
+            for (token in tokens) {
+                val end = minOf(token.end.toInt(), text.length)
+                if (token.start.toInt() < end) addStyle(SpanStyle(color = tokenColor(token.kind)), token.start.toInt(), end)
+            }
+        }
+    }
     val shape = RoundedCornerShape(16.dp)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(P.chip)
-            .border(1.dp, P.border, shape)
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        BasicText(text, style = style(13f, color = P.text, line = 1.6f, mono = true), softWrap = false)
+    Column(Modifier.fillMaxWidth().clip(shape).background(P.chip).border(1.dp, P.border, shape)) {
+        androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxWidth().height(40.dp).padding(start = 14.dp, end = 8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            T(language.ifEmpty { "code" }, 13f, P.muted, lines = 1, modifier = Modifier.weight(1f))
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .tap(label = "Copy code") {
+                        clipboard.setText(AnnotatedString(text))
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
+                        copied = true
+                        model.core.toast("Copied")
+                    },
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.animation.Crossfade(copied, label = "copy") { done ->
+                    Icon(if (done) "check" else "copy", if (done) P.success else P.muted, size = 18.dp)
+                }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+        ) {
+            BasicText(colored, style = style(13f, color = P.text, line = 1.6f, mono = true), softWrap = false)
+        }
     }
 }
 

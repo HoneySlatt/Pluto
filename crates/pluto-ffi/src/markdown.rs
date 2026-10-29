@@ -22,9 +22,11 @@ pub enum BlockKind {
     Heading {
         level: u8,
     },
+    /// A code block, its tokens colored (`.k`, `.s`, `.f`, `.c`).
     Code {
         language: String,
         text: String,
+        tokens: Vec<CodeToken>,
     },
     Rule,
     Table {
@@ -200,7 +202,12 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                         if text.ends_with('\n') {
                             text.pop();
                         }
-                        b.flush(BlockKind::Code { language, text });
+                        let tokens = highlight(&language, &text);
+                        b.flush(BlockKind::Code {
+                            language,
+                            text,
+                            tokens,
+                        });
                     }
                 }
                 TagEnd::List(_) => {
@@ -279,9 +286,306 @@ fn safe_url(url: &str) -> Option<String> {
         .then(|| url.trim().to_owned())
 }
 
+/// A colored run of a code block, in UTF-16 units (Kotlin's indices).
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct CodeToken {
+    pub start: u32,
+    pub end: u32,
+    pub kind: TokenKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Enum)]
+pub enum TokenKind {
+    Keyword,
+    String,
+    Function,
+    Comment,
+}
+
+/// Words that read as keywords across the languages agents write.
+const KEYWORDS: &[&str] = &[
+    "abstract",
+    "and",
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "chan",
+    "class",
+    "const",
+    "continue",
+    "crate",
+    "def",
+    "default",
+    "defer",
+    "del",
+    "do",
+    "done",
+    "dyn",
+    "elif",
+    "else",
+    "enum",
+    "esac",
+    "except",
+    "export",
+    "extends",
+    "extern",
+    "false",
+    "fi",
+    "final",
+    "finally",
+    "fn",
+    "for",
+    "from",
+    "fun",
+    "func",
+    "function",
+    "go",
+    "if",
+    "impl",
+    "implements",
+    "import",
+    "in",
+    "inherit",
+    "interface",
+    "is",
+    "lambda",
+    "let",
+    "local",
+    "loop",
+    "match",
+    "mod",
+    "module",
+    "move",
+    "mut",
+    "new",
+    "nil",
+    "None",
+    "not",
+    "null",
+    "object",
+    "of",
+    "or",
+    "override",
+    "package",
+    "pass",
+    "private",
+    "protected",
+    "pub",
+    "public",
+    "raise",
+    "rec",
+    "ref",
+    "return",
+    "select",
+    "self",
+    "Self",
+    "static",
+    "struct",
+    "super",
+    "switch",
+    "then",
+    "this",
+    "throw",
+    "throws",
+    "trait",
+    "true",
+    "True",
+    "False",
+    "try",
+    "type",
+    "typeof",
+    "undefined",
+    "unsafe",
+    "use",
+    "val",
+    "var",
+    "void",
+    "when",
+    "where",
+    "while",
+    "with",
+    "yield",
+];
+
+/// The comment markers of `language`: a line one, and whether `/* */`
+/// comments exist.
+fn comments(language: &str) -> (&'static [&'static str], bool) {
+    match language.to_ascii_lowercase().as_str() {
+        "python" | "py" | "sh" | "bash" | "zsh" | "shell" | "console" | "ruby" | "rb" | "yaml"
+        | "yml" | "toml" | "perl" | "r" | "make" | "makefile" | "dockerfile" | "conf" | "ini"
+        | "fish" | "elixir" | "ex" | "nim" | "julia" => (&["#"], false),
+        "nix" => (&["#"], true),
+        "sql" | "lua" | "haskell" | "hs" | "elm" => (&["--"], false),
+        "" | "text" | "txt" | "plain" | "plaintext" | "markdown" | "md" | "diff" | "patch"
+        | "json" => (&[], false),
+        _ => (&["//"], true),
+    }
+}
+
+/// Colors a code block lightly, like the spec's `.k`, `.s`, `.f` and `.c`:
+/// comments, strings, keywords, and names called. Plain text and diffs
+/// stay plain.
+pub fn highlight(language: &str, text: &str) -> Vec<CodeToken> {
+    let lower = language.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "" | "text" | "txt" | "plain" | "plaintext" | "diff" | "patch" | "markdown" | "md"
+    ) {
+        return Vec::new();
+    }
+    let (line_comments, block_comments) = comments(&lower);
+    let rust = matches!(lower.as_str(), "rust" | "rs");
+    let backticks = matches!(
+        lower.as_str(),
+        "js" | "javascript"
+            | "ts"
+            | "typescript"
+            | "tsx"
+            | "jsx"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "shell"
+            | "go"
+    );
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    // UTF-16 offset of each char index.
+    let mut utf16 = Vec::with_capacity(chars.len() + 1);
+    let mut at = 0u32;
+    for (_, c) in &chars {
+        utf16.push(at);
+        at += c.len_utf16() as u32;
+    }
+    utf16.push(at);
+    let starts_with = |i: usize, pattern: &str| text[chars[i].0..].starts_with(pattern);
+    let mut tokens = Vec::new();
+    let mut push = |from: usize, to: usize, kind: TokenKind| {
+        if to > from {
+            tokens.push(CodeToken {
+                start: utf16[from],
+                end: utf16[to],
+                kind,
+            });
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i].1;
+        if line_comments.iter().any(|m| starts_with(i, m)) {
+            let end = (i..chars.len())
+                .find(|&j| chars[j].1 == '\n')
+                .unwrap_or(chars.len());
+            push(i, end, TokenKind::Comment);
+            i = end;
+            continue;
+        }
+        if block_comments && starts_with(i, "/*") {
+            let end = text[chars[i].0 + 2..]
+                .find("*/")
+                .map(|at| chars.partition_point(|(byte, _)| *byte < chars[i].0 + 2 + at + 2))
+                .unwrap_or(chars.len());
+            push(i, end, TokenKind::Comment);
+            i = end;
+            continue;
+        }
+        let quote = c == '"'
+            || (c == '\'' && !(rust && !char_literal(&chars, i)))
+            || (c == '`' && backticks);
+        if quote {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].1 != c {
+                if chars[j].1 == '\\' {
+                    j += 1;
+                }
+                // A string does not run past its line, except backticks.
+                if chars.get(j).is_some_and(|(_, d)| *d == '\n') && c != '`' {
+                    break;
+                }
+                j += 1;
+            }
+            let end = (j + 1).min(chars.len());
+            push(i, end, TokenKind::String);
+            i = end;
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let mut j = i;
+            while j < chars.len() && (chars[j].1.is_alphanumeric() || chars[j].1 == '_') {
+                j += 1;
+            }
+            let word = &text[chars[i].0..chars.get(j).map_or(text.len(), |(b, _)| *b)];
+            // `name(` or Rust's `name!(`.
+            let mut k = j;
+            if rust && chars.get(k).is_some_and(|(_, d)| *d == '!') {
+                k += 1;
+            }
+            if KEYWORDS.contains(&word) {
+                push(i, j, TokenKind::Keyword);
+            } else if chars.get(k).is_some_and(|(_, d)| *d == '(') {
+                push(i, j, TokenKind::Function);
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    tokens
+}
+
+/// Whether the quote at `i` opens a Rust char literal (`'a'`, `'\n'`),
+/// not a lifetime (`'a`).
+fn char_literal(chars: &[(usize, char)], i: usize) -> bool {
+    match (chars.get(i + 1), chars.get(i + 2), chars.get(i + 3)) {
+        (Some((_, '\\')), _, _) => true,
+        (Some(_), Some((_, '\'')), _) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_colors_comments_strings_keywords_and_calls() {
+        let kinds = |language: &str, text: &str| -> Vec<(String, TokenKind)> {
+            let units: Vec<u16> = text.encode_utf16().collect();
+            highlight(language, text)
+                .into_iter()
+                .map(|t| {
+                    (
+                        String::from_utf16_lossy(&units[t.start as usize..t.end as usize]),
+                        t.kind,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            kinds("rust", "let é = f('x'); // done\nfn g(s: &'a str) {}"),
+            vec![
+                ("let".into(), TokenKind::Keyword),
+                ("f".into(), TokenKind::Function),
+                ("'x'".into(), TokenKind::String),
+                ("// done".into(), TokenKind::Comment),
+                ("fn".into(), TokenKind::Keyword),
+                ("g".into(), TokenKind::Function),
+            ]
+        );
+        assert_eq!(
+            kinds("python", "def f(): # \"no\"\n    return \"a\\\"b\""),
+            vec![
+                ("def".into(), TokenKind::Keyword),
+                ("f".into(), TokenKind::Function),
+                ("# \"no\"".into(), TokenKind::Comment),
+                ("return".into(), TokenKind::Keyword),
+                ("\"a\\\"b\"".into(), TokenKind::String),
+            ]
+        );
+        assert!(highlight("diff", "+ fn x()").is_empty());
+    }
 
     #[test]
     fn agent_html_stays_text() {
@@ -318,7 +622,19 @@ mod tests {
             out[5].kind,
             BlockKind::Code {
                 language: "rust".into(),
-                text: "fn x() {}".into()
+                text: "fn x() {}".into(),
+                tokens: vec![
+                    CodeToken {
+                        start: 0,
+                        end: 2,
+                        kind: TokenKind::Keyword
+                    },
+                    CodeToken {
+                        start: 3,
+                        end: 4,
+                        kind: TokenKind::Function
+                    },
+                ],
             }
         );
         let BlockKind::Table { header, rows } = &out[6].kind else {

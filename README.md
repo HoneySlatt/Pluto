@@ -209,8 +209,9 @@ brings its attachments back with its text.
 Not wired yet: chat projects' own memories, thread notifications and a background
 connection, creating the chat space from the phone, the "ask" line of Needs
 you, unread state, snoozed threads, published pages and MCP apps in the
-timeline (a note points to the computer), and the code blocks' copy button
-and syntax colors. Checked in the emulator against a disposable server
+timeline (a note points to the computer). Code blocks show their language,
+a copy button and light syntax colors (the core's `markdown::highlight`).
+Checked in the emulator against a disposable server
 (connection, drafts, drawer, sheets, Settings, projects, tasks, usage,
 Personalization, attachments' images) and a demo thread (timeline, markdown,
 request cards); the diff page and generated images were not seen there, and
