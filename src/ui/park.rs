@@ -31,6 +31,8 @@ pub(crate) struct Continuation {
     /// The error toast's title when the server refuses it.
     pub failure: &'static str,
     pub advance: Option<(String, Park, Next)>,
+    /// The notice waiting on it (`App::notice_busy`), freed either way.
+    pub busy: Option<String>,
 }
 
 /// A move waiting for the shell to show the thread parked.
@@ -49,6 +51,21 @@ impl App {
             Continuation {
                 failure,
                 advance: None,
+                busy: None,
+            },
+        );
+    }
+
+    /// Sends `command` for the notice `busy`, which shows its in-flight
+    /// label until the server answers.
+    pub(crate) fn dispatch_busy(&mut self, command: Value, busy: &str, failure: &'static str) {
+        self.notice_busy.insert(busy.to_owned());
+        self.dispatch_with(
+            command,
+            Continuation {
+                failure,
+                advance: None,
+                busy: Some(busy.to_owned()),
             },
         );
     }
@@ -70,7 +87,14 @@ impl App {
         let advance = self
             .next_after_park(thread_id, batch)
             .map(|next| (thread_id.to_owned(), park, next));
-        self.dispatch_with(command, Continuation { failure, advance });
+        self.dispatch_with(
+            command,
+            Continuation {
+                failure,
+                advance,
+                busy: None,
+            },
+        );
     }
 
     /// `planForwardNavigation`: only for the open thread.
@@ -115,6 +139,9 @@ impl App {
         let Some(continuation) = self.pending_commands.remove(id) else {
             return false;
         };
+        if let Some(busy) = &continuation.busy {
+            self.notice_busy.remove(busy);
+        }
         match refusal {
             Some(message) => {
                 let description = if message.trim().is_empty() {

@@ -15,6 +15,9 @@ use crate::timeline::Expansion;
 /// or the user changes server.
 pub(crate) struct Reconnect {
     attempt: u32,
+    /// When the connection was lost: the notice waits 2 s, "Change server"
+    /// 20 s.
+    pub(crate) since: std::time::Instant,
     next: std::time::Instant,
     /// Why the last attempt failed.
     pub(crate) error: String,
@@ -59,7 +62,7 @@ pub struct App {
     window: Option<([f32; 2], bool)>,
     /// A lost connection coming back: the attempt, when the next one goes,
     /// and its toast.
-    reconnect: Option<Reconnect>,
+    pub(crate) reconnect: Option<Reconnect>,
     /// The streams open, by key, opened again after a reconnection.
     streams: Vec<(String, &'static str, Value)>,
     /// Failures of what was sent without a synchronized connection, handled
@@ -166,6 +169,12 @@ pub struct App {
     pub(crate) rewind: Option<crate::ui::rewind::Rewind>,
     /// Composer notices dismissed for the run, by id.
     pub(crate) dismissed_notices: std::collections::HashSet<String>,
+    /// Branch notices shown once (they stay while the mismatch lasts), and
+    /// the thread whose branch is being restored.
+    pub(crate) revealed_notices: std::cell::RefCell<std::collections::HashSet<String>>,
+    pub(crate) restoring_branch: Option<String>,
+    /// Notices whose command is on its way ("Stopping...", "Saving...").
+    pub(crate) notice_busy: std::collections::HashSet<String>,
     /// Thread errors dismissed for the run, by thread and message.
     pub(crate) dismissed_thread_errors: std::collections::HashSet<String>,
     pub(crate) favorite_models: std::collections::BTreeSet<String>,
@@ -560,7 +569,16 @@ impl App {
             nav_forward: Vec::new(),
             navigating: false,
             rewind: None,
-            dismissed_notices: Default::default(),
+            dismissed_notices:
+                read_ui_state(options.client_settings_path.as_deref())["dismissedNotices"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect(),
+            revealed_notices: Default::default(),
+            restoring_branch: None,
+            notice_busy: Default::default(),
             dismissed_thread_errors: Default::default(),
             favorite_models: Default::default(),
             panels: Default::default(),
@@ -903,8 +921,13 @@ impl App {
     fn lost(&mut self, error: String) {
         let attempt = self.reconnect.as_ref().map_or(0, |r| r.attempt) + 1;
         let delay = (1500u64 << (attempt - 1).min(4)).min(15_000);
+        let since = self
+            .reconnect
+            .as_ref()
+            .map_or_else(std::time::Instant::now, |r| r.since);
         self.reconnect = Some(Reconnect {
             attempt,
+            since,
             next: std::time::Instant::now() + std::time::Duration::from_millis(delay),
             error,
         });
@@ -1069,6 +1092,18 @@ impl App {
             self.toasts
                 .add(Toast::new(Kind::Loading, "Restoring your threads…").description(description)),
         );
+    }
+
+    /// Follows the workspace's VCS status again, for a fresh snapshot.
+    pub(crate) fn refresh_vcs(&mut self) {
+        self.watched_vcs = None;
+    }
+
+    /// Tries the connection again now (the notice's "Reconnect").
+    pub(crate) fn reconnect_now(&mut self) {
+        if let Some(reconnect) = &mut self.reconnect {
+            reconnect.next = std::time::Instant::now();
+        }
     }
 
     /// Gives up on a server that does not answer, for the connection screen.
@@ -2078,6 +2113,7 @@ impl App {
             || self.memory_result(&key, &result)
             || self.chat_versions_result(&key, &result)
             || self.file_upload_result(&key, &result)
+            || self.notice_result(&key, &result)
         {
             return;
         }
@@ -2346,6 +2382,12 @@ pub(crate) fn save_ui_state(app: &App) {
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
         "stickyModels": app.sticky_models,
+        // Only the server version notices are kept across runs.
+        "dismissedNotices": app
+            .dismissed_notices
+            .iter()
+            .filter(|id| id.starts_with("server-version:"))
+            .collect::<Vec<_>>(),
     });
     let temp = path.with_extension("json.tmp");
     if std::fs::write(&temp, value.to_string()).is_ok() {
