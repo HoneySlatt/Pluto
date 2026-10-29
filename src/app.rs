@@ -2522,6 +2522,11 @@ mod thread_retry_tests {
         app.poll_events();
         assert!(app.screen == Screen::Main);
         assert!(app.reconnect.is_some() && !app.connected());
+        // The notice waits 2 s before it shows.
+        assert_eq!(app.composer_notices(true).len(), 0);
+        if let Some(reconnect) = &mut app.reconnect {
+            reconnect.since -= std::time::Duration::from_secs(3);
+        }
         assert_eq!(app.composer_notices(true).len(), 1);
         // Meanwhile a command fails at once instead of ending the next connection.
         app.send(Action::Request {
