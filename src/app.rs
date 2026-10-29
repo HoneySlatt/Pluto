@@ -42,6 +42,11 @@ pub struct App {
     /// The connection's server synchronized (its config arrived): until
     /// then commands fail at once and subscriptions wait (`send`).
     synced: bool,
+    /// A sidebar row being dragged, this frame's sections and the
+    /// composer's rect (`ui/sidebar_drag.rs`).
+    pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
+    pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
+    pub(crate) composer_rect: Option<Rect>,
     /// What the last parks can undo (`ui/undo.rs`).
     pub(crate) undo: crate::ui::undo::Undo,
     /// Commands whose receipt something waits on (`ui/park.rs`).
@@ -516,6 +521,9 @@ impl App {
             synced: false,
             pending_commands: Default::default(),
             undo: Default::default(),
+            sidebar_drag: None,
+            sidebar_zones: Vec::new(),
+            composer_rect: None,
             advance: None,
             migration_toast: None,
             slow_toast: None,

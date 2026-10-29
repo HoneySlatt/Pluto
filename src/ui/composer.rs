@@ -380,6 +380,7 @@ impl App {
             _ => self.composer_text_height(ui, width),
         };
         let surface = Rect::from_min_size(top_left, Vec2::new(width, height));
+        self.composer_rect = Some(surface);
         let thread_id = self.selected.clone().unwrap_or_default();
 
         // Attached banners sit behind the surface's top edge, the queue's

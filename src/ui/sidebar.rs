@@ -610,6 +610,7 @@ impl App {
             Pos2::new(rect.right() - 1.0, rect.bottom() - FOOTER_HEIGHT - notice),
         );
         self.thread_list(ui, list_rect);
+        self.sidebar_drag_frame(ui, list_rect);
     }
 
     /// Pluto: the New and Search rows under Code | Chat, shared by both
@@ -788,6 +789,22 @@ impl App {
                     self.empty_list(ui, area);
                     return;
                 }
+                // The sections a dragged row can land on.
+                use crate::ui::sidebar_drag::Zone;
+                let pinned_count = cards.iter().filter(|t| t.pinned_at.is_some()).count();
+                let pinned_top = y;
+                let pinned_bottom = y
+                    + (pinned_count.max(1) as f32)
+                        * CARD_SLOT
+                        * if pinned_count == 0 { 0.5 } else { 1.0 };
+                self.sidebar_zones.clear();
+                self.sidebar_zones.push((
+                    Zone::Pinned,
+                    Rect::from_min_max(
+                        Pos2::new(area.left() + 4.0, pinned_top),
+                        Pos2::new(area.right() - 4.0, pinned_bottom),
+                    ),
+                ));
                 for thread in &cards {
                     let card = Rect::from_min_size(
                         Pos2::new(area.left() + 8.0, y + 2.0),
@@ -798,6 +815,21 @@ impl App {
                     }
                     y += CARD_SLOT;
                 }
+                let active_top = if pinned_count > 0 {
+                    pinned_bottom
+                } else {
+                    pinned_top + CARD_SLOT * 0.5
+                };
+                self.sidebar_zones.push((
+                    Zone::Active,
+                    Rect::from_min_max(
+                        Pos2::new(area.left() + 4.0, active_top),
+                        Pos2::new(
+                            area.right() - 4.0,
+                            (y.max(active_top + CARD_SLOT)).min(area.bottom() - tail_height),
+                        ),
+                    ),
+                ));
                 // The shelves sink to the bottom (`mt-auto`).
                 let mut header_top = y.max(area.bottom() - tail_height);
                 if snoozed_count > 0 {
@@ -835,6 +867,13 @@ impl App {
                     Pos2::new(area.left() + 10.0, header_top),
                     Vec2::new(area.width() - 20.0, 32.0),
                 );
+                self.sidebar_zones.push((
+                    Zone::Settled,
+                    Rect::from_min_max(
+                        Pos2::new(area.left() + 4.0, header.top()),
+                        Pos2::new(area.right() - 4.0, area.bottom()),
+                    ),
+                ));
                 if self
                     .section_header(ui, header, &label, self.settled_expanded, false)
                     .clicked()
@@ -991,8 +1030,9 @@ impl App {
         let response = ui.interact(
             rect,
             ui.id().with(("thread-card", &thread.id)),
-            Sense::click(),
+            Sense::click_and_drag(),
         );
+        self.sidebar_row_drag(&response, thread);
         let active = self.selected.as_deref() == Some(thread.id.as_str());
         let status = status(thread);
         let recede = self.recedes(thread, active);
@@ -1522,8 +1562,9 @@ impl App {
         let response = ui.interact(
             rect,
             ui.id().with(("thread-slim", &thread.id)),
-            Sense::click(),
+            Sense::click_and_drag(),
         );
+        self.sidebar_row_drag(&response, thread);
         let active = self.selected.as_deref() == Some(thread.id.as_str());
         // `group-hover`, kept while the pointer is over the row's buttons.
         let hovered = response.contains_pointer();
