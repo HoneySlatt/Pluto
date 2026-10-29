@@ -83,6 +83,7 @@ pub mod settings_search;
 pub mod shortcuts;
 pub mod sidebar;
 pub mod sidebar_drag;
+pub mod sidebar_sweep;
 pub mod snooze_dialog;
 pub mod source_control;
 pub mod stash;

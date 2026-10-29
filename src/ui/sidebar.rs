@@ -611,6 +611,7 @@ impl App {
         );
         self.thread_list(ui, list_rect);
         self.sidebar_drag_frame(ui, list_rect);
+        self.sweep_frame(ui, list_rect);
     }
 
     /// Pluto: the New and Search rows under Code | Chat, shared by both
@@ -781,6 +782,27 @@ impl App {
             .id_salt("sidebar-threads")
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
+                // dnd-kit's auto-scroll while a row is dragged within the
+                // list: 20% of the viewport at either edge, faster deeper
+                // in (10px every 5ms at the edge).
+                if self.sidebar_drag.is_some()
+                    && let Some(pointer) = ui.ctx().pointer_latest_pos()
+                    && (rect.left()..=rect.right()).contains(&pointer.x)
+                {
+                    let threshold = rect.height() * 0.2;
+                    let depth = if pointer.y < rect.top() + threshold {
+                        (rect.top() + threshold - pointer.y).min(threshold)
+                    } else if pointer.y > rect.bottom() - threshold {
+                        -(pointer.y - (rect.bottom() - threshold)).min(threshold)
+                    } else {
+                        0.0
+                    };
+                    if depth != 0.0 && threshold > 0.0 {
+                        let dt = ui.input(|i| i.stable_dt).min(0.1);
+                        ui.scroll_with_delta(Vec2::new(0.0, 2000.0 * depth / threshold * dt));
+                        ui.ctx().request_repaint();
+                    }
+                }
                 let height = content_height.max(rect.height());
                 let (area, _) =
                     ui.allocate_exact_size(Vec2::new(rect.width(), height), Sense::hover());
@@ -798,6 +820,7 @@ impl App {
                         * CARD_SLOT
                         * if pinned_count == 0 { 0.5 } else { 1.0 };
                 self.sidebar_zones.clear();
+                self.sidebar_rows.clear();
                 self.sidebar_zones.push((
                     Zone::Pinned,
                     Rect::from_min_max(
@@ -1033,18 +1056,25 @@ impl App {
             Sense::click_and_drag(),
         );
         self.sidebar_row_drag(&response, thread);
+        self.sidebar_rows.push((
+            thread.id.clone(),
+            crate::ui::sidebar_drag::zone_of(thread, self.now),
+            rect,
+        ));
         let active = self.selected.as_deref() == Some(thread.id.as_str());
         let status = status(thread);
         let recede = self.recedes(thread, active);
         let unread = self.is_unread(thread);
         let woke = self.woke_at(thread);
+        let swept = self.swept(&thread.id);
         // `group-hover`: the row stays hovered while the pointer is over its
         // own buttons (egui's `hovered()` only reports the topmost widget).
-        let hovered = response.contains_pointer();
+        // A sweep takes the hovers.
+        let hovered = response.contains_pointer() && self.sidebar_sweep.is_none();
         let painter = ui.painter().clone();
         if active {
             painter.rect_filled(rect, widgets::radius(8.0), theme::row_active());
-        } else if self.legacy_selection.contains(&thread.id) {
+        } else if self.legacy_selection.contains(&thread.id) || swept {
             // `bg-sidebar-row-selected`.
             painter.rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
@@ -1104,8 +1134,14 @@ impl App {
         let mut status_width = 0.0;
         if hovered || snooze_open {
             let settle = Rect::from_min_size(Pos2::new(right - 58.0, top), Vec2::new(62.0, 20.0));
-            let settle_response =
-                ui.interact(settle, ui.id().with(("settle", &thread.id)), Sense::click());
+            let settle_response = ui.interact(
+                settle,
+                ui.id().with(("settle", &thread.id)),
+                Sense::click_and_drag(),
+            );
+            if self.capability("threadSettlement") {
+                self.sweep_button(&settle_response, thread, "settle");
+            }
             let color = if settle_response.hovered() {
                 theme::foreground()
             } else {
@@ -1495,7 +1531,15 @@ impl App {
             }
         }
 
-        self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
+        if swept {
+            self.sweep_badge(ui, rect);
+        }
+        self.thread_hover_card(
+            ui,
+            rect,
+            response.contains_pointer() && self.sidebar_sweep.is_none(),
+            thread,
+        );
         self.row_file_drop(ui, rect, thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);
@@ -1566,13 +1610,20 @@ impl App {
             Sense::click_and_drag(),
         );
         self.sidebar_row_drag(&response, thread);
+        self.sidebar_rows.push((
+            thread.id.clone(),
+            crate::ui::sidebar_drag::zone_of(thread, self.now),
+            rect,
+        ));
         let active = self.selected.as_deref() == Some(thread.id.as_str());
-        // `group-hover`, kept while the pointer is over the row's buttons.
-        let hovered = response.contains_pointer();
+        let swept = self.swept(&thread.id);
+        // `group-hover`, kept while the pointer is over the row's buttons; a
+        // sweep takes the hovers.
+        let hovered = response.contains_pointer() && self.sidebar_sweep.is_none();
         if active {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::row_active());
-        } else if self.legacy_selection.contains(&thread.id) {
+        } else if self.legacy_selection.contains(&thread.id) || swept {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
@@ -1733,8 +1784,24 @@ impl App {
                 ("unsettle", "undo-2", 14.0, "Un-settle thread")
             };
             let button_response = ui
-                .interact(button, ui.id().with((id, &thread.id)), Sense::click())
+                .interact(
+                    button,
+                    ui.id().with((id, &thread.id)),
+                    Sense::click_and_drag(),
+                )
                 .on_hover_text(tooltip);
+            let capable = self.capability(if snoozed {
+                "threadSnooze"
+            } else {
+                "threadSettlement"
+            });
+            if capable {
+                self.sweep_button(
+                    &button_response,
+                    thread,
+                    if snoozed { "unsnooze" } else { "unsettle" },
+                );
+            }
             theme::paint_icon(
                 ui,
                 icon,
@@ -1762,7 +1829,15 @@ impl App {
                 self.dispatch_titled(cmd, failure);
             }
         }
-        self.thread_hover_card(ui, rect, response.contains_pointer(), thread);
+        if swept {
+            self.sweep_badge(ui, rect);
+        }
+        self.thread_hover_card(
+            ui,
+            rect,
+            response.contains_pointer() && self.sidebar_sweep.is_none(),
+            thread,
+        );
         self.row_file_drop(ui, rect, thread);
         if response.clicked() {
             self.sidebar_row_clicked(ui, thread);

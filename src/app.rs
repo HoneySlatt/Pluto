@@ -46,6 +46,9 @@ pub struct App {
     /// composer's rect (`ui/sidebar_drag.rs`).
     pub(crate) sidebar_drag: Option<crate::ui::sidebar_drag::Drag>,
     pub(crate) sidebar_zones: Vec<(crate::ui::sidebar_drag::Zone, Rect)>,
+    /// The action sweep, and this frame's rows in sidebar order.
+    pub(crate) sidebar_sweep: Option<crate::ui::sidebar_sweep::Sweep>,
+    pub(crate) sidebar_rows: Vec<(String, crate::ui::sidebar_drag::Zone, Rect)>,
     pub(crate) composer_rect: Option<Rect>,
     /// `subscribeProjectClones`: whether it is open, and the snapshots.
     pub(crate) clones_streaming: bool,
@@ -543,6 +546,8 @@ impl App {
             clones: Vec::new(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
+            sidebar_sweep: None,
+            sidebar_rows: Vec::new(),
             composer_rect: None,
             advance: None,
             migration_toast: None,
