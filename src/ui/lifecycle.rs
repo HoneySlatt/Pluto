@@ -191,6 +191,39 @@ struct Agent {
     child_thread_id: Option<String>,
 }
 
+/// The card of a subagent known only from the thread's projection, its
+/// detail picked as of `status` when an event reports one.
+fn live_agent(live: &Subagent, status: Option<&str>) -> Agent {
+    let trimmed = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let (result, progress) = (trimmed(&live.result), trimmed(&live.progress));
+    let settled = matches!(
+        status.unwrap_or(&live.status),
+        "completed" | "failed" | "cancelled" | "interrupted"
+    );
+    let raw = if settled {
+        result.or(progress)
+    } else {
+        progress.or(result)
+    };
+    Agent {
+        title: crate::model::subagent_display_title(live.title.as_deref().unwrap_or("Subagent")),
+        driver: Some(live.driver.clone()).filter(|d| !d.is_empty()),
+        detail: raw
+            .filter(|d| !d.to_lowercase().starts_with("child task ended with status"))
+            .map(|d| plain_detail(&d))
+            .filter(|d| !d.is_empty()),
+        started_at: live.started_at.clone(),
+        completed_at: live.completed_at.clone(),
+        child_thread_id: live.child_thread_id.clone(),
+        status: live.status.clone(),
+    }
+}
+
 fn agent(item: &TurnItem, detail: &Detail) -> Agent {
     let live: Option<&Subagent> = item
         .str("subagentId")
@@ -318,6 +351,7 @@ impl App {
                 "fork" => self.fork_divider(ui, first, width),
                 "handoff" => self.handoff_divider(ui, first, &detail, width),
                 "secret_request" => self.secret_request(ui, first, width),
+                "thread_created" => self.created_thread_card(ui, first, width),
                 _ => {
                     // `run_interrupt_result`.
                     let mut pieces = vec![
@@ -344,6 +378,65 @@ impl App {
             }
         }
         ui.add_space(8.0);
+    }
+
+    /// `V2LifecycleRow`'s resource summary: a thread the run created, under
+    /// its final answer, with Open chat.
+    fn created_thread_card(&mut self, ui: &mut Ui, item: &TurnItem, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 62.0), Sense::hover());
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(8),
+            Stroke::new(1.0, theme::alpha(theme::border(), 0.6)),
+            egui::StrokeKind::Inside,
+        );
+        let tile = Rect::from_min_size(rect.min + Vec2::splat(13.0), Vec2::splat(36.0));
+        ui.painter().rect_filled(
+            tile,
+            CornerRadius::same(8),
+            theme::alpha(theme::muted(), 0.6),
+        );
+        theme::paint_icon(ui, "message-square", tile, 16.0, theme::secondary_label());
+        let title = item
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or("Created thread");
+        let label = "Open chat";
+        let button_width = widgets::outline_button_width(ui, false, label);
+        let button = Rect::from_min_size(
+            Pos2::new(rect.right() - 13.0 - button_width, rect.center().y - 12.0),
+            Vec2::new(button_width, 24.0),
+        );
+        widgets::text_in(
+            ui,
+            Rect::from_min_max(
+                Pos2::new(tile.right() + 12.0, rect.top()),
+                Pos2::new(button.left() - 12.0, rect.bottom()),
+            ),
+            title,
+            font(14.0, Weight::Medium),
+            theme::foreground(),
+        );
+        let target = item.str("targetThreadId").map(str::to_owned);
+        let response = widgets::outline_button(
+            ui,
+            button,
+            ("created-thread", &item.id),
+            None,
+            label,
+            CornerRadius::same(6),
+        )
+        .on_hover_text(format!(
+            "Open {}",
+            item.title.as_deref().unwrap_or("created thread")
+        ));
+        if response.clicked()
+            && let Some(target) = target.filter(|t| self.state.threads.iter().any(|x| &x.id == t))
+        {
+            self.select_thread(Some(target));
+        }
     }
 
     fn fork_divider(&mut self, ui: &mut Ui, item: &TurnItem, width: f32) {
@@ -506,12 +599,68 @@ impl App {
         inset: f32,
     ) {
         let agent = agent(item, detail);
+        self.agent_card(ui, &item.id, agent, width, inset, None);
+    }
+
+    /// `SubagentNotificationLink`: a notification about a subagent the
+    /// thread knows, as that subagent's card with the status it reported
+    /// and when. False when the thread has no record of it.
+    pub(crate) fn notification_card(&mut self, ui: &mut Ui, entry: &WorkEntry, width: f32) -> bool {
+        let Some(item) = entry.item.as_deref().filter(|i| i.kind == "notification") else {
+            return false;
+        };
+        let source = item.get("source");
+        let subagent_source =
+            matches!(source["kind"].as_str(), Some("subagent" | "delegated_task"))
+                || (source["kind"] == "background_task" && source["work"] == "subagent");
+        let Some(child) = source["childThreadId"].as_str().filter(|_| subagent_source) else {
+            return false;
+        };
+        let Some(detail) = self.current_detail() else {
+            return false;
+        };
+        let Some(live) = detail
+            .subagents
+            .iter()
+            .find(|a| a.child_thread_id.as_deref() == Some(child))
+        else {
+            return false;
+        };
+        let outcome = item.str("outcome").unwrap_or("unknown");
+        let status = match outcome {
+            "completed" | "failed" | "cancelled" => Some(outcome),
+            _ => None,
+        };
+        let label = match outcome {
+            "failed" => "Failed",
+            "cancelled" => "Stopped",
+            "updated" => "Updated",
+            _ => "Finished",
+        };
+        let agent = live_agent(live, status);
+        let time = widgets::clock_time(&entry.created_at, self.now);
+        self.agent_card(ui, &item.id, agent, width, 0.0, Some((status, label, time)));
+        ui.add_space(8.0);
+        true
+    }
+
+    /// A subagent's card; `event` draws a past event about it instead: its
+    /// status then (none for an update), the label, and when.
+    fn agent_card(
+        &mut self,
+        ui: &mut Ui,
+        id: &str,
+        agent: Agent,
+        width: f32,
+        inset: f32,
+        event: Option<(Option<&str>, &str, String)>,
+    ) {
         let (row, _) = ui.allocate_exact_size(Vec2::new(width, CARD), Sense::hover());
         let rect = row.shrink2(Vec2::new(inset, 0.0));
         let opens = agent.child_thread_id.is_some();
         let response = ui.interact(
             rect,
-            ui.id().with(("subagent", &item.id)),
+            ui.id().with(("subagent", id)),
             if opens {
                 Sense::click()
             } else {
@@ -529,11 +678,15 @@ impl App {
             .driver
             .as_deref()
             .and_then(crate::ui::pickers::provider_icon);
+        let shown_status = match &event {
+            Some((status, ..)) => *status,
+            None => Some(agent.status.as_str()),
+        };
         avatar(
             ui,
             Pos2::new(rect.left() + 8.0 + 12.0, rect.center().y),
             mark,
-            Some(&agent.status),
+            shown_status,
         );
         let muted = theme::muted_foreground();
         let mut right = rect.right() - 8.0;
@@ -551,11 +704,15 @@ impl App {
             );
             right -= 14.0 + 10.0;
         }
-        if let Some(time) = elapsed(
-            &agent.status,
-            agent.started_at.as_deref(),
-            agent.completed_at.as_deref(),
-        ) {
+        let time = match &event {
+            Some((.., timestamp)) => Some(timestamp.clone()),
+            None => elapsed(
+                &agent.status,
+                agent.started_at.as_deref(),
+                agent.completed_at.as_deref(),
+            ),
+        };
+        if let Some(time) = time {
             let time_font = font(12.0, Weight::Regular);
             let time_width = widgets::tabular_width(ui, &time, time_font.clone());
             widgets::tabular_text(
@@ -567,14 +724,17 @@ impl App {
                 16.0,
             );
             right -= time_width + 10.0;
-            if active(&agent.status) {
+            if event.is_none() && active(&agent.status) {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_secs(1));
             }
         }
         let left = rect.left() + 8.0 + 24.0 + 10.0;
-        let failed = agent.status == "failed";
-        let (_, status_label) = status_visual(&agent.status);
+        let failed = shown_status == Some("failed");
+        let status_label = match &event {
+            Some((_, label, _)) => *label,
+            None => status_visual(&agent.status).1,
+        };
         let title_width = widgets::text_in(
             ui,
             Rect::from_min_max(
@@ -585,7 +745,7 @@ impl App {
             font(12.0, Weight::Medium),
             theme::foreground(),
         );
-        if agent.detail.is_some() && agent.status != "completed" {
+        if agent.detail.is_some() && (event.is_some() || agent.status != "completed") {
             widgets::text_in(
                 ui,
                 Rect::from_min_max(

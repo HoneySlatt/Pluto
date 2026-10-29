@@ -181,6 +181,7 @@ fn estimate(row: &Row, width: f32) -> f32 {
             let card = match entries.first().and_then(|e| e.item_type.as_deref()) {
                 Some("subagent") => 46.0,
                 Some("fork") => 42.0,
+                Some("thread_created") => 62.0,
                 _ => 40.0,
             };
             card + 8.0

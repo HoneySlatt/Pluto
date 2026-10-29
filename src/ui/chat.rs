@@ -2239,6 +2239,9 @@ impl App {
         width: f32,
         in_group: bool,
     ) {
+        if self.notification_card(ui, entry, width) {
+            return;
+        }
         let key = format!("entry:{}", entry.id);
         let expanded = self.expansion.groups.contains(&key);
         let failed = timeline::indicates_failure(entry);

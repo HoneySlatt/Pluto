@@ -2842,6 +2842,77 @@ pub fn rows(thread: &Thread, detail: &Detail, expansion: &Expansion) -> Vec<Row>
             });
         }
     }
+    attach_created_thread_summaries(out, &entries)
+}
+
+/// `attachCreatedThreadSummaries`: the threads a run created show again
+/// as cards (`source_kind` `summary`) under its final answer; their own
+/// rows go when the run folds or sit after that answer.
+fn attach_created_thread_summaries(rows: Vec<Row>, entries: &[Entry]) -> Vec<Row> {
+    let mut terminal: HashMap<&str, usize> = HashMap::new();
+    let mut collapsed: HashSet<&str> = HashSet::new();
+    for (index, row) in rows.iter().enumerate() {
+        match row {
+            Row::Assistant {
+                message,
+                show_meta: true,
+                ..
+            } => {
+                if let Some(run) = message.run_id.as_deref() {
+                    terminal.insert(run, index);
+                }
+            }
+            Row::TurnFold {
+                run_id,
+                expanded: false,
+                ..
+            } => {
+                collapsed.insert(run_id);
+            }
+            _ => {}
+        }
+    }
+    let mut created: HashMap<String, Vec<WorkEntry>> = HashMap::new();
+    for entry in entries {
+        if let Entry::Work(work) = entry
+            && work.item_type.as_deref() == Some("thread_created")
+            && let Some(run) = &work.run_id
+        {
+            created.entry(run.clone()).or_default().push(work.clone());
+        }
+    }
+    if created.is_empty() {
+        return rows;
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        if let Row::Work { entry, .. } = row
+            && entry.item_type.as_deref() == Some("thread_created")
+            && let Some(run) = entry.run_id.as_deref()
+            && let Some(&end) = terminal.get(run)
+            && (collapsed.contains(run) || index > end)
+        {
+            continue;
+        }
+        out.push(row.clone());
+        if let Row::Assistant {
+            message,
+            show_meta: true,
+            ..
+        } = row
+            && let Some(list) = message.run_id.as_ref().and_then(|run| created.get(run))
+        {
+            for entry in list {
+                out.push(Row::Event {
+                    id: format!("summary:{}", entry.id),
+                    entries: vec![WorkEntry {
+                        source_kind: "summary".into(),
+                        ..entry.clone()
+                    }],
+                });
+            }
+        }
+    }
     out
 }
 
@@ -3109,6 +3180,33 @@ mod tests {
             }
         ));
         assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn created_threads_show_again_under_the_answer() {
+        let (thread, mut detail) = settled();
+        detail.visible.insert(
+            2,
+            item(
+                "c",
+                "thread_created",
+                "2026-01-01T00:02:00.000Z",
+                Some("run"),
+                json!({"targetThreadId": "child", "title": "Child"}),
+            ),
+        );
+        let rows = rows(&thread, &detail, &Expansion::default());
+        // Folded: only the summary under the final answer remains.
+        assert!(matches!(
+            &rows[2],
+            Row::Assistant {
+                show_meta: true,
+                ..
+            }
+        ));
+        assert!(matches!(&rows[3], Row::Event { id, entries }
+            if id == "summary:c" && entries[0].source_kind == "summary"));
+        assert_eq!(rows.len(), 4);
     }
 
     #[test]
