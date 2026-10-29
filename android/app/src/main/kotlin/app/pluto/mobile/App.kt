@@ -95,7 +95,15 @@ fun Modifier.safeBars(top: Dp = 12.dp, bottom: Dp = 8.dp): Modifier = composed {
 
 @Composable
 fun PlutoApp(model: Model) {
-    CompositionLocalProvider(LocalModel provides model) {
+    // Selected text and its handles take Pluto's accent.
+    val selection = androidx.compose.foundation.text.selection.TextSelectionColors(
+        handleColor = P.accent,
+        backgroundColor = P.accent.copy(alpha = .35f),
+    )
+    CompositionLocalProvider(
+        LocalModel provides model,
+        androidx.compose.foundation.text.selection.LocalTextSelectionColors provides selection,
+    ) {
         // A remembered server connects at once.
         LaunchedEffect(Unit) {
             model.secret.load()?.let { (server, token) -> model.core.connect(server, token, true) }
