@@ -37,6 +37,60 @@ pub struct Message {
     pub updated_at: String,
     /// `turn_start`, `queued_turn`, `steer` or `promoted_queued_to_steer`.
     pub input_intent: Option<String>,
+    /// Who sent a user message the user did not type
+    /// (`resolveUserMessagePresentation`): `automation`, `agent` or `t3code`;
+    /// with the task or the sending thread.
+    pub attribution: Option<String>,
+    pub scheduled_task_id: Option<String>,
+    pub sender_thread_id: Option<String>,
+}
+
+/// `resolveUserMessagePresentation`: the sender of a user message, and its
+/// text without an older scheduled message's prefix.
+fn user_message_presentation(
+    id: &str,
+    text: &str,
+    item: &TurnItem,
+) -> (String, Option<String>, Option<String>) {
+    if let Some(task) = item.str("scheduledTaskId") {
+        return (
+            text.to_owned(),
+            Some("automation".into()),
+            Some(task.to_owned()),
+        );
+    }
+    let agent = item.str("createdBy") == Some("agent");
+    // `LEGACY_AUTOMATION_PREFIX`: "[Triggered by schedule task: …]" and a blank line.
+    let legacy = text
+        .strip_prefix("[Triggered by schedule task: ")
+        .and_then(|rest| {
+            let end = rest.find(']')?;
+            let after = &rest[end + 1..];
+            after
+                .strip_prefix("\r\n\r\n")
+                .or_else(|| after.strip_prefix("\n\n"))
+                .filter(|_| !rest[..end].contains('\n'))
+        });
+    let legacy_task = id
+        .strip_prefix("scheduled-task-message:")
+        .and_then(|rest| rest.rsplit_once(':'))
+        .filter(|(_, mode)| matches!(*mode, "scheduled" | "manual"))
+        .and_then(|(rest, _)| rest.rsplit_once(':'))
+        .filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit()))
+        .map(|(task, _)| task.to_owned());
+    if let Some(body) = legacy
+        && (legacy_task.is_some() || agent)
+    {
+        return (body.to_owned(), Some("automation".into()), legacy_task);
+    }
+    let attribution = agent.then(|| {
+        if item.str("creationSource") == Some("server") {
+            "t3code".to_owned()
+        } else {
+            "agent".to_owned()
+        }
+    });
+    (text.to_owned(), attribution, None)
 }
 
 /// `ProposedPlan`: a plan a plan-mode run proposed.
@@ -1186,10 +1240,15 @@ fn entries(detail: &Detail) -> Vec<Entry> {
             })),
             "user_message" | "assistant_message" => {
                 let user = item.kind == "user_message";
+                let (text, attribution, scheduled_task_id) = if user {
+                    user_message_presentation(message_id, item.text(), item)
+                } else {
+                    (item.text().to_owned(), None, None)
+                };
                 out.push(Entry::Message(Message {
                     id: message_id.to_owned(),
                     role: if user { "user" } else { "assistant" }.into(),
-                    text: item.text().to_owned(),
+                    text,
                     attachments: item
                         .get("attachments")
                         .as_array()
@@ -1209,6 +1268,9 @@ fn entries(detail: &Detail) -> Vec<Entry> {
                     } else {
                         None
                     },
+                    attribution,
+                    scheduled_task_id,
+                    sender_thread_id: item.str("senderThreadId").map(str::to_owned),
                 }));
             }
             "proposed_plan" => {
@@ -2232,6 +2294,47 @@ mod tests {
             item: Arc::new(item),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn user_messages_say_who_sent_them() {
+        let presentation = |id: &str, text: &str, extra: Value| {
+            let row = item(id, "user_message", "2026-10-01T00:00:00.000Z", None, extra);
+            user_message_presentation(id, text, &row.item)
+        };
+        assert_eq!(
+            presentation("m", "hi", json!({"scheduledTaskId": "task"})),
+            ("hi".into(), Some("automation".into()), Some("task".into()))
+        );
+        assert_eq!(
+            presentation(
+                "scheduled-task-message:task-1:3:manual",
+                "[Triggered by schedule task: Daily]\n\nRun it",
+                json!({})
+            ),
+            (
+                "Run it".into(),
+                Some("automation".into()),
+                Some("task-1".into())
+            )
+        );
+        assert_eq!(
+            presentation(
+                "m",
+                "go",
+                json!({"createdBy": "agent", "creationSource": "server"})
+            )
+            .1,
+            Some("t3code".into())
+        );
+        assert_eq!(
+            presentation("m", "go", json!({"createdBy": "agent"})).1,
+            Some("agent".into())
+        );
+        assert_eq!(
+            presentation("m", "go", json!({"createdBy": "user"})).1,
+            None
+        );
     }
 
     #[test]

@@ -974,6 +974,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         };
     }
     icons!(
+        "redo-2",
         "octagon-alert",
         "message-square-warning",
         "lightbulb",

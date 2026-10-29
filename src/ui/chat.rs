@@ -1523,10 +1523,27 @@ impl App {
             text_size.x.max(grid.x).max(files_size.x) + 24.0,
             grid.y + files_size.y + text_size.y + 24.0,
         );
-        let (row_rect, response) =
-            ui.allocate_exact_size(Vec2::new(width, bubble_size.y + 4.0 + 24.0), Sense::hover());
+        // Over the bubble (`gap-1`): who sent it when the user did not, and a
+        // queued or steering message's marker.
+        let markers = user_markers(message);
+        let markers_height = markers.len() as f32 * (16.0 + 4.0);
+        let (row_rect, response) = ui.allocate_exact_size(
+            Vec2::new(width, markers_height + bubble_size.y + 4.0 + 24.0),
+            Sense::hover(),
+        );
+        if let Some(target) = self.paint_user_markers(ui, &message.id, &markers, row_rect) {
+            match target {
+                MarkerTarget::Task => {
+                    self.open_settings_page(crate::ui::scheduled_tasks::SCHEDULED_TASKS_PAGE)
+                }
+                MarkerTarget::Thread(id) => self.select_thread(Some(id)),
+            }
+        }
         let bubble = Rect::from_min_size(
-            Pos2::new(row_rect.right() - bubble_size.x, row_rect.top()),
+            Pos2::new(
+                row_rect.right() - bubble_size.x,
+                row_rect.top() + markers_height,
+            ),
             bubble_size,
         );
         ui.painter()
@@ -2393,6 +2410,161 @@ impl App {
 const DESTRUCTIVE: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(251, 65, 74); // --destructive
 
 /// `workEntryIconName`: tool action icons, then the tone icon.
+/// A line over a user bubble: its text, icon, tooltip and what a click
+/// opens.
+struct Marker {
+    text: &'static str,
+    icon: Option<&'static str>,
+    tooltip: Option<&'static str>,
+    small: bool,
+    target: Option<MarkerTarget>,
+}
+
+#[derive(Clone)]
+enum MarkerTarget {
+    Task,
+    Thread(String),
+}
+
+/// `UserTimelineRow`'s attribution line and `UserMessageIntentMarker`.
+fn user_markers(message: &Message) -> Vec<Marker> {
+    let mut markers = Vec::new();
+    match message.attribution.as_deref() {
+        Some("automation") => markers.push(Marker {
+            text: "Sent by automation",
+            icon: None,
+            tooltip: None,
+            small: true,
+            target: message
+                .scheduled_task_id
+                .as_ref()
+                .map(|_| MarkerTarget::Task),
+        }),
+        // Pluto: the server is Pluto's.
+        Some("t3code") => markers.push(Marker {
+            text: "Sent by Pluto",
+            icon: None,
+            tooltip: None,
+            small: true,
+            target: None,
+        }),
+        Some("agent") => markers.push(Marker {
+            text: "Sent by another agent",
+            icon: None,
+            tooltip: None,
+            small: true,
+            target: message.sender_thread_id.clone().map(MarkerTarget::Thread),
+        }),
+        _ => {}
+    }
+    match message.input_intent.as_deref() {
+        None | Some("turn_start") => {}
+        Some("queued_turn") => markers.push(Marker {
+            text: "From queue",
+            icon: None,
+            tooltip: Some("Queued while the agent was busy"),
+            small: false,
+            target: None,
+        }),
+        Some(intent) => markers.push(Marker {
+            text: "Steer",
+            icon: Some("redo-2"),
+            tooltip: Some(if intent == "promoted_queued_to_steer" {
+                "Originally queued, then promoted to steer the active turn"
+            } else {
+                "Steered the active turn"
+            }),
+            small: false,
+            target: None,
+        }),
+    }
+    markers
+}
+
+impl App {
+    /// Draws the markers right-aligned at the top of `row`; returns what a
+    /// clicked one opens.
+    fn paint_user_markers(
+        &mut self,
+        ui: &mut Ui,
+        message_id: &str,
+        markers: &[Marker],
+        row: Rect,
+    ) -> Option<MarkerTarget> {
+        let mut clicked = None;
+        for (index, marker) in markers.iter().enumerate() {
+            // `text-2xs text-muted-foreground/70`, or `text-xs`.
+            let (size, color) = if marker.small {
+                (10.0, theme::alpha(theme::muted_foreground(), 0.7))
+            } else {
+                (12.0, theme::muted_foreground())
+            };
+            let label_font = font(size, Weight::Regular);
+            let text_width = widgets::text_width(ui, marker.text, label_font.clone());
+            let icon_width = if marker.icon.is_some() {
+                12.0 + 4.0
+            } else {
+                0.0
+            };
+            let top = row.top() + index as f32 * 20.0;
+            let right = row.right() - 4.0;
+            let rect = Rect::from_min_max(
+                Pos2::new(right - text_width - icon_width, top),
+                Pos2::new(right, top + 16.0),
+            );
+            let mut response = ui.interact(
+                rect,
+                ui.id().with(("user-marker", message_id, index)),
+                if marker.target.is_some() {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                },
+            );
+            if let Some(tooltip) = marker.tooltip {
+                response = response.on_hover_text(tooltip);
+            }
+            let hovered = marker.target.is_some() && response.hovered();
+            let color = if hovered {
+                theme::muted_foreground()
+            } else {
+                color
+            };
+            if let Some(icon) = marker.icon {
+                theme::paint_icon(
+                    ui,
+                    icon,
+                    Rect::from_min_size(Pos2::new(rect.left(), top + 2.0), Vec2::splat(12.0)),
+                    12.0,
+                    color,
+                );
+            }
+            widgets::text(
+                ui,
+                Pos2::new(rect.left() + icon_width, top + (16.0 - size * 1.3) / 2.0),
+                marker.text,
+                label_font,
+                color,
+                (size * 1.3).round(),
+            );
+            if hovered {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                ui.painter().line_segment(
+                    [
+                        Pos2::new(rect.left() + icon_width, rect.bottom() - 2.0),
+                        Pos2::new(rect.right(), rect.bottom() - 2.0),
+                    ],
+                    egui::Stroke::new(1.0, color),
+                );
+            }
+            if response.clicked() {
+                clicked = marker.target.clone();
+            }
+        }
+        clicked
+    }
+}
+
 /// `ThreadStatusLine`: what the thread's state is, under its last message,
 /// with the one action that leaves it.
 pub(crate) struct StatusLine {
