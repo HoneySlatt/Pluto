@@ -377,7 +377,14 @@ impl App {
             theme::foreground(),
             36.0,
         );
-        let sub = "Add a project, or start without one.";
+        // `NoProjectsHero`: without a Scratch folder there is no starting
+        // without a project.
+        let scratch = self.scratch_root().is_some();
+        let sub = if scratch {
+            "Add a project, or start without one."
+        } else {
+            "Add a project to start your first thread."
+        };
         let width = widgets::text_width(ui, sub, font(14.0, Weight::Regular));
         widgets::text(
             ui,
@@ -387,6 +394,84 @@ impl App {
             theme::muted_foreground(),
             20.0,
         );
+        // `Button size="sm"`: Add project, and Start without a project.
+        let label_font = font(14.0, Weight::Medium);
+        let button_width = |label: &str| {
+            (12.0 + 16.0 + 6.0 + widgets::text_width(ui, label, label_font.clone()) + 12.0).ceil()
+        };
+        let add = "Add project";
+        let start = "Start without a project";
+        let widths = [
+            button_width(add),
+            if scratch { button_width(start) } else { 0.0 },
+        ];
+        let total = widths[0] + if scratch { 8.0 + widths[1] } else { 0.0 };
+        let mut x = (center.x - total / 2.0).round();
+        let top = center.y - 42.0 + 20.0 + 24.0;
+        let mut clicked = [false; 2];
+        for (index, (label, icon)) in [(add, "plus"), (start, "message-square-dashed")]
+            .into_iter()
+            .enumerate()
+            .take(if scratch { 2 } else { 1 })
+        {
+            let rect = Rect::from_min_size(Pos2::new(x, top), Vec2::new(widths[index], 32.0));
+            let response = ui
+                .interact(rect, ui.id().with(("empty-state", index)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let primary = index == 0;
+            let (fill, color) = if primary {
+                let fill = if response.hovered() {
+                    theme::primary_hover()
+                } else {
+                    theme::primary()
+                };
+                (fill, theme::primary_foreground())
+            } else {
+                let fill = if response.hovered() {
+                    theme::overlay(0.06)
+                } else {
+                    theme::control_surface()
+                };
+                (fill, theme::foreground())
+            };
+            ui.painter().rect(
+                rect,
+                CornerRadius::same(8),
+                fill,
+                if primary {
+                    egui::Stroke::NONE
+                } else {
+                    egui::Stroke::new(1.0, theme::input())
+                },
+                egui::StrokeKind::Inside,
+            );
+            theme::paint_icon(
+                ui,
+                icon,
+                Rect::from_min_size(
+                    Pos2::new(rect.left() + 12.0, rect.top() + 8.0),
+                    Vec2::splat(16.0),
+                ),
+                16.0,
+                color,
+            );
+            widgets::text(
+                ui,
+                Pos2::new(rect.left() + 12.0 + 16.0 + 6.0, rect.top() + 6.0),
+                label,
+                label_font.clone(),
+                color,
+                20.0,
+            );
+            clicked[index] = response.clicked();
+            x = rect.right() + 8.0;
+        }
+        if clicked[0] {
+            self.toggle_palette(crate::ui::palette::View::AddProject);
+        }
+        if clicked[1] {
+            self.start_scratch_thread();
+        }
     }
 
     /// Pluto: the pixel logo 22px above the hero's headline at `top`, its

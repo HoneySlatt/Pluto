@@ -413,17 +413,35 @@ impl App {
             surface.min + Vec2::new(17.0, 17.0 + strip_height),
             Vec2::new(width - 34.0, text_height),
         );
+        // `ChatComposer`'s placeholder, by state.
+        let choice_only = matches!(mode, Mode::Question(input)
+            if input
+                .questions
+                .get(self.question_index)
+                .is_some_and(|q| !q.allow_custom_answer));
+        let providers_known = !self.providers().is_empty();
+        let provider_ready = self
+            .providers()
+            .iter()
+            .any(|p| p["enabled"] != false && p["status"] == "ready");
         let placeholder = match mode {
             Mode::Approval(..) => "Resolve this approval request to continue",
+            Mode::Question(_) if choice_only => "Choose an option above",
             Mode::Question(_) => {
                 "Type your own answer, or leave this blank to use the selected option"
+            }
+            Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
+            Mode::Normal if !self.connected() => {
+                "Ask for changes, send follow-ups, or attach images"
+            }
+            Mode::Normal if providers_known && !provider_ready => {
+                "Enable a provider in Settings to send a message"
             }
             // Pluto: a chat asks like the chat sites do.
             Mode::Normal if self.image_on(draft) => "Describe the image to make",
             Mode::Normal if self.research_on(draft) => "What should I research?",
             Mode::Normal if self.chat_context(draft) => "Ask anything",
-            Mode::Normal => "Ask for changes, send follow-ups, or attach images",
-            Mode::Plan(_) => "Add feedback to refine the plan, or leave this blank to implement it",
+            Mode::Normal => "Ask anything, @tag files/folders, $use skills, or / for commands",
         };
         // Attached images count as context, which hides the placeholder.
         if (self.composer.is_empty()

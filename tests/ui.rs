@@ -844,3 +844,11 @@ fn a_settled_thread_says_so_under_its_last_message() {
     assert!(shown.iter().any(|t| t == "Settled 2h ago"), "{shown:?}");
     assert!(shown.iter().any(|t| t == "Un-settle"), "{shown:?}");
 }
+
+#[test]
+fn without_projects_the_hero_offers_to_add_one() {
+    let harness = harness_with(json!([]), json!([]));
+    assert!(find_text(&harness, "Add a project to start your first thread.").is_some());
+    assert!(find_text(&harness, "Add project").is_some());
+    assert!(find_text(&harness, "Start without a project").is_none());
+}
