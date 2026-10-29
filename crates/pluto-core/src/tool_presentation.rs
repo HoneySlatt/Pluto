@@ -582,6 +582,464 @@ pub fn read_label(path: &str, extra: usize) -> String {
     }
 }
 
+/// `T3ToolSummaryCall`: `outcome` is `completed`, `failed` or `unfinished`.
+pub struct SummaryCall {
+    pub input: Value,
+    pub output: Value,
+    pub outcome: &'static str,
+}
+
+fn id(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_owned)
+}
+
+/// `countEntities`: distinct known ids, plus every unknown one.
+fn count_entities(ids: &[Option<String>]) -> usize {
+    let known: std::collections::HashSet<&String> = ids.iter().flatten().collect();
+    known.len() + ids.iter().filter(|i| i.is_none()).count()
+}
+
+fn quantity(count: usize, noun: &str, plural: Option<&str>) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!(
+            "{count} {}",
+            plural.map_or_else(|| format!("{noun}s"), str::to_owned)
+        )
+    }
+}
+
+/// `summarizeT3ToolCalls`: a T3 group's label, counting what succeeded
+/// apart from failed or unfinished calls, and how many failed.
+pub fn summarize_t3_calls(action: &str, calls: &[SummaryCall]) -> (String, usize) {
+    struct Call {
+        input: Map<String, Value>,
+        output: Map<String, Value>,
+        outcome: &'static str,
+    }
+    let results: Vec<Call> = calls
+        .iter()
+        .map(|call| {
+            let (output, failed) = read_result(&call.output);
+            Call {
+                input: read_input(&call.input).unwrap_or_default(),
+                output: output.unwrap_or_default(),
+                outcome: if failed { "failed" } else { call.outcome },
+            }
+        })
+        .collect();
+    let completed: Vec<&Call> = results
+        .iter()
+        .filter(|c| c.outcome == "completed")
+        .collect();
+    let mut failed_count = results.iter().filter(|c| c.outcome == "failed").count();
+    let selected: Vec<&Call> = if completed.is_empty() {
+        results.iter().collect()
+    } else {
+        completed.clone()
+    };
+    let times = quantity(selected.len(), "time", None);
+    let any_completed = !completed.is_empty();
+    let phrase = |past: &str, infinitive: &str, object: &str| {
+        if any_completed {
+            format!("{past} {object}")
+        } else {
+            format!("Tried to {infinitive} {object}")
+        }
+    };
+    let entity_ids = |key: &str| -> Vec<Option<String>> {
+        selected
+            .iter()
+            .map(|c| id(c.output.get(key)).or_else(|| id(c.input.get(key))))
+            .collect()
+    };
+    let counted = |key: &str, noun: &str, plural: Option<&str>| {
+        quantity(count_entities(&entity_ids(key)), noun, plural)
+    };
+    let project_ids: Vec<Option<String>> = selected
+        .iter()
+        .map(|c| {
+            id(c.output.get("id"))
+                .or_else(|| id(c.output.get("projectId")))
+                .or_else(|| id(c.input.get("projectId")))
+        })
+        .collect();
+    let thread_ids: Vec<Option<String>> = selected
+        .iter()
+        .map(|c| {
+            id(c.output.get("threadId"))
+                .or_else(|| id(c.output.get("thread").and_then(|t| t.get("threadId"))))
+                .or_else(|| id(c.input.get("threadId")))
+        })
+        .collect();
+    let targets_known = thread_ids.iter().all(Option::is_some);
+    let distinct_threads = thread_ids
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let threads = |ids: &[Option<String>]| quantity(count_entities(ids), "thread", None);
+    let label = match action {
+        "thread-send" => {
+            let messages = count_entities(
+                &selected
+                    .iter()
+                    .map(|c| id(c.output.get("messageId")))
+                    .collect::<Vec<_>>(),
+            );
+            let object = if !targets_known {
+                quantity(messages, "message", None)
+            } else if messages == distinct_threads && messages > 1 {
+                format!("messages to {}", quantity(distinct_threads, "thread", None))
+            } else {
+                format!(
+                    "{} to {}",
+                    quantity(messages, "message", None),
+                    quantity(distinct_threads, "thread", None)
+                )
+            };
+            phrase("Sent", "send", &object)
+        }
+        "thread-create" => {
+            let mut created: Vec<String> = Vec::new();
+            let known = any_completed
+                && completed.iter().all(|call| {
+                    let list = match call.output.get("threads").and_then(Value::as_array) {
+                        Some(list) => list.clone(),
+                        None => vec![Value::Object(call.output.clone())],
+                    };
+                    list.iter().all(|thread| {
+                        if thread["status"] == "rolled_back" {
+                            return true;
+                        }
+                        match id(thread.get("threadId")) {
+                            Some(thread_id) => {
+                                created.push(thread_id);
+                                true
+                            }
+                            None => false,
+                        }
+                    })
+                });
+            if known {
+                created.sort();
+                created.dedup();
+                format!("Created {}", quantity(created.len(), "thread", None))
+            } else {
+                format!("Requested thread creation {times}")
+            }
+        }
+        "delegate" => phrase("Delegated", "delegate", &counted("taskId", "task", None)),
+        "thread-read" | "thread-wait" => {
+            let targets = if targets_known {
+                quantity(distinct_threads, "thread", None)
+            } else {
+                format!("threads {times}")
+            };
+            if action == "thread-read" {
+                phrase("Read", "read", &targets)
+            } else {
+                phrase("Waited on", "wait on", &targets)
+            }
+        }
+        "thread-list" => phrase("Listed", "list", &format!("threads {times}")),
+        "thread-interrupt" => phrase(
+            "Requested interrupts for",
+            "interrupt",
+            &threads(&thread_ids),
+        ),
+        "workflow-stop" => phrase(
+            "Requested stops for",
+            "stop",
+            &counted("subagentId", "workflow", None),
+        ),
+        "task-status" => phrase("Checked", "check", &format!("task status {times}")),
+        "task-cancel" => phrase(
+            "Requested cancellation of",
+            "cancel",
+            &counted("taskId", "task", None),
+        ),
+        "schedule-create" => phrase(
+            "Scheduled",
+            "schedule",
+            &counted("scheduledTaskId", "task", None),
+        ),
+        "schedule-list" => phrase("Listed", "list", &format!("scheduled tasks {times}")),
+        "schedule-update" => phrase(
+            "Updated",
+            "update",
+            &counted("scheduledTaskId", "scheduled task", None),
+        ),
+        "schedule-delete" => phrase(
+            "Requested deletion of",
+            "delete",
+            &counted("scheduledTaskId", "scheduled task", None),
+        ),
+        "schedule-run" => phrase(
+            "Requested",
+            "request",
+            &quantity(selected.len(), "scheduled task run", None),
+        ),
+        "thread-configuration" => {
+            phrase("Checked", "check", &format!("thread configuration {times}"))
+        }
+        "thread-configure" => phrase("Set", "set", &format!("thread model {times}")),
+        "thread-fork" => phrase(
+            "Requested",
+            "request",
+            &quantity(selected.len(), "thread fork", None),
+        ),
+        "thread-merge" => phrase(
+            "Requested",
+            "request",
+            &quantity(selected.len(), "context merge", None),
+        ),
+        "thread-search" => phrase("Searched", "search", &format!("threads {times}")),
+        "thread-transfers" => phrase("Checked", "check", &format!("thread transfers {times}")),
+        "thread-organize" => phrase("Organized", "organize", &format!("threads {times}")),
+        "thread-update" => phrase("Updated", "update", &threads(&thread_ids)),
+        "queue-list" => phrase("Listed", "list", &format!("queued messages {times}")),
+        "queue-read" => phrase(
+            "Read",
+            "read",
+            &counted("queuedRunId", "queued message", None),
+        ),
+        "queue-edit" => phrase(
+            "Edited",
+            "edit",
+            &counted("queuedRunId", "queued message", None),
+        ),
+        "queue-cancel" => phrase(
+            "Requested cancellation of",
+            "cancel",
+            &counted("queuedRunId", "queued run", None),
+        ),
+        "queue-reorder" => phrase(
+            "Reordered",
+            "reorder",
+            &counted("queuedRunId", "queued run", None),
+        ),
+        "queue-steer" => phrase(
+            "Requested steering with",
+            "steer with",
+            &counted("queuedRunId", "queued message", None),
+        ),
+        "question-list" => phrase("Listed", "list", &format!("pending questions {times}")),
+        "question-read" => phrase(
+            "Read",
+            "read",
+            &counted("requestId", "pending question request", None),
+        ),
+        "question-respond" => phrase(
+            "Answered",
+            "answer",
+            &counted("requestId", "pending question request", None),
+        ),
+        "secret-request" => phrase(
+            "Asked for",
+            "ask for",
+            &quantity(selected.len(), "secret", None),
+        ),
+        "worktree-handoff" => phrase(
+            "Handed off to",
+            "hand off to",
+            &counted("worktreePath", "worktree", None),
+        ),
+        "worktree-list" => phrase("Listed", "list", &format!("workspace branches {times}")),
+        "worktree-status" => phrase("Checked", "check", &format!("worktree status {times}")),
+        "project-list" => phrase("Listed", "list", &format!("projects {times}")),
+        "project-read" => phrase(
+            "Read",
+            "read",
+            &quantity(count_entities(&project_ids), "project", None),
+        ),
+        "project-create" => phrase(
+            "Registered",
+            "register",
+            &quantity(count_entities(&project_ids), "project", None),
+        ),
+        "project-update" => phrase(
+            "Updated",
+            "update",
+            &quantity(count_entities(&project_ids), "project", None),
+        ),
+        "project-delete" => phrase(
+            "Deleted",
+            "delete",
+            &quantity(count_entities(&project_ids), "project", None),
+        ),
+        "project-clone" => phrase(
+            "Cloned",
+            "clone",
+            &counted("cwd", "repository", Some("repositories")),
+        ),
+        "environment-read" => phrase(
+            "Checked",
+            "check",
+            &format!("environment preferences {times}"),
+        ),
+        "environment-update" => phrase(
+            "Updated",
+            "update",
+            &format!("environment preferences {times}"),
+        ),
+        "attachment-prepare" => phrase(
+            "Prepared",
+            "prepare",
+            &counted("attachmentId", "attachment upload", None),
+        ),
+        "attachment-discard" => phrase(
+            "Discarded",
+            "discard",
+            &counted("attachmentId", "pending attachment", None),
+        ),
+        "attachment-send" => {
+            // A message can hold several attachments: retries count once,
+            // by message.
+            let mut messages: Vec<(String, &Call)> = Vec::new();
+            for (index, call) in selected.iter().enumerate() {
+                let key =
+                    id(call.output.get("messageId")).unwrap_or_else(|| format!("call-{index}"));
+                match messages.iter_mut().find(|(k, _)| *k == key) {
+                    Some(entry) => entry.1 = call,
+                    None => messages.push((key, call)),
+                }
+            }
+            let attachments = |call: &Call| {
+                call.input
+                    .get("attachments")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+            };
+            let count: usize = messages.iter().filter_map(|(_, c)| attachments(c)).sum();
+            let known = messages
+                .iter()
+                .all(|(_, c)| attachments(c).is_some_and(|n| n > 0));
+            let targets = if targets_known {
+                format!(" to {}", quantity(distinct_threads, "thread", None))
+            } else {
+                String::new()
+            };
+            phrase(
+                "Sent",
+                "send",
+                &if known {
+                    format!("{}{targets}", quantity(count, "attachment", None))
+                } else {
+                    format!("attachments{targets} {times}")
+                },
+            )
+        }
+        "link-pr" => phrase(
+            "Linked",
+            "link",
+            &quantity(selected.len(), "pull request", None),
+        ),
+        "unlink-pr" => phrase(
+            "Unlinked",
+            "unlink",
+            &quantity(selected.len(), "pull request", None),
+        ),
+        "watch-pr" => phrase(
+            "Watching",
+            "watch",
+            &quantity(selected.len(), "pull request", None),
+        ),
+        "unwatch-pr" => phrase(
+            "Stopped watching",
+            "stop watching",
+            &quantity(selected.len(), "pull request", None),
+        ),
+        "list-prs" => phrase(
+            "Checked",
+            "check",
+            &if selected.len() == 1 {
+                "linked pull requests".to_owned()
+            } else {
+                format!("linked pull requests {times}")
+            },
+        ),
+        "write-pr-guides" => {
+            // One call writes many guides and reports a refusal per guide.
+            let outcomes: Vec<Option<&str>> = selected
+                .iter()
+                .flat_map(|c| {
+                    c.output
+                        .get("guides")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(|g| g["outcome"].as_str())
+                })
+                .collect();
+            let started = outcomes.iter().filter(|o| **o != Some("failed")).count();
+            let failed = outcomes.len() - started;
+            failed_count += failed;
+            if !outcomes.is_empty() && started == 0 {
+                format!("Could not start {}", quantity(failed, "review guide", None))
+            } else {
+                phrase(
+                    "Started",
+                    "start",
+                    &if outcomes.is_empty() {
+                        format!("review guides {times}")
+                    } else if failed > 0 {
+                        format!(
+                            "{}, {failed} failed",
+                            quantity(started, "review guide", None)
+                        )
+                    } else {
+                        quantity(started, "review guide", None)
+                    },
+                )
+            }
+        }
+        "read-pr-guide" => phrase(
+            "Read",
+            "read",
+            &quantity(selected.len(), "review guide", None),
+        ),
+        "browser" => phrase("Used", "use", &format!("browser {times}")),
+        "device" => phrase("Used", "use", &format!("device controls {times}")),
+        "html-preview" => phrase(
+            "Previewed",
+            "preview",
+            &quantity(selected.len(), "HTML page", None),
+        ),
+        "html-render" => phrase(
+            "Rendered",
+            "render",
+            &quantity(selected.len(), "HTML page", None),
+        ),
+        "capabilities" => phrase(
+            "Checked",
+            "check",
+            &format!("orchestration capabilities {times}"),
+        ),
+        "memory-save" => phrase(
+            "Saved",
+            "save",
+            &quantity(selected.len(), "memory", Some("memories")),
+        ),
+        "memory-update" => phrase(
+            "Updated",
+            "update",
+            &quantity(selected.len(), "memory", Some("memories")),
+        ),
+        "memory-delete" => phrase(
+            "Deleted",
+            "delete",
+            &quantity(selected.len(), "memory", Some("memories")),
+        ),
+        "code-run" => phrase("Ran", "run", &format!("Python {times}")),
+        _ => phrase("Used", "use", &format!("tools {times}")),
+    };
+    (label, failed_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +1093,53 @@ mod tests {
         assert!(!t3_result_failed(
             &json!({"content": [{"type": "text", "text": "ok"}]})
         ));
+    }
+
+    #[test]
+    fn summarizes_t3_calls_by_effect() {
+        let call = |input: Value, output: Value, outcome| SummaryCall {
+            input,
+            output,
+            outcome,
+        };
+        let sends = [
+            call(
+                json!({"threadId": "a"}),
+                json!({"messageId": "m1"}),
+                "completed",
+            ),
+            call(
+                json!({"threadId": "b"}),
+                json!({"messageId": "m2"}),
+                "completed",
+            ),
+        ];
+        assert_eq!(
+            summarize_t3_calls("thread-send", &sends).0,
+            "Sent messages to 2 threads"
+        );
+        let failed = [call(json!({}), json!({"isError": true}), "completed")];
+        assert_eq!(
+            summarize_t3_calls("delegate", &failed),
+            ("Tried to delegate 1 task".into(), 1)
+        );
+        let created = [call(
+            json!({}),
+            json!({"threads": [{"threadId": "x"}, {"threadId": "y"}]}),
+            "completed",
+        )];
+        assert_eq!(
+            summarize_t3_calls("thread-create", &created).0,
+            "Created 2 threads"
+        );
+        let memories = [
+            call(json!({}), json!({}), "completed"),
+            call(json!({}), json!({}), "completed"),
+        ];
+        assert_eq!(
+            summarize_t3_calls("memory-save", &memories).0,
+            "Saved 2 memories"
+        );
     }
 
     #[test]

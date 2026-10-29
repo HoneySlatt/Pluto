@@ -1642,6 +1642,31 @@ fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
+/// `t3ToolSummaryCall`.
+fn t3_summary_call(entry: &WorkEntry) -> crate::tool_presentation::SummaryCall {
+    let data = tool_data(entry);
+    let input = ["arguments", "input", "rawInput"]
+        .iter()
+        .map(|key| &data[*key])
+        .find(|v| !v.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let failed =
+        matches!(entry.status.as_deref(), Some("failed" | "declined")) || entry.tone == "error";
+    let outcome = if failed {
+        "failed"
+    } else if entry.status.as_deref() == Some("completed") {
+        "completed"
+    } else {
+        "unfinished"
+    };
+    crate::tool_presentation::SummaryCall {
+        input,
+        output: tool_output(entry),
+        outcome,
+    }
+}
+
 /// `toolGroupActionLabel`.
 fn group_action_label(action: &str, count: usize) -> String {
     let pull_requests = plural(count, "pull request", "pull requests");
@@ -1684,8 +1709,7 @@ fn summary_priority(action: &str) -> u8 {
 
 /// Port of `summarizeToolGroup`: at most two categories, by priority,
 /// then how many other calls there were ("Ran 2 commands and changed 1
-/// file"). T3 calls group by their summary action; their labels use the
-/// group action's until `summarizeT3ToolCalls` is ported.
+/// file"). T3 calls group by their summary action (`summarizeT3ToolCalls`).
 pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
     let tools: Vec<&WorkEntry> = entries
         .iter()
@@ -1724,12 +1748,14 @@ pub fn summarize_tool_group(entries: &[WorkEntry]) -> String {
             } else {
                 list.len()
             };
-            (
-                index,
-                summary_priority(key),
-                list.len(),
-                group_action_label(action, count),
-            )
+            let label = if t3_presentation(list[0], None).is_some() {
+                let calls: Vec<crate::tool_presentation::SummaryCall> =
+                    list.iter().map(|e| t3_summary_call(e)).collect();
+                crate::tool_presentation::summarize_t3_calls(key, &calls).0
+            } else {
+                group_action_label(action, count)
+            };
+            (index, summary_priority(key), list.len(), label)
         })
         .collect();
     selected.sort_by_key(|(index, priority, _, _)| (*priority, *index));
@@ -2884,7 +2910,7 @@ mod tests {
         // Two categories by priority, then the rest.
         assert_eq!(
             summarize_tool_group(&group),
-            "Ran 3 commands, used 1 tool, and performed 2 other actions"
+            "Ran 3 commands, delegated 1 task, and performed 2 other actions"
         );
         assert_eq!(group_summary_kind(&commands), "command");
         assert_eq!(group_summary_kind(&[link.clone(), link]), "pull-request");
