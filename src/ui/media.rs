@@ -158,11 +158,21 @@ pub(crate) fn classify(value: &str, workspace_root: Option<&str>) -> ImageSource
     let Some(root) = workspace_root else {
         return ImageSource::Blocked;
     };
-    ImageSource::File(format!(
+    let joined = format!(
         "{}/{}",
         root.trim_end_matches('/'),
         path.trim_start_matches('/')
-    ))
+    );
+    // A relative path stays in the workspace: `../` out of it is blocked.
+    let inside = segments(&joined)
+        .zip(segments(root))
+        .is_some_and(|(target, workspace)| {
+            target.len() > workspace.len() && target.starts_with(&workspace)
+        });
+    if !inside {
+        return ImageSource::Blocked;
+    }
+    ImageSource::File(joined)
 }
 
 /// Lexical path segments of an absolute path, `.` and `..` resolved.
@@ -506,6 +516,12 @@ mod tests {
         assert_eq!(classify("~/a.png", root), ImageSource::Blocked);
         assert_eq!(classify("mailto:x", root), ImageSource::Blocked);
         assert_eq!(classify("#top", root), ImageSource::Blocked);
+        // A relative path stays in the workspace.
+        assert_eq!(
+            classify("docs/../a.png", root),
+            ImageSource::File("/work/app/docs/../a.png".into())
+        );
+        assert_eq!(classify("../../.ssh/id_rsa", root), ImageSource::Blocked);
     }
 
     #[test]

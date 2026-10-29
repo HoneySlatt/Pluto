@@ -730,8 +730,23 @@ impl App {
                         }
                     }
                     Route::Shell => {
+                        // The open thread deleted elsewhere: its draft takes
+                        // the screen, in the same project.
+                        let removed = value["kind"] == "thread.removed"
+                            && self
+                                .selected
+                                .as_deref()
+                                .is_some_and(|id| value["threadId"] == id);
+                        let project = self.current_thread().map(|t| t.project_id.clone());
                         if let Err(error) = self.state.shell(&value) {
                             self.notify(crate::ui::toasts::Kind::Error, error);
+                        }
+                        if removed {
+                            self.start_draft(project);
+                            self.notify(
+                                crate::ui::toasts::Kind::Warning,
+                                "This thread was deleted elsewhere.",
+                            );
                         }
                     }
                     Route::Thread(id) => {
@@ -1347,7 +1362,7 @@ impl App {
 
 impl eframe::App for App {
     fn on_exit(&mut self) {
-        self.save_drafts();
+        self.save_drafts_now();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -1422,6 +1437,9 @@ impl eframe::App for App {
                 let studio = panel_open && self.studio_active();
                 // A maximized panel leaves the chat column no width.
                 let maximized = panel_open && self.panel().maximized;
+                // Too narrow for a 360px chat beside a 360px panel: the
+                // panel covers the chat's right side, like a sheet.
+                let covering = panel_open && !maximized && !studio && workspace.width() < 720.0;
                 let main = if maximized {
                     Rect::from_min_max(
                         workspace.min,
@@ -1433,11 +1451,15 @@ impl eframe::App for App {
                         workspace.min,
                         Pos2::new(workspace.right() - self.panel_width, workspace.bottom()),
                     )
+                } else if covering {
+                    self.panel_width = self
+                        .panel_width
+                        .clamp(360.0_f32.min(workspace.width()), workspace.width());
+                    workspace
                 } else if panel_open {
-                    let max = (rect.width() * 0.7)
-                        .min(workspace.width() - 360.0)
-                        .max(360.0);
-                    self.panel_width = self.panel_width.clamp(360.0, max);
+                    // The chat column keeps 360px.
+                    let max = (rect.width() * 0.7).min(workspace.width() - 360.0);
+                    self.panel_width = self.panel_width.clamp(360.0, max.max(360.0));
                     Rect::from_min_max(
                         workspace.min,
                         Pos2::new(workspace.right() - self.panel_width, workspace.bottom()),
@@ -1469,7 +1491,24 @@ impl eframe::App for App {
                     self.main_area(ui, main);
                 }
                 if panel_open {
-                    let panel = Rect::from_min_max(Pos2::new(main.right(), rect.top()), rect.max);
+                    let left = if covering {
+                        rect.right() - self.panel_width
+                    } else {
+                        main.right()
+                    };
+                    let panel = Rect::from_min_max(Pos2::new(left, rect.top()), rect.max);
+                    if covering {
+                        // Over the chat: a shadow on its edge.
+                        let shadow = egui::epaint::Shadow {
+                            offset: [0, 0],
+                            blur: 24,
+                            spread: 0,
+                            color: egui::Color32::from_black_alpha(90),
+                        };
+                        ui.painter()
+                            .add(shadow.as_shape(panel, egui::CornerRadius::ZERO));
+                        ui.painter().rect_filled(panel, 0.0, theme::background());
+                    }
                     self.diff_panel(ui, panel);
                 }
                 if docked {

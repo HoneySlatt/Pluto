@@ -31,6 +31,10 @@ fn tls_config() -> Option<Arc<rustls::ClientConfig>> {
         .clone()
 }
 
+/// The most of a response read (an image, a history page): a server that
+/// sends more is cut there.
+const MAX_RESPONSE: u64 = 256 * 1024 * 1024;
+
 /// One request: the status, the raw headers and the body. `upload` is a
 /// POST body with its content type; `headers` are extra header lines, each
 /// ending in CRLF.
@@ -74,7 +78,7 @@ fn request(
         "http" => {
             let mut stream = stream;
             stream.write_all(&request).ok()?;
-            stream.read_to_end(&mut response).ok()?;
+            stream.take(MAX_RESPONSE).read_to_end(&mut response).ok()?;
         }
         "https" => {
             let name = rustls::pki_types::ServerName::try_from(host.clone()).ok()?;
@@ -82,7 +86,7 @@ fn request(
             let mut tls = rustls::StreamOwned::new(connection, stream);
             tls.write_all(&request).ok()?;
             // Servers may close without a TLS close_notify; keep what arrived.
-            let _ = tls.read_to_end(&mut response);
+            let _ = tls.take(MAX_RESPONSE).read_to_end(&mut response);
         }
         _ => return None,
     }

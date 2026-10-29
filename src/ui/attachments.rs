@@ -77,6 +77,39 @@ pub(crate) fn cached_image(key: &str) -> Option<Arc<image::RgbaImage>> {
     }
 }
 
+/// The decoded images kept at most (their RGBA bytes): past it, the least
+/// recently stored go, and come back from their source when shown again.
+const IMAGE_BUDGET: usize = 384 * 1024 * 1024;
+
+/// Stores a load's outcome; decoded images count against the budget.
+fn store(key: String, state: Loaded) {
+    static ORDER: Mutex<std::collections::VecDeque<(String, usize)>> =
+        Mutex::new(std::collections::VecDeque::new());
+    let Ok(mut cache) = cache().lock() else {
+        return;
+    };
+    let size = match &state {
+        Loaded::Image(image) => image.as_raw().len(),
+        _ => 0,
+    };
+    cache.insert(key.clone(), state);
+    if size == 0 {
+        return;
+    }
+    let Ok(mut order) = ORDER.lock() else {
+        return;
+    };
+    order.retain(|(k, _)| *k != key);
+    order.push_back((key, size));
+    let mut total: usize = order.iter().map(|(_, s)| s).sum();
+    while total > IMAGE_BUDGET && order.len() > 1 {
+        if let Some((old, old_size)) = order.pop_front() {
+            cache.remove(&old);
+            total -= old_size;
+        }
+    }
+}
+
 /// Marks an image as asked for, before its request goes out.
 pub(crate) fn mark_loading(key: &str) {
     if let Ok(mut cache) = cache().lock() {
@@ -104,16 +137,19 @@ pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
     let (key, uri, ctx) = (key.to_owned(), uri.to_owned(), ctx.clone());
     std::thread::spawn(move || {
         let bytes = if let Some(data) = uri.strip_prefix("data:") {
-            data.split_once(',').and_then(|(meta, payload)| {
-                use base64::Engine;
-                meta.ends_with(";base64")
-                    .then(|| {
-                        base64::engine::general_purpose::STANDARD
-                            .decode(payload.trim())
-                            .ok()
-                    })
-                    .flatten()
-            })
+            // Its base64 is a third larger than the image.
+            data.split_once(',')
+                .filter(|(_, payload)| payload.len() <= MAX_DECODED_BYTES / 3 * 4 + 4)
+                .and_then(|(meta, payload)| {
+                    use base64::Engine;
+                    meta.ends_with(";base64")
+                        .then(|| {
+                            base64::engine::general_purpose::STANDARD
+                                .decode(payload.trim())
+                                .ok()
+                        })
+                        .flatten()
+                })
         } else {
             let absolute = if uri.starts_with("//") {
                 format!("https:{uri}")
@@ -130,17 +166,31 @@ pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
         if let Ok(mut origins) = origins().lock() {
             origins.urls.insert(key.clone(), uri);
         }
-        if let Ok(mut cache) = cache().lock() {
-            cache.insert(key, state);
-        }
+        store(key, state);
         ctx.request_repaint();
     });
 }
 
+/// The largest image file decoded (a markdown image, a download, a
+/// `data:` URL).
+const MAX_DECODED_BYTES: usize = 40 * 1024 * 1024;
+
 /// Decodes image bytes (or an SVG, rasterized at its own size) into
 /// premultiplied RGBA.
 pub(crate) fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
-    let Ok(decoded) = image::load_from_memory(bytes) else {
+    // An image this large (or a decompression bomb) is not drawn.
+    if bytes.len() > MAX_DECODED_BYTES {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limits);
+    let Ok(decoded) = reader.decode() else {
         let svg = egui_extras::image::load_svg_bytes(bytes, &Default::default()).ok()?;
         let [width, height] = svg.size;
         let pixels = svg.pixels.iter().flat_map(|p| p.to_array()).collect();
@@ -337,9 +387,7 @@ pub(crate) fn generated_image(
         let state = found
             .and_then(|bytes| decode(&bytes))
             .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
-        if let Ok(mut cache) = cache().lock() {
-            cache.insert(key, state);
-        }
+        store(key, state);
         ctx.request_repaint();
     });
     None
@@ -405,9 +453,7 @@ impl App {
             base?.join(&relative).ok()
         });
         let Some(url) = url else {
-            if let Ok(mut cache) = cache().lock() {
-                cache.insert(id.to_owned(), Loaded::Missing);
-            }
+            store(id.to_owned(), Loaded::Missing);
             return;
         };
         if let Ok(mut origins) = origins().lock() {
@@ -419,9 +465,7 @@ impl App {
             let state = http_get(&url)
                 .and_then(|bytes| decode(&bytes))
                 .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
-            if let Ok(mut cache) = cache().lock() {
-                cache.insert(id, state);
-            }
+            store(id, state);
             ctx.request_repaint();
         });
     }

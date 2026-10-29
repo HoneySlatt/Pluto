@@ -57,6 +57,8 @@ pub(crate) struct Drafts {
     seen: u64,
     changed_at: Option<Instant>,
     written: u64,
+    /// Set by a background write that failed: the drafts are written again.
+    write_failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Encoded images, by id, so a write does not encode them again.
     encoded: HashMap<String, String>,
 }
@@ -243,7 +245,11 @@ impl App {
             return false;
         };
         let open = self.composer_key(false) == composer;
-        let open_empty = self.composer.trim().is_empty() && self.composer_images.is_empty();
+        // Empty means no text, image, file or context (`is_empty`).
+        let open_empty = self.composer.trim().is_empty()
+            && self.composer_images.is_empty()
+            && self.composer_files.is_empty()
+            && self.composer_contexts.is_empty();
         let scope = self.draft_scope(&composer);
         if open && open_empty {
             self.put_composer(draft);
@@ -256,14 +262,39 @@ impl App {
         {
             self.drafts.stored.insert(scope, draft);
         } else {
-            // Both hold text: the message's comes after what was written.
-            let target = if open {
-                &mut self.composer
+            // Both hold something: the message's text comes after what was
+            // written, and its images, files and contexts join the others.
+            let ComposerDraft {
+                text,
+                images,
+                files,
+                contexts,
+            } = draft;
+            let (target, target_images, target_files, target_contexts) = if open {
+                (
+                    &mut self.composer,
+                    &mut self.composer_images,
+                    &mut self.composer_files,
+                    &mut self.composer_contexts,
+                )
             } else {
-                &mut self.drafts.stored.entry(scope).or_default().text
+                let stored = self.drafts.stored.entry(scope).or_default();
+                (
+                    &mut stored.text,
+                    &mut stored.images,
+                    &mut stored.files,
+                    &mut stored.contexts,
+                )
             };
-            target.push_str("\n\n");
-            target.push_str(&draft.text);
+            if !text.trim().is_empty() {
+                if !target.trim().is_empty() {
+                    target.push_str("\n\n");
+                }
+                target.push_str(&text);
+            }
+            target_images.extend(images);
+            target_files.extend(files);
+            target_contexts.extend(contexts);
         }
         self.drafts.revision += 1;
         true
@@ -295,6 +326,15 @@ impl App {
 
     /// Writes the drafts a moment after the last change (every frame).
     pub(crate) fn save_drafts_when_idle(&mut self, ctx: &eframe::egui::Context) {
+        // A write that failed counts as not written: it is tried again.
+        if self
+            .drafts
+            .write_failed
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            self.drafts.written = 0;
+            self.drafts.changed_at = Some(Instant::now());
+        }
         let print = self.drafts_fingerprint();
         if print != self.drafts.seen {
             self.drafts.seen = print;
@@ -312,9 +352,28 @@ impl App {
 
     /// Writes the drafts now, off the UI thread.
     pub(crate) fn save_drafts(&mut self) {
-        let Some(path) = drafts_path(self.client_settings_path.as_deref()) else {
+        let Some((path, text)) = self.drafts_text() else {
             return;
         };
+        let failed = self.drafts.write_failed.clone();
+        std::thread::spawn(move || {
+            if !write_drafts(&path, Some(text)) {
+                failed.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
+
+    /// Writes the drafts on this thread, before the app goes (`on_exit`):
+    /// the last change and a write still running both land.
+    pub(crate) fn save_drafts_now(&mut self) {
+        if let Some((path, text)) = self.drafts_text() {
+            write_drafts(&path, Some(text));
+        }
+    }
+
+    /// The drafts file's path and contents, marking them written.
+    fn drafts_text(&mut self) -> Option<(std::path::PathBuf, String)> {
+        let path = drafts_path(self.client_settings_path.as_deref())?;
         self.drafts.written = self.drafts_fingerprint();
         let mut entries = serde_json::Map::new();
         let mut encoded = std::mem::take(&mut self.drafts.encoded);
@@ -346,16 +405,30 @@ impl App {
         encoded.retain(|id, _| held.contains(id));
         self.drafts.encoded = encoded;
         let text = json!({"version": 1, "drafts": entries}).to_string();
-        std::thread::spawn(move || {
-            let temporary = path.with_extension("json.tmp");
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if std::fs::write(&temporary, text).is_ok() {
-                let _ = std::fs::rename(&temporary, &path);
-            }
-        });
+        Some((path, text))
     }
+}
+
+/// Writes the latest drafts given (one writer at a time, through one
+/// temporary file, so two saves never interleave or land out of order);
+/// whether the file holds them.
+fn write_drafts(path: &std::path::Path, text: Option<String>) -> bool {
+    use std::sync::Mutex;
+    static LATEST: Mutex<Option<String>> = Mutex::new(None);
+    static WRITING: Mutex<()> = Mutex::new(());
+    if let Some(text) = text {
+        *LATEST.lock().unwrap_or_else(|p| p.into_inner()) = Some(text);
+    }
+    let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(text) = LATEST.lock().unwrap_or_else(|p| p.into_inner()).take() else {
+        // A later save already wrote them.
+        return true;
+    };
+    let temporary = path.with_extension("json.tmp");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::write(&temporary, text).is_ok() && std::fs::rename(&temporary, path).is_ok()
 }
 
 #[cfg(test)]
