@@ -503,6 +503,7 @@ impl App {
             self.legacy_sidebar(ui, rect);
         } else {
             self.inbox_sidebar(ui, rect);
+            self.sidebar_selection_menu(ui);
         }
         self.sidebar_footer(ui, rect);
     }
@@ -997,6 +998,9 @@ impl App {
         let painter = ui.painter().clone();
         if active {
             painter.rect_filled(rect, widgets::radius(8.0), theme::row_active());
+        } else if self.legacy_selection.contains(&thread.id) {
+            // `bg-sidebar-row-selected`.
+            painter.rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
             painter.rect_filled(rect, widgets::radius(8.0), theme::accent());
         }
@@ -1291,12 +1295,18 @@ impl App {
         }
 
         if response.clicked() {
-            self.thread_row_clicked(ui, thread);
+            self.sidebar_row_clicked(ui, thread);
         }
         if response.secondary_clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
-            self.open_thread_menu(&thread.id, at);
+            // A selected row opens the selection's menu, another its own.
+            if self.legacy_selection.contains(&thread.id) {
+                self.open_menu = None;
+                self.legacy_multi_menu = Some(crate::ui::context_menu::State::new(at));
+            } else {
+                self.open_thread_menu(&thread.id, at);
+            }
         }
     }
 
@@ -1358,6 +1368,9 @@ impl App {
         if active {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::row_active());
+        } else if self.legacy_selection.contains(&thread.id) {
+            ui.painter()
+                .rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::accent());
@@ -1546,12 +1559,18 @@ impl App {
             }
         }
         if response.clicked() {
-            self.thread_row_clicked(ui, thread);
+            self.sidebar_row_clicked(ui, thread);
         }
         if response.secondary_clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
-            self.open_thread_menu(&thread.id, at);
+            // A selected row opens the selection's menu, another its own.
+            if self.legacy_selection.contains(&thread.id) {
+                self.open_menu = None;
+                self.legacy_multi_menu = Some(crate::ui::context_menu::State::new(at));
+            } else {
+                self.open_thread_menu(&thread.id, at);
+            }
         }
     }
 }
@@ -1559,6 +1578,215 @@ impl App {
 impl App {
     /// Select on click; a second click on the same row within 400ms renames
     /// it (upstream renames on double click).
+    /// `handleThreadClick`: Ctrl toggles the row in the selection, Shift
+    /// selects from the anchor, a plain click clears it and opens the thread.
+    fn sidebar_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.command {
+            if !self.legacy_selection.remove(&thread.id) {
+                self.legacy_selection.insert(thread.id.clone());
+                self.legacy_anchor = Some(thread.id.clone());
+            }
+        } else if modifiers.shift {
+            let ordered = self.ordered_sidebar_threads();
+            let anchor = self
+                .legacy_anchor
+                .as_ref()
+                .and_then(|a| ordered.iter().position(|id| id == a));
+            match (anchor, ordered.iter().position(|id| *id == thread.id)) {
+                (Some(a), Some(t)) => {
+                    for id in &ordered[a.min(t)..=a.max(t)] {
+                        self.legacy_selection.insert(id.clone());
+                    }
+                }
+                _ => {
+                    self.legacy_selection.insert(thread.id.clone());
+                    self.legacy_anchor = Some(thread.id.clone());
+                }
+            }
+        } else {
+            self.legacy_selection.clear();
+            self.legacy_anchor = Some(thread.id.clone());
+            self.thread_row_clicked(ui, thread);
+        }
+    }
+
+    /// The selection's menu (`Sidebar.tsx`'s multi-select menu): Unpin,
+    /// Settle, Snooze, Regenerate titles, Mark unread, Delete.
+    pub(crate) fn sidebar_selection_menu(&mut self, ui: &mut Ui) {
+        use crate::ui::context_menu::{self, Item};
+        // Escape clears the selection.
+        if !self.legacy_selection.is_empty()
+            && self.legacy_multi_menu.is_none()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.legacy_selection.clear();
+            self.legacy_anchor = None;
+            return;
+        }
+        let Some(state) = self.legacy_multi_menu.take() else {
+            return;
+        };
+        let threads: Vec<std::sync::Arc<Thread>> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| self.legacy_selection.contains(&t.id))
+            .cloned()
+            .collect();
+        let count = threads.len();
+        if count == 0 {
+            return;
+        }
+        let pinned = threads.iter().filter(|t| t.pinned_at.is_some()).count();
+        let unsettled = threads
+            .iter()
+            .filter(|t| t.settled_override.as_deref() != Some("settled"))
+            .count();
+        let snoozable = self.capability("threadSnooze")
+            && threads
+                .iter()
+                .all(|t| crate::snooze::can_snooze(t, self.now));
+        let regenerating = threads
+            .iter()
+            .filter(|t| t.title_regeneration.is_some())
+            .count();
+        let now = self.now.with_timezone(&chrono::Local);
+        let presets = crate::snooze::presets(now);
+        let mut items = Vec::new();
+        if pinned > 0 && self.capability("threadPinning") {
+            items.push(Item::new("unpin", format!("Unpin ({pinned})")));
+        }
+        items.push(Item {
+            disabled: unsettled == 0,
+            ..Item::new("settle", format!("Settle ({count})"))
+        });
+        if snoozable {
+            let mut children: Vec<Item> = presets
+                .iter()
+                .map(|p| {
+                    Item::new(
+                        format!("snooze:{}", p.id),
+                        format!("{} ({})", p.label, p.when),
+                    )
+                })
+                .collect();
+            children.push(Item {
+                separator_before: true,
+                ..Item::new("snooze:custom", "Custom…")
+            });
+            items.push(Item {
+                children,
+                ..Item::new("snooze", format!("Snooze ({count})"))
+            });
+        }
+        if self.capability("threadTitleRegeneration") {
+            items.push(if regenerating == count {
+                Item {
+                    disabled: true,
+                    ..Item::new("regenerate", format!("Regenerating… ({regenerating})"))
+                }
+            } else {
+                Item::new(
+                    "regenerate",
+                    format!("Regenerate titles ({})", count - regenerating),
+                )
+            });
+        }
+        items.push(Item::new("mark-unread", format!("Mark unread ({count})")));
+        items.push(Item {
+            destructive: true,
+            ..Item::new("delete", format!("Delete ({count})"))
+        });
+        let mut open = Some(state);
+        let clicked = context_menu::show(ui, &mut open, &items);
+        self.legacy_multi_menu = open;
+        let Some(clicked) = clicked else {
+            return;
+        };
+        let ids: Vec<String> = threads.iter().map(|t| t.id.clone()).collect();
+        let clear = |app: &mut App| {
+            app.legacy_selection.clear();
+            app.legacy_anchor = None;
+        };
+        match clicked.as_str() {
+            "unpin" => {
+                for thread in threads.iter().filter(|t| t.pinned_at.is_some()) {
+                    let unpin = crate::model::command("thread.unpin", &thread.id);
+                    self.dispatch_titled(unpin, "Failed to unpin thread");
+                }
+                clear(self);
+            }
+            "settle" => {
+                for thread in threads
+                    .iter()
+                    .filter(|t| t.settled_override.as_deref() != Some("settled"))
+                {
+                    let settle = crate::model::command("thread.settle", &thread.id);
+                    self.park(&thread.id, settle, crate::ui::park::Park::Settle, &ids);
+                }
+                clear(self);
+            }
+            "snooze:custom" => {
+                clear(self);
+                self.request_custom_snooze(ids);
+            }
+            id if id.starts_with("snooze:") => {
+                if let Some(preset) = presets.iter().find(|p| format!("snooze:{}", p.id) == id) {
+                    let until = crate::snooze::until_iso(preset);
+                    for thread in &ids {
+                        let mut command = crate::model::command("thread.snooze", thread);
+                        command["snoozedUntil"] = serde_json::json!(until);
+                        self.park(thread, command, crate::ui::park::Park::Snooze, &ids);
+                    }
+                }
+                clear(self);
+            }
+            "regenerate" => {
+                for thread in threads.iter().filter(|t| t.title_regeneration.is_none()) {
+                    let mut command = crate::model::command("thread.metadata.update", &thread.id);
+                    command["regenerateTitle"] = serde_json::json!(true);
+                    self.dispatch_titled(command, "Failed to regenerate thread titles");
+                }
+                clear(self);
+            }
+            "mark-unread" => {
+                for thread in &threads {
+                    self.mark_unread(thread);
+                }
+                clear(self);
+            }
+            "delete" => {
+                let mut list: Vec<serde_json::Value> = ids
+                    .iter()
+                    .map(|id| crate::model::command("thread.delete", id))
+                    .collect();
+                let plural = if count == 1 { "" } else { "s" };
+                if self.client_setting("confirmThreadDelete") != false {
+                    let first = list.remove(0);
+                    self.confirm = Some(crate::ui::thread_menu::Confirm {
+                        title: format!("Delete {count} thread{plural}?"),
+                        message: "This permanently clears conversation history for these threads."
+                            .into(),
+                        confirm_label: "Delete",
+                        command: first,
+                        more: list,
+                    });
+                } else {
+                    let open_deleted = self.selected.as_ref().is_some_and(|s| ids.contains(s));
+                    for command in list {
+                        self.dispatch_titled(command, "Failed to delete threads");
+                    }
+                    if open_deleted {
+                        self.start_draft(None);
+                    }
+                }
+                clear(self);
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn thread_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
         let now = ui.input(|i| i.time);
         let double = self

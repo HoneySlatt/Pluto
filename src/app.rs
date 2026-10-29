@@ -1348,6 +1348,9 @@ impl App {
             .or_else(|| self.current_thread().map(|t| t.project_id.clone()))
             .or_else(|| self.draft_project().map(|p| p.id));
         self.select_thread(None);
+        // A draft clears the sidebar's selection.
+        self.legacy_selection.clear();
+        self.legacy_anchor = None;
         self.draft_project_id = project_id;
         // A new draft starts from its project's default or the last model
         // picked (`applyStickyState`), not from the last draft's pick.
