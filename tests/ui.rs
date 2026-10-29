@@ -49,6 +49,29 @@ fn harness_with(projects: Value, threads: Value) -> Harness<'static, App> {
     harness
 }
 
+/// The texts drawn last frame, with where they were drawn.
+fn shown_texts(harness: &Harness<'static, App>) -> Vec<(String, egui::Rect)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn find_text(harness: &Harness<'static, App>, label: &str) -> Option<egui::Rect> {
+    shown_texts(harness)
+        .into_iter()
+        .find(|(text, _)| text == label)
+        .map(|(_, rect)| rect)
+}
+
 fn click(harness: &mut Harness<'static, App>, pos: egui::Pos2) {
     harness.event(egui::Event::PointerMoved(pos));
     harness.run_steps(1);
@@ -788,4 +811,36 @@ fn a_thread_error_shows_until_dismissed() {
             .any(|t| t == "Synthetic provider failure")
     });
     assert!(dismissed);
+}
+
+#[test]
+fn a_settled_thread_says_so_under_its_last_message() {
+    let mut settled = thread("a", "Newest thread", 5);
+    settled["settledOverride"] = json!("settled");
+    settled["settledAt"] = json!(at(120));
+    let mut harness = harness_with(
+        json!([{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}]),
+        json!([settled]),
+    );
+    // A settled thread lives on the collapsed Settled shelf.
+    let shelf = find_text(&harness, "Settled").expect("the Settled shelf");
+    click(&mut harness, shelf.center());
+    let card = find_text(&harness, "Newest thread").expect("the settled card");
+    click(&mut harness, card.center());
+    let detail = json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": "a", "projectId": "p", "title": "Newest thread"},
+        "visibleTurnItems": [], "updatedAt": at(5)}});
+    harness.state_mut().load_offline_thread(&detail).unwrap();
+    harness.run_steps(4);
+    let shown: Vec<String> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(shown.iter().any(|t| t == "Settled 2h ago"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "Un-settle"), "{shown:?}");
 }

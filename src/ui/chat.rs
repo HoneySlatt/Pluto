@@ -803,7 +803,10 @@ impl App {
             .map(|(row, key)| view.height(*key, row, column))
             .collect();
         let history_height = history_control_height(&detail.history);
-        let content_height = 24.0 + history_height + guesses.iter().sum::<f32>() + bottom_padding;
+        let status_line = self.thread_status_line(&thread);
+        let footer = if status_line.is_some() { 24.0 } else { 0.0 };
+        let content_height =
+            24.0 + history_height + guesses.iter().sum::<f32>() + footer + bottom_padding;
         // Older turns loaded above keep what is on screen in place
         // (`maintainVisibleContentPosition`).
         if !view.follow {
@@ -826,7 +829,36 @@ impl App {
         } else {
             0.0
         };
-        if wheel != 0.0 {
+        // `pageScrollController`: PageUp and PageDown page the timeline (from
+        // the composer too), a page less 36px; Home and End go to its ends
+        // when nothing editable has the focus.
+        let composer_focused = self
+            .cite
+            .editor_id
+            .is_some_and(|id| ui.memory(|m| m.has_focus(id)));
+        let free = ui.memory(|m| m.focused().is_none());
+        let page = (viewport_height - 36.0).max(40.0);
+        let key = |key| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key));
+        let paging = if (free || composer_focused) && !self.palette.open {
+            if key(egui::Key::PageUp) {
+                Some(-page)
+            } else if key(egui::Key::PageDown) {
+                Some(page)
+            } else if free && key(egui::Key::Home) {
+                Some(f32::NEG_INFINITY)
+            } else if free && key(egui::Key::End) {
+                Some(f32::INFINITY)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(delta) = paging {
+            let max = (content_height - viewport_height).max(0.0);
+            offset = (offset + delta).clamp(0.0, max);
+            scrolled = true;
+        } else if wheel != 0.0 {
             ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
             let max = (content_height - viewport_height).max(0.0);
             offset = (offset - wheel).clamp(0.0, max);
@@ -907,6 +939,9 @@ impl App {
                             cut_changed |= top + guess > viewport.top();
                         }
                     }
+                    if let Some(line) = &status_line {
+                        self.paint_thread_status_line(ui, &thread.id, line, column);
+                    }
                 });
                 ui.add_space(bottom_padding);
             });
@@ -964,6 +999,26 @@ impl App {
                     ui.ctx().request_repaint();
                 }
             }
+        }
+        // `chat-scroll-to-bottom`: away from the end for 150ms, a "Scroll to
+        // end" pill above the composer brings the view back and follows.
+        let now = ui.input(|i| i.time);
+        if view.follow || max - next < 1.0 {
+            view.away_since = None;
+        } else if view.away_since.is_none() {
+            view.away_since = Some(now);
+        }
+        let shown =
+            view.away_since.is_some_and(|since| now - since >= 0.15) && !self.find.is_open();
+        if view.away_since.is_some() && !shown {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(160));
+        }
+        if shown && scroll_to_end_pill(ui, rect, bottom_padding) {
+            view.follow = true;
+            view.away_since = None;
+            next = max;
+            ui.ctx().request_repaint();
         }
         let misaligned = view.follow && ((content - view.viewport).max(0.0) - used).abs() > 0.5;
         if misaligned || cut_changed {
@@ -2253,6 +2308,212 @@ impl App {
 const DESTRUCTIVE: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(251, 65, 74); // --destructive
 
 /// `workEntryIconName`: tool action icons, then the tone icon.
+/// `ThreadStatusLine`: what the thread's state is, under its last message,
+/// with the one action that leaves it.
+pub(crate) struct StatusLine {
+    icon: &'static str,
+    label: String,
+    action: &'static str,
+    kind: StatusAction,
+}
+
+enum StatusAction {
+    Wake,
+    Unsettle,
+    /// Dismisses the Woke notice (the thread's wake time, read).
+    Dismiss(String),
+}
+
+impl App {
+    /// Snoozed, settled, or just woke (`ChatView`'s `threadStatusLine`).
+    fn thread_status_line(&self, thread: &crate::model::Thread) -> Option<StatusLine> {
+        if crate::snooze::effective_snoozed(thread, self.now) {
+            let left = thread
+                .snoozed_until
+                .as_deref()
+                .map(|until| until_label(until, self.now))
+                .filter(|l| !l.is_empty());
+            return Some(StatusLine {
+                icon: "alarm-clock",
+                label: left.map_or("Snoozed".into(), |l| format!("Snoozed, {l}")),
+                action: "Wake now",
+                kind: StatusAction::Wake,
+            });
+        }
+        if thread.settled_override.as_deref() == Some("settled") {
+            let ago = thread
+                .settled_at
+                .as_deref()
+                .map(|at| ago_label(at, self.now))
+                .filter(|l| !l.is_empty());
+            return Some(StatusLine {
+                icon: "circle-check",
+                label: ago.map_or("Settled".into(), |a| format!("Settled {a}")),
+                action: "Un-settle",
+                kind: StatusAction::Unsettle,
+            });
+        }
+        let woke = self.woke_at(thread)?;
+        Some(StatusLine {
+            icon: "alarm-clock",
+            label: "Woke from snooze".into(),
+            action: "Dismiss",
+            kind: StatusAction::Dismiss(woke),
+        })
+    }
+
+    fn paint_thread_status_line(
+        &mut self,
+        ui: &mut Ui,
+        thread_id: &str,
+        line: &StatusLine,
+        column: f32,
+    ) {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(column, 24.0), Sense::hover());
+        let small = font(12.0, Weight::Regular);
+        let muted = theme::muted_foreground();
+        let mut x = rect.left() + 4.0;
+        theme::paint_icon(
+            ui,
+            line.icon,
+            Rect::from_min_size(Pos2::new(x, rect.top() + 1.0), Vec2::splat(14.0)),
+            14.0,
+            muted,
+        );
+        x += 14.0 + 6.0;
+        for (text, gap) in [(line.label.as_str(), 6.0), ("·", 6.0)] {
+            widgets::text(
+                ui,
+                Pos2::new(x, rect.top()),
+                text,
+                small.clone(),
+                muted,
+                16.0,
+            );
+            x += widgets::text_width(ui, text, small.clone()) + gap;
+        }
+        let width = widgets::text_width(ui, line.action, small.clone());
+        let button = Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(width, 16.0));
+        let response = ui
+            .interact(
+                button,
+                ui.id().with(("status-line", thread_id)),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let color = if response.hovered() {
+            theme::foreground()
+        } else {
+            muted
+        };
+        widgets::text(ui, button.min, line.action, small, color, 16.0);
+        if response.hovered() {
+            ui.painter().line_segment(
+                [
+                    Pos2::new(button.left(), button.bottom() - 1.0),
+                    Pos2::new(button.right(), button.bottom() - 1.0),
+                ],
+                egui::Stroke::new(1.0, color),
+            );
+        }
+        if !response.clicked() {
+            return;
+        }
+        match &line.kind {
+            StatusAction::Wake | StatusAction::Unsettle => {
+                let kind = if matches!(line.kind, StatusAction::Wake) {
+                    "thread.unsnooze"
+                } else {
+                    "thread.unsettle"
+                };
+                let mut command = crate::model::command(kind, thread_id);
+                command["reason"] = serde_json::json!("user");
+                self.dispatch(command);
+            }
+            StatusAction::Dismiss(at) => self.mark_visited(thread_id, at),
+        }
+    }
+}
+
+/// `formatRelativeTimeUntilLabel`: "3h left", "Soon", "Expired".
+fn until_label(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(at) = crate::timeline::parse_time(iso) else {
+        return String::new();
+    };
+    let seconds = (at - now).num_seconds();
+    match seconds {
+        ..=0 => "Expired".into(),
+        1..5 => "Soon".into(),
+        5..60 => format!("{seconds}s left"),
+        60..3600 => format!("{}m left", seconds / 60),
+        3600..86_400 => format!("{}h left", seconds / 3600),
+        _ => format!("{}d left", seconds / 86_400),
+    }
+}
+
+/// `formatRelativeTimeLabel`: "just now", "5m ago", "2d ago".
+fn ago_label(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(at) = crate::timeline::parse_time(iso) else {
+        return String::new();
+    };
+    let seconds = (now - at).num_seconds();
+    match seconds {
+        ..60 => "just now".into(),
+        60..3600 => format!("{}m ago", seconds / 60),
+        3600..86_400 => format!("{}h ago", seconds / 3600),
+        _ => format!("{}d ago", seconds / 86_400),
+    }
+}
+
+/// The "Scroll to end" pill (`Button size="xs" variant="glass"`), centered
+/// 4px above the composer; true when clicked.
+fn scroll_to_end_pill(ui: &mut Ui, rect: Rect, bottom_padding: f32) -> bool {
+    let label_font = font(12.0, Weight::Medium);
+    let width =
+        8.0 + 14.0 + 4.0 + widgets::text_width(ui, "Scroll to end", label_font.clone()) + 8.0;
+    let button = Rect::from_center_size(
+        Pos2::new(
+            rect.center().x,
+            rect.bottom() - bottom_padding - 4.0 - 6.0 - 12.0,
+        ),
+        Vec2::new(width.round(), 24.0),
+    );
+    let response = ui
+        .interact(button, ui.id().with("scroll-to-end"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let painter = ui.painter();
+    painter.rect(
+        button,
+        CornerRadius::same(6),
+        if response.hovered() {
+            theme::accent()
+        } else {
+            theme::alpha(theme::popover(), 0.85)
+        },
+        egui::Stroke::new(1.0, theme::border()),
+        egui::StrokeKind::Inside,
+    );
+    theme::paint_icon(
+        ui,
+        "chevron-down",
+        Rect::from_min_size(
+            Pos2::new(button.left() + 8.0, button.center().y - 7.0),
+            Vec2::splat(14.0),
+        ),
+        14.0,
+        theme::foreground(),
+    );
+    widgets::text(
+        ui,
+        Pos2::new(button.left() + 8.0 + 14.0 + 4.0, button.top() + 4.0),
+        "Scroll to end",
+        label_font,
+        theme::foreground(),
+        16.0,
+    );
+    response.clicked()
+}
+
 pub(crate) fn work_icon(entry: &WorkEntry) -> &'static str {
     match entry.item_type.as_deref() {
         Some("command_execution") => return "terminal",

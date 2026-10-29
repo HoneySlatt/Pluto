@@ -37,6 +37,9 @@ pub(crate) struct TimelineView {
     pub header: f32,
     /// The first message or plan in view (find's reading position).
     pub first_entry: Option<String>,
+    /// When the view stopped following the end (the Scroll to end pill
+    /// shows 150ms later).
+    pub away_since: Option<f64>,
 }
 
 struct RowsCache {
