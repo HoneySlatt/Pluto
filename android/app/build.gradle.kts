@@ -45,6 +45,8 @@ android {
         getByName("main") {
             jniLibs.directories += rustLibs.get().asFile.path
             kotlin.directories += bindings.get().asFile.path
+            // The open source notice (notice.gradle.kts).
+            assets.directories += layout.buildDirectory.dir("generated/notice/assets").get().asFile.path
         }
     }
 }
@@ -89,3 +91,5 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+apply(from = "notice.gradle.kts")
