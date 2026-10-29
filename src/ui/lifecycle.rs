@@ -24,6 +24,7 @@ use crate::ui::widgets;
 
 const DESTRUCTIVE: Color32 = Color32::from_rgb(251, 65, 74); // --destructive
 const SUCCESS: Color32 = Color32::from_rgb(0, 188, 125); // --success
+const INFO: Color32 = Color32::from_rgb(43, 127, 255); // --info
 /// The subagent card: `py-1.5` around a 12px title and an 11px relaxed line.
 const CARD: f32 = 46.0;
 /// The group's disclosure: `py-2` around a 12px label and a 10px summary.
@@ -189,6 +190,23 @@ struct Agent {
     started_at: Option<String>,
     completed_at: Option<String>,
     child_thread_id: Option<String>,
+    /// For the hover card: the instance and model it reported, and
+    /// `subagentDetailPreview`.
+    instance: Option<String>,
+    model: Option<String>,
+    preview: Option<String>,
+}
+
+/// `subagentDetailPreview`: whitespace collapsed, cut at 280 characters.
+fn detail_preview(raw: Option<&str>) -> Option<String> {
+    let compact = raw?.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    Some(match compact.char_indices().nth(280) {
+        Some((at, _)) => format!("{}…", compact[..at].trim_end()),
+        None => compact,
+    })
 }
 
 /// The card of a subagent known only from the thread's projection, its
@@ -210,7 +228,11 @@ fn live_agent(live: &Subagent, status: Option<&str>) -> Agent {
     } else {
         progress.or(result)
     };
+    let preview = detail_preview(raw.as_deref());
     Agent {
+        instance: Some(live.provider_instance_id.clone()).filter(|i| !i.is_empty()),
+        model: live.model.clone(),
+        preview,
         title: crate::model::subagent_display_title(live.title.as_deref().unwrap_or("Subagent")),
         driver: Some(live.driver.clone()).filter(|d| !d.is_empty()),
         detail: raw
@@ -246,12 +268,21 @@ fn agent(item: &TurnItem, detail: &Detail) -> Agent {
     } else {
         progress.or(result)
     };
+    let preview = detail_preview(raw.as_deref());
     // The server's placeholder when a child ends without output.
     let detail = raw
         .filter(|d| !d.to_lowercase().starts_with("child task ended with status"))
         .map(|d| plain_detail(&d))
         .filter(|d| !d.is_empty());
     Agent {
+        instance: live
+            .map(|a| a.provider_instance_id.clone())
+            .or_else(|| item.str("providerInstanceId").map(str::to_owned))
+            .filter(|i| !i.is_empty()),
+        model: live
+            .and_then(|a| a.model.clone())
+            .or_else(|| item.str("model").map(str::to_owned)),
+        preview,
         title: crate::model::subagent_display_title(item.title.as_deref().unwrap_or("Subagent")),
         driver: item.str("driver").map(str::to_owned),
         detail,
@@ -772,10 +803,238 @@ impl App {
         } else {
             response
         };
+        self.subagent_hover(ui, rect, response.hovered(), id, &agent, shown_status);
         if response.clicked()
             && let Some(thread) = agent.child_thread_id
         {
             self.select_thread(Some(thread));
+        }
+    }
+
+    /// `SubagentTooltipContent` after 150 ms on a card: the model, the
+    /// status and time, where it works when that differs from the parent,
+    /// and what it last reported.
+    fn subagent_hover(
+        &mut self,
+        ui: &mut Ui,
+        card: Rect,
+        hovered: bool,
+        id: &str,
+        agent: &Agent,
+        status: Option<&str>,
+    ) {
+        let key = egui::Id::new(("subagent-hover", id));
+        let now = ui.input(|i| i.time);
+        if !hovered || ui.ctx().dragged_id().is_some() {
+            ui.data_mut(|d| d.remove::<f64>(key));
+            return;
+        }
+        let since = ui.data_mut(|d| *d.get_temp_mut_or(key, now));
+        if now - since < 0.15 {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(0.15 - (now - since)));
+            return;
+        }
+        let muted = theme::muted_foreground();
+        let status = status.unwrap_or(&agent.status);
+        let model = agent
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty());
+        let model_label = match (&agent.instance, model) {
+            (Some(instance), Some(model)) => {
+                self.model_label(&crate::model::ModelSelection {
+                    instance_id: instance.clone(),
+                    model: model.to_owned(),
+                    options: None,
+                })
+                .0
+            }
+            (None, Some(model)) => model.to_owned(),
+            _ => "Not reported".into(),
+        };
+        let mark = agent
+            .driver
+            .as_deref()
+            .and_then(crate::ui::pickers::provider_icon);
+        let working = matches!(status, "running" | "in_progress" | "pending" | "waiting");
+        let (status_icon, status_color) = if working {
+            ("circle-dashed", INFO)
+        } else if matches!(status, "failed" | "error") {
+            ("circle-x", theme::error())
+        } else if status == "completed" {
+            ("check", SUCCESS)
+        } else {
+            ("circle-dashed", muted)
+        };
+        let status_text = {
+            let text = status.replace('_', " ");
+            let mut chars = text.chars();
+            chars
+                .next()
+                .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        };
+        let elapsed_text = elapsed(
+            &agent.status,
+            agent.started_at.as_deref(),
+            agent.completed_at.as_deref(),
+        );
+        // Where it works, when that differs from the parent.
+        let parent = self.current_thread();
+        let child = agent
+            .child_thread_id
+            .as_ref()
+            .and_then(|c| self.state.threads.iter().find(|t| &t.id == c).cloned());
+        let mut places: Vec<(&'static str, String)> = Vec::new();
+        if let (Some(parent), Some(child)) = (&parent, &child) {
+            let child_project = self.state.project(&child.project_id).cloned();
+            if child.project_id != parent.project_id
+                && let Some(project) = &child_project
+            {
+                places.push(("folder", format!("Project {}", project.title)));
+            }
+            let parent_workspace = parent.worktree_path.clone().or_else(|| {
+                self.state
+                    .project(&parent.project_id)
+                    .map(|p| p.workspace_root.clone())
+            });
+            let child_workspace = child
+                .worktree_path
+                .clone()
+                .or_else(|| child_project.as_ref().map(|p| p.workspace_root.clone()));
+            if let (Some(a), Some(b)) = (parent_workspace, child_workspace)
+                && a != b
+            {
+                let (icon, label) = if child.branch.is_some() {
+                    ("git-branch", "Branch")
+                } else if child.worktree_path.is_some() {
+                    ("folder", "Worktree")
+                } else {
+                    ("folder", "Workspace")
+                };
+                let value = child.branch.clone().unwrap_or_else(|| {
+                    b.trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&b)
+                        .to_owned()
+                });
+                places.push((icon, format!("{label} {value}")));
+            }
+        }
+        let line = 18.0;
+        let rows = 2 + places.len() + usize::from(agent.preview.is_some());
+        let width = 320.0f32.min(card.width());
+        let height = 12.0 + 16.0 + 6.0 + rows as f32 * line + 12.0;
+        let above = card.top() - 6.0 - height;
+        let top = if above >= ui.clip_rect().top() {
+            above
+        } else {
+            card.bottom() + 6.0
+        };
+        let rect = Rect::from_min_size(Pos2::new(card.left(), top), Vec2::new(width, height));
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Tooltip, key));
+        painter.add(
+            egui::epaint::Shadow {
+                offset: [0, 10],
+                blur: 25,
+                spread: 0,
+                color: Color32::from_black_alpha(60),
+            }
+            .as_shape(rect, CornerRadius::same(6)),
+        );
+        painter.rect(
+            rect,
+            CornerRadius::same(6),
+            widgets::menu_surface(),
+            Stroke::new(1.0, widgets::menu_outline()),
+            egui::StrokeKind::Inside,
+        );
+        let child_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .layer_id(painter.layer_id())
+                .max_rect(rect),
+        );
+        let left = rect.left() + 12.0;
+        let inner = width - 24.0;
+        let mut y = rect.top() + 12.0;
+        widgets::text_in(
+            &child_ui,
+            Rect::from_min_size(Pos2::new(left, y), Vec2::new(inner, 16.0)),
+            &agent.title,
+            font(12.0, Weight::Medium),
+            theme::foreground(),
+        );
+        y += 16.0 + 6.0;
+        let icon_at = |y: f32| {
+            Rect::from_center_size(
+                Pos2::new(left + 2.0 + 6.0, y + line / 2.0),
+                Vec2::splat(12.0),
+            )
+        };
+        let text_at = |y: f32, right: f32| {
+            Rect::from_min_max(Pos2::new(left + 22.0, y), Pos2::new(right, y + line))
+        };
+        match mark {
+            Some((icon, _)) => {
+                theme::paint_icon(&child_ui, icon, icon_at(y), 12.0, theme::alpha(muted, 0.6))
+            }
+            None => theme::paint_icon(&child_ui, "bot", icon_at(y), 12.0, muted),
+        }
+        widgets::text_in(
+            &child_ui,
+            text_at(y, rect.right() - 12.0),
+            &model_label,
+            font(12.0, Weight::Regular),
+            theme::alpha(theme::foreground(), 0.75),
+        );
+        y += line;
+        theme::paint_icon(&child_ui, status_icon, icon_at(y), 12.0, status_color);
+        let mut right = rect.right() - 12.0;
+        if let Some(time) = &elapsed_text {
+            let w = widgets::tabular_width(&child_ui, time, font(12.0, Weight::Regular));
+            widgets::tabular_text(
+                &child_ui,
+                Pos2::new(right - w, y + 1.0),
+                time,
+                font(12.0, Weight::Regular),
+                muted,
+                16.0,
+            );
+            right -= w + 8.0;
+        }
+        widgets::text_in(
+            &child_ui,
+            text_at(y, right),
+            &status_text,
+            font(12.0, Weight::Regular),
+            muted,
+        );
+        y += line;
+        for (icon, text) in &places {
+            theme::paint_icon(&child_ui, icon, icon_at(y), 12.0, muted);
+            widgets::text_in(
+                &child_ui,
+                text_at(y, rect.right() - 12.0),
+                text,
+                font(12.0, Weight::Regular),
+                muted,
+            );
+            y += line;
+        }
+        if let Some(preview) = &agent.preview {
+            theme::paint_icon(&child_ui, "terminal", icon_at(y), 12.0, muted);
+            widgets::text_in(
+                &child_ui,
+                text_at(y, rect.right() - 12.0),
+                preview,
+                font(12.0, Weight::Regular),
+                muted,
+            );
         }
     }
 
@@ -1118,6 +1377,16 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hover_previews_collapse_and_cut() {
+        assert_eq!(detail_preview(Some("  a\n\n b  ")).as_deref(), Some("a b"));
+        assert_eq!(detail_preview(Some("   ")), None);
+        let long = "x".repeat(300);
+        let cut = detail_preview(Some(&long)).unwrap();
+        assert_eq!(cut.chars().count(), 281);
+        assert!(cut.ends_with('…'));
+    }
 
     #[test]
     fn details_read_as_one_plain_line() {
