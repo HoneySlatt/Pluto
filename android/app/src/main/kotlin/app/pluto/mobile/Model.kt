@@ -11,6 +11,7 @@ import android.text.format.DateFormat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.pluto.core.Core
 import app.pluto.core.Listener
@@ -44,4 +45,7 @@ class Model(context: Context) {
     // The composers' texts by key (`chat`, `code` or a thread id), kept
     // while the app runs.
     val texts = mutableStateMapOf<String, String>()
+
+    // The image shown full screen, over everything.
+    var viewer by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
 }

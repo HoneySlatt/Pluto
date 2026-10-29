@@ -92,6 +92,14 @@ fun ThreadView(id: String, page: Boolean) {
     val core = model.core
     val nav = model.nav
     val view = remember(model.revision, id) { core.thread(id) }
+    // Codex's images land on the server's disk without an event: they are
+    // asked for while the thread is on screen, often while it works.
+    LaunchedEffect(id, view.running, view.loaded) {
+        while (view.loaded) {
+            core.watchGenerated(id)
+            delay(if (view.running) 3_000 else 20_000)
+        }
+    }
     Box(Modifier.fillMaxSize().background(P.canvas)) {
         Glow(dim = true)
         Column(Modifier.fillMaxSize().safeBars().imePadding()) {
@@ -245,6 +253,7 @@ private fun itemKey(item: Item): String = when (item) {
     is Item.Working -> item.key
     is Item.Thinking -> item.key
     is Item.Note -> item.key
+    is Item.Image -> item.key
 }
 
 @Composable
@@ -319,6 +328,7 @@ private fun TimelineItem(thread: String, item: Item, now: Long) {
             WorkingRow(if (started != null) "Working for " to elapsed(now - started) else "Working" to null)
         }
         is Item.Thinking -> WorkingRow("Thinking" to null)
+        is Item.Image -> GeneratedImage(thread, item.path)
         is Item.Note -> Row(
             Modifier.padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -465,16 +475,49 @@ private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also { images[image.id] = it }
         }
     }
-    android.util.Log.d("PlutoDebug", "attachment ${image.id}: ${model.core.debugAsset("attachment:" + image.id)} bitmap=${bitmap != null}")
     val shape = RoundedCornerShape(14.dp)
     Box(
-        modifier.aspectRatio(4f / 3f).card(P.chip, shape),
+        modifier
+            .aspectRatio(4f / 3f)
+            .card(P.chip, shape)
+            .then(if (bitmap != null) Modifier.tap(label = "Open ${image.name}") { model.viewer = bitmap } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
             Image(bitmap, image.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Icon("image", P.muted)
+        }
+    }
+}
+
+/// An image Codex generated: as wide as the answers, at its own ratio, a
+/// tap opens it full screen.
+@Composable
+private fun GeneratedImage(thread: String, path: String) {
+    val model = LocalModel.current
+    val key = "generated:$path"
+    val bitmap = images[key] ?: run {
+        @Suppress("UNUSED_EXPRESSION") model.revision
+        model.core.generatedImage(thread, path)?.let { bytes ->
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also { images[key] = it }
+        }
+    }
+    val shape = RoundedCornerShape(16.dp)
+    val name = path.substringAfterLast('/')
+    Box(
+        Modifier
+            .padding(top = 4.dp, bottom = 16.dp)
+            .fillMaxWidth()
+            .then(if (bitmap != null) Modifier.aspectRatio(bitmap.width.toFloat() / bitmap.height) else Modifier.aspectRatio(1f))
+            .card(P.chip, shape)
+            .then(if (bitmap != null) Modifier.tap(label = "Open $name") { model.viewer = bitmap } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(bitmap, name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Spinner(P.muted)
         }
     }
 }

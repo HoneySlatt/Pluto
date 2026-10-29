@@ -113,6 +113,7 @@ fun PlutoApp(model: Model) {
                 is Net.Unreachable -> Unreachable()
                 else -> Session(net)
             }
+            app.pluto.mobile.ui.Viewer()
             Toast(shell.toast)
         }
     }

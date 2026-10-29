@@ -204,6 +204,12 @@ pub enum Item {
         key: String,
         text: String,
     },
+    /// An image Codex generated, by its path on the server's host
+    /// (`generated_image`).
+    Image {
+        key: String,
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -387,7 +393,7 @@ fn work(entry: &WorkEntry, live: bool) -> Work {
 }
 
 /// A row's key: its own id, so loading earlier turns keeps the rows below.
-fn row_key(row: &Row, index: usize) -> String {
+fn row_key(row: &Row) -> String {
     match row {
         Row::User(message) => format!("u:{}", message.id),
         Row::Assistant { message, .. } => format!("a:{}", message.id),
@@ -404,7 +410,7 @@ fn row_key(row: &Row, index: usize) -> String {
         Row::HtmlRender(entry) => format!("html:{}", entry.id),
         Row::McpApp(entry) => format!("mcp:{}", entry.id),
         Row::Event { id, .. } => format!("event:{id}"),
-        Row::GeneratedImage { .. } => format!("image:{index}"),
+        Row::GeneratedImage { image } => format!("image:{}", image.path.display()),
     }
 }
 
@@ -486,7 +492,7 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for (index, row) in rows.into_iter().enumerate() {
-        let mut key = row_key(&row, index);
+        let mut key = row_key(&row);
         if !seen.insert(key.clone()) {
             key = format!("{key}#{index}");
         }
@@ -579,7 +585,11 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
             },
             Row::Thinking { .. } => Item::Thinking { key },
             Row::Compaction { label, .. } => Item::Note { key, text: label },
-            Row::HtmlRender(_) | Row::McpApp(_) | Row::GeneratedImage { .. } => Item::Note {
+            Row::GeneratedImage { image } => Item::Image {
+                key,
+                path: image.path.display().to_string(),
+            },
+            Row::HtmlRender(_) | Row::McpApp(_) => Item::Note {
                 key,
                 text: "Open this thread in Pluto on the computer to see this page".into(),
             },
@@ -998,7 +1008,11 @@ impl Core {
                 worktree: thread.as_ref().is_some_and(|t| t.worktree_path.is_some()),
                 items: match (&thread, &detail) {
                     (Some(thread), Some(detail)) => {
-                        items(timeline::rows(thread, detail, &s.expansion))
+                        let mut rows = timeline::rows(thread, detail, &s.expansion);
+                        if let Some(images) = s.generated.get(&id) {
+                            timeline::insert_generated_images(&mut rows, images);
+                        }
+                        items(rows)
                     }
                     _ => Vec::new(),
                 },
@@ -1061,15 +1075,18 @@ impl Core {
             .map(|bytes| bytes.to_vec())
     }
 
-    /// TEMPORARY: an image's state, for debugging.
-    pub fn debug_asset(&self, key: String) -> String {
-        self.read(|app| match app.session.assets.get(&key) {
-            None => "none".into(),
-            Some(crate::session::Asset::Pending) => "pending".into(),
-            Some(crate::session::Asset::Missing) => "missing".into(),
-            Some(crate::session::Asset::Ready(b)) => format!("ready {}", b.len()),
-            Some(crate::session::Asset::Failed(at)) => format!("failed {:?} ago", at.elapsed()),
-        } + &format!(" online={} server={}", app.session.net.online(), app.session.server))
+    /// An image Codex generated for `thread`, asked for on first use.
+    pub fn generated_image(&self, thread: String, path: String) -> Option<Vec<u8>> {
+        self.hub
+            .lock()
+            .session
+            .generated_image(&thread, &path)
+            .map(|bytes| bytes.to_vec())
+    }
+
+    /// Asks the server again for the images Codex generated for `thread`.
+    pub fn watch_generated(&self, thread: String) {
+        self.update(|app, _| app.session.watch_generated(&thread));
     }
 
     /// A message's image, asked for on first use.

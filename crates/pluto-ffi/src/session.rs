@@ -130,6 +130,9 @@ pub struct Session {
     /// Why the open thread could not be followed, by thread id.
     pub thread_error: Option<(String, String)>,
     pub assets: HashMap<String, Asset>,
+    /// The images Codex generated for a thread (`generatedImages.list`),
+    /// placed in its timeline like the desktop's local scan.
+    pub generated: HashMap<String, Vec<pluto_core::generated_images::GeneratedImage>>,
     /// Temporary chats opened here, and those already sent `thread.delete`
     /// on this connection.
     temporary: HashSet<String>,
@@ -164,6 +167,7 @@ impl Session {
             resubscribe: None,
             thread_error: None,
             assets: HashMap::new(),
+            generated: HashMap::new(),
             temporary: HashSet::new(),
             deleted: HashSet::new(),
         }
@@ -613,6 +617,31 @@ impl Session {
         )
     }
 
+    /// An image Codex generated for `thread`, by its path on the server's
+    /// host (`media-file`).
+    pub fn generated_image(&mut self, thread: &str, path: &str) -> Option<Arc<Vec<u8>>> {
+        self.asset(
+            &format!("generated:{path}"),
+            json!({"_tag": "media-file", "threadId": thread, "path": path}),
+        )
+    }
+
+    /// Asks again for the images Codex generated for `thread`, when it ran
+    /// with Codex (the server lists them; an older one has no such list).
+    pub fn watch_generated(&mut self, thread: &str) {
+        let codex = self.state.detail.as_ref().is_some_and(|d| {
+            d.id() == thread
+                && d.provider_threads
+                    .iter()
+                    .any(|t| t["driver"] == "codex" && t["appThreadId"] == thread)
+        });
+        let key = format!("generated:{thread}");
+        if !codex || !self.net.online() || self.waiting(&key) {
+            return;
+        }
+        self.request(key, "generatedImages.list", json!({"threadId": thread}));
+    }
+
     /// An image the server serves (`assets.createUrl`), asked for once.
     fn asset(&mut self, key: &str, resource: Value) -> Option<Arc<Vec<u8>>> {
         match self.assets.get(key) {
@@ -866,6 +895,26 @@ impl Session {
                 sentence(error)
             ));
             self.replies.insert(key, result);
+            return;
+        }
+        if let Some(thread) = key.strip_prefix("generated:") {
+            // A server without the list keeps the timeline as it is.
+            if let Ok(value) = &result {
+                let images = value["images"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|image| {
+                        Some(pluto_core::generated_images::GeneratedImage {
+                            path: image["path"].as_str()?.into(),
+                            modified: std::time::UNIX_EPOCH
+                                + Duration::from_millis(image["modifiedAt"].as_u64()?),
+                            bytes: image["sizeBytes"].as_u64().unwrap_or_default(),
+                        })
+                    })
+                    .collect();
+                self.generated.insert(thread.to_owned(), images);
+            }
             return;
         }
         if key == "scheduled-tasks" {
