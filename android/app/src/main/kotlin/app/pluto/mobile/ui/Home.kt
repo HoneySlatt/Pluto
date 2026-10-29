@@ -227,11 +227,12 @@ fun Composer(target: Target, placeholder: String) {
     }
     val view = remember(model.revision, target) { core.composer(target) }
     val text = model.texts[key].orEmpty()
-    // A message the server refused comes back here, unless something new
-    // was typed meanwhile.
+    // A message the server refused comes back here, after what was typed
+    // meanwhile.
     LaunchedEffect(model.revision, key) {
         core.takeUnsent(key)?.let { back ->
-            if (model.texts[key].isNullOrBlank()) model.texts[key] = back
+            val typed = model.texts[key].orEmpty()
+            model.texts[key] = if (typed.isBlank()) back else "$typed\n\n$back"
         }
     }
     var focused by remember { mutableStateOf(false) }
@@ -299,8 +300,12 @@ fun Composer(target: Target, placeholder: String) {
                 }
             } else {
                 SendButton(stop = false, enabled = !empty && !uploading && view.online, label = "Send") {
+                    // Read now: a second tap in the same frame finds the
+                    // composer already empty.
+                    val current = model.texts[key].orEmpty()
+                    if (current.isBlank() && core.attachments(key).isEmpty()) return@SendButton
                     haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                    val outcome = core.send(target, text)
+                    val outcome = core.send(target, current)
                     val error = outcome.error
                     if (error == null) {
                         model.texts.remove(key)

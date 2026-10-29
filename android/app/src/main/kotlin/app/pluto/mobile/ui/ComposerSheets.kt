@@ -109,7 +109,7 @@ fun ThreadMenuSheet(id: String) {
             SRow("git-fork", "Fork thread", enabled = !outcome.busy) {
                 done = "Forked"
                 outcome.error = null
-                outcome.sent = core.forkThread(id)
+                outcome.once { core.forkThread(id) }
             }
         }
         SRow("file-diff", "Changed files") {
@@ -132,7 +132,7 @@ fun ThreadMenuSheet(id: String) {
         } else {
             done = "Deleted"
             outcome.error = null
-            outcome.sent = core.deleteThread(id)
+            outcome.once { core.deleteThread(id) }
         }
     }
     if (outcome.busy) SheetNote("Waiting for the server…")
@@ -360,7 +360,7 @@ fun RenameSheet(id: String) {
             enabled = !outcome.busy && title.isNotBlank(),
         ) {
             outcome.error = null
-            outcome.sent = core.renameThread(id, title)
+            outcome.once { core.renameThread(id, title) }
         }
     }
 }
@@ -386,7 +386,7 @@ fun DeleteThreadSheet(id: String) {
             enabled = !outcome.busy,
         ) {
             outcome.error = null
-            outcome.sent = core.deleteThread(id)
+            outcome.once { core.deleteThread(id) }
         }
     }
 }

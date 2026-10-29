@@ -221,6 +221,6 @@ fun RemoveProjectSheet(project: String) {
             Modifier.weight(1f),
             tone = Tone.Danger,
             enabled = !outcome.busy,
-        ) { outcome.sent = core.removeProject(project) }
+        ) { outcome.once { core.removeProject(project) } }
     }
 }

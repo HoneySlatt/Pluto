@@ -404,7 +404,17 @@ private fun WorkingRow(text: Pair<String, String?>) {
     }
 }
 
-private val images = HashMap<String, app.pluto.mobile.Viewed>()
+// The images shown, bounded by their memory (the bitmap and the bytes kept
+// for saving), the least recently shown going first.
+private val images = object : android.util.LruCache<String, app.pluto.mobile.Viewed>(64 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: app.pluto.mobile.Viewed) =
+        value.bitmap.width * value.bitmap.height * 4 + value.bytes.size
+}
+
+// Leaving the server forgets its images.
+fun clearImages() {
+    images.evictAll()
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -473,7 +483,7 @@ private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
         @Suppress("UNUSED_EXPRESSION") model.revision
         model.core.attachment(image.id)?.let { bytes ->
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
-                app.pluto.mobile.Viewed(it, bytes, image.name).also { v -> images[image.id] = v }
+                app.pluto.mobile.Viewed(it, bytes, image.name).also { v -> images.put(image.id, v) }
             }
         }
     }
@@ -505,7 +515,7 @@ private fun GeneratedImage(thread: String, path: String) {
         @Suppress("UNUSED_EXPRESSION") model.revision
         model.core.generatedImage(thread, path)?.let { bytes ->
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
-                app.pluto.mobile.Viewed(it, bytes, name).also { v -> images[key] = v }
+                app.pluto.mobile.Viewed(it, bytes, name).also { v -> images.put(key, v) }
             }
         }
     }
@@ -586,6 +596,14 @@ private fun AskCard(tone: Color, icon: String, title: String, content: @Composab
     }
 }
 
+// Whether the card's last answer still waits, read now (a second tap in
+// the same frame sees the first).
+@Composable
+private fun waitingCheck(): (String?) -> Boolean {
+    val core = LocalModel.current.core
+    return { key -> key != null && core.replyState(key).waiting }
+}
+
 // The reply to a card's last answer: waiting, or why it failed.
 @Composable
 private fun answerState(key: String?): Pair<Boolean, String?> {
@@ -598,6 +616,7 @@ private fun answerState(key: String?): Pair<Boolean, String?> {
 @Composable
 private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boolean) {
     val core = LocalModel.current.core
+    val waiting = waitingCheck()
     val haptic = LocalHapticFeedback.current
     var sent by remember { mutableStateOf<String?>(null) }
     val (busy, error) = answerState(sent)
@@ -644,7 +663,7 @@ private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boo
                         enabled = enabled,
                     ) {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        sent = core.respond(thread, approval.requestId, choice.decision)
+                        if (!waiting(sent)) sent = core.respond(thread, approval.requestId, choice.decision)
                     }
                 }
             }
@@ -656,7 +675,7 @@ private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boo
             ) {
                 for (choice in approval.rest) {
                     Btn(choice.label, Modifier.fillMaxWidth(), enabled = enabled) {
-                        sent = core.respond(thread, approval.requestId, choice.decision)
+                        if (!waiting(sent)) sent = core.respond(thread, approval.requestId, choice.decision)
                     }
                 }
             }
@@ -667,6 +686,7 @@ private fun ApprovalCardView(thread: String, approval: ApprovalCard, online: Boo
 @Composable
 private fun QuestionCardView(thread: String, input: QuestionCard, online: Boolean) {
     val core = LocalModel.current.core
+    val waiting = waitingCheck()
     var sent by remember { mutableStateOf<String?>(null) }
     val (busy, error) = answerState(sent)
     val enabled = online && !busy
@@ -734,14 +754,14 @@ private fun QuestionCardView(thread: String, input: QuestionCard, online: Boolea
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (input.dismissible) {
-                Btn("Dismiss", Modifier.weight(1f), enabled = enabled) { sent = core.dismissQuestion(thread, input.requestId) }
+                Btn("Dismiss", Modifier.weight(1f), enabled = enabled) { if (!waiting(sent)) sent = core.dismissQuestion(thread, input.requestId) }
             }
             Btn(
                 if (busy) "Sending…" else "Submit",
                 Modifier.weight(1f),
                 tone = Tone.Primary,
                 enabled = enabled && input.ready,
-            ) { core.submitAnswers(thread, input.requestId)?.let { sent = it } }
+            ) { if (!waiting(sent)) core.submitAnswers(thread, input.requestId)?.let { sent = it } }
         }
     }
 }

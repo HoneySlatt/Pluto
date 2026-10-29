@@ -735,6 +735,7 @@ impl Core {
             crate::usage::reset();
             crate::memory::reset();
             crate::tasks::reset();
+            crate::diff::reset();
         });
     }
 
@@ -868,7 +869,13 @@ impl Core {
     /// A message the server refused, back for its composer.
     pub fn take_unsent(&self, composer: String) -> Option<String> {
         // Nothing changes for the other screens: no notification.
-        self.hub.lock().session.unsent.remove(&composer)
+        // Every message given back, oldest first, a blank line apart.
+        self.hub
+            .lock()
+            .session
+            .unsent
+            .remove(&composer)
+            .map(|texts| texts.join("\n\n"))
     }
 
     /// Stops the thread's run, holding its queue.

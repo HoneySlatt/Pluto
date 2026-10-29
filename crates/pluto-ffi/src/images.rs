@@ -125,7 +125,8 @@ pub fn raster(bytes: &[u8]) -> Option<Vec<u8>> {
     if raster {
         return Some(bytes.to_vec());
     }
-    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]).to_lowercase();
+    // An SVG may start with a long prologue (comments, a doctype).
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(64 * 1024)]).to_lowercase();
     head.contains("<svg").then(|| svg_png(bytes, 192)).flatten()
 }
 

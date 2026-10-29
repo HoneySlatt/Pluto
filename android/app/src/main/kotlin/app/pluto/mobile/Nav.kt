@@ -235,6 +235,9 @@ class Nav(private val model: Model) {
     fun disconnect() {
         reset()
         model.texts.clear()
+        model.viewer = null
+        app.pluto.mobile.ui.clearImages()
+        app.pluto.mobile.ui.clearFavicons()
         core.disconnect()
     }
 }

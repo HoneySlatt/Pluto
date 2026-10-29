@@ -10,6 +10,9 @@
     <application
         android:name=".PlutoApplication"
         android:label="Pluto"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Pluto"
         android:usesCleartextTraffic="true"

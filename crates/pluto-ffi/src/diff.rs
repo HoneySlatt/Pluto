@@ -83,6 +83,11 @@ pub struct DiffView {
 /// page reads it again on every event of the thread.
 static PARSED: Mutex<Option<(String, Arc<Vec<DiffFile>>)>> = Mutex::new(None);
 
+/// Leaving the server forgets its last diff.
+pub fn reset() {
+    *PARSED.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
 fn utf16(text: &str, byte: usize) -> u32 {
     text.get(..byte.min(text.len()))
         .map(|s| s.encode_utf16().count() as u32)

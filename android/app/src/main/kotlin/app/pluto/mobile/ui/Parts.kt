@@ -259,9 +259,24 @@ fun Area(
 /// to its key; `busy` while it waits, `error` once it failed; `onOk` runs
 /// once the server accepted it.
 class Outcome {
-    var sent by mutableStateOf<String?>(null)
+    private var key by mutableStateOf<String?>(null)
     var error by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
+
+    // Setting it marks the outcome busy at once: a second tap in the same
+    // frame sees it.
+    var sent: String?
+        get() = key
+        set(value) {
+            key = value
+            if (value != null) busy = true
+        }
+
+    // Runs `ask` (which returns the key to follow) unless one waits already.
+    fun once(ask: () -> String?) {
+        if (busy) return
+        sent = ask()
+    }
 }
 
 @Composable

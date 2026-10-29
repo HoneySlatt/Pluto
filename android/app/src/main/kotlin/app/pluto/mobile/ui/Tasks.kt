@@ -168,7 +168,7 @@ fun TaskMenuSheet(id: String) {
     if (!view.webhook) {
         SRow("play", "Run now", enabled = !outcome.busy) {
             done = "Running ${view.title}"
-            outcome.sent = core.taskAction(id, true)
+            outcome.once { core.taskAction(id, true) }
         }
     }
     SRow("pencil", "Edit", enabled = !outcome.busy) {
@@ -176,7 +176,7 @@ fun TaskMenuSheet(id: String) {
     }
     SRow("trash-2", "Delete", danger = true, enabled = !outcome.busy) {
         done = "Task deleted"
-        outcome.sent = core.taskAction(id, false)
+        outcome.once { core.taskAction(id, false) }
     }
     if (outcome.busy) SheetNote("Waiting for the server…")
     outcome.error?.let { SheetError(it) }

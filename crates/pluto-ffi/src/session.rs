@@ -120,7 +120,7 @@ pub struct Session {
     /// Each composer's attachments (`attachments.rs`).
     pub attachments: HashMap<String, Vec<Attached>>,
     /// Texts given back to their composer (by composer key).
-    pub unsent: HashMap<String, String>,
+    pub unsent: HashMap<String, Vec<String>>,
     /// The scheduled tasks (`scheduledTasks.subscribe`), once listed.
     pub tasks: Option<Result<Vec<Value>, String>>,
     tasks_streaming: bool,
@@ -317,7 +317,9 @@ impl Session {
                 *list = attachments;
             }
         }
-        self.unsent.entry(composer).or_insert(text);
+        if !text.trim().is_empty() {
+            self.unsent.entry(composer).or_default().push(text);
+        }
     }
 
     /// Sends `action` once the server synchronized; false without a
@@ -692,11 +694,12 @@ impl Session {
     }
 
     fn fetch_asset(&mut self, hub: &Arc<Hub>, key: &str, reply: &Value) {
+        // Only from the server itself: an absolute URL elsewhere is refused.
         let url = reply["relativeUrl"].as_str().and_then(|relative| {
-            url::Url::parse(self.server.trim())
-                .ok()?
-                .join(relative)
+            let base = url::Url::parse(self.server.trim()).ok()?;
+            base.join(relative)
                 .ok()
+                .filter(|url| url.origin() == base.origin())
         });
         // The server's marker for a project without a favicon keeps the
         // monogram for the session.
@@ -928,6 +931,11 @@ impl Session {
                 sentence(error)
             ));
             self.replies.insert(key, result);
+            return;
+        }
+        // A launch the server took: nothing waits on its reply.
+        if key.starts_with("launch:") && result.is_ok() {
+            self.sends.remove(&key);
             return;
         }
         if let Some(thread) = key.strip_prefix("generated:") {

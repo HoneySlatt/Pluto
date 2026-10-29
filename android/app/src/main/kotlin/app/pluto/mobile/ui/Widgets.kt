@@ -394,7 +394,13 @@ val BadgeAttention = BadgeSize(30.dp, 11f, 9.dp)
 val BadgeRow = BadgeSize(36.dp, 12f, 10.dp)
 val BadgeHead = BadgeSize(56.dp, 18f, 16.dp, 40f)
 
-private val favicons = HashMap<String, ImageBitmap>()
+// Project favicons, a few dozen at most.
+private val favicons = android.util.LruCache<String, ImageBitmap>(64)
+
+// Leaving the server forgets its favicons.
+fun clearFavicons() {
+    favicons.evictAll()
+}
 
 // A project's badge (`ProjectFavicon.tsx`): its Lucide icon, emoji or
 // favicon, else the monogram on its color.
@@ -416,7 +422,7 @@ fun ProjectBadge(badge: Badge, size: BadgeSize = BadgeDefault) {
                 @Suppress("UNUSED_EXPRESSION") model.revision
                 favicons[badge.projectId] ?: model.core.favicon(badge.projectId)?.let { bytes ->
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also {
-                        favicons[badge.projectId] = it
+                        favicons.put(badge.projectId, it)
                     }
                 }
             } else null

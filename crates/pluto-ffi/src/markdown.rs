@@ -107,7 +107,7 @@ impl Builder {
         self.blocks.push(Block {
             kind,
             spans,
-            indent: self.lists.len() as u8,
+            indent: self.lists.len().min(255) as u8,
             marker: self.marker.take(),
             quote: self.quote,
         });
@@ -137,7 +137,7 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 Tag::Heading { level, .. } => b.heading = Some(level as u8),
                 Tag::BlockQuote(_) => {
                     b.flush(BlockKind::Paragraph);
-                    b.quote += 1;
+                    b.quote = b.quote.saturating_add(1);
                 }
                 Tag::CodeBlock(kind) => {
                     b.flush(BlockKind::Paragraph);
@@ -166,9 +166,9 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                         _ => "•".into(),
                     });
                 }
-                Tag::Emphasis => b.style.italic += 1,
-                Tag::Strong => b.style.bold += 1,
-                Tag::Strikethrough => b.style.strike += 1,
+                Tag::Emphasis => b.style.italic = b.style.italic.saturating_add(1),
+                Tag::Strong => b.style.bold = b.style.bold.saturating_add(1),
+                Tag::Strikethrough => b.style.strike = b.style.strike.saturating_add(1),
                 Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
                     b.style.link.push(safe_url(&dest_url));
                 }
@@ -242,7 +242,7 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                         b.blocks.push(Block {
                             kind: BlockKind::Table { header, rows },
                             spans: Vec::new(),
-                            indent: b.lists.len() as u8,
+                            indent: b.lists.len().min(255) as u8,
                             marker: b.marker.take(),
                             quote: b.quote,
                         });

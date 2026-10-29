@@ -516,8 +516,13 @@ impl Core {
         } else {
             "scheduledTasks.delete"
         };
-        let key = format!("task-action:{}", uuid::Uuid::new_v4());
-        self.update(|app, _| app.session.request(key.clone(), method, json!({"id": id})));
+        // One action per task at a time: a second tap follows the first.
+        let key = format!("task-action:{id}");
+        self.update(|app, _| {
+            if !app.session.waiting(&key) {
+                app.session.request(key.clone(), method, json!({"id": id}));
+            }
+        });
         key
     }
 
@@ -622,6 +627,10 @@ impl Core {
     /// Saves the draft (`scheduledTasks.upsert`), or shows why it cannot.
     pub fn task_save(&self) {
         self.update(|app, _| {
+            // A second tap while the first save waits.
+            if app.session.waiting(UPSERT) {
+                return;
+            }
             let known = |project: &str| app.session.state.projects.iter().any(|p| p.id == project);
             let input = with_draft(|d| {
                 let draft = d.as_mut()?;

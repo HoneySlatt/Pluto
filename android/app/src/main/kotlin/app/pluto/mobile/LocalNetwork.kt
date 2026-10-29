@@ -72,8 +72,10 @@ fun rememberLocalNetworkGate(): LocalNetworkGate {
     return remember {
         LocalNetworkGate { server, then ->
             if (LocalNetwork.missing(context, server)) {
+                // The prompt is already up: the last connection asked wins.
+                val asking = pending[0] != null
                 pending[0] = then
-                ask.launch(LocalNetwork.PERMISSION)
+                if (!asking) ask.launch(LocalNetwork.PERMISSION)
             } else {
                 then()
             }
