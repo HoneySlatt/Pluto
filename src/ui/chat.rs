@@ -1129,6 +1129,36 @@ impl App {
             next = max;
             ui.ctx().request_repaint();
         }
+        // The minimap in the left gutter: each prompt's row, and a click
+        // scrolls to it.
+        {
+            let mut items = Vec::new();
+            let mut top = 24.0 + history_height;
+            for (row, key) in rows.iter().zip(&keys) {
+                let height = view.height(*key, row, column);
+                match row {
+                    Row::User(message) => items.push(crate::ui::minimap::Item {
+                        top,
+                        height,
+                        user: crate::ui::minimap::preview_text(&message.text),
+                        assistant: None,
+                    }),
+                    Row::Assistant { message, .. } => {
+                        if let Some(last) = items.last_mut() {
+                            last.assistant = crate::ui::minimap::preview_text(&message.text);
+                        }
+                    }
+                    _ => {}
+                }
+                top += height;
+            }
+            let gutter = column_left - rect.left();
+            if let Some(target) = crate::ui::minimap::show(ui, rect, gutter, &items, next) {
+                view.follow = false;
+                next = target.min(max);
+                ui.ctx().request_repaint();
+            }
+        }
         let misaligned = view.follow && ((content - view.viewport).max(0.0) - used).abs() > 0.5;
         if misaligned || cut_changed {
             ui.ctx().request_discard("timeline row heights");

@@ -50,6 +50,7 @@ pub mod md_links;
 pub mod media;
 pub mod memory_settings;
 pub mod mentions;
+pub mod minimap;
 pub mod open_in;
 pub mod palette;
 pub mod park;
