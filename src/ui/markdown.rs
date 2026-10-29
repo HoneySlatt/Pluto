@@ -166,7 +166,7 @@ fn collect_files(blocks: &[Block], out: &mut Vec<String>) {
                 head.iter().for_each(|cell| inlines(cell, out));
                 rows.iter().flatten().for_each(|cell| inlines(cell, out));
             }
-            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+            Block::Code { .. } | Block::Rule | Block::Image { .. } | Block::Anchor(_) => {}
         }
     }
 }
@@ -203,6 +203,9 @@ enum Block {
         blocks: Vec<Block>,
     },
     Rule,
+    /// A fragment target (`user-content-<id>`) at the next block's top: a
+    /// heading's slug, a footnote definition's `fn-<label>`.
+    Anchor(String),
     /// An image alone in its paragraph (`markStandaloneImages`); images
     /// within a line of text keep their alt text.
     Image {
@@ -239,11 +242,115 @@ fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
         blocks.push(Block::Rule);
         blocks.push(Block::List {
             start: Some(1),
-            items: definitions.into_iter().map(|(_, blocks)| blocks).collect(),
+            items: definitions
+                .into_iter()
+                .map(|(_, (label, mut blocks))| {
+                    blocks.insert(0, Block::Anchor(format!("fn-{label}")));
+                    blocks
+                })
+                .collect(),
         });
     }
     autolink_blocks(&mut blocks);
+    heading_anchors(
+        &mut blocks,
+        &mut HashMap::new(),
+        &mut std::collections::HashSet::new(),
+    );
     blocks
+}
+
+/// `githubHeadingSlug`: GitHub's heading anchor, so `[Setup](#setup)`
+/// table-of-contents links find their heading.
+fn heading_slug(text: &str) -> String {
+    text.trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '_' | ' ' | '-'))
+        .map(|c| if c == ' ' { '-' } else { c })
+        .collect()
+}
+
+/// `rehypeHeadingIds`: an anchor before each heading, deduplicated in
+/// document order (`setup`, `setup-1`…).
+fn heading_anchors(
+    blocks: &mut Vec<Block>,
+    next: &mut HashMap<String, usize>,
+    taken: &mut std::collections::HashSet<String>,
+) {
+    let mut index = 0;
+    while index < blocks.len() {
+        match &mut blocks[index] {
+            Block::Heading(_, inlines) => {
+                let slug = heading_slug(&plain(inlines));
+                if !slug.is_empty() {
+                    let mut count = next.get(&slug).copied().unwrap_or(0);
+                    let mut id = slug.clone();
+                    while taken.contains(&id) {
+                        count += 1;
+                        id = format!("{slug}-{count}");
+                    }
+                    next.insert(slug, count);
+                    taken.insert(id.clone());
+                    blocks.insert(index, Block::Anchor(id));
+                    index += 1;
+                }
+            }
+            Block::List { items, .. } => {
+                for item in items {
+                    heading_anchors(item, next, taken);
+                }
+            }
+            Block::Quote(children) | Block::Alert(_, children) => {
+                heading_anchors(children, next, taken)
+            }
+            Block::Details { blocks, .. } => heading_anchors(blocks, next, taken),
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
+/// The anchors drawn this frame and the last, by message: where a
+/// fragment link scrolls to.
+#[derive(Clone, Default)]
+struct Anchors {
+    frame: u64,
+    current: Vec<(egui::Id, String, Rect)>,
+    previous: Vec<(egui::Id, String, Rect)>,
+}
+
+const ANCHORS: &str = "markdown-anchors";
+/// A fragment link clicked this frame, for its message to resolve.
+const FRAGMENT: &str = "markdown-fragment";
+
+fn register_anchor(ctx: &egui::Context, root: egui::Id, id: &str, rect: Rect) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let anchors = d.get_temp_mut_or_default::<Anchors>(egui::Id::new(ANCHORS));
+        if anchors.frame != frame {
+            anchors.previous = std::mem::take(&mut anchors.current);
+            anchors.frame = frame;
+        }
+        anchors.current.push((root, id.to_owned(), rect));
+    });
+}
+
+/// `findMarkdownFragmentTarget`: `href`'s target, in `root`'s message
+/// first, then any drawn; `user-content-` prefixes are ignored.
+fn fragment_target(ctx: &egui::Context, root: egui::Id, href: &str) -> Option<Rect> {
+    let fragment = href.strip_prefix('#')?;
+    let decoded = pluto_core::media::percent_decode(fragment);
+    let mut wanted = decoded.as_str();
+    while let Some(rest) = wanted.strip_prefix("user-content-") {
+        wanted = rest;
+    }
+    let anchors = ctx.data(|d| d.get_temp::<Anchors>(egui::Id::new(ANCHORS)))?;
+    let all = || anchors.current.iter().chain(anchors.previous.iter());
+    all()
+        .find(|(r, id, _)| *r == root && id == wanted)
+        .or_else(|| all().find(|(_, id, _)| id == wanted))
+        .map(|(_, _, rect)| *rect)
 }
 
 thread_local! {
@@ -276,13 +383,13 @@ impl Footnotes {
         }
     }
 
-    fn take(&mut self) -> Vec<(usize, Vec<Block>)> {
+    fn take(&mut self) -> Vec<(usize, (String, Vec<Block>))> {
         let definitions = std::mem::take(&mut self.definitions);
         let referenced = std::mem::take(&mut self.referenced);
         definitions
             .into_iter()
             .filter(|(label, _)| referenced.contains(label))
-            .map(|(label, blocks)| (self.number(&label), blocks))
+            .map(|(label, blocks)| (self.number(&label), (label, blocks)))
             .collect()
     }
 }
@@ -484,6 +591,74 @@ fn details_start(html: &str) -> Option<(Vec<Inline>, bool, String)> {
 /// Bare URLs in text become links (remark-gfm's autolink literals): `http`,
 /// `https` and `www.`, trailing punctuation left out.
 fn autolink(list: &mut Vec<Inline>) {
+    autolink_urls(list);
+    autolink_emails(list);
+}
+
+/// GFM's e-mail literal: `local@domain.tld` links to `mailto:`.
+fn autolink_emails(list: &mut Vec<Inline>) {
+    let local = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-' | '_');
+    let domain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
+    let mut out = Vec::with_capacity(list.len());
+    for inline in list.drain(..) {
+        let Inline::Text(text, style) = &inline else {
+            out.push(inline);
+            continue;
+        };
+        if style.link.is_some() || !text.contains('@') {
+            out.push(inline);
+            continue;
+        }
+        let mut cursor = 0;
+        let mut search = 0;
+        while let Some(at) = text[search..].find('@').map(|i| i + search) {
+            search = at + 1;
+            let start = text[..at]
+                .char_indices()
+                .rev()
+                .take_while(|(_, c)| local(*c))
+                .last()
+                .map_or(at, |(i, _)| i);
+            let mut end = text[at + 1..]
+                .find(|c: char| !domain(c))
+                .map_or(text.len(), |e| at + 1 + e);
+            while text[..end].ends_with('.') {
+                end -= 1;
+            }
+            let host = &text[at + 1..end];
+            let valid = start < at
+                && start >= cursor
+                && !text[..start].ends_with('/')
+                && host.contains('.')
+                && !host.starts_with('.')
+                && !host.ends_with(['-', '_']);
+            if !valid {
+                continue;
+            }
+            if start > cursor {
+                out.push(Inline::Text(text[cursor..start].to_owned(), style.clone()));
+            }
+            let address = &text[start..end];
+            out.push(Inline::Text(
+                address.to_owned(),
+                Style {
+                    link: Some(format!("mailto:{address}")),
+                    ..style.clone()
+                },
+            ));
+            cursor = end;
+            search = end;
+        }
+        if cursor == 0 {
+            out.push(inline);
+        } else if cursor < text.len() {
+            out.push(Inline::Text(text[cursor..].to_owned(), style.clone()));
+        }
+    }
+    *list = out;
+}
+
+fn autolink_urls(list: &mut Vec<Inline>) {
     let mut out = Vec::with_capacity(list.len());
     for inline in list.drain(..) {
         let Inline::Text(text, style) = &inline else {
@@ -571,7 +746,7 @@ fn autolink_blocks(blocks: &mut [Block]) {
                 head.iter_mut().for_each(autolink);
                 rows.iter_mut().flatten().for_each(autolink);
             }
-            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+            Block::Code { .. } | Block::Rule | Block::Image { .. } | Block::Anchor(_) => {}
         }
     }
 }
@@ -1772,7 +1947,16 @@ fn paint_inlines(
         if let Some(url) = section.and_then(|s| inlines.links.get(s).cloned().flatten()) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if response.clicked() {
-                widgets::open_external(&url);
+                // `handleMarkdownFragmentClick`: a plain click on `#…`
+                // scrolls to its target; the message resolves it.
+                if url.starts_with('#') {
+                    if !ui.input(|i| i.modifiers.any()) {
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(egui::Id::new(FRAGMENT), url));
+                    }
+                } else {
+                    widgets::open_external(&url);
+                }
             }
         }
     }
@@ -1839,7 +2023,7 @@ fn skill_chip_blocks(blocks: &mut [Block]) {
                 head.iter_mut().for_each(inlines);
                 rows.iter_mut().flatten().for_each(inlines);
             }
-            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+            Block::Code { .. } | Block::Rule | Block::Image { .. } | Block::Anchor(_) => {}
         }
     }
 }
@@ -1875,7 +2059,7 @@ fn context_display_kinds(blocks: &mut [Block], records: &[serde_json::Value]) {
                     .flatten()
                     .for_each(|cell| inlines(cell, records));
             }
-            Block::Code { .. } | Block::Rule | Block::Image { .. } => {}
+            Block::Code { .. } | Block::Rule | Block::Image { .. } | Block::Anchor(_) => {}
         }
     }
 }
@@ -1980,6 +2164,16 @@ impl<'a> Markdown<'a> {
         self.used_width = 0.0;
         let top = ui.cursor().top();
         self.blocks(ui, &blocks, width, 0, self.id);
+        let clicked = ui
+            .ctx()
+            .data(|d| d.get_temp::<String>(egui::Id::new(FRAGMENT)));
+        if let Some(href) = clicked {
+            ui.ctx()
+                .data_mut(|d| d.remove::<String>(egui::Id::new(FRAGMENT)));
+            if let Some(target) = fragment_target(ui.ctx(), self.id, &href) {
+                ui.scroll_to_rect(target, Some(egui::Align::Min));
+            }
+        }
         ui.cursor().top() - top
     }
 
@@ -2039,10 +2233,19 @@ impl<'a> Markdown<'a> {
         parent: egui::Id,
     ) {
         let mut previous_bottom: Option<f32> = None;
+        let mut anchors: Vec<&str> = Vec::new();
         for (index, block) in blocks.iter().enumerate() {
+            if let Block::Anchor(anchor) = block {
+                anchors.push(anchor);
+                continue;
+            }
             let (top, bottom) = margins(block);
             if let Some(previous) = previous_bottom {
                 ui.add_space(previous.max(top));
+            }
+            for anchor in anchors.drain(..) {
+                let at = Rect::from_min_size(ui.cursor().min, Vec2::new(width, 1.0));
+                register_anchor(ui.ctx(), self.id, anchor, at);
             }
             let id = parent.with(index);
             // Code, tables, images and rules take the column's width.
@@ -2230,6 +2433,8 @@ impl<'a> Markdown<'a> {
                 open,
                 blocks,
             } => self.details(ui, summary, *open, blocks, width, depth, id),
+            // Registered by `blocks` at the next block's top.
+            Block::Anchor(_) => {}
             Block::Rule => {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
                 ui.painter().rect_filled(rect, 0.0, theme::border());
@@ -3309,6 +3514,50 @@ mod tests {
         // A definition nothing refers to is left out.
         let unreferenced = parse_with("Text.\n\n[^x]: Unused.", false);
         assert_eq!(unreferenced.len(), 1);
+    }
+
+    #[test]
+    fn mail_literals_and_heading_anchors_follow_gfm() {
+        let blocks = parse_with(
+            "Write to dev.team+x@pluto.example. Or https://a.dev/u@b.c",
+            false,
+        );
+        let Block::Paragraph(inlines) = &blocks[0] else {
+            panic!("{blocks:?}")
+        };
+        let links = texts(inlines);
+        assert!(links.contains(&(
+            "dev.team+x@pluto.example".into(),
+            Some("mailto:dev.team+x@pluto.example".into())
+        )));
+        assert!(
+            !links
+                .iter()
+                .any(|(_, l)| l.as_deref() == Some("mailto:u@b.c"))
+        );
+        assert_eq!(heading_slug(" Set up: the CLI! "), "set-up-the-cli");
+        let blocks = parse_with(
+            "# Setup
+
+## Setup
+
+See[^n].
+
+[^n]: Note.",
+            false,
+        );
+        let anchors: Vec<&str> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Anchor(id) => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(anchors, ["setup", "setup-1"]);
+        let Some(Block::List { items, .. }) = blocks.last() else {
+            panic!("{blocks:?}")
+        };
+        assert!(matches!(&items[0][0], Block::Anchor(id) if id == "fn-n"));
     }
 
     #[test]

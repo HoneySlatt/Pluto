@@ -1270,7 +1270,10 @@ pub fn combobox_search(ui: &mut Ui, rect: Rect, query: &mut String, hint: &str) 
 /// build has no `links` feature, so `xdg-open` stands in for it.
 pub fn open_external(url: &str) {
     let lower = url.to_ascii_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+    if !(lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:"))
+    {
         return;
     }
     let _ = std::process::Command::new("xdg-open")
