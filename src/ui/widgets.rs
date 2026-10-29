@@ -651,6 +651,29 @@ pub fn numeric_date(local: chrono::DateTime<chrono::Local>, with_year: bool) -> 
 
 /// `formatDayAwareTimestamp`: the time today, "yesterday at" it, else the
 /// numeric date before it.
+/// `formatChatTimestampTooltip`: "12:04 PM, 4th June 2026" (English month
+/// names, the time per the Time format setting).
+pub fn timestamp_tooltip(iso: &str) -> String {
+    let Some(date) = crate::timeline::parse_time(iso) else {
+        return String::new();
+    };
+    let local = date.with_timezone(&chrono::Local);
+    let day = chrono::Datelike::day(&local);
+    let suffix = match (day % 100, day % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!(
+        "{}, {day}{suffix} {} {}",
+        hour_minute(local),
+        local.format("%B"),
+        chrono::Datelike::year(&local)
+    )
+}
+
 pub fn clock_time(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(date) = crate::timeline::parse_time(iso) else {
         return String::new();
@@ -1256,4 +1279,37 @@ pub fn open_external(url: &str) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_tooltips_read_like_upstream() {
+        set_time_format("12-hour");
+        let local = |y, m, d| {
+            chrono::TimeZone::with_ymd_and_hms(&chrono::Local, y, m, d, 12, 4, 0)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339()
+        };
+        assert_eq!(
+            timestamp_tooltip(&local(2026, 6, 4)),
+            "12:04 PM, 4th June 2026"
+        );
+        assert_eq!(
+            timestamp_tooltip(&local(2026, 6, 1)),
+            "12:04 PM, 1st June 2026"
+        );
+        assert_eq!(
+            timestamp_tooltip(&local(2026, 6, 12)),
+            "12:04 PM, 12th June 2026"
+        );
+        assert_eq!(
+            timestamp_tooltip(&local(2026, 6, 23)),
+            "12:04 PM, 23rd June 2026"
+        );
+        set_time_format("locale");
+    }
 }

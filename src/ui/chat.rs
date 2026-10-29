@@ -1202,9 +1202,12 @@ impl App {
                 run_id,
                 label,
                 expanded,
-                ..
+                created_at,
             } => {
-                if self.fold_row(ui, label, *expanded, width).clicked() {
+                if self
+                    .fold_row(ui, label, *expanded, width, created_at)
+                    .clicked()
+                {
                     if !self.expansion.turns.remove(run_id) {
                         self.expansion.turns.insert(run_id.clone());
                     }
@@ -1837,16 +1840,23 @@ impl App {
             }
             let time = widgets::clock_time(&message.created_at, self.now);
             let time_width = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
+            let time_rect = Rect::from_min_size(
+                Pos2::new(time_right - 8.0 - time_width, meta_top),
+                Vec2::new(time_width + 1.0, 24.0),
+            );
             widgets::text_in(
                 ui,
-                Rect::from_min_size(
-                    Pos2::new(time_right - 8.0 - time_width, meta_top),
-                    Vec2::new(time_width + 1.0, 24.0),
-                ),
+                time_rect,
                 &time,
                 font(12.0, Weight::Regular),
                 theme::muted_foreground(),
             );
+            ui.interact(
+                time_rect,
+                ui.id().with(("user-time", &message.id)),
+                Sense::hover(),
+            )
+            .on_hover_text(widgets::timestamp_tooltip(&message.created_at));
         }
     }
 
@@ -2043,23 +2053,62 @@ impl App {
                 }
                 if !message.streaming {
                     let time = widgets::clock_time(&message.updated_at, self.now);
-                    widgets::text_in(
+                    let width = widgets::text_in(
                         ui,
                         Rect::from_min_max(Pos2::new(after + 8.0, meta.top()), meta.max),
                         &time,
                         font(12.0, Weight::Regular),
                         theme::muted_foreground(),
                     );
+                    let time_rect = Rect::from_min_size(
+                        Pos2::new(after + 8.0, meta.top()),
+                        Vec2::new(width, 24.0),
+                    );
+                    ui.interact(
+                        time_rect,
+                        ui.id().with(("answer-time", &message.id)),
+                        Sense::hover(),
+                    )
+                    .on_hover_text(widgets::timestamp_tooltip(&message.updated_at));
                 }
             }
         }
     }
 
-    fn fold_row(&mut self, ui: &mut Ui, label: &str, expanded: bool, width: f32) -> egui::Response {
+    fn fold_row(
+        &mut self,
+        ui: &mut Ui,
+        label: &str,
+        expanded: bool,
+        width: f32,
+        created_at: &str,
+    ) -> egui::Response {
         let (rect, _) = ui.allocate_exact_size(
             Vec2::new(width, 4.0 + MESSAGE_LINE + 8.0 + 1.0),
             Sense::hover(),
         );
+        // `TimelineRowTimestamp`: the time at the right while hovered.
+        if ui.rect_contains_pointer(rect) {
+            let time = widgets::clock_time(created_at, self.now);
+            let time_width = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
+            let time_rect = Rect::from_min_size(
+                Pos2::new(rect.right() - 4.0 - time_width, rect.top() + 4.0),
+                Vec2::new(time_width, MESSAGE_LINE),
+            );
+            widgets::text_in(
+                ui,
+                time_rect,
+                &time,
+                font(12.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+            ui.interact(
+                time_rect,
+                ui.id().with(("fold-time", rect.top() as i32)),
+                Sense::hover(),
+            )
+            .on_hover_text(widgets::timestamp_tooltip(created_at));
+        }
         let label_font = font(14.0, Weight::Regular);
         let text_width = widgets::text_width(ui, label, label_font.clone());
         let button = Rect::from_min_size(
@@ -2163,8 +2212,10 @@ impl App {
         let expanded = self.expansion.groups.contains(&key);
         let failed = timeline::indicates_failure(entry);
         let tool_like = timeline::is_tool_like(entry);
-        let destructive =
-            failed && (entry.tone == "error" && entry.item_type.is_none() || !tool_like);
+        let destructive = failed
+            && (entry.item_type.as_deref() == Some("error")
+                || entry.tone == "error" && entry.item_type.is_none()
+                || !tool_like);
         // Command runs and tool calls open as the inspector's body.
         let call = entry
             .item
@@ -2200,6 +2251,9 @@ impl App {
         }
         let (icon, icon_color) = if destructive {
             ("circle-alert", DESTRUCTIVE)
+        } else if failed {
+            // `text-tool-error-icon/40`: a failed tool keeps its icon, tinted.
+            (work_icon(entry), theme::alpha(theme::error(), 0.4))
         } else if entry.question.is_some() {
             ("message-circle", theme::muted_foreground())
         } else {
@@ -2232,7 +2286,85 @@ impl App {
                 theme::alpha(theme::foreground(), 0.8),
             )
         };
-        let text_right = line.right() - 22.0;
+        // Trailing: a created thread's "Open chat", a subagent's "Open
+        // subagent", and the time while hovered, before the chevron.
+        let item = entry.item.as_deref();
+        let open_target = item.and_then(|item| match item.kind.as_str() {
+            "thread_created" => item
+                .str("targetThreadId")
+                .map(|t| ("Open chat", t.to_owned(), true)),
+            "notification"
+                if matches!(
+                    item.get("source")["kind"].as_str(),
+                    Some("subagent" | "delegated_task")
+                ) =>
+            {
+                item.get("source")["childThreadId"]
+                    .as_str()
+                    .map(|t| ("Open subagent", t.to_owned(), false))
+            }
+            _ => None,
+        });
+        let mut trailing = if can_expand {
+            line.right() - 22.0
+        } else {
+            line.right()
+        };
+        if let Some((action, target, primary)) = &open_target {
+            let action_font = if *primary {
+                font(14.0, Weight::Regular)
+            } else {
+                font(14.0, Weight::Medium)
+            };
+            let w = widgets::text_width(ui, action, action_font.clone());
+            let action_rect = Rect::from_min_size(
+                Pos2::new(trailing - w, line.top()),
+                Vec2::new(w, MESSAGE_LINE),
+            );
+            let action_response = ui
+                .interact(
+                    action_rect,
+                    ui.id().with(("work-open", &entry.id)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let color = if *primary {
+                theme::primary()
+            } else {
+                theme::foreground()
+            };
+            widgets::text_in(ui, action_rect, action, action_font, color);
+            if action_response.hovered() {
+                ui.painter().line_segment(
+                    [
+                        Pos2::new(action_rect.left(), action_rect.bottom() - 3.0),
+                        Pos2::new(action_rect.right(), action_rect.bottom() - 3.0),
+                    ],
+                    egui::Stroke::new(1.0, color),
+                );
+            }
+            if action_response.clicked() && self.state.threads.iter().any(|t| &t.id == target) {
+                self.select_thread(Some(target.clone()));
+            }
+            trailing = action_rect.left() - 8.0;
+        }
+        if ui.rect_contains_pointer(rect) && !entry.created_at.is_empty() {
+            let time = widgets::clock_time(&entry.created_at, self.now);
+            let w = widgets::text_width(ui, &time, font(12.0, Weight::Regular));
+            let time_rect = Rect::from_min_size(
+                Pos2::new(trailing - w, line.top()),
+                Vec2::new(w, MESSAGE_LINE),
+            );
+            widgets::text_in(
+                ui,
+                time_rect,
+                &time,
+                font(12.0, Weight::Regular),
+                theme::muted_foreground(),
+            );
+            trailing = time_rect.left() - 8.0;
+        }
+        let text_right = trailing;
         let label_width = widgets::text_in(
             ui,
             Rect::from_min_max(
