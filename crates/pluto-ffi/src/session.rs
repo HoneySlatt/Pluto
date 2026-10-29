@@ -130,6 +130,8 @@ pub struct Session {
     pub tasks: Option<Result<Vec<Value>, String>>,
     tasks_streaming: bool,
     pub prefs: Prefs,
+    /// Thread events for the phone's notifications (`notices.rs`).
+    pub notices: crate::notices::Notices,
     /// A short message at the top of the screen, with its serial.
     pub toast: Option<(String, u64)>,
     serial: u64,
@@ -186,6 +188,7 @@ impl Session {
             tasks: None,
             tasks_streaming: false,
             prefs,
+            notices: Default::default(),
             toast: None,
             serial: 0,
             resubscribe: None,
@@ -562,6 +565,8 @@ impl Session {
                     Ok(()) => self.listed = true,
                     Err(error) => self.show_toast(error),
                 }
+                let on = self.prefs.flag(crate::notices::PREF);
+                self.notices.scan(&self.state.threads, on);
                 if let Some(id) = self.resubscribe.clone()
                     && self.thread(&id).is_some()
                 {

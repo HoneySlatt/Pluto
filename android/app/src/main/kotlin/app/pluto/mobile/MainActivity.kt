@@ -3,7 +3,9 @@ package app.pluto.mobile
 // Pluto's activity: the app draws edge to edge, under transparent status
 // and navigation bars, and the keyboard resizes it. Coming back to the
 // foreground checks the session (it may have died while the phone slept).
+// A thread notification opens its thread.
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -40,6 +42,7 @@ class MainActivity : ComponentActivity() {
         }
         model = (application as PlutoApplication).model
         setContent { PlutoApp(model) }
+        openNotified(intent)
         // A debug build opens a demo session (`--es demo <file in files/>`)
         // to look at the screens without a server.
         if (BuildConfig.DEBUG) {
@@ -60,5 +63,30 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         model.core.probe()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        model.core.setForeground(true)
+        Notifications.clear(this)
+        // On screen, Android lets the service start; it then outlives the
+        // activity.
+        if (model.core.notificationsEnabled()) ConnectionService.start(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        model.core.setForeground(false)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openNotified(intent)
+    }
+
+    private fun openNotified(intent: Intent?) {
+        val thread = intent?.getStringExtra(Notifications.THREAD) ?: return
+        intent.removeExtra(Notifications.THREAD)
+        model.nav.openPage(Page.Thread(thread))
     }
 }

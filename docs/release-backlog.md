@@ -111,9 +111,9 @@ Still open:
 
 ## 6. The Android app
 
-- Background notifications (a foreground service keeping the connection,
-  with its setting), attachments (photos, camera, files), https servers,
-  creating the chat space, chat projects' memories, unread and snoozed
+- Done: background notifications (a foreground service keeping the
+  connection, with its setting), attachments (photos, camera, files).
+- https servers, creating the chat space, chat projects' memories, unread and snoozed
   threads, the request text in Needs you, code block copy and colors,
   published pages, MCP apps and images, a list window for very long threads.
 

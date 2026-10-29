@@ -15,6 +15,7 @@ pub mod html_render;
 pub mod http;
 pub mod mcp_app;
 pub mod model;
+pub mod notifications;
 pub mod protocol;
 pub mod requests;
 pub mod spaces;

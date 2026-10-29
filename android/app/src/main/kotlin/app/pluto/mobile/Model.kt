@@ -18,6 +18,8 @@ import app.pluto.core.Listener
 import java.util.concurrent.atomic.AtomicBoolean
 
 class Model(context: Context) {
+    private val app = context.applicationContext
+
     var revision by mutableIntStateOf(0)
         private set
 
@@ -41,6 +43,9 @@ class Model(context: Context) {
                     main.post {
                         posted.set(false)
                         revision++
+                        // Away from the screen, a thread's news become
+                        // notifications (empty in the foreground).
+                        Notifications.post(app, core.takeNotices())
                     }
                 }
             }

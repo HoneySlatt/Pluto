@@ -157,8 +157,13 @@ JPEG of at most 3072 px), other files up to 50 MiB are uploaded when
 attached (`attachments.createUploadUrl`) and sent by id; a refused message
 brings its attachments back with its text.
 
-Not wired yet: chat projects' own memories, thread notifications and a background
-connection, creating the chat space from the phone, the "ask" line of Needs
+Thread notifications (Settings → Notifications) tell when a thread
+finishes, fails, or needs an answer while Pluto is in the background; a
+foreground service keeps the connection open meanwhile (the phone may have
+no push service), and a row asks Android to lift the battery limits that
+would close it. Tapping one opens its thread.
+
+Not wired yet: chat projects' own memories, creating the chat space from the phone, the "ask" line of Needs
 you, snoozed threads, published pages and MCP apps in the
 timeline (a note points to the computer). Code blocks show their language,
 a copy button and light syntax colors (the core's `markdown::highlight`).

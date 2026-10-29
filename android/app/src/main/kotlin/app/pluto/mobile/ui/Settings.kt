@@ -3,7 +3,8 @@ package app.pluto.mobile.ui
 // Settings (the Dioxus app's `pages.rs`, the desktop's `settings.rs` labels
 // kept to what a phone needs): the server card, Chat's default model and
 // personalization, New threads' model, permissions and workspace, the
-// display choices, the confirmations, the server's address and token,
+// display choices, the confirmations, thread notifications (with the
+// battery exemption that keeps them coming), the server's address and token,
 // Disconnect, and About. Each choice opens its sheet (`SettingSheet`); the
 // core reads and writes them (crates/pluto-ffi/src/settings.rs).
 //
@@ -14,7 +15,11 @@ package app.pluto.mobile.ui
 // every crate the app links, all generated with the APK
 // (android/app/notice.gradle.kts). A row opens its text.
 
+import android.Manifest
 import android.content.Context
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +39,10 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +53,9 @@ import androidx.compose.ui.unit.dp
 import app.pluto.core.Dot
 import app.pluto.core.coreVersion
 import app.pluto.mobile.BuildConfig
+import app.pluto.mobile.ConnectionService
 import app.pluto.mobile.LocalModel
+import app.pluto.mobile.Notifications
 import app.pluto.mobile.Page
 import app.pluto.mobile.Sheet
 import org.json.JSONArray
@@ -104,6 +114,7 @@ fun SettingsPage() {
                 detail = "Ask before deleting a thread and its chat history.",
             ) { core.setSettingFlag("confirmThreadDelete", it) }
         }
+        NotificationsGroup()
         GroupLabel("Server")
         Group {
             SetRow("link-2", "Address", view.host)
@@ -132,6 +143,52 @@ fun SettingsPage() {
             SetRow("info", "Open source licenses") { nav.openPage(Page.Licenses) }
         }
         PageNote("Providers, appearance, keybindings and storage are set in Pluto on the computer.")
+    }
+}
+
+// Thread notifications: turning them on asks Android for the permission
+// (13 and later), then starts the service that keeps the connection.
+@Composable
+private fun NotificationsGroup() {
+    val model = LocalModel.current
+    val core = model.core
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(core.notificationsEnabled()) }
+    // Read again when Settings shows: the battery page may have changed it.
+    val unrestricted = remember(model.revision) { Notifications.unrestricted(context) }
+    val enable = {
+        core.setNotifications(true)
+        on = true
+        ConnectionService.start(context)
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) enable() else core.toast("Allow notifications for Pluto in Android's settings")
+    }
+    GroupLabel("Notifications")
+    Group {
+        SetToggle(
+            "bell",
+            "Thread notifications",
+            on,
+            detail = "When a thread finishes or needs you while Pluto is in the background. Pluto stays connected meanwhile.",
+        ) { wanted ->
+            if (!wanted) {
+                core.setNotifications(false)
+                on = false
+                ConnectionService.stop(context)
+            } else if (Build.VERSION.SDK_INT >= 33 && !Notifications.allowed(context)) {
+                ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                enable()
+            }
+        }
+        if (on && !unrestricted) {
+            SetRow(
+                "battery",
+                "Background activity",
+                detail = "Let Pluto run without battery limits so the connection survives the phone's sleep",
+            ) { Notifications.askUnrestricted(context) }
+        }
     }
 }
 

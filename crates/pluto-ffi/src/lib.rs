@@ -27,6 +27,7 @@ mod views;
 mod diff;
 mod licenses;
 mod memory;
+mod notices;
 mod projects;
 mod settings;
 mod sheets;

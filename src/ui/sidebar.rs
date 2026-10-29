@@ -152,41 +152,7 @@ pub fn sections<'a>(
     sections
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Status {
-    Approval,
-    Input,
-    Working,
-    /// Stopped, with background work that will wake it (runtime `idle`).
-    Waiting,
-    Failed,
-    /// Failed on a usage limit.
-    Limited,
-    Ready,
-}
-
-/// `resolveSidebarThreadStatus`.
-pub(crate) fn status(thread: &Thread) -> Status {
-    let subagent = thread.pending_subagent_request.as_deref();
-    let runtime = thread.runtime.as_ref();
-    if thread.has_pending_approvals || subagent == Some("approval") {
-        Status::Approval
-    } else if thread.has_pending_user_input || subagent == Some("user_input") {
-        Status::Input
-    } else if runtime.is_some_and(|r| r.is_active()) {
-        Status::Working
-    } else if runtime.is_some_and(|r| r.status == "idle") {
-        Status::Waiting
-    } else if let Some(runtime) = runtime.filter(|r| r.status == "failed") {
-        if runtime.last_error_class.as_deref() == Some("usage_limit") {
-            Status::Limited
-        } else {
-            Status::Failed
-        }
-    } else {
-        Status::Ready
-    }
-}
+pub(crate) use pluto_core::notifications::{Status, status};
 
 impl App {
     /// The sidebar surface, its right border and the toggle + wordmark header,
