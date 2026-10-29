@@ -2548,11 +2548,98 @@ impl App {
         if expanded && let Some(item) = &call {
             self.inspector_body(ui, item, rect.left() + 2.0 + 28.0, width - 30.0);
         }
+        // `V2ItemInspector`'s checkpoint: its state and files, and Roll back
+        // while it is ready.
+        if expanded && let Some(item) = entry.item.as_deref().filter(|i| i.kind == "checkpoint") {
+            self.checkpoint_rollback_row(ui, item, rect.left() + 2.0 + 28.0, width);
+        }
         if expanded && let Some(item) = entry.item.clone() {
             let left = rect.left() + 2.0 + 28.0;
             if self.tool_output_images(ui, &item, left, width - 30.0) {
                 ui.add_space(4.0);
             }
+        }
+    }
+
+    fn checkpoint_rollback_row(
+        &mut self,
+        ui: &mut Ui,
+        item: &crate::model::TurnItem,
+        left: f32,
+        width: f32,
+    ) {
+        let (Some(checkpoint), Some(scope)) = (item.str("checkpointId"), item.str("scopeId"))
+        else {
+            return;
+        };
+        let status = self
+            .current_detail()
+            .and_then(|d| {
+                d.checkpoints
+                    .iter()
+                    .find(|c| c.id == checkpoint && c.scope_id == scope)
+                    .map(|c| c.status.clone())
+            })
+            .unwrap_or_else(|| item.status.clone());
+        let files = item.get("files").as_array().map_or(0, Vec::len);
+        let (row, _) = ui.allocate_exact_size(Vec2::new(width, 24.0 + 6.0), Sense::hover());
+        let summary = format!("{status} · {files} files");
+        let summary_width = widgets::text_width(ui, &summary, font(12.0, Weight::Regular));
+        widgets::text_in(
+            ui,
+            Rect::from_min_size(
+                Pos2::new(left, row.top() + 2.0),
+                Vec2::new(summary_width, 24.0),
+            ),
+            &summary,
+            font(12.0, Weight::Regular),
+            theme::muted_foreground(),
+        );
+        if status != "ready" {
+            return;
+        }
+        let label = "Roll back";
+        let button = Rect::from_min_size(
+            Pos2::new(left + summary_width + 8.0, row.top() + 2.0),
+            Vec2::new(widgets::outline_button_width(ui, true, label), 24.0),
+        );
+        let clicked = widgets::outline_button(
+            ui,
+            button,
+            ("checkpoint-rollback", checkpoint),
+            Some(("rotate-ccw", theme::foreground())),
+            label,
+            CornerRadius::same(6),
+        )
+        .clicked();
+        if !clicked {
+            return;
+        }
+        // `onRollbackCheckpoint`.
+        if !self.connected() {
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Reconnect before reverting checkpoints.",
+            );
+        } else if self.running() {
+            self.notify(
+                crate::ui::toasts::Kind::Warning,
+                "Interrupt the current turn before reverting checkpoints.",
+            );
+        } else {
+            self.confirm = Some(crate::ui::thread_menu::Confirm {
+                title: "Roll back this thread to the selected checkpoint?".into(),
+                message: "This action cannot be undone.".into(),
+                confirm_label: "Roll back",
+                command: serde_json::json!({
+                    "type": "checkpoint.rollback",
+                    "commandId": uuid::Uuid::new_v4().to_string(),
+                    "threadId": item.thread_id,
+                    "scopeId": scope,
+                    "checkpointId": checkpoint,
+                }),
+                more: Vec::new(),
+            });
         }
     }
 

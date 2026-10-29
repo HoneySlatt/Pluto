@@ -59,7 +59,7 @@ Chat view shell
 | Feature | Upstream file(s) | Status | What is missing | Port location | Size |
 |---|---|---|---|---|---|
 | Edit from here (rewind) | MessagesTimeline `RevertUserMessageButton`, ChatView `onRevertToTurnCount` | done | The message's attachments do not return to the composer with its prompt | src/ui/rewind.rs, chat.rs `user_row` | - |
-| Checkpoint rollback from inspector | V2ItemInspector, ChatView `onRollbackCheckpoint` | missing | "Roll back this thread to the selected checkpoint?" + `revertCheckpoint{checkpointId,scopeId}` | none | M |
+| Checkpoint rollback from inspector | V2ItemInspector, ChatView `onRollbackCheckpoint` | done | Roll back on an expanded checkpoint row, with its confirmation | chat.rs | - |
 | Timeline minimap | MessagesTimeline `TimelineMinimap`, timelineMinimapItems.ts, timelineMinimapWheel.ts | done | Turn strip, hover preview, Previous/Next, wheel and scrub (`minimap.rs`) | minimap.rs | - |
 | Scroll-to-end pill, page scroll | ChatView (pill), timelineScrollTarget.ts, pageScrollController.ts, ChatView `handleKeyDown` | done | Pill and page keys; position memory per thread is not ported | chat.rs `timeline` | - |
 | Worktree setup card | chat/WorktreeSetupCard.tsx, `BackgroundWorktreeSetupChip`, ChatView `onCancelWorktreeSetup`/`onOpenWorktreeSetupTerminal`/`onWorktreeSetupWorkLocally` | missing | "Setting up worktree…" / ready / failed / cancelled card with Base/Branch/Path/Setup rows, script progress, Cancel, Work locally, Open terminal; the background chip. Port shows only a preparation work row with Retry | chat.rs ~2037 | M/L |
