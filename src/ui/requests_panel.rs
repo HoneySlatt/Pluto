@@ -661,8 +661,22 @@ impl App {
             let draft = self.question_drafts.entry(question.id.clone()).or_default();
             requests::toggle_option(&question, draft, &value);
             self.composer.clear();
+            // The check mark shows, then the next question after 200 ms.
             if !question.multi_select {
-                self.advance_question(input, thread_id);
+                self.question_advance = Some((question.id.clone(), std::time::Instant::now()));
+            }
+        }
+        if let Some((id, at)) = &self.question_advance {
+            if *id != question.id || responding {
+                self.question_advance = None;
+            } else {
+                let left = std::time::Duration::from_millis(200).saturating_sub(at.elapsed());
+                if left.is_zero() {
+                    self.question_advance = None;
+                    self.advance_question(input, thread_id);
+                } else {
+                    ui.ctx().request_repaint_after(left);
+                }
             }
         }
         if dismissed && !responding {

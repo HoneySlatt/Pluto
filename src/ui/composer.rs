@@ -1281,7 +1281,8 @@ impl App {
         left
     }
 
-    /// Previous / Next / Submit for a pending question. Returns the left edge.
+    /// Stop (while a turn runs), Previous, Next / Submit for a pending
+    /// question. Returns the left edge.
     fn question_actions(
         &mut self,
         ui: &mut Ui,
@@ -1348,6 +1349,25 @@ impl App {
                 self.previous_question(input);
             }
             left = previous.left();
+        }
+        if self.running() {
+            let stop =
+                Rect::from_min_size(Pos2::new(left - 8.0 - 28.0, bar_top), Vec2::splat(28.0));
+            let response = ui.interact(stop, ui.id().with("question-stop"), Sense::click());
+            let fill = if response.hovered() {
+                DESTRUCTIVE
+            } else {
+                theme::alpha(DESTRUCTIVE, 0.9)
+            };
+            ui.painter().circle_filled(stop.center(), 14.0, fill);
+            theme::paint_icon(ui, "stop-square", stop, 12.0, Color32::WHITE);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Stop generation")
+            });
+            if response.on_hover_text("Interrupt").clicked() {
+                self.interrupt();
+            }
+            left = stop.left();
         }
         left
     }

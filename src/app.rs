@@ -378,6 +378,8 @@ pub struct App {
     pub(crate) question_request: Option<String>,
     pub(crate) question_drafts: std::collections::BTreeMap<String, crate::requests::DraftAnswer>,
     pub(crate) question_index: usize,
+    /// A single-select pick waiting its 200 ms before the next question.
+    pub(crate) question_advance: Option<(String, std::time::Instant)>,
     pub(crate) question_collapsed: Option<String>,
     pub(crate) responding: std::collections::HashSet<String>,
     reply_commands: std::collections::HashMap<String, String>,
@@ -537,6 +539,7 @@ impl App {
             permission_notice_shown: Default::default(),
             clones_streaming: false,
             keep_full_history: Default::default(),
+            question_advance: None,
             clones: Vec::new(),
             sidebar_drag: None,
             sidebar_zones: Vec::new(),
