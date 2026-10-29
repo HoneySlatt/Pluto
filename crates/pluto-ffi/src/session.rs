@@ -117,6 +117,8 @@ pub struct Session {
     /// Messages on their way, by request key or command id: their composer
     /// and text, given back if the server refuses them.
     sends: HashMap<String, (String, String, Vec<Attached>)>,
+    /// Settings changed here, before the change, until the server answers.
+    setting_backups: HashMap<String, Value>,
     /// Each composer's attachments (`attachments.rs`).
     pub attachments: HashMap<String, Vec<Attached>>,
     /// Texts given back to their composer (by composer key).
@@ -164,6 +166,7 @@ impl Session {
             pending: HashSet::new(),
             sends: HashMap::new(),
             attachments: HashMap::new(),
+            setting_backups: HashMap::new(),
             unsent: HashMap::new(),
             tasks: None,
             tasks_streaming: false,
@@ -904,6 +907,9 @@ impl Session {
         if !self.state.config["settings"].is_object() {
             self.state.config["settings"] = json!({});
         }
+        // The value before the first change still on its way, for a refusal.
+        let before = self.state.config["settings"][key].clone();
+        self.setting_backups.entry(key.to_owned()).or_insert(before);
         self.state.config["settings"][key] = value.clone();
         self.request(
             format!("settings:{key}"),
@@ -914,6 +920,14 @@ impl Session {
 
     fn rpc_result(&mut self, key: String, result: Result<Value, String>) {
         self.pending.remove(&key);
+        // A setting the server refused goes back to what it was; one it took
+        // keeps its new value.
+        if let Some(setting) = key.strip_prefix("settings:") {
+            let before = self.setting_backups.remove(setting);
+            if let (Err(_), Some(before)) = (&result, before) {
+                self.state.config["settings"][setting] = before;
+            }
+        }
         if let Some(sent) = self.sends.remove(&key)
             && let Err(error) = &result
         {

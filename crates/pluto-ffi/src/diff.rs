@@ -62,8 +62,11 @@ pub enum DiffState {
     },
     /// The turn changed nothing.
     Empty,
+    /// The files come from `diff_files(key)`.
     Files {
-        files: Vec<DiffFile>,
+        count: u32,
+        additions: u32,
+        deletions: u32,
     },
 }
 
@@ -202,16 +205,19 @@ impl Core {
                         DiffState::Empty
                     } else {
                         DiffState::Files {
-                            files: files.as_ref().clone(),
+                            count: files.len() as u32,
+                            additions: files.iter().map(|f| f.additions).sum(),
+                            deletions: files.iter().map(|f| f.deletions).sum(),
                         }
                     }
                 }
             };
             let (additions, deletions) = match &state {
-                DiffState::Files { files } => (
-                    files.iter().map(|f| f.additions).sum(),
-                    files.iter().map(|f| f.deletions).sum(),
-                ),
+                DiffState::Files {
+                    additions,
+                    deletions,
+                    ..
+                } => (*additions, *deletions),
                 _ => (0, 0),
             };
             DiffView {
@@ -267,5 +273,19 @@ mod tests {
             lines[1].emphasis
         );
         assert_eq!(utf16("é1", 2), 1);
+    }
+}
+
+#[uniffi::export]
+impl Core {
+    /// The diff's files (`DiffState::Files`), asked once per reply rather
+    /// than with every change of the thread.
+    pub fn diff_files(&self, key: String) -> Vec<DiffFile> {
+        self.read(|app| match app.session.replies.get(&key) {
+            Some(Ok(value)) => parsed(&key, value["diff"].as_str().unwrap_or_default())
+                .as_ref()
+                .clone(),
+            _ => Vec::new(),
+        })
     }
 }

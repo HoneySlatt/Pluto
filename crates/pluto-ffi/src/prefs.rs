@@ -47,8 +47,25 @@ impl Prefs {
 
     pub fn set(&mut self, key: &str, value: Value) {
         self.values[key] = value;
-        if let Some(dir) = &self.dir {
-            let _ = std::fs::write(dir.join(FILE), self.values.to_string());
+        // Written off the caller's thread (the interface's), through a
+        // temporary file so a crash never leaves half a file.
+        // The latest settings wait in `LATEST`; each writer takes them, so
+        // two quick changes never land out of order.
+        static LATEST: std::sync::Mutex<Option<(PathBuf, String)>> = std::sync::Mutex::new(None);
+        static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        if let Some(dir) = self.dir.clone() {
+            *LATEST.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some((dir, self.values.to_string()));
+            std::thread::spawn(|| {
+                let _writing = WRITING.lock().unwrap_or_else(|p| p.into_inner());
+                let latest = LATEST.lock().unwrap_or_else(|p| p.into_inner()).take();
+                if let Some((dir, text)) = latest {
+                    let partial = dir.join(format!("{FILE}.partial"));
+                    if std::fs::write(&partial, text).is_ok() {
+                        let _ = std::fs::rename(partial, dir.join(FILE));
+                    }
+                }
+            });
         }
     }
 }

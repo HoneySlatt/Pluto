@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import app.pluto.core.Net
 import app.pluto.core.checkAddress
 import app.pluto.mobile.LocalGate
+import kotlinx.coroutines.launch
 import app.pluto.mobile.LocalModel
 import app.pluto.mobile.LocalNetwork
 import app.pluto.mobile.safeBars
@@ -144,6 +145,7 @@ fun Connect() {
     var help by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val gate = LocalGate.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val busy = shell.net is Net.Connecting
     // The connection's own failure goes under the address.
     val error = localError ?: (shell.net as? Net.Disconnected)?.error?.let { it to true }
@@ -164,10 +166,10 @@ fun Connect() {
             return@submit
         }
         localError = null
-        if (remember) {
-            model.secret.save(address, secret)?.let { core.toast(it) }
-        } else {
-            model.secret.forget()
+        // The Keystore and the file are slow: off the main thread.
+        val keep = remember
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            if (keep) model.secret.save(address, secret)?.let { core.toast(it) } else model.secret.forget()
         }
         token = ""
         gate.connect(address) { core.connect(address, secret, false) }

@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -71,9 +72,9 @@ fun SRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .pressRow(interaction)
             .tap(enabled = enabled, interaction = interaction, onClick = onClick)
-            .alpha(if (enabled) 1f else .45f)
             .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -95,9 +96,9 @@ fun Choice(label: String, checked: Boolean, detail: String? = null, mark: String
         Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .pressRow(interaction)
             .tap(enabled = enabled, role = Role.RadioButton, interaction = interaction, onClick = onPick)
-            .alpha(if (enabled) 1f else .45f)
             .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -359,8 +360,8 @@ fun SetRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .then(if (onClick != null) Modifier.pressRow(interaction, P.overlay).tap(enabled = enabled, interaction = interaction, onClick = onClick) else Modifier.background(P.overlay))
-            .alpha(if (enabled) 1f else .45f)
             .padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -393,9 +394,9 @@ fun SetToggle(icon: String?, label: String, on: Boolean, detail: String? = null,
         Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .pressRow(interaction, P.overlay)
             .tap(enabled = enabled, role = Role.Switch, interaction = interaction) { onChange(!on) }
-            .alpha(if (enabled) 1f else .45f)
             .padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),

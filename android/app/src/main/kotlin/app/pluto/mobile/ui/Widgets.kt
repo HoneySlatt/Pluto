@@ -118,13 +118,14 @@ fun Disc(
     val fill by animateColorAsState(if (on) P.accent else P.overlay, tween(150), label = "disc")
     Box(
         modifier
+            // `opacity` on the whole disc, its fill included.
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .size(size)
             .pressScale(interaction, .94f)
             .clip(CircleShape)
             .background(fill)
             .border(1.dp, if (on) Color.Transparent else P.border, CircleShape)
-            .tap(enabled = enabled, label = label, interaction = interaction, onClick = onClick)
-            .alpha(if (enabled) 1f else .45f),
+            .tap(enabled = enabled, label = label, interaction = interaction, onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -154,7 +155,14 @@ fun Btn(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(50)
+    // `.btn:disabled { opacity }`: the whole button, its fill included.
+    val fade = when {
+        enabled -> 1f
+        tone == Tone.Primary -> .7f
+        else -> .45f
+    }
     val base = modifier
+        .graphicsLayer { alpha = fade }
         .height(height)
         .pressScale(interaction, .98f)
         .clip(shape)
@@ -172,13 +180,6 @@ fun Btn(
     Row(
         filled
             .tap(enabled = enabled, interaction = interaction, onClick = onClick)
-            .alpha(
-                when {
-                    enabled -> 1f
-                    tone == Tone.Primary -> .7f
-                    else -> .45f
-                },
-            )
             .padding(horizontal = 18.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -418,13 +419,23 @@ fun ProjectBadge(badge: Badge, size: BadgeSize = BadgeDefault) {
             BasicText(badge.text, style = style(size.emoji, line = 1f))
         }
         else -> {
+            // Decoded off the main thread; asked again with each change
+            // until the server sent it.
             val favicon = if (badge.favicon) {
-                @Suppress("UNUSED_EXPRESSION") model.revision
-                favicons[badge.projectId] ?: model.core.favicon(badge.projectId)?.let { bytes ->
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also {
-                        favicons.put(badge.projectId, it)
+                val cached = favicons[badge.projectId]
+                val tick = if (cached == null) model.revision else -1
+                val loaded by androidx.compose.runtime.produceState(cached, badge.projectId, tick) {
+                    if (value == null) {
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            model.core.favicon(badge.projectId)?.let { bytes ->
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.also {
+                                    favicons.put(badge.projectId, it)
+                                }
+                            }
+                        }
                     }
                 }
+                loaded
             } else null
             if (favicon != null) {
                 Image(favicon, null, tile.clip(shape), contentScale = ContentScale.Fit)

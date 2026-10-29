@@ -174,9 +174,11 @@ pub enum Item {
         chips: Vec<Chip>,
         images: Vec<ImageRef>,
     },
+    /// An answer or a plan: its markdown comes from `answer_blocks(key)`,
+    /// asked again only when `hash` changes (the answer still streaming).
     Answer {
         key: String,
-        blocks: Vec<Block>,
+        hash: u64,
         changes: Option<Changes>,
     },
     /// A fold or a tool group's toggle; `toggle` flips it.
@@ -490,6 +492,41 @@ fn user_item(key: String, message: &timeline::Message) -> Item {
     }
 }
 
+/// The answers' markdown by row key: its hash, its text, and its blocks
+/// once asked for. A thread's view sends the hash alone; Compose asks for
+/// the blocks of an answer whose hash changed.
+type Answers = std::collections::HashMap<String, (u64, String, Option<Arc<Vec<Block>>>)>;
+
+fn answers() -> std::sync::MutexGuard<'static, Answers> {
+    static ANSWERS: std::sync::OnceLock<std::sync::Mutex<Answers>> = std::sync::OnceLock::new();
+    ANSWERS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+}
+
+/// Leaving the server forgets its answers.
+pub fn reset_answers() {
+    answers().clear();
+}
+
+/// Records an answer's text under its row key; its hash.
+fn remember_answer(key: &str, text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut answers = answers();
+    if answers.get(key).is_none_or(|(known, ..)| *known != hash) {
+        // Many threads later, the cache starts over.
+        if answers.len() > 4000 {
+            answers.clear();
+        }
+        answers.insert(key.to_owned(), (hash, text.to_owned(), None));
+    }
+    hash
+}
+
 fn items(rows: Vec<Row>) -> Vec<Item> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
@@ -512,7 +549,7 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
             Row::Assistant {
                 message, changes, ..
             } => Item::Answer {
-                blocks: markdown::blocks(&message.text),
+                hash: remember_answer(&key, &message.text),
                 changes: changes.map(|(run, files)| Changes {
                     run,
                     additions: files.iter().map(|f| f.additions).sum(),
@@ -529,8 +566,8 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
                 key,
             },
             Row::Plan(plan) => Item::Answer {
+                hash: remember_answer(&key, &plan.plan_markdown),
                 key,
-                blocks: markdown::blocks(&plan.plan_markdown),
                 changes: None,
             },
             Row::TurnFold {
@@ -736,6 +773,7 @@ impl Core {
             crate::memory::reset();
             crate::tasks::reset();
             crate::diff::reset();
+            reset_answers();
         });
     }
 
@@ -1140,16 +1178,37 @@ impl Core {
 
     /// A typed answer replaces the picked options.
     pub fn type_answer(&self, request: String, question: String, text: String) {
-        self.update(|app, _| {
+        // The field keeps its own text: the card is built again only when
+        // the answer starts or stops being empty (Submit depends on it).
+        let changed = {
+            let mut app = self.hub.lock();
             let draft = app
                 .answers
                 .entry(request)
                 .or_default()
                 .entry(question)
                 .or_default();
+            let changed = draft.custom.trim().is_empty() != text.trim().is_empty()
+                || !draft.selected.is_empty();
             draft.custom = text;
             draft.selected.clear();
-        });
+            changed
+        };
+        if changed {
+            self.update(|_, _| {});
+        }
+    }
+
+    /// An answer's markdown blocks (`Item::Answer`).
+    pub fn answer_blocks(&self, key: String) -> Vec<Block> {
+        let mut answers = answers();
+        let Some((_, text, blocks)) = answers.get_mut(&key) else {
+            return Vec::new();
+        };
+        blocks
+            .get_or_insert_with(|| Arc::new(markdown::blocks(text)))
+            .as_ref()
+            .clone()
     }
 
     /// Submits a question card's answers; the key to follow, once ready.

@@ -81,7 +81,12 @@ fun DiffPage(thread: String, run: String?, focus: String?) {
     // The turn range is asked for once the thread's projection has its
     // checkpoints.
     LaunchedEffect(view.key) { core.askDiff(thread, run) }
-    val files = (view.state as? DiffState.Files)?.files.orEmpty()
+    // The files, asked once per reply (the view carries their count).
+    val count = (view.state as? DiffState.Files)?.count ?: 0u
+    val files = remember(view.key, count) {
+        val key = view.key
+        if (count > 0u && key != null) core.diffFiles(key) else emptyList()
+    }
     // Where each file's header sits in the list.
     val headers = headerIndices(files, open)
     LaunchedEffect(files.isNotEmpty()) {
@@ -124,7 +129,7 @@ fun DiffPage(thread: String, run: String?, focus: String?) {
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    for (file in state.files) {
+                    for (file in files) {
                         val shape = RoundedCornerShape(20.dp)
                         Row(
                             Modifier
@@ -153,7 +158,7 @@ fun DiffPage(thread: String, run: String?, focus: String?) {
                     state = list,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
                 ) {
-                    for (file in state.files) {
+                    for (file in files) {
                         val expanded = file.path in open
                         stickyHeader(key = "h:${file.path}") {
                             FileHeader(file, expanded) {

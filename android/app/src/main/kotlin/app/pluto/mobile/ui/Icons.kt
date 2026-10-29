@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,17 +66,21 @@ fun Icon(
     )
 }
 
-private val marks = HashMap<String, ImageBitmap?>()
+private val marks = java.util.concurrent.ConcurrentHashMap<String, ImageBitmap>()
 
 // A provider's mark (`ComposerView.mark`), drawn `size` square.
 @Composable
 fun Mark(name: String, modifier: Modifier = Modifier, size: Dp = 18.dp) {
-    val bitmap = remember(name) {
-        marks.getOrPut(name) {
-            markPng(name, 96u)?.let { png ->
-                BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+    // Rendered (resvg) and decoded off the main thread, once per mark.
+    val rendered by androidx.compose.runtime.produceState(marks[name], name) {
+        if (value == null) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                markPng(name, 96u)?.let { png ->
+                    BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+                }?.also { marks[name] = it }
             }
         }
-    } ?: return
+    }
+    val bitmap = rendered ?: return androidx.compose.foundation.layout.Spacer(modifier.size(size))
     Image(bitmap = bitmap, contentDescription = null, modifier = modifier.size(size))
 }

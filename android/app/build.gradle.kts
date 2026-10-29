@@ -56,6 +56,12 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+// The core's records and enums never change once built: Compose may skip
+// what did not change (compose-stability.conf).
+composeCompiler {
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
+}
+
 val cargoRelease = !gradle.startParameter.taskNames.any { it.contains("Debug") }
 
 val buildCore by tasks.registering(Exec::class) {

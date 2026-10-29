@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,12 @@ import org.json.JSONObject
 
 @Composable
 fun SettingsPage() {
+    // The licenses' notice loads while Settings shows (assets, off the
+    // main thread), so its page opens at once.
+    val noticeContext = LocalContext.current
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Notice.of(noticeContext) }
+    }
     val model = LocalModel.current
     val core = model.core
     val nav = model.nav

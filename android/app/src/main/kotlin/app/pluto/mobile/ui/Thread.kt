@@ -274,10 +274,10 @@ private fun ThreadState(title: String, text: String, action: String, enabled: Bo
 fun TextBtn(text: String, icon: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier
+            .graphicsLayer { alpha = if (enabled) 1f else .45f }
             .height(40.dp)
             .clip(RoundedCornerShape(12.dp))
             .tap(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else .45f)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -293,7 +293,9 @@ private fun TimelineItem(thread: String, item: Item, now: Long) {
     when (item) {
         is Item.User -> UserMessage(item)
         is Item.Answer -> Column {
-            Markdown(item.blocks)
+            // Asked again only when the answer changed (it streams).
+            val blocks = remember(item.key, item.hash) { model.core.answerBlocks(item.key) }
+            Markdown(blocks)
             item.changes?.let { ChangesCard(thread, it) }
         }
         is Item.Fold -> {
@@ -416,6 +418,37 @@ fun clearImages() {
     images.evictAll()
 }
 
+// Decodes an image at most 2048 px on its longer side (the viewer zooms
+// it; the timeline shows it smaller).
+fun decodeImage(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2048) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+}
+
+// An image the core fetches (`fetch` returns its bytes once they came),
+// decoded off the main thread and kept in `images`; asked again with each
+// change until it is there.
+@Composable
+private fun rememberImage(key: String, name: String, fetch: () -> ByteArray?): app.pluto.mobile.Viewed? {
+    val model = LocalModel.current
+    val cached = images[key]
+    val tick = if (cached == null) model.revision else -1
+    val image by androidx.compose.runtime.produceState(cached, key, tick) {
+        if (value == null) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                fetch()?.let { bytes ->
+                    decodeImage(bytes)?.let { app.pluto.mobile.Viewed(it, bytes, name).also { v -> images.put(key, v) } }
+                }
+            }
+        }
+    }
+    return image
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun UserMessage(item: Item.User) {
@@ -479,14 +512,7 @@ private fun UserMessage(item: Item.User) {
 @Composable
 private fun AttachmentImage(image: ImageRef, modifier: Modifier) {
     val model = LocalModel.current
-    val viewed = images[image.id] ?: run {
-        @Suppress("UNUSED_EXPRESSION") model.revision
-        model.core.attachment(image.id)?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
-                app.pluto.mobile.Viewed(it, bytes, image.name).also { v -> images.put(image.id, v) }
-            }
-        }
-    }
+    val viewed = rememberImage(image.id, image.name) { model.core.attachment(image.id) }
     val bitmap = viewed?.bitmap
     val shape = RoundedCornerShape(14.dp)
     Box(
@@ -511,14 +537,7 @@ private fun GeneratedImage(thread: String, path: String) {
     val model = LocalModel.current
     val key = "generated:$path"
     val name = path.substringAfterLast('/')
-    val viewed = images[key] ?: run {
-        @Suppress("UNUSED_EXPRESSION") model.revision
-        model.core.generatedImage(thread, path)?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()?.let {
-                app.pluto.mobile.Viewed(it, bytes, name).also { v -> images.put(key, v) }
-            }
-        }
-    }
+    val viewed = rememberImage(key, name) { model.core.generatedImage(thread, path) }
     val bitmap = viewed?.bitmap
     val shape = RoundedCornerShape(16.dp)
     Box(
@@ -731,16 +750,23 @@ private fun QuestionCardView(thread: String, input: QuestionCard, online: Boolea
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
+                        // The field keeps its text; the core follows it, and
+                        // a picked option (which clears it) comes back here.
+                        var custom by remember(question.id) { mutableStateOf(question.custom) }
+                        LaunchedEffect(question.custom) { if (question.custom != custom) custom = question.custom }
                         BasicTextField(
-                            question.custom,
-                            { core.typeAnswer(input.requestId, question.id, it) },
+                            custom,
+                            {
+                                custom = it
+                                core.typeAnswer(input.requestId, question.id, it)
+                            },
                             Modifier.fillMaxWidth(),
                             enabled = enabled,
                             singleLine = true,
                             textStyle = style(16f),
                             cursorBrush = SolidColor(P.accent),
                             decorationBox = { field ->
-                                if (question.custom.isEmpty()) T("Your answer", 16f, P.muted, lines = 1)
+                                if (custom.isEmpty()) T("Your answer", 16f, P.muted, lines = 1)
                                 field()
                             },
                         )

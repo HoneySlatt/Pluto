@@ -91,10 +91,12 @@ fun Viewer() {
         }
     }
     val close = { model.viewer = null }
-    val save = {
+    val save: () -> Unit = {
         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-        val error = saveToGallery(context, viewed)
-        model.core.toast(error ?: "Saved to Pictures/Pluto")
+        scope.launch {
+            val error = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saveToGallery(context, viewed) }
+            model.core.toast(error ?: "Saved to Pictures/Pluto")
+        }
     }
     // Android 9 asks for storage first; later ones need nothing.
     val askStorage = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
