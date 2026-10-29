@@ -36,6 +36,8 @@ pub(crate) struct Style {
     pub(crate) link: Option<String>,
     /// Inside a `<script>` or `<style>`, whose text the sanitizer drops.
     pub(crate) hidden: bool,
+    /// A footnote mark: smaller, semibold and raised (`sup`).
+    pub(crate) superscript: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -255,6 +257,8 @@ thread_local! {
 struct Footnotes {
     numbers: Vec<String>,
     definitions: Vec<(String, Vec<Block>)>,
+    /// The labels some text refers to: only their definitions show.
+    referenced: Vec<String>,
 }
 
 impl Footnotes {
@@ -274,20 +278,24 @@ impl Footnotes {
 
     fn take(&mut self) -> Vec<(usize, Vec<Block>)> {
         let definitions = std::mem::take(&mut self.definitions);
+        let referenced = std::mem::take(&mut self.referenced);
         definitions
             .into_iter()
+            .filter(|(label, _)| referenced.contains(label))
             .map(|(label, blocks)| (self.number(&label), blocks))
             .collect()
     }
 }
 
-/// A footnote reference: its number, as a link-colored `[n]`.
+/// A footnote reference: its number raised, link-colored (`sup > a`).
 fn footnote_reference(label: &str) -> Inline {
     let number = FOOTNOTES.with_borrow_mut(|f| f.number(label));
+    FOOTNOTES.with_borrow_mut(|f| f.referenced.push(label.to_owned()));
     Inline::Text(
-        format!("[{number}]"),
+        number.to_string(),
         Style {
             link: Some(format!("#user-content-fn-{label}")),
+            superscript: true,
             ..Style::default()
         },
     )
@@ -1027,12 +1035,18 @@ fn build_inlines(
         previous_link = link;
         match inline {
             Inline::Text(text, style) => {
-                let weight = if style.bold {
+                let weight = if style.superscript {
+                    Weight::SemiBold
+                } else if style.bold {
                     Weight::Bold
                 } else {
                     base_weight
                 };
-                let mut format = widgets::format(font(size, weight), color, line_height);
+                let text_size = if style.superscript { 11.0 } else { size };
+                let mut format = widgets::format(font(text_size, weight), color, line_height);
+                if style.superscript {
+                    format.valign = egui::Align::TOP;
+                }
                 format.italics = style.italic;
                 if style.strike {
                     format.strikethrough = Stroke::new(1.0, color);
@@ -3289,9 +3303,12 @@ mod tests {
             "https://example.dev/a".into(),
             Some("https://example.dev/a".into())
         )));
-        assert!(links.iter().any(|(t, _)| t == "[1]"));
+        assert!(links.iter().any(|(t, _)| t == "1"));
         assert!(matches!(blocks[2], Block::Rule));
         assert!(matches!(&blocks[3], Block::List { start: Some(1), items } if items.len() == 1));
+        // A definition nothing refers to is left out.
+        let unreferenced = parse_with("Text.\n\n[^x]: Unused.", false);
+        assert_eq!(unreferenced.len(), 1);
     }
 
     #[test]
