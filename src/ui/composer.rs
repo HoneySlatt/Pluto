@@ -1182,7 +1182,8 @@ impl App {
                 "Environment disconnected"
             })
         } else {
-            self.clone_send_block()
+            self.worktree_send_block()
+                .or_else(|| self.clone_send_block())
         };
         let can_send = (has_content || resume) && status.is_none();
         // `compactBeforeSendTokens`: a stale Claude session offers to compact

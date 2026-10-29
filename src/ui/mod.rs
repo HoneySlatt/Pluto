@@ -112,3 +112,4 @@ pub mod usage_prices;
 pub mod usage_summary;
 pub mod when_builder;
 pub mod widgets;
+pub mod worktree_setup;

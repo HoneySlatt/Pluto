@@ -779,6 +779,7 @@ impl App {
         let mut rows =
             self.timeline_view
                 .rows(&thread, &detail, &self.expansion, revision, &images);
+        rows = self.with_worktree_setup(rows, &thread, &detail);
         // A revealed citation's message: its folded turn opens, and the
         // timeline stops following its end until it is in view.
         let mut reveal = self.citation_scroll_target(&thread.id);
@@ -1316,6 +1317,9 @@ impl App {
             Row::Working { started_at } => {
                 self.working_row(ui, started_at.as_deref(), width);
                 ui.add_space(4.0);
+            }
+            Row::WorktreeSetup { snapshot, embedded } => {
+                self.worktree_setup_row(ui, snapshot, *embedded, width);
             }
             Row::GeneratedImage { image } => {
                 if self.generated_image_row(ui, image, width) {
@@ -2788,6 +2792,24 @@ impl App {
             0.0,
             theme::alpha(theme::border(), 0.6),
         );
+        // While the worktree is made, the row says so, shimmering.
+        if self.preparing_worktree() {
+            crate::ui::live_activity::sweep_label(
+                ui,
+                Rect::from_min_size(
+                    Pos2::new(rect.left() + 4.0, rect.top() + 4.0),
+                    Vec2::new(rect.width() - 8.0, 24.0),
+                ),
+                "Setting up worktree…",
+                font(14.0, Weight::Regular),
+                MESSAGE_LINE,
+                theme::muted_foreground(),
+                theme::foreground(),
+                true,
+            );
+            ui.ctx().request_repaint();
+            return;
+        }
         let elapsed = started_at
             .and_then(timeline::parse_time)
             .map(|start| (self.now - start).num_milliseconds().max(0))

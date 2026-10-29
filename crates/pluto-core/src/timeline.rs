@@ -325,6 +325,12 @@ pub enum Row {
         id: String,
         entries: Vec<WorkEntry>,
     },
+    /// The worktree's setup card (`WorktreeSetupCard`); `embedded` once the
+    /// agent's turn took over.
+    WorktreeSetup {
+        snapshot: Box<crate::worktree_setup::WorktreeSetup>,
+        embedded: bool,
+    },
     /// A local Codex image omitted by the server's native item projection.
     GeneratedImage {
         image: crate::generated_images::GeneratedImage,

@@ -52,6 +52,11 @@ pub struct App {
     pub(crate) composer_rect: Option<Rect>,
     /// `subscribeProjectClones`: whether it is open, and the snapshots.
     pub(crate) clones_streaming: bool,
+    /// `subscribeWorktreeSetup`: the held snapshot by thread, and the
+    /// threads subscribed.
+    pub(crate) worktree_setups:
+        std::collections::HashMap<String, crate::worktree_setup::WorktreeSetup>,
+    pub(crate) worktree_streams: std::collections::HashSet<String>,
     /// Threads whose Compact chip is turned off (`fullHistoryThreadKeys`).
     pub(crate) keep_full_history: std::collections::HashSet<String>,
     pub(crate) clones: Vec<Value>,
@@ -552,6 +557,8 @@ impl App {
             closed_views: Vec::new(),
             permission_notice_shown: Default::default(),
             clones_streaming: false,
+            worktree_setups: Default::default(),
+            worktree_streams: Default::default(),
             keep_full_history: Default::default(),
             question_advance: None,
             clones: Vec::new(),
@@ -1830,6 +1837,7 @@ impl eframe::App for App {
         self.sync_theme(ui.ctx());
         self.save_drafts_when_idle(ui.ctx());
         self.watch_project_clones();
+        self.watch_worktree_setup();
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
@@ -2298,6 +2306,7 @@ impl App {
             || self.secret_result(&key, &result)
             || self.auth_session_result(&key, &result)
             || self.clone_result(&key, &result)
+            || self.worktree_setup_result(&key, &result)
         {
             return;
         }

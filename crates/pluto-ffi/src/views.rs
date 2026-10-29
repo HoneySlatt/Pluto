@@ -422,6 +422,7 @@ fn row_key(row: &Row) -> String {
         Row::McpApp(entry) => format!("mcp:{}", entry.id),
         Row::Event { id, .. } => format!("event:{id}"),
         Row::GeneratedImage { image } => format!("image:{}", image.path.display()),
+        Row::WorktreeSetup { .. } => "worktree-setup".into(),
     }
 }
 
@@ -632,6 +633,8 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
             },
             Row::Thinking { .. } => Item::Thinking { key },
             Row::Compaction { label, .. } => Item::Note { key, text: label },
+            // The desktop's setup card; the core never lists it.
+            Row::WorktreeSetup { .. } => continue,
             Row::GeneratedImage { image } => Item::Image {
                 key,
                 path: image.path.display().to_string(),

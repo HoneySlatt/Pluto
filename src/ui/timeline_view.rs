@@ -126,6 +126,7 @@ pub(crate) fn row_key(row: &Row) -> Id {
         Row::WorkDetails { group_id, .. } => Id::new(("details", group_id)),
         Row::Working { .. } => Id::new("working"),
         Row::GeneratedImage { image } => Id::new(("generated", &image.path)),
+        Row::WorktreeSetup { .. } => Id::new("worktree-setup"),
         Row::Plan(plan) => Id::new(("plan", &plan.id)),
         Row::HtmlRender(page) => Id::new(("html-render", &page.id)),
         Row::McpApp(app) => Id::new(("mcp-app", &app.id)),
@@ -187,6 +188,9 @@ fn estimate(row: &Row, width: f32) -> f32 {
             card + 8.0
         }
         Row::GeneratedImage { .. } => width.min(384.0) * 0.75 + 16.0,
+        Row::WorktreeSetup { snapshot, embedded } => {
+            crate::ui::worktree_setup::card_height(snapshot, *embedded, false)
+        }
         // The frame (`px-1`) at its measured height, then `pb-2`.
         Row::HtmlRender(page) => page.render.frame_height(width - 8.0, None) + 8.0,
         Row::McpApp(_) => crate::mcp_app::DEFAULT_HEIGHT + 8.0,
