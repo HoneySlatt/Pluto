@@ -37,24 +37,31 @@ Still open:
 
 ## 2. The chat, the composer and the sidebar
 
+Done: the composer banner stack (offline, server update against the pinned
+0.1.0, branch changed, child thread waiting, goal, background work, project
+clone, usage limit, provider status); prompt stash, length limit, large
+pastes, the typing guard, `@` thread mentions, background send; the send
+button's disabled states and the Compact chip; questions' 200 ms advance and
+Stop; the timeline minimap, Scroll to end, secret requests, the status line,
+subagent threads, intent and failed pills, attribution, timestamps; the T3
+tool table, icons, group summaries (`tool_presentation.rs`), thread-read
+labels, created-thread cards, subagent notification cards; markdown
+autolinks with e-mail, footnotes with back-references, alerts, thread links,
+heading anchors, code block wrap, run and titles, table cell expansion; the
+default sidebar's drag and drop (sections, sweep, auto-scroll, onto the
+composer), multi-select, undo, draft rows, hover cards, indicators,
+settle-and-advance, durations, colors, Woke; root coordinators and toasts.
+
+Still open:
+
 - Edit from here with checkpoint rollback ("Revert files too").
-- The composer banner stack: offline, server update, branch changed, child
-  thread waiting, goal, background work Stop, project clone, usage limit,
-  provider status.
 - The rich prompt editor (formatting, code blocks, list continuation, chip
-  undo), prompt stash, prompt length limit and large-paste folding, `@`
-  thread mentions, prompt links, sending to several models, background send.
-- Timeline: minimap, Scroll to end, worktree setup card, secret requests,
-  the status line (Wake now, Un-settle), subagent threads, From queue / Steer
-  pills, attribution, failed pills, the rest of the tool presentation names,
-  markdown (autolinks, footnotes, GitHub alerts, Mermaid, thread and PR
-  links, heading anchors, code block wrap and run), video.
-- Default sidebar: drag and drop, multi-select, undo, draft rows, hover
-  cards, indicators, settle-and-advance, durations and v0.1.0 status colors,
-  Woke from the server.
-- Root coordinators: keybindings reload, migration, slow request,
-  permission notice, version mismatch, quit hold; toasts with copy, details,
-  several actions, tied to their thread.
+  undo), prompt links (`pluto://`), sending to several models.
+- Timeline: worktree setup card, the subagent hover card, image tool icons
+  (favicon, themed logo, native app), Mermaid, PR links (with milestone 3),
+  video through ffmpeg.
+- Sidebar list motion; browser tabs in reopen-closed; project clone toasts
+  away from the draft.
 
 ## 3. Pull requests
 
