@@ -7,7 +7,14 @@
 //! `terminal.write` and resized with `terminal.resize`.
 //!
 //! Selection offers "Add to chat" (a terminal excerpt for the composer),
-//! Copy and Paste. Not ported: font settings and cursor blinking.
+//! Copy, Paste, Select all and Jump to latest. Programs that ask for the
+//! mouse get xterm reports (Shift keeps it for selecting); OSC 8
+//! hyperlinks, URLs and paths (`terminal-links.ts`, across soft-wrapped
+//! lines) open on click, paths in the preferred editor. The cursor blinks
+//! while focused. Closing asks first (`terminalCloseConfirm.ts`).
+//!
+//! Not ported: the Kitty keyboard protocol, links opening in the preview
+//! browser, server session labels and the read-only mode.
 use std::collections::HashMap;
 
 use eframe::egui::{
@@ -79,42 +86,199 @@ pub struct TerminalView {
     /// The selection's anchor and head as (buffer line, column), lines
     /// counted from the oldest scrollback line.
     selection: Option<((usize, usize), (usize, usize))>,
+    /// Replies the emulator owes the program, written once attached.
+    replies: String,
+    /// The mouse button a reporting program saw pressed, and the cell it
+    /// was last told about.
+    mouse_button: Option<u8>,
+    mouse_cell: Option<(usize, usize)>,
+    /// When the blink cycle last restarted on its visible phase.
+    blink_since: std::time::Instant,
 }
 
-/// `extractTerminalLinks`' URL matches: the URL covering `col` in a line,
-/// as (start, end, text) columns, trailing punctuation and unbalanced
-/// closers trimmed.
-fn url_at(line: &[char], col: usize) -> Option<(usize, usize, String)> {
-    let text: String = line.iter().collect();
-    let lower = text.to_ascii_lowercase();
-    let mut search = 0;
-    while let Some(found) = lower[search..].find("http") {
-        let start_byte = search + found;
-        search = start_byte + 4;
-        let rest = &lower[start_byte..];
-        if !(rest.starts_with("http://") || rest.starts_with("https://")) {
-            continue;
-        }
-        let start = text[..start_byte].chars().count();
-        let mut end = start;
-        while end < line.len() && !line[end].is_whitespace() && !"\"'`<>".contains(line[end]) {
-            end += 1;
-        }
-        let mut url: String = line[start..end].iter().collect();
-        while url.ends_with(['.', ',', ';', '!', '?']) {
-            url.pop();
-        }
-        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
-            while url.ends_with(close) && url.matches(open).count() < url.matches(close).count() {
-                url.pop();
-            }
-        }
-        let end = start + url.chars().count();
-        if col >= start && col < end {
-            return Some((start, end, url));
+/// The link under the pointer: its (line, start, end) row spans, whether
+/// it is a URL, and its text.
+type HoveredLink = (Vec<(usize, usize, usize)>, bool, String);
+
+/// A link in a terminal line (`TerminalLinkMatch`): a URL or a path.
+#[derive(Debug, PartialEq, Eq)]
+struct LinkMatch {
+    url: bool,
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+/// `trimClosingDelimiters`: trailing punctuation (a path's colon too) and
+/// unbalanced closers.
+fn trim_link(mut text: String, url: bool) -> String {
+    let punctuation: &[char] = if url {
+        &['.', ',', ';', '!', '?']
+    } else {
+        &['.', ',', ';', ':', '!', '?']
+    };
+    while text.ends_with(punctuation) {
+        text.pop();
+    }
+    for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+        while text.ends_with(close) && text.matches(open).count() < text.matches(close).count() {
+            text.pop();
         }
     }
-    None
+    text
+}
+
+fn link_char(c: char) -> bool {
+    !c.is_whitespace() && !"\"'`<>".contains(c)
+}
+
+fn path_word(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "._-".contains(c)
+}
+
+/// `FILE_PATH_PATTERN` at `at`: a rooted path (`~/`, `./`, `../`, `/`,
+/// `C:\`, `\\`) to the end of the word, else `a/b[/c][:line[:col]]`.
+fn path_match(line: &[char], at: usize) -> Option<usize> {
+    let rest = &line[at..];
+    let starts = |prefix: &str| {
+        rest.len() >= prefix.chars().count()
+            && rest.iter().zip(prefix.chars()).all(|(a, b)| *a == b)
+    };
+    let drive = rest.len() >= 3
+        && rest[0].is_ascii_alphabetic()
+        && rest[1] == ':'
+        && matches!(rest[2], '\\' | '/');
+    let prefix = if drive {
+        Some(3)
+    } else {
+        ["~/", "./", "../", "/", "\\\\"]
+            .iter()
+            .find(|p| starts(p))
+            .map(|p| p.chars().count())
+    };
+    if let Some(prefix) = prefix {
+        // At least one path character after the prefix.
+        let len = prefix + rest[prefix..].iter().take_while(|c| link_char(**c)).count();
+        return (len > prefix).then_some(at + len);
+    }
+    let mut end = at;
+    let word = |from: usize| line[from..].iter().take_while(|c| path_word(**c)).count();
+    let first = word(end);
+    if first == 0 {
+        return None;
+    }
+    end += first;
+    let mut segments = 0;
+    while end < line.len() && line[end] == '/' {
+        let next = word(end + 1);
+        if next == 0 {
+            break;
+        }
+        end += 1 + next;
+        segments += 1;
+    }
+    if segments == 0 {
+        return None;
+    }
+    for _ in 0..2 {
+        if end < line.len() && line[end] == ':' {
+            let digits = line[end + 1..]
+                .iter()
+                .take_while(|c| c.is_ascii_digit())
+                .count();
+            if digits == 0 {
+                break;
+            }
+            end += 1 + digits;
+        }
+    }
+    Some(end)
+}
+
+/// `extractTerminalLinks`: URLs, then paths that overlap none of them.
+fn extract_links(line: &[char]) -> Vec<LinkMatch> {
+    let text: String = line.iter().collect();
+    let lower: Vec<char> = text.to_ascii_lowercase().chars().collect();
+    let mut links = Vec::new();
+    let mut i = 0;
+    while i < line.len() {
+        let rest: String = lower[i..lower.len().min(i + 8)].iter().collect();
+        if rest.starts_with("http://") || rest.starts_with("https://") {
+            let end = i + line[i..].iter().take_while(|c| link_char(**c)).count();
+            let url = trim_link(line[i..end].iter().collect(), true);
+            if !url.is_empty() {
+                links.push(LinkMatch {
+                    url: true,
+                    start: i,
+                    end: i + url.chars().count(),
+                    text: url,
+                });
+            }
+            i = end.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i < line.len() {
+        let Some(end) = path_match(line, i) else {
+            i += 1;
+            continue;
+        };
+        let path = trim_link(line[i..end].iter().collect(), false);
+        let candidate_end = i + path.chars().count();
+        let lowered = path.to_ascii_lowercase();
+        let overlaps = links
+            .iter()
+            .any(|l: &LinkMatch| i < l.end && l.start < candidate_end);
+        if !path.is_empty()
+            && !lowered.starts_with("http://")
+            && !lowered.starts_with("https://")
+            && !overlaps
+        {
+            paths.push(LinkMatch {
+                url: false,
+                start: i,
+                end: candidate_end,
+                text: path,
+            });
+        }
+        i = end.max(i + 1);
+    }
+    links.extend(paths);
+    links.sort_by_key(|l| l.start);
+    links
+}
+
+/// `resolvePathLinkTarget`: `~/` from the home in `cwd`, relative paths
+/// under `cwd`; a `:line:col` suffix rides along.
+fn resolve_path_link(path: &str, cwd: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        let home = ["/Users/", "/home/"].iter().find_map(|root| {
+            let user = cwd
+                .strip_prefix(root)?
+                .split('/')
+                .next()
+                .filter(|u| !u.is_empty())?;
+            Some(format!("{root}{user}"))
+        });
+        return match home {
+            Some(home) => format!("{home}/{rest}"),
+            None => path.to_owned(),
+        };
+    }
+    let absolute =
+        path.starts_with('/') || path.starts_with("\\\\") || path.chars().nth(1) == Some(':');
+    if absolute {
+        path.to_owned()
+    } else {
+        format!(
+            "{}/{}",
+            cwd.trim_end_matches('/'),
+            path.trim_start_matches("./")
+        )
+    }
 }
 
 impl TerminalView {
@@ -127,22 +291,17 @@ impl TerminalView {
             return None;
         }
         let screen = &self.terminal.screen;
-        let lines: Vec<&Vec<terminal::Cell>> =
-            screen.scrollback.iter().chain(screen.grid.iter()).collect();
         let mut out = Vec::new();
-        for (line, cells) in lines
-            .iter()
-            .enumerate()
-            .skip(start.0)
-            .take(end.0 + 1 - start.0)
-        {
+        for line in start.0..=end.0.min(screen.len().saturating_sub(1)) {
+            let cells = screen.line(line);
             let from = if line == start.0 { start.1 } else { 0 };
             let to = if line == end.0 { end.1 } else { cells.len() };
             let text: String = cells
                 .iter()
                 .skip(from)
                 .take(to.saturating_sub(from))
-                .map(|c| c.c)
+                .filter(|c| c.flags & terminal::SPACER == 0)
+                .map(terminal::Cell::text)
                 .collect();
             out.push(text.trim_end().to_owned());
         }
@@ -216,6 +375,8 @@ impl App {
                 ..crate::ui::context_menu::Item::new("copy", "Copy")
             },
             crate::ui::context_menu::Item::new("paste", "Paste"),
+            crate::ui::context_menu::Item::new("select-all", "Select all"),
+            crate::ui::context_menu::Item::new("scroll-to-bottom", "Jump to latest"),
         ]);
         let mut open = Some(state);
         let clicked = crate::ui::context_menu::show(ui, &mut open, &items);
@@ -252,6 +413,20 @@ impl App {
                 self.terminals.focused = Some(key.to_owned());
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            }
+            Some("select-all") => {
+                if let Some(view) = self.terminals.views.get_mut(key) {
+                    let screen = &view.terminal.screen;
+                    let last = screen.len().saturating_sub(1);
+                    view.selection = Some(((0, 0), (last, screen.cols)));
+                }
+                self.terminals.focused = Some(key.to_owned());
+            }
+            Some("scroll-to-bottom") => {
+                if let Some(view) = self.terminals.views.get_mut(key) {
+                    view.offset = 0;
+                }
+                self.terminals.focused = Some(key.to_owned());
             }
             _ => {}
         }
@@ -290,6 +465,8 @@ impl Terminals {
                     view.terminal.reset();
                     view.terminal
                         .feed(event["snapshot"]["history"].as_str().unwrap_or_default());
+                    // Questions in the history were answered long ago.
+                    view.terminal.take_replies();
                     view.status = event["snapshot"]["status"]
                         .as_str()
                         .unwrap_or("running")
@@ -299,6 +476,9 @@ impl Terminals {
                     view.terminal
                         .feed(event["data"].as_str().unwrap_or_default());
                     view.offset = 0;
+                    view.blink_since = std::time::Instant::now();
+                    let replies = view.terminal.take_replies();
+                    view.replies.push_str(&replies);
                 }
                 Some("cleared") => view.terminal.reset(),
                 Some("exited") => view.status = "exited".into(),
@@ -308,6 +488,53 @@ impl Terminals {
             },
         }
         true
+    }
+}
+
+/// The screen cell (row, column) under `pos`.
+fn grid_point(
+    pos: Pos2,
+    origin: Pos2,
+    cell_width: f32,
+    rows: usize,
+    cols: usize,
+) -> (usize, usize) {
+    let row = ((pos.y - origin.y) / theme::terminal_cell_height())
+        .floor()
+        .max(0.0) as usize;
+    let col = ((pos.x - origin.x) / cell_width).floor().max(0.0) as usize;
+    (
+        row.min(rows.saturating_sub(1)),
+        col.min(cols.saturating_sub(1)),
+    )
+}
+
+/// An xterm mouse report: SGR (1006) when asked, else the legacy bytes
+/// (UTF-8 coordinates under 1005); `code` is the button with its motion
+/// and wheel bits.
+fn mouse_report(
+    mode: terminal::MouseMode,
+    code: u8,
+    pressed: bool,
+    row: usize,
+    col: usize,
+) -> String {
+    let (x, y) = (col + 1, row + 1);
+    if mode.sgr {
+        return format!("\x1b[<{code};{x};{y}{}", if pressed { 'M' } else { 'm' });
+    }
+    let code = if pressed { code } else { 3 };
+    let encode = |v: usize| -> Option<char> {
+        let v = 32 + v;
+        if mode.utf8 {
+            char::from_u32(v as u32)
+        } else {
+            (v <= 255).then_some(v as u8 as char)
+        }
+    };
+    match (encode(code as usize), encode(x), encode(y)) {
+        (Some(b), Some(x), Some(y)) => format!("\x1b[M{b}{x}{y}"),
+        _ => String::new(),
     }
 }
 
@@ -520,7 +747,7 @@ impl App {
             Some(0) => self.split_terminal(false),
             Some(1) => self.split_terminal(true),
             Some(2) => self.open_terminal_tab(),
-            Some(3) => self.close_terminal(&thread, &ids[active]),
+            Some(3) => self.confirm_close_terminals(&thread, vec![ids[active].clone()], false),
             _ => {}
         }
     }
@@ -578,6 +805,10 @@ impl App {
                     error: None,
                     offset: 0,
                     selection: None,
+                    replies: String::new(),
+                    mouse_button: None,
+                    mouse_cell: None,
+                    blink_since: std::time::Instant::now(),
                 },
             );
             self.terminals.focused = Some(key.clone());
@@ -595,6 +826,16 @@ impl App {
             .is_some_and(|view| view.status != "starting");
         if attached && let Some(data) = self.terminals.pending.remove(&key) {
             self.terminal_write(&thread, id, &data);
+        }
+        let replies = self
+            .terminals
+            .views
+            .get_mut(&key)
+            .filter(|view| view.status != "starting")
+            .map(|view| std::mem::take(&mut view.replies))
+            .unwrap_or_default();
+        if !replies.is_empty() {
+            self.terminal_write(&thread, id, &replies);
         }
         // Follow the panel's size.
         let resized = self
@@ -622,12 +863,67 @@ impl App {
         if response.clicked() {
             self.terminals.focused = Some(key.clone());
         }
+        // A program that asked for the mouse gets it; Shift keeps it for
+        // selecting.
+        let shift = ui.input(|i| i.modifiers.shift);
+        let origin = body.min + Vec2::splat(PADDING);
+        let mouse = self
+            .terminals
+            .views
+            .get(&key)
+            .and_then(|v| v.terminal.screen.mouse())
+            .filter(|_| !shift);
+        if let Some(mode) = mouse {
+            let mut reports = String::new();
+            let events = ui.input(|i| i.events.clone());
+            if let Some(view) = self.terminals.views.get_mut(&key) {
+                let screen = &view.terminal.screen;
+                let (rows, cols) = (screen.rows, screen.cols);
+                for event in events {
+                    match event {
+                        Event::PointerButton {
+                            pos,
+                            button,
+                            pressed,
+                            ..
+                        } if (pressed && body.contains(pos))
+                            || (!pressed && view.mouse_button.is_some()) =>
+                        {
+                            let code = match button {
+                                egui::PointerButton::Primary => 0,
+                                egui::PointerButton::Middle => 1,
+                                egui::PointerButton::Secondary => 2,
+                                _ => continue,
+                            };
+                            let (row, col) = grid_point(pos, origin, cell_width, rows, cols);
+                            reports.push_str(&mouse_report(mode, code, pressed, row, col));
+                            view.mouse_button = pressed.then_some(code);
+                            view.mouse_cell = Some((row, col));
+                        }
+                        Event::PointerMoved(pos)
+                            if body.contains(pos)
+                                && (mode.motion || mode.drag && view.mouse_button.is_some()) =>
+                        {
+                            let cell = grid_point(pos, origin, cell_width, rows, cols);
+                            if view.mouse_cell != Some(cell) {
+                                view.mouse_cell = Some(cell);
+                                let code = view.mouse_button.unwrap_or(3) + 32;
+                                reports.push_str(&mouse_report(mode, code, true, cell.0, cell.1));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !reports.is_empty() {
+                self.terminal_write(&thread, id, &reports);
+            }
+        }
         // Mouse selection on the cell grid; a release opens the selection
         // actions, a right click the terminal menu (Copy, Paste).
-        let origin = body.min + Vec2::splat(PADDING);
         let cell_at = |view: &TerminalView, pos: Pos2| -> (usize, usize) {
             let screen = &view.terminal.screen;
-            let first = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
+            let first = screen.history_len() - view.offset.min(screen.history_len());
             let row = (((pos.y - origin.y) / theme::terminal_cell_height())
                 .floor()
                 .max(0.0) as usize)
@@ -638,6 +934,7 @@ impl App {
         };
         if let Some(view) = self.terminals.views.get_mut(&key)
             && let Some(pos) = response.interact_pointer_pos()
+            && mouse.is_none()
         {
             if response.drag_started_by(egui::PointerButton::Primary) {
                 let cell = cell_at(view, pos);
@@ -659,27 +956,67 @@ impl App {
         {
             self.terminals.menu = Some((key.clone(), crate::ui::context_menu::State::new(pos)));
         }
-        // Links: a URL under the pointer underlines and opens on click.
-        let mut hovered_link = None;
+        // Links: an OSC 8 hyperlink, a URL or a path under the pointer
+        // underlines (across wrapped lines) and opens on click: URLs in the
+        // browser, paths in the preferred editor.
+        let mut hovered_link: Option<HoveredLink> = None;
         if let Some(pos) = response.hover_pos()
             && let Some(view) = self.terminals.views.get(&key)
         {
-            let (line, _) = cell_at(view, pos);
             let screen = &view.terminal.screen;
-            let cells: Option<&Vec<terminal::Cell>> =
-                screen.scrollback.iter().chain(screen.grid.iter()).nth(line);
-            if let Some(cells) = cells {
-                let chars: Vec<char> = cells.iter().map(|c| c.c).collect();
-                let col = (((pos.x - origin.x) / cell_width).floor().max(0.0)) as usize;
-                if let Some((start, end, url)) = url_at(&chars, col) {
-                    hovered_link = Some((line, start, end, url));
+            let (line, _) = cell_at(view, pos);
+            let cells = screen.line(line);
+            let col = (((pos.x - origin.x) / cell_width).floor().max(0.0)) as usize;
+            if let Some(uri) = cells.get(col).and_then(|c| c.link.clone()) {
+                let same = |c: &terminal::Cell| c.link.as_deref() == Some(&*uri);
+                let start = (0..=col).rev().take_while(|&i| same(&cells[i])).last();
+                let end = (col..cells.len()).take_while(|&i| same(&cells[i])).last();
+                if let (Some(start), Some(end)) = (start, end) {
+                    hovered_link = Some((vec![(line, start, end + 1)], true, uri.to_string()));
+                }
+            } else {
+                // `collectWrappedTerminalLinkLine`: the rows one soft-wrapped line spans.
+                let mut first = line;
+                while first > 0 && screen.wrapped(first - 1) {
+                    first -= 1;
+                }
+                let mut last = line;
+                while screen.wrapped(last) && last + 1 < screen.len() {
+                    last += 1;
+                }
+                let cols = screen.cols;
+                let chars: Vec<char> = (first..=last)
+                    .flat_map(|l| screen.line(l).into_iter().map(|c| c.c))
+                    .collect();
+                let at = (line - first) * cols + col;
+                if let Some(link) = extract_links(&chars)
+                    .into_iter()
+                    .find(|l| at >= l.start && at < l.end)
+                {
+                    let segments = (first..=last)
+                        .filter_map(|l| {
+                            let row_start = (l - first) * cols;
+                            let start = link.start.max(row_start);
+                            let end = link.end.min(row_start + cols);
+                            (start < end).then(|| (l, start - row_start, end - row_start))
+                        })
+                        .collect();
+                    hovered_link = Some((segments, link.url, link.text));
                 }
             }
         }
-        if let Some((_, _, _, url)) = &hovered_link {
+        if let Some((_, url, text)) = &hovered_link {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if response.clicked() {
-                crate::ui::widgets::open_external(url);
+                if *url {
+                    crate::ui::widgets::open_external(text);
+                } else {
+                    let target = resolve_path_link(text, &cwd);
+                    match self.preferred_editor() {
+                        Some(editor) => self.open_in_editor(&target, editor),
+                        None => self.notify(crate::ui::toasts::Kind::Error, "Unable to open path"),
+                    }
+                }
             }
         }
         if response.clicked()
@@ -688,6 +1025,7 @@ impl App {
             view.selection = None;
         }
         if response.secondary_clicked()
+            && mouse.is_none()
             && let Some(pos) = response.interact_pointer_pos()
         {
             self.terminals.menu = Some((key.clone(), crate::ui::context_menu::State::new(pos)));
@@ -702,8 +1040,8 @@ impl App {
                 .get(&key)
                 .map(|v| {
                     (
-                        v.terminal.screen.app_cursor,
-                        v.terminal.screen.bracketed_paste,
+                        v.terminal.screen.app_cursor(),
+                        v.terminal.screen.bracketed_paste(),
                     )
                 })
                 .unwrap_or((false, false));
@@ -748,18 +1086,42 @@ impl App {
                 });
             });
             if !out.is_empty() {
+                if let Some(view) = self.terminals.views.get_mut(&key) {
+                    view.blink_since = std::time::Instant::now();
+                }
                 self.terminal_write(&thread, id, &out);
             }
         }
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0
+            let lines = (scroll / theme::terminal_cell_height()).round() as i64;
+            let mut wheel = String::new();
+            if lines != 0
                 && let Some(view) = self.terminals.views.get_mut(&key)
-                && !view.terminal.screen.alternate()
             {
-                let lines = (scroll / theme::terminal_cell_height()).round() as i64;
-                let max = view.terminal.screen.scrollback.len() as i64;
-                view.offset = (view.offset as i64 + lines).clamp(0, max) as usize;
+                let screen = &view.terminal.screen;
+                let pointer = ui.input(|i| i.pointer.latest_pos()).unwrap_or(origin);
+                let (row, col) = grid_point(pointer, origin, cell_width, screen.rows, screen.cols);
+                if let Some(mode) = screen.mouse().filter(|_| !shift) {
+                    let button = if lines > 0 { 64 } else { 65 };
+                    for _ in 0..lines.unsigned_abs().min(5) {
+                        wheel.push_str(&mouse_report(mode, button, true, row, col));
+                    }
+                } else if screen.alternate_scroll() {
+                    let arrow = match (lines > 0, screen.app_cursor()) {
+                        (true, true) => "\x1bOA",
+                        (true, false) => "\x1b[A",
+                        (false, true) => "\x1bOB",
+                        (false, false) => "\x1b[B",
+                    };
+                    wheel = arrow.repeat(lines.unsigned_abs().min(5) as usize);
+                } else if !screen.alternate() {
+                    let max = screen.history_len() as i64;
+                    view.offset = (view.offset as i64 + lines).clamp(0, max) as usize;
+                }
+            }
+            if !wheel.is_empty() {
+                self.terminal_write(&thread, id, &wheel);
             }
         }
 
@@ -772,40 +1134,52 @@ impl App {
         let background = theme::background();
         let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
         let lines = screen.view(view.offset);
-        let first_line = screen.scrollback.len() - view.offset.min(screen.scrollback.len());
+        let first_line = screen.history_len() - view.offset.min(screen.history_len());
         paint_terminal_lines(ui, &painter, origin, &lines, cell_width, |row, col| {
             view.selected(first_line + row, col)
         });
-        if let Some((line, start, end, _)) = &hovered_link
-            && *line >= first_line
-            && *line < first_line + screen.rows
-        {
-            let y = origin.y
-                + (line - first_line) as f32 * theme::terminal_cell_height()
-                + theme::terminal_cell_height()
-                - 3.0;
-            painter.hline(
-                origin.x + *start as f32 * cell_width..=origin.x + *end as f32 * cell_width,
-                y,
-                Stroke::new(1.0, foreground),
-            );
+        if let Some((segments, ..)) = &hovered_link {
+            for (line, start, end) in segments {
+                if *line < first_line || *line >= first_line + screen.rows {
+                    continue;
+                }
+                let y = origin.y
+                    + (line - first_line) as f32 * theme::terminal_cell_height()
+                    + theme::terminal_cell_height()
+                    - 3.0;
+                painter.hline(
+                    origin.x + *start as f32 * cell_width..=origin.x + *end as f32 * cell_width,
+                    y,
+                    Stroke::new(1.0, foreground),
+                );
+            }
         }
         // The cursor: a block while focused, an outline otherwise.
-        if screen.cursor_visible && view.offset == 0 {
+        // `shouldBlinkTerminalCursor`: 500ms phases while focused.
+        let blink_off = focused
+            && screen.cursor_blinking()
+            && (view.blink_since.elapsed().as_millis() / 500) % 2 == 1;
+        if screen.cursor_visible() && view.offset == 0 && !blink_off {
+            let (row, col) = screen.cursor();
+            let under = lines.get(row).and_then(|l| l.get(col));
+            let wide = under.is_some_and(|c| c.flags & terminal::WIDE != 0);
             let cursor = Rect::from_min_size(
                 Pos2::new(
-                    origin.x + screen.col as f32 * cell_width,
-                    origin.y + screen.row as f32 * theme::terminal_cell_height(),
+                    origin.x + col as f32 * cell_width,
+                    origin.y + row as f32 * theme::terminal_cell_height(),
                 ),
-                Vec2::new(cell_width, theme::terminal_cell_height()),
+                Vec2::new(
+                    cell_width * if wide { 2.0 } else { 1.0 },
+                    theme::terminal_cell_height(),
+                ),
             );
             if focused {
                 painter.rect_filled(cursor, 0.0, CURSOR);
-                let c = screen.grid[screen.row][screen.col].c;
-                if c != ' ' {
+                let c = under.map(terminal::Cell::text).unwrap_or_default();
+                if !c.trim().is_empty() {
                     let galley = widgets::galley(
                         ui,
-                        &c.to_string(),
+                        &c,
                         mono.clone(),
                         background,
                         theme::terminal_cell_height(),
@@ -854,7 +1228,7 @@ pub(crate) fn paint_terminal_lines(
     ui: &Ui,
     painter: &egui::Painter,
     origin: Pos2,
-    lines: &[&Vec<terminal::Cell>],
+    lines: &[Vec<terminal::Cell>],
     cell_width: f32,
     selected: impl Fn(usize, usize) -> bool,
 ) {
@@ -888,7 +1262,7 @@ pub(crate) fn paint_terminal_lines(
         }
         let mut col = 0;
         while col < line.len() {
-            let cell = line[col];
+            let cell = &line[col];
             let mut end = col + 1;
             while end < line.len()
                 && line[end].fg == cell.fg
@@ -918,8 +1292,8 @@ pub(crate) fn paint_terminal_lines(
                     bg,
                 );
             }
-            let text: String = line[col..end].iter().map(|c| c.c).collect();
-            if !text.trim().is_empty() {
+            let run = &line[col..end];
+            if run.iter().any(|c| c.c != ' ') {
                 let run_font = if cell.flags & terminal::BOLD != 0 {
                     theme::terminal_font(true)
                 } else {
@@ -927,11 +1301,11 @@ pub(crate) fn paint_terminal_lines(
                 };
                 // Glyphs are placed on the cell grid one by one, so a
                 // fallback glyph cannot push the rest of the row.
-                for (i, c) in text.chars().enumerate() {
-                    if c != ' ' {
+                for (i, c) in run.iter().enumerate() {
+                    if c.c != ' ' && c.flags & terminal::SPACER == 0 {
                         let galley = widgets::galley(
                             ui,
-                            &c.to_string(),
+                            &c.text(),
                             run_font.clone(),
                             fg,
                             theme::terminal_cell_height(),
@@ -1023,7 +1397,61 @@ pub(crate) fn terminal_toolbar(ui: &mut Ui, body: Rect, sessions: usize) -> Opti
     }
 }
 
+/// The confirm dialog's local command for closing terminals.
+pub(crate) const CLOSE_TERMINALS_COMMAND: &str = "pluto.terminals.close";
+
 impl App {
+    /// `confirmTerminalClose`: asks before stopping the sessions `ids`
+    /// (in the bottom drawer when `drawer`).
+    pub(crate) fn confirm_close_terminals(&mut self, thread: &str, ids: Vec<String>, drawer: bool) {
+        let labels: Vec<String> = ids.iter().map(|id| terminal_label(id)).collect();
+        let (title, message) = match labels.as_slice() {
+            [one] => (
+                format!("Close terminal \"{one}\"?"),
+                "This stops the running process and clears its history.".to_owned(),
+            ),
+            _ => (
+                format!("Close {} terminals?", labels.len()),
+                format!(
+                    "This stops their running processes and clears their histories: {}.",
+                    labels
+                        .iter()
+                        .map(|l| format!("\"{l}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ),
+        };
+        self.confirm = Some(crate::ui::thread_menu::Confirm {
+            title,
+            message,
+            confirm_label: "Close",
+            command: json!({"type": CLOSE_TERMINALS_COMMAND, "threadId": thread, "terminalIds": ids, "drawer": drawer}),
+            more: Vec::new(),
+        });
+    }
+
+    /// The confirmed close.
+    pub(crate) fn close_confirmed_terminals(&mut self, command: &Value) {
+        let thread = command["threadId"].as_str().unwrap_or_default().to_owned();
+        let ids: Vec<String> = command["terminalIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect();
+        for id in ids {
+            if command["drawer"] == true {
+                self.drawer_action(
+                    &thread,
+                    crate::ui::terminal_drawer::DrawerAction::Closed(id),
+                );
+            } else {
+                self.close_terminal(&thread, &id);
+            }
+        }
+    }
+
     /// Closes the terminal session and its tab.
     pub(crate) fn close_terminal(&mut self, thread: &str, id: &str) {
         let key = format!("term:{thread}\0{id}");
@@ -1087,11 +1515,21 @@ mod tests {
 
     #[test]
     fn urls_trim_like_terminal_links() {
-        let line: Vec<char> = "see (https://example.com/a_(b)). next".chars().collect();
-        let (start, end, url) = url_at(&line, 10).unwrap();
-        assert_eq!(url, "https://example.com/a_(b)");
-        assert_eq!((start, end), (5, 30));
-        assert!(url_at(&line, 2).is_none());
+        let line: Vec<char> = "see (https://example.com/a_(b)). next src/main.rs:12:3: x ~/a.txt"
+            .chars()
+            .collect();
+        let links = extract_links(&line);
+        assert_eq!(links[0].text, "https://example.com/a_(b)");
+        assert_eq!((links[0].start, links[0].end), (5, 30));
+        assert_eq!(links[1].text, "src/main.rs:12:3");
+        assert!(!links[1].url);
+        assert_eq!(links[2].text, "~/a.txt");
+        assert_eq!(links.len(), 3);
+        assert_eq!(
+            resolve_path_link("src/a.rs:3", "/home/me/repo"),
+            "/home/me/repo/src/a.rs:3"
+        );
+        assert_eq!(resolve_path_link("~/x", "/home/me/repo"), "/home/me/x");
     }
 
     #[test]
@@ -1104,6 +1542,10 @@ mod tests {
             error: None,
             offset: 0,
             selection: Some(((1, 3), (0, 0))),
+            replies: String::new(),
+            mouse_button: None,
+            mouse_cell: None,
+            blink_since: std::time::Instant::now(),
         };
         assert_eq!(view.selected_text().as_deref(), Some("hello\nwor"));
         assert!(view.selected(0, 9) && !view.selected(1, 3));

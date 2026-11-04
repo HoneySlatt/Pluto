@@ -411,13 +411,8 @@ impl App {
             && let Some(crate::app::PanelTab::Terminal { id, split, .. }) = panel.tabs.get(index)
             && let Some(thread) = self.selected.clone()
         {
-            for terminal in std::iter::once(id)
-                .chain(split.iter())
-                .cloned()
-                .collect::<Vec<_>>()
-            {
-                self.close_terminal(&thread, &terminal);
-            }
+            let ids = std::iter::once(id).chain(split.iter()).cloned().collect();
+            self.confirm_close_terminals(&thread, ids, false);
         } else if let Some(panel) = self.panel_mut() {
             if let Some(index) = close {
                 if let Some(tab @ crate::app::PanelTab::Browser { id }) =

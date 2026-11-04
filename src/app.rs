@@ -766,7 +766,9 @@ impl App {
             last_script: Default::default(),
             icon_picker: None,
             egui_ctx: None,
-            drawers: Default::default(),
+            drawers: crate::ui::terminal_drawer::drawers_from_json(
+                &read_ui_state(options.client_settings_path.as_deref())["terminalDrawers"],
+            ),
             agents: Default::default(),
             keybinding_edit: None,
             new_keybinding: None,
@@ -2624,6 +2626,7 @@ pub(crate) fn save_ui_state(app: &App) {
         "lastEditor": app.last_editor,
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
+        "terminalDrawers": crate::ui::terminal_drawer::drawers_to_json(&app.drawers),
         "stickyModels": app.sticky_models,
         // Only the server version and permission notices are kept across runs.
         "dismissedNotices": app

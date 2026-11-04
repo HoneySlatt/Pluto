@@ -30,11 +30,76 @@ pub struct Group {
 }
 
 /// Drawer actions gathered while painting.
-enum DrawerAction {
+pub(crate) enum DrawerAction {
     Split(bool),
     New,
+    /// Asks first (`confirmTerminalClose`), then closes.
     Close(String),
+    Closed(String),
     Activate(String),
+}
+
+/// The drawers as `ui-state.json` keeps them (`terminalUiStateStore.ts`):
+/// open, height, groups and active session per thread.
+pub(crate) fn drawers_to_json(
+    drawers: &std::collections::HashMap<String, Drawer>,
+) -> serde_json::Value {
+    drawers
+        .iter()
+        .map(|(thread, drawer)| {
+            (
+                thread.clone(),
+                serde_json::json!({
+                    "open": drawer.open,
+                    "height": drawer.height,
+                    "active": drawer.active,
+                    "groups": drawer.groups.iter().map(|g| serde_json::json!({"ids": g.ids, "vertical": g.vertical})).collect::<Vec<_>>(),
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+pub(crate) fn drawers_from_json(
+    value: &serde_json::Value,
+) -> std::collections::HashMap<String, Drawer> {
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(thread, drawer)| {
+            let groups: Vec<Group> = drawer["groups"]
+                .as_array()?
+                .iter()
+                .filter_map(|g| {
+                    let ids: Vec<String> = g["ids"]
+                        .as_array()?
+                        .iter()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect();
+                    (!ids.is_empty()).then(|| Group {
+                        ids,
+                        vertical: g["vertical"] == true,
+                    })
+                })
+                .collect();
+            let first = groups.first()?.ids[0].clone();
+            let active = drawer["active"]
+                .as_str()
+                .filter(|a| groups.iter().any(|g| g.ids.iter().any(|id| id == a)))
+                .map_or(first, str::to_owned);
+            Some((
+                thread.clone(),
+                Drawer {
+                    open: drawer["open"] == true,
+                    height: drawer["height"].as_f64().unwrap_or(DEFAULT_HEIGHT as f64) as f32,
+                    groups,
+                    active,
+                },
+            ))
+        })
+        .collect()
 }
 
 impl App {
@@ -54,6 +119,7 @@ impl App {
             active: "default".into(),
         });
         drawer.open = !drawer.open;
+        crate::app::save_ui_state(self);
     }
 
     /// Opens the drawer of `thread` (`setTerminalOpen(true)`); returns its
@@ -72,7 +138,9 @@ impl App {
                 active: "default".into(),
             });
         drawer.open = true;
-        drawer.active.clone()
+        let active = drawer.active.clone();
+        crate::app::save_ui_state(self);
+        active
     }
 
     /// The open drawer's height for the current thread.
@@ -104,6 +172,9 @@ impl App {
             && let Some(drawer) = self.drawers.get_mut(&thread)
         {
             drawer.height = (rect.height() - response.drag_delta().y).max(120.0);
+        }
+        if response.drag_stopped() {
+            crate::app::save_ui_state(self);
         }
 
         let Some(drawer) = self.drawers.get(&thread) else {
@@ -426,7 +497,11 @@ impl App {
         true
     }
 
-    fn drawer_action(&mut self, thread: &str, action: DrawerAction) {
+    pub(crate) fn drawer_action(&mut self, thread: &str, action: DrawerAction) {
+        if let DrawerAction::Close(id) = action {
+            self.confirm_close_terminals(thread, vec![id], true);
+            return;
+        }
         let next = next_terminal_id(&self.used_terminal_ids());
         let Some(drawer) = self.drawers.get_mut(thread) else {
             return;
@@ -452,7 +527,8 @@ impl App {
                 });
                 drawer.active = next;
             }
-            DrawerAction::Close(id) => {
+            DrawerAction::Close(_) => {}
+            DrawerAction::Closed(id) => {
                 let order: Vec<String> = drawer.groups.iter().flat_map(|g| g.ids.clone()).collect();
                 let position = order.iter().position(|t| *t == id).unwrap_or(0);
                 for group in drawer.groups.iter_mut() {
@@ -474,5 +550,6 @@ impl App {
                 self.close_terminal(thread, &id);
             }
         }
+        crate::app::save_ui_state(self);
     }
 }

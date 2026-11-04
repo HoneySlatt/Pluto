@@ -540,6 +540,12 @@ impl App {
         match decision {
             Some(true) => {
                 if let Some(confirm) = self.confirm.take() {
+                    if confirm.command["type"]
+                        == crate::ui::terminal_surface::CLOSE_TERMINALS_COMMAND
+                    {
+                        self.close_confirmed_terminals(&confirm.command);
+                        return;
+                    }
                     if confirm.command["type"] == crate::ui::memory_settings::CLEAR_COMMAND {
                         self.clear_memories();
                         return;

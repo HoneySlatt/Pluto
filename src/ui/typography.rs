@@ -1033,8 +1033,8 @@ fn paint_terminal_preview(ui: &Ui, rect: Rect) {
     );
     let cursor = Rect::from_min_size(
         Pos2::new(
-            inner.left() + screen.col as f32 * cell_width,
-            inner.top() + screen.row as f32 * cell_height,
+            inner.left() + screen.cursor().1 as f32 * cell_width,
+            inner.top() + screen.cursor().0 as f32 * cell_height,
         ),
         Vec2::new(cell_width, cell_height),
     );
