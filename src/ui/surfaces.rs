@@ -95,7 +95,11 @@ impl App {
         match surface.label {
             // The browser needs a Chromium-based browser to run headless.
             "Browser" => crate::preview::browser_binary().is_some(),
-            "Pull request" | "Linked pull requests" => false,
+            "Pull request" => false,
+            // `pullRequestsSurfaceAvailable`.
+            "Linked pull requests" => {
+                self.links_pull_requests() && self.linked_pull_request_count() > 0
+            }
             "Diff" => self.workspace_is_repo(),
             "Design" => !self.thread_pages().is_empty(),
             _ => true,
@@ -150,6 +154,8 @@ impl App {
                     *t == crate::app::PanelTab::Agents
                 });
             }
+        } else if label == "Linked pull requests" {
+            self.show_linked_pull_requests();
         } else if label == "Design" {
             self.open_design(None);
         } else if label == "Files" {
@@ -323,6 +329,9 @@ impl App {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
                 crate::app::PanelTab::Agents => ("Agents".to_owned(), "bot", theme::foreground()),
+                crate::app::PanelTab::PullRequests => {
+                    ("Pull requests".to_owned(), "link-2", theme::foreground())
+                }
                 crate::app::PanelTab::Design => {
                     ("Design".to_owned(), "palette", theme::foreground())
                 }

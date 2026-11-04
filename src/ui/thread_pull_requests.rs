@@ -165,6 +165,44 @@ fn chains<'a>(links: &[&'a Value]) -> Vec<Vec<&'a Value>> {
     chains
 }
 
+/// One line of a thread's pull-request list (`PullRequestListLine`).
+pub(crate) struct ListLine<'a> {
+    pub link: &'a Value,
+    /// 0 for a pull request on the base branch; each layer above steps in.
+    pub depth: usize,
+    /// On the bottom layer of a multi-layer stack: whether the host stacks
+    /// them natively, and how many layers.
+    pub stack: Option<(bool, usize)>,
+}
+
+/// The visible links (`visibleThreadPullRequests`).
+pub(crate) fn visible_links(links: &[Value]) -> Vec<&Value> {
+    visible(links)
+}
+
+/// `pullRequestListLines`: chains newest first by their most recent layer,
+/// each read bottom to top.
+pub(crate) fn list_lines<'a>(links: &[&'a Value]) -> Vec<ListLine<'a>> {
+    let mut chains = chains(links);
+    let activity = |chain: &Vec<&Value>| chain.iter().map(|l| latest_updated_at(l)).max();
+    chains.sort_by_key(|chain| std::cmp::Reverse(activity(chain)));
+    chains
+        .into_iter()
+        .flat_map(|chain| {
+            let size = chain.len();
+            let native = chain[0]["stack"].is_object();
+            chain
+                .into_iter()
+                .enumerate()
+                .map(move |(depth, link)| ListLine {
+                    link,
+                    depth,
+                    stack: (depth == 0 && size > 1).then_some((native, size)),
+                })
+        })
+        .collect()
+}
+
 /// `resolveThreadCurrentPullRequestLink`.
 pub fn current_link(links: &[Value]) -> Option<&Value> {
     let visible = visible(links);

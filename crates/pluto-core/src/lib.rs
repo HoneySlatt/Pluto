@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod change_request;
 pub mod chat_requests;
 pub mod commands;
 pub mod context;

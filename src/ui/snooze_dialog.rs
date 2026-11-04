@@ -134,7 +134,7 @@ impl SnoozeDialog {
 }
 
 /// A `size="default"` button: 32px, 14px medium text, 11px padding.
-fn dialog_button(ui: &mut Ui, rect: Rect, id: &str, label: &str, primary: bool) -> bool {
+pub(crate) fn dialog_button(ui: &mut Ui, rect: Rect, id: &str, label: &str, primary: bool) -> bool {
     let response = ui.interact(rect, ui.id().with(id), Sense::click());
     let (fill, stroke, color) = if primary {
         let fill = if response.hovered() {
@@ -173,7 +173,7 @@ fn dialog_button(ui: &mut Ui, rect: Rect, id: &str, label: &str, primary: bool) 
 }
 
 /// The field surface of inputs and outline triggers.
-fn field(ui: &Ui, rect: Rect, radius: u8) {
+pub(crate) fn field(ui: &Ui, rect: Rect, radius: u8) {
     ui.painter().rect(
         rect,
         CornerRadius::same(radius),

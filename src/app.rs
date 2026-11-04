@@ -339,6 +339,8 @@ pub struct App {
     pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
+    /// The Linked pull requests surface's menu and the Link dialog.
+    pub(crate) linked_prs: crate::ui::linked_pull_requests::LinkedPullRequests,
     pub(crate) prices_dialog: Option<crate::ui::usage_prices::PricesDialog>,
     /// The custom model being added: instance, typed slug and its error.
     pub(crate) custom_model_input: Option<(String, String, Option<String>)>,
@@ -477,6 +479,8 @@ pub(crate) enum PanelTab {
     },
     /// The thread's subagents.
     Agents,
+    /// The thread's linked pull requests.
+    PullRequests,
     /// A Browser tab and its page in the preview browser.
     Browser {
         id: u64,
@@ -748,6 +752,7 @@ impl App {
             legacy_project_rename: None,
             confirm: None,
             snooze_dialog: None,
+            linked_prs: Default::default(),
             prices_dialog: None,
             custom_model_input: None,
             accent_picker: None,
@@ -930,6 +935,7 @@ impl App {
                     Route::Vcs(cwd) => self.vcs_event(cwd, &value),
                     Route::Lifecycle => self.lifecycle_event(&value),
                     Route::Command(id) => {
+                        self.link_pull_request_settled(&id, None);
                         self.command_settled(&id, None);
                         self.finish_reply(&id);
                         self.rewind_done(&id, None);
@@ -966,6 +972,8 @@ impl App {
                     self.streams.retain(|(open, ..)| *open != key);
                     self.rpc_result(key, Err(message))
                 }
+                Event::Failed(Route::Command(id), message)
+                    if self.link_pull_request_settled(&id, Some(&message)) => {}
                 Event::Failed(Route::Command(id), message)
                     if self.command_settled(&id, Some(&message)) => {}
                 Event::Failed(Route::Command(id), message) => {
@@ -1882,6 +1890,7 @@ impl eframe::App for App {
                 self.confirm_dialog(ui, rect);
                 self.rewind_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
+                self.link_pull_request_dialog(ui, rect);
                 self.add_instance_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
                 self.scheduled_task_editor(ui, rect);
@@ -2027,6 +2036,7 @@ impl eframe::App for App {
                 self.confirm_dialog(ui, rect);
                 self.rewind_dialog(ui, rect);
                 self.snooze_dialog(ui, rect);
+                self.link_pull_request_dialog(ui, rect);
                 self.prices_dialog(ui, rect);
                 self.action_editor_dialog(ui, rect);
                 self.scheduled_task_editor(ui, rect);

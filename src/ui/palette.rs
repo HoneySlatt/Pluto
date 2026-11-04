@@ -362,6 +362,33 @@ impl App {
                         ));
                     }
                 }
+                // `threadPullRequestLinkMode` other than unsupported.
+                if self.selected.is_some() && self.links_pull_requests() {
+                    let mut link = Item::new(
+                        "link-2",
+                        "Link pull request to thread",
+                        Action::Call(App::open_link_pull_request_dialog),
+                    );
+                    link.terms = ["link", "pull request", "pr", "attach", "stack"]
+                        .iter()
+                        .map(|t| (*t).to_owned())
+                        .chain([link.title.to_lowercase()])
+                        .collect();
+                    actions.push(link);
+                    if self.linked_pull_request_count() > 0 {
+                        let mut show = Item::new(
+                            "link-2",
+                            "Show linked pull requests",
+                            Action::Call(App::show_linked_pull_requests),
+                        );
+                        show.terms = ["pull requests", "linked", "stack", "prs"]
+                            .iter()
+                            .map(|t| (*t).to_owned())
+                            .chain([show.title.to_lowercase()])
+                            .collect();
+                        actions.push(show);
+                    }
+                }
                 actions.push(Item::new(
                     "folder-git-2",
                     "New project",

@@ -8,8 +8,8 @@ pub mod theme;
 pub mod ui;
 
 pub use pluto_core::{
-    commands, diff, generated_images, html_render, http, mcp_app, model, protocol, requests,
-    timeline, worktree_setup,
+    change_request, commands, diff, generated_images, html_render, http, mcp_app, model, protocol,
+    requests, timeline, worktree_setup,
 };
 
 /// The core's redraw requests, answered by egui.

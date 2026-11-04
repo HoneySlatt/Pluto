@@ -235,6 +235,11 @@ impl App {
             self.design_surface(ui, body);
             return;
         }
+        if active == crate::app::PanelTab::PullRequests {
+            let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
+            self.linked_pull_requests_panel(ui, body);
+            return;
+        }
         if active == crate::app::PanelTab::Agents {
             let body = Rect::from_min_max(Pos2::new(inner.left(), HEADER), inner.max);
             self.agents_panel(ui, body);

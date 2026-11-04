@@ -1,6 +1,6 @@
 # Backlog to the first release
 
-The release is public and complete: every feature of T3 Code v0.1.0's client
+The release is private (the repository stays private) and complete: every feature of T3 Code v0.1.0's client
 is ported (the ACP registry stays out on purpose), the Android app gets its
 background notifications, and the programs ship with their notices.
 
@@ -142,5 +142,5 @@ Still open (polish, after the later milestones if time allows):
 - The APK signed with a release key the user enters at signing time.
 - The pinned pluto-server version and a clear message on a protocol
   mismatch.
-- An install README for strangers; a final check of the history for
-  personal data; the tag and the GitHub release, after the user's go.
+- The repository stays private: no public install README or history
+  scrub; the tag and a private release, after the user's go.

@@ -40,6 +40,7 @@ pub mod keybindings;
 pub mod legacy_sidebar;
 pub mod lifecycle;
 pub mod lightbox;
+pub mod linked_pull_requests;
 pub mod live_activity;
 pub mod lucide;
 pub mod markdown;
