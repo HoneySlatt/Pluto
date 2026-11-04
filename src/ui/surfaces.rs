@@ -94,7 +94,9 @@ impl App {
     fn surface_available(&self, surface: &Surface) -> bool {
         match surface.label {
             // The browser needs a Chromium-based browser to run headless.
-            "Browser" => crate::preview::browser_binary().is_some(),
+            "Browser" => {
+                self.server_browser_enabled() || crate::preview::browser_binary().is_some()
+            }
             "Pull request" => false,
             // `pullRequestsSurfaceAvailable`.
             "Linked pull requests" => {

@@ -189,6 +189,9 @@ pub struct TabState {
     /// The latest frame and a counter that moves with each new one.
     pub frame: Option<Arc<egui::ColorImage>>,
     pub frame_seq: u64,
+    /// The page's size in CSS pixels when its frames are scaled to fit
+    /// (a server tab); a local page draws one texel per pixel.
+    pub display_size: Option<(f32, f32)>,
     pub error: Option<String>,
     /// A render tab's content height in CSS pixels, as its page reports it.
     pub content_height: Option<f32>,

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod highlight;
 pub mod preview;
+pub mod server_browser;
 pub mod snooze;
 pub mod subagents;
 pub mod terminal;

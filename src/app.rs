@@ -98,7 +98,7 @@ pub struct App {
     /// and its toast.
     pub(crate) reconnect: Option<Reconnect>,
     /// The streams open, by key, opened again after a reconnection.
-    streams: Vec<(String, &'static str, Value)>,
+    pub(crate) streams: Vec<(String, &'static str, Value)>,
     /// Failures of what was sent without a synchronized connection, handled
     /// with the server's events.
     offline_failures: Vec<Event>,
@@ -399,6 +399,9 @@ pub struct App {
     saved_panels: Option<String>,
     /// What proactive panels last saw of each thread.
     pub(crate) proactive: crate::ui::proactive_panels::Proactive,
+    /// The server's browser tabs, and the threads whose tabs were listed.
+    pub(crate) server_browser: crate::server_browser::ServerBrowser,
+    pub(crate) server_previews_listed: std::collections::HashSet<String>,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
@@ -525,6 +528,7 @@ pub(crate) enum PanelTab {
 /// pages live in this run's browser, are left out.
 pub(crate) fn panels_to_json(
     panels: &std::collections::HashMap<String, Panel>,
+    server: &crate::server_browser::ServerBrowser,
 ) -> serde_json::Value {
     use serde_json::json;
     panels
@@ -544,13 +548,21 @@ pub(crate) fn panels_to_json(
                             "kind": "terminal", "id": id, "number": number, "split": split,
                             "active": active, "vertical": vertical,
                         }),
-                        PanelTab::Browser { .. } => return None,
+                        // A server tab comes back from the server's list.
+                        PanelTab::Browser { id } => {
+                            let tab = server.tabs.get(id)?;
+                            json!({"kind": "server-browser", "tabId": tab.tab_id})
+                        }
                     })
                 })
                 .collect();
+            let kept = |t: &PanelTab| match t {
+                PanelTab::Browser { id } => server.owns(*id),
+                _ => true,
+            };
             let active = panel
                 .active_tab()
-                .and_then(|a| panel.tabs.iter().filter(|t| !matches!(t, PanelTab::Browser { .. })).position(|t| t == a))
+                .and_then(|a| panel.tabs.iter().filter(|t| kept(t)).position(|t| t == a))
                 .unwrap_or(0);
             (
                 thread.clone(),
@@ -902,6 +914,8 @@ impl App {
             panel_tab_menu: None,
             saved_panels: None,
             proactive: Default::default(),
+            server_browser: Default::default(),
+            server_previews_listed: Default::default(),
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_rows: Default::default(),
@@ -969,6 +983,7 @@ impl App {
         app.diff_wrap = app.client_settings["wordWrap"] != false;
         app.files.wrap = app.diff_wrap;
         app.load_favorites();
+        app.restore_server_tabs(&read_ui_state(options.client_settings_path.as_deref())["panels"]);
         if let (Some(_), Some(token)) = (options.server, options.token) {
             app.connect.token = token;
             app.connect_now(&cc.egui_ctx);
@@ -2010,8 +2025,9 @@ impl eframe::App for App {
         self.quit_hold(ui, rect);
         self.flush_file_edits(ui.ctx());
         self.proactive_panels();
+        self.sync_server_previews();
         // The panels are saved when they change.
-        let panels = panels_to_json(&self.panels).to_string();
+        let panels = panels_to_json(&self.panels, &self.server_browser).to_string();
         if self.saved_panels.as_deref() != Some(panels.as_str()) {
             if self.saved_panels.is_some() {
                 save_ui_state(self);
@@ -2468,6 +2484,7 @@ impl App {
             || self.open_in_result(&key, &result)
             || self.file_menu_result(&key, &result)
             || self.file_save_result(&key, &result)
+            || self.server_preview_result(&key, &result)
             || self.markdown_task_result(&key, &result)
             || self.git_result(&key, &result)
             || self.plan_result(&key, &result)
@@ -2794,7 +2811,7 @@ pub(crate) fn save_ui_state(app: &App) {
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
         "terminalDrawers": crate::ui::terminal_drawer::drawers_to_json(&app.drawers),
-        "panels": panels_to_json(&app.panels),
+        "panels": panels_to_json(&app.panels, &app.server_browser),
         "stickyModels": app.sticky_models,
         // Only the server version and permission notices are kept across runs.
         "dismissedNotices": app

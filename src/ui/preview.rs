@@ -73,7 +73,7 @@ fn normalize_preview_url(raw: &str) -> Option<String> {
 
 /// The DOM key, code and Windows virtual key of a key the page receives
 /// as a key event (characters arrive as text).
-fn dom_key(key: Key) -> Option<(&'static str, &'static str, u32)> {
+pub(crate) fn dom_key(key: Key) -> Option<(&'static str, &'static str, u32)> {
     Some(match key {
         Key::Enter => ("Enter", "Enter", 13),
         Key::Tab => ("Tab", "Tab", 9),
@@ -100,7 +100,7 @@ fn dom_key(key: Key) -> Option<(&'static str, &'static str, u32)> {
     })
 }
 
-fn modifier_bits(modifiers: egui::Modifiers) -> u32 {
+pub(crate) fn modifier_bits(modifiers: egui::Modifiers) -> u32 {
     u32::from(modifiers.alt)
         | (u32::from(modifiers.ctrl) << 1)
         | (u32::from(modifiers.mac_cmd) << 2)
@@ -117,6 +117,9 @@ impl App {
     /// `addBrowserSurface` / `openDiscoveredPort`: a new Browser tab in the
     /// thread's panel, on `url` or on its empty state.
     pub(crate) fn open_browser_tab(&mut self, ctx: &egui::Context, url: Option<String>) {
+        if self.server_browser_enabled() && self.open_server_browser_tab(url.clone()) {
+            return;
+        }
         self.preview.next_tab += 1;
         let tab = self.preview.next_tab;
         self.preview_engine(ctx).open(tab, url);
@@ -128,6 +131,11 @@ impl App {
 
     /// A closed Browser tab's page goes away.
     pub(crate) fn close_browser_tab(&mut self, tab: u64) {
+        if self.server_browser.owns(tab) {
+            self.close_server_browser_tab(tab);
+            self.preview.drafts.remove(&tab);
+            return;
+        }
         if let Some(engine) = &self.preview.engine {
             engine.close(tab);
         }
@@ -138,7 +146,7 @@ impl App {
     /// A Browser tab's label and whether it has a page (`surfaceTitle`):
     /// the page title, else its host, else "Browser".
     pub(crate) fn browser_tab_title(&self, tab: u64) -> String {
-        let Some(state) = self.preview.engine.as_ref().and_then(|e| e.tab(tab)) else {
+        let Some(state) = self.browser_state(tab) else {
             return "Browser".into();
         };
         if !state.title.trim().is_empty() {
@@ -173,19 +181,19 @@ impl App {
     /// The Browser surface below the panel's tab bar.
     pub(crate) fn browser_surface(&mut self, ui: &mut Ui, body: Rect, tab: u64) {
         let ctx = ui.ctx().clone();
-        self.preview_engine(&ctx);
-        self.preview.drawn = Some(tab);
-        let failure = self
-            .preview
-            .engine
-            .as_ref()
-            .and_then(|e| e.failure.lock().ok().and_then(|f| f.clone()));
-        let state = self
-            .preview
-            .engine
-            .as_ref()
-            .and_then(|e| e.tab(tab))
-            .unwrap_or_default();
+        let server = self.server_browser.owns(tab);
+        let failure = if server {
+            self.attach_server_tab(tab, &ctx);
+            None
+        } else {
+            self.preview_engine(&ctx);
+            self.preview.drawn = Some(tab);
+            self.preview
+                .engine
+                .as_ref()
+                .and_then(|e| e.failure.lock().ok().and_then(|f| f.clone()))
+        };
+        let state = self.browser_state(tab).unwrap_or_default();
         let idle = state.url.is_empty() || state.url == "about:blank";
         let chrome = Rect::from_min_size(
             Pos2::new(body.left() + 8.0, body.top()),
@@ -205,6 +213,9 @@ impl App {
             return;
         }
         self.preview_page(ui, page, tab, &state);
+        if server {
+            self.server_tab_overlay(ui, page, tab);
+        }
     }
 
     /// Back, forward, refresh, the address field with its hover "Open in
@@ -274,7 +285,17 @@ impl App {
             },
         );
         x += 24.0 + 4.0;
-        if let Some(engine) = &self.preview.engine {
+        if self.server_browser.owns(tab) {
+            if back {
+                self.server_browser.back(tab);
+            }
+            if forward {
+                self.server_browser.forward(tab);
+            }
+            if refresh {
+                self.server_browser.reload(tab);
+            }
+        } else if let Some(engine) = &self.preview.engine {
             if back {
                 engine.back(tab);
             }
@@ -363,9 +384,8 @@ impl App {
         if submit && !text.trim().is_empty() {
             self.preview.drafts.remove(&tab);
             ui.memory_mut(|m| m.surrender_focus(id));
-            if let (Some(url), Some(engine)) = (normalize_preview_url(&text), &self.preview.engine)
-            {
-                engine.navigate(tab, url);
+            if let Some(url) = normalize_preview_url(&text) {
+                self.browser_navigate(tab, url);
             }
         }
         if external && hovered {
@@ -536,8 +556,8 @@ impl App {
             font(12.0, Weight::Regular),
             theme::muted_foreground(),
         );
-        if let (Some(url), Some(engine)) = (open, &self.preview.engine) {
-            engine.navigate(tab, url);
+        if let Some(url) = open {
+            self.browser_navigate(tab, url);
         }
     }
 
@@ -553,10 +573,14 @@ impl App {
         let ppp = ui.ctx().pixels_per_point();
         let width = area.width().floor().max(1.0) as u32;
         let height = area.height().floor().max(1.0) as u32;
-        let Some(engine) = &self.preview.engine else {
-            return;
-        };
-        engine.resize(tab, width, height, ppp);
+        if self.server_browser.owns(tab) {
+            self.server_browser.resize(tab, width, height);
+        } else {
+            let Some(engine) = &self.preview.engine else {
+                return;
+            };
+            engine.resize(tab, width, height, ppp);
+        }
         ui.painter().rect_filled(area, 0.0, Color32::WHITE);
         self.page_view(ui, area, tab, state, true, true);
     }
@@ -575,7 +599,8 @@ impl App {
         pointer: bool,
     ) -> bool {
         let ppp = ui.ctx().pixels_per_point();
-        if self.preview.engine.is_none() {
+        let server = self.server_browser.owns(tab);
+        if self.preview.engine.is_none() && !server {
             return false;
         }
         if let Some(frame) = &state.frame {
@@ -601,8 +626,12 @@ impl App {
                 }
             }
             if let Some((_, texture)) = self.preview.textures.get(&tab) {
-                // One texel per physical pixel keeps the page's text crisp.
-                let size = Vec2::new(frame.size[0] as f32, frame.size[1] as f32) / ppp;
+                // One texel per physical pixel keeps the page's text crisp;
+                // a server page's frames scale to its viewport.
+                let size = match state.display_size {
+                    Some((w, h)) => Vec2::new(w, h),
+                    None => Vec2::new(frame.size[0] as f32, frame.size[1] as f32) / ppp,
+                };
                 let min = (area.min * ppp).round() / ppp;
                 ui.painter().image(
                     texture.id(),
@@ -618,7 +647,7 @@ impl App {
             if wheel && ui.rect_contains_pointer(area) {
                 let events = ui.input(|i| i.events.clone());
                 let at = ui.input(|i| i.pointer.hover_pos()).unwrap_or(area.center()) - area.min;
-                if let Some(engine) = &self.preview.engine {
+                if let Some(engine) = self.preview.engine.as_ref().filter(|_| !server) {
                     for event in &events {
                         if let egui::Event::MouseWheel {
                             unit,
@@ -675,7 +704,20 @@ impl App {
         let now = ui.input(|i| i.time);
         let events = ui.input(|i| i.events.clone());
         let local = |pos: Pos2| (pos.x - area.left(), pos.y - area.top());
-        let engine = self.preview.engine.as_ref().expect("preview engine");
+        let local_engine = self.preview.engine.as_ref().filter(|_| !server);
+        let browser = &self.server_browser;
+        let pointer_to = |event: Pointer, bits: u32| match local_engine {
+            Some(engine) => engine.pointer(tab, event, bits),
+            None => browser.pointer(tab, event, bits),
+        };
+        let text_to = |text: String| match local_engine {
+            Some(engine) => engine.text(tab, text),
+            None => browser.text(tab, text),
+        };
+        let key_to = |stroke: KeyStroke| match local_engine {
+            Some(engine) => engine.key(tab, stroke),
+            None => browser.key(tab, stroke),
+        };
         for event in &events {
             match event {
                 egui::Event::PointerMoved(pos)
@@ -685,7 +727,7 @@ impl App {
                     if self.preview.pointer != Some(*pos) {
                         self.preview.pointer = Some(*pos);
                         let (x, y) = local(*pos);
-                        engine.pointer(tab, Pointer::Move { x, y }, 0);
+                        pointer_to(Pointer::Move { x, y }, 0);
                     }
                 }
                 egui::Event::PointerButton {
@@ -713,8 +755,7 @@ impl App {
                         };
                         self.preview.last_press = Some((now, *pos, clicks));
                         self.preview.pressed = Some((tab, name));
-                        engine.pointer(
-                            tab,
+                        pointer_to(
                             Pointer::Press {
                                 x,
                                 y,
@@ -726,8 +767,7 @@ impl App {
                     } else if !*pressed && self.preview.pressed == Some((tab, name)) {
                         let clicks = self.preview.last_press.map_or(1, |(_, _, c)| c);
                         self.preview.pressed = None;
-                        engine.pointer(
-                            tab,
+                        pointer_to(
                             Pointer::Release {
                                 x,
                                 y,
@@ -750,8 +790,7 @@ impl App {
                         egui::MouseWheelUnit::Page => area.height(),
                     };
                     let (x, y) = local(self.preview.pointer.unwrap_or(area.center()));
-                    engine.pointer(
-                        tab,
+                    pointer_to(
                         Pointer::Wheel {
                             x,
                             y,
@@ -761,8 +800,8 @@ impl App {
                         modifier_bits(*modifiers),
                     );
                 }
-                egui::Event::Text(text) if focused => engine.text(tab, text.clone()),
-                egui::Event::Paste(text) if focused => engine.text(tab, text.clone()),
+                egui::Event::Text(text) if focused => text_to(text.clone()),
+                egui::Event::Paste(text) if focused => text_to(text.clone()),
                 egui::Event::Key {
                     key,
                     pressed,
@@ -778,17 +817,14 @@ impl App {
                     if character && !(modifiers.ctrl || modifiers.alt || modifiers.mac_cmd) {
                         continue;
                     }
-                    engine.key(
-                        tab,
-                        KeyStroke {
-                            key: dom.to_owned(),
-                            code: code.to_owned(),
-                            virtual_key,
-                            text: (*key == Key::Enter).then(|| "\r".to_owned()),
-                            pressed: *pressed,
-                            modifiers: modifier_bits(*modifiers),
-                        },
-                    );
+                    key_to(KeyStroke {
+                        key: dom.to_owned(),
+                        code: code.to_owned(),
+                        virtual_key,
+                        text: (*key == Key::Enter).then(|| "\r".to_owned()),
+                        pressed: *pressed,
+                        modifiers: modifier_bits(*modifiers),
+                    });
                 }
                 _ => {}
             }
