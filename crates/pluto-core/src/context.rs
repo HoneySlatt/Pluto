@@ -420,6 +420,71 @@ pub fn thread_record(thread_id: &str, environment_id: &str, title: &str) -> Valu
     })
 }
 
+/// A review comment on a diff or a file (`ReviewCommentContext`).
+pub struct ReviewComment<'a> {
+    pub id: &'a str,
+    pub section_id: &'a str,
+    pub section_title: &'a str,
+    pub file_path: &'a str,
+    pub start_index: usize,
+    pub end_index: usize,
+    pub range_label: &'a str,
+    pub text: &'a str,
+    pub diff: &'a str,
+    pub fence_language: &'a str,
+}
+
+/// `reviewCommentContextLabel`: the file's name and the range, a diff's
+/// `+12 to +14` read as `L12 to L14` (deletions say "(before)").
+fn review_comment_label(file_path: &str, range_label: &str) -> String {
+    let name = file_path.rsplit(['/', '\\']).next().unwrap_or(file_path);
+    let diff = || {
+        let marker = range_label
+            .chars()
+            .next()
+            .filter(|c| matches!(c, '+' | '-'))?;
+        let rest = &range_label[1..];
+        let (first, last) = match rest.split_once(" to ") {
+            Some((first, last)) => (first, Some(last.strip_prefix(marker)?)),
+            None => (rest, None),
+        };
+        let numeric = |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit());
+        if !numeric(first) || !last.is_none_or(numeric) {
+            return None;
+        }
+        Some(format!(
+            "L{first}{}{}",
+            last.map(|l| format!(" to L{l}")).unwrap_or_default(),
+            if marker == '-' { " (before)" } else { "" }
+        ))
+    };
+    let range = diff().unwrap_or_else(|| range_label.to_owned());
+    format!("{name} {range}")
+}
+
+fn clamp_chars(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+/// `reviewCommentContextRecord`.
+pub fn review_comment_record(comment: &ReviewComment) -> Value {
+    json!({
+        "version": 1,
+        "contextId": kind_scoped_id("review-comment", comment.id),
+        "kind": "review-comment",
+        "label": sanitize_label(&review_comment_label(comment.file_path, comment.range_label), "review-comment"),
+        "sectionId": comment.section_id,
+        "sectionTitle": comment.section_title,
+        "filePath": comment.file_path,
+        "startIndex": comment.start_index,
+        "endIndex": comment.end_index,
+        "rangeLabel": comment.range_label,
+        "text": clamp_chars(comment.text.trim(), 16_000),
+        "diff": clamp_chars(comment.diff, 32_000),
+        "fenceLanguage": comment.fence_language,
+    })
+}
+
 pub fn pull_request_record(entry: &Value) -> Value {
     let number = entry["number"].as_u64().unwrap_or(0);
     let field = |key: &str| bounded_field(entry[key].as_str().unwrap_or_default());
@@ -647,6 +712,23 @@ mod tests {
             "voir <review_comment sectionId=\"pull-request:42\" sectionTitle=\"PR #42\""
         ));
         assert!(legacy.contains("The pull request is #42, titled `Fix the build`"));
+    }
+
+    #[test]
+    fn review_comment_labels_read_like_lines() {
+        assert_eq!(
+            review_comment_label("src/a.rs", "+12 to +14"),
+            "a.rs L12 to L14"
+        );
+        assert_eq!(review_comment_label("src/a.rs", "-3"), "a.rs L3 (before)");
+        assert_eq!(
+            review_comment_label("src/a.rs", "L3 to L5"),
+            "a.rs L3 to L5"
+        );
+        assert_eq!(
+            review_comment_label("src/a.rs", "12 to 14"),
+            "a.rs 12 to 14"
+        );
     }
 
     #[test]

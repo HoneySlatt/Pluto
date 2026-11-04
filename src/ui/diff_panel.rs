@@ -719,6 +719,12 @@ impl App {
             }
             _ => None,
         };
+        // `reviewSectionId` / `reviewSectionTitle` for review comments.
+        self.review.section = Some(match (scope, selected_turn) {
+            (DiffScope::Turn(_), Some(turn)) => (format!("turn:{turn}"), format!("Turn {turn}")),
+            (DiffScope::WorkingTree, _) => ("unstaged".into(), "Uncommitted".into()),
+            _ => ("branch".into(), "Changes".into()),
+        });
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(list));
         let output = egui::ScrollArea::vertical()
             .id_salt(("diff-files", &key))
@@ -742,6 +748,7 @@ impl App {
                 }
                 ui.add_space(12.0);
             });
+        self.review.section = None;
         // Rows leave the scrollbar's strip clear only while the list scrolls.
         self.diff_list_overflows = output.content_size.y > output.inner_rect.height() + 0.5;
     }
@@ -1319,6 +1326,15 @@ impl App {
         let mut previous_end: u32 = 1;
         let mut previous_old_end: u32 = 1;
         let hunk_count = file.hunks.len();
+        // Review comments count the hunks' lines in unified order.
+        let review_index: std::collections::HashMap<*const diff::Line, usize> = file
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines())
+            .enumerate()
+            .map(|(i, l)| (l as *const diff::Line, i))
+            .collect();
+        let review_of = |line: &diff::Line| review_index.get(&(line as *const diff::Line)).copied();
         for (index, hunk) in file.hunks.iter().enumerate() {
             let skipped = hunk.new_start.saturating_sub(previous_end);
             if skipped > 0 {
@@ -1350,11 +1366,15 @@ impl App {
                     // Rows out of view keep their place without a layout.
                     let height =
                         self.cell_rows(ui, &line.text, content, shift) as f32 * code_line_height();
+                    let review = review_of(line);
                     if !ui.is_rect_visible(Rect::from_min_size(
                         ui.cursor().min,
                         Vec2::new(width, height),
                     )) {
                         ui.add_space(height);
+                        if let Some(index) = review {
+                            self.review_annotations(ui, file, index, width);
+                        }
                         continue;
                     }
                     let galley = self.code_galley(ui, line, &language, content, shift);
@@ -1363,6 +1383,12 @@ impl App {
                     let column =
                         Rect::from_min_max(row.min, Pos2::new(row.left() + content, row.bottom()));
                     paint_diff_cell(ui, column, line, line.number(), galley, shift);
+                    if let Some(index) = review {
+                        let gutter =
+                            Rect::from_min_size(column.min, Vec2::new(GUTTER + shift, height));
+                        self.review_gutter(ui, gutter, &file.path, index);
+                        self.review_annotations(ui, file, index, width);
+                    }
                 }
                 continue;
             }
@@ -1388,11 +1414,23 @@ impl App {
                 let height = rows_of(self, old, left_width).max(rows_of(self, new, right_width))
                     as f32
                     * code_line_height();
+                let reviews: Vec<usize> = {
+                    let mut reviews: Vec<usize> = [old, new]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(review_of)
+                        .collect();
+                    reviews.dedup();
+                    reviews
+                };
                 if !ui.is_rect_visible(Rect::from_min_size(
                     ui.cursor().min,
                     Vec2::new(width, height),
                 )) {
                     ui.add_space(height);
+                    for index in reviews {
+                        self.review_annotations(ui, file, index, width);
+                    }
                     continue;
                 }
                 let old_galley = old.map(|l| self.code_galley(ui, l, &language, left_width, shift));
@@ -1419,6 +1457,16 @@ impl App {
                         paint_diff_cell(ui, right, line, line.new, galley, shift)
                     }
                     _ => paint_filler(ui, right, 0.0, shift),
+                }
+                for (line, cell) in [(old, left), (new, right)] {
+                    if let Some(index) = line.and_then(review_of) {
+                        let gutter =
+                            Rect::from_min_size(cell.min, Vec2::new(GUTTER + shift, height));
+                        self.review_gutter(ui, gutter, &file.path, index);
+                    }
+                }
+                for index in reviews {
+                    self.review_annotations(ui, file, index, width);
                 }
             }
         }

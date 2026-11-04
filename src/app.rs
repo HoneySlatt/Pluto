@@ -384,6 +384,8 @@ pub struct App {
     pub(crate) workspace_refreshes: std::collections::HashMap<String, String>,
     /// Files open in the editor.
     pub(crate) edits: crate::ui::file_editor::Edits,
+    /// Review comments on the diff panel's lines.
+    pub(crate) review: crate::ui::diff_review::Review,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
@@ -786,6 +788,7 @@ impl App {
             diff_file_menu: None,
             workspace_refreshes: Default::default(),
             edits: Default::default(),
+            review: Default::default(),
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_rows: Default::default(),
