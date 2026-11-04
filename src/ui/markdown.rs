@@ -236,6 +236,7 @@ fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
     // User messages show HTML as typed; answers parse the sanitized tags.
     RAW_HTML.set(!line_breaks);
     FOOTNOTES.with_borrow_mut(Footnotes::clear);
+    TASK_COUNT.set(0);
     let mut index = 0;
     let mut blocks = parse_blocks(&events, &mut index, None);
     // `remark-gfm`'s footnotes section: a rule, then the definitions in the
@@ -367,6 +368,9 @@ struct Anchors {
 const ANCHORS: &str = "markdown-anchors";
 /// A fragment link clicked this frame, for its message to resolve.
 const FRAGMENT: &str = "markdown-fragment";
+/// The task marker clicked in a `task_links` document (its index).
+pub(crate) const TASK_CLICKED: &str = "markdown-task-clicked";
+const TASK_LINK: &str = "pluto-task:";
 
 fn register_anchor(ctx: &egui::Context, root: egui::Id, id: &str, rect: Rect) {
     let frame = ctx.cumulative_frame_nr();
@@ -400,6 +404,9 @@ fn fragment_target(ctx: &egui::Context, root: egui::Id, href: &str) -> Option<Re
 thread_local! {
     /// Whether the text being parsed keeps its raw HTML's meaning.
     static RAW_HTML: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// Task markers become `pluto-task:N` links (a file's rendered view).
+    static TASK_LINKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TASK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static FOOTNOTES: std::cell::RefCell<Footnotes> = std::cell::RefCell::new(Footnotes::default());
 }
 
@@ -1019,10 +1026,17 @@ fn parse_blocks_until(
                 *index -= 1;
                 blocks.push(Block::Paragraph(parse_inline_run(events, index)));
             }
-            Event::TaskListMarker(done) => loose.push(Inline::Text(
-                if *done { "☑ " } else { "☐ " }.into(),
-                Style::default(),
-            )),
+            Event::TaskListMarker(done) => {
+                let index = TASK_COUNT.get();
+                TASK_COUNT.set(index + 1);
+                loose.push(Inline::Text(
+                    if *done { "☑ " } else { "☐ " }.into(),
+                    Style {
+                        link: TASK_LINKS.get().then(|| format!("{TASK_LINK}{index}")),
+                        ..Style::default()
+                    },
+                ))
+            }
             _ => {}
         }
     }
@@ -2026,7 +2040,12 @@ fn paint_inlines(
             if response.clicked() {
                 // `handleMarkdownFragmentClick`: a plain click on `#…`
                 // scrolls to its target; the message resolves it.
-                if url.starts_with('#') {
+                if let Some(task) = url.strip_prefix(TASK_LINK) {
+                    if let Ok(task) = task.parse::<usize>() {
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(egui::Id::new(TASK_CLICKED), task));
+                    }
+                } else if url.starts_with('#') {
                     if !ui.input(|i| i.modifiers.any()) {
                         ui.ctx()
                             .data_mut(|d| d.insert_temp(egui::Id::new(FRAGMENT), url));
@@ -2185,6 +2204,8 @@ pub struct Markdown<'a> {
     pub(crate) line_breaks: bool,
     pub(crate) text_color: Option<Color32>,
     pub(crate) skill_chips: bool,
+    /// Task markers can be ticked (`TASK_CLICKED`).
+    pub(crate) task_links: bool,
     /// Code blocks start wrapped (the `wordWrap` setting).
     pub(crate) word_wrap: bool,
     /// An answer in a project: a shell command can run in its terminal,
@@ -2223,6 +2244,7 @@ impl<'a> Markdown<'a> {
             line_breaks: false,
             text_color: None,
             skill_chips: false,
+            task_links: false,
             word_wrap: true,
             can_run_shell: false,
             streaming: false,
@@ -2284,7 +2306,7 @@ impl<'a> Markdown<'a> {
                 Default::default();
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (text, self.line_breaks, self.skill_chips).hash(&mut hasher);
+        (text, self.line_breaks, self.skill_chips, self.task_links).hash(&mut hasher);
         for record in &self.context_records {
             record.to_string().hash(&mut hasher);
         }
@@ -2298,7 +2320,9 @@ impl<'a> Markdown<'a> {
         }) {
             return parsed;
         }
+        TASK_LINKS.set(self.task_links);
         let mut blocks = parse_with(text, self.line_breaks);
+        TASK_LINKS.set(false);
         if self.skill_chips {
             skill_chip_blocks(&mut blocks);
         }

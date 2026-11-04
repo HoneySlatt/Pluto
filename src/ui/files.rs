@@ -27,7 +27,7 @@ const TREE_WIDTH: f32 = 256.0;
 const CHEVRON: Color32 = Color32::from_rgb(0x84, 0x84, 0x8a);
 const CODE_BACKGROUND: Color32 = Color32::from_rgb(17, 17, 17);
 /// The code line (20px at the default code size).
-fn code_line_height() -> f32 {
+pub(crate) fn code_line_height() -> f32 {
     theme::code_line(20.0)
 }
 
@@ -64,6 +64,8 @@ pub struct FilesState {
     pub render_table: bool,
     /// The open CSV/TSV laid out as a table.
     pub(crate) table: Option<crate::ui::file_previews::TableLayout>,
+    /// The tree entry whose context menu is open.
+    menu: Option<(String, crate::ui::context_menu::State)>,
 }
 
 /// A read file laid out: one galley per line, where each starts and how
@@ -94,6 +96,7 @@ impl Default for FilesState {
             render_markdown: false,
             render_table: true,
             table: None,
+            menu: None,
         }
     }
 }
@@ -159,6 +162,11 @@ impl FilesState {
             return false;
         }
         true
+    }
+
+    /// Reads `key` (`cwd\0path`) again the next time it shows.
+    pub(crate) fn forget_read(&mut self, key: &str) {
+        self.requested.remove(&format!("files-read:{key}"));
     }
 
     /// The tree rows under `directory`, recursing into expanded folders.
@@ -317,6 +325,9 @@ impl App {
             );
             return;
         };
+        if self.workspace_mutated(format!("files:{cwd}")) {
+            self.refresh_files(&cwd);
+        }
         self.files_list(&cwd, "");
         let Some(path) = file else {
             self.file_tree(ui, body, &cwd, None);
@@ -631,6 +642,7 @@ impl App {
         };
         let mut rect = rect;
         rect.min.y += file_previews::truncated_notice(ui, rect, value);
+        let editable = value["truncated"].as_bool() != Some(true);
         let contents = value["contents"].as_str().unwrap_or_default();
         // The read's text stays put until the file is read again.
         let identity = (contents.as_ptr() as usize, contents.len());
@@ -647,6 +659,22 @@ impl App {
         } else {
             f32::INFINITY
         };
+        let background = theme::stock_or(CODE_BACKGROUND, |p| {
+            theme::mix(p.background, p.overlay, 0.03)
+        });
+        if editable && self.edits.editing(&key) {
+            self.file_editor(
+                ui,
+                rect,
+                cwd,
+                path,
+                number_right,
+                code_left,
+                wrap_width,
+                background,
+            );
+            return;
+        }
         let extension = name_of(path).rsplit('.').next().unwrap_or_default();
         // Lines are laid out once per read, width and theme; plain lines
         // until the highlighter answers. epaint rebuilds its font atlas now
@@ -749,6 +777,7 @@ impl App {
             .filter(|(revealed, _, _)| revealed == path)
             .map(|&(_, line, scrolled)| (line, scrolled));
         let mut revealed = false;
+        let mut caret: Option<usize> = None;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         let scroll = if self.files.wrap {
@@ -835,10 +864,38 @@ impl App {
                         theme::code_foreground(),
                     );
                 }
-                ui.allocate_rect(area, Sense::hover());
+                // A click in the code puts the caret there and edits.
+                let response = ui.allocate_rect(area, Sense::click());
+                if editable
+                    && response.clicked()
+                    && let Some(pos) = response.interact_pointer_pos()
+                {
+                    let index = rendered
+                        .tops
+                        .partition_point(|t| top + t <= pos.y)
+                        .saturating_sub(1)
+                        .min(rendered.galleys.len().saturating_sub(1));
+                    let in_line = rendered.galleys.get(index).map_or(0, |galley| {
+                        galley
+                            .cursor_from_pos(
+                                pos - Pos2::new(origin.x + code_left, top + rendered.tops[index]),
+                            )
+                            .index
+                            .0
+                    });
+                    let before: usize = contents
+                        .split('\n')
+                        .take(index)
+                        .map(|l| l.chars().count() + 1)
+                        .sum();
+                    caret = Some(before + in_line);
+                }
             });
         if revealed && let Some(reveal) = &mut self.files.reveal {
             reveal.2 = true;
+        }
+        if let Some(caret) = caret {
+            self.edits.begin(key, contents.to_owned(), caret);
         }
     }
 
@@ -1052,6 +1109,14 @@ impl App {
                         font(12.0, Weight::Regular),
                         theme::alpha(theme::foreground(), fade),
                     );
+                    if response.secondary_clicked()
+                        && let Some(pos) = response.interact_pointer_pos()
+                    {
+                        self.files.menu = Some((
+                            row.entry.path.trim_end_matches('/').to_owned(),
+                            crate::ui::context_menu::State::new(pos),
+                        ));
+                    }
                     if response.clicked() {
                         if row.entry.directory {
                             toggle_folder = Some(row.entry.path.clone());
@@ -1065,6 +1130,7 @@ impl App {
                     Sense::hover(),
                 );
             });
+        self.file_tree_menu(ui, cwd);
         if let Some(folder) = toggle_folder {
             let key = format!("{cwd}\0{folder}");
             if !self.files.expanded.remove(&key) {
@@ -1078,6 +1144,104 @@ impl App {
             let index = panel.active.min(panel.tabs.len().saturating_sub(1));
             if let Some(tab @ PanelTab::Files { .. }) = panel.tabs.get_mut(index) {
                 *tab = PanelTab::Files { file: Some(path) };
+            }
+        }
+    }
+}
+
+impl App {
+    /// `workspaceMutationId`: the latest settled command or file change,
+    /// with the latest checkpoint, after which files on disk may differ.
+    pub(crate) fn workspace_mutation_id(&self) -> Option<String> {
+        let detail = self.current_detail()?;
+        let item = detail
+            .turn_items
+            .iter()
+            .filter(|i| matches!(i.kind.as_str(), "command_execution" | "file_change"))
+            .filter(|i| !matches!(i.status.as_str(), "pending" | "running" | "waiting"))
+            .max_by_key(|i| i.ordinal)
+            .map(|i| i.id.clone());
+        let checkpoint = detail
+            .checkpoints
+            .iter()
+            .map(|c| c.captured_at.clone())
+            .max();
+        (item.is_some() || checkpoint.is_some()).then(|| format!("{item:?}\0{checkpoint:?}"))
+    }
+
+    /// `useWorkspaceMutationRefresh`: true once per mutation and resource.
+    pub(crate) fn workspace_mutated(&mut self, resource: String) -> bool {
+        let Some(id) = self.workspace_mutation_id() else {
+            return false;
+        };
+        match self.workspace_refreshes.insert(resource, id.clone()) {
+            None => false,
+            Some(previous) => previous != id,
+        }
+    }
+
+    /// Asks again for what the surface shows under `cwd` (the listings of
+    /// open folders, the search, the open file), keeping it until the
+    /// answers land.
+    fn refresh_files(&mut self, cwd: &str) {
+        let prefix = format!("{cwd}\0");
+        self.files.requested.retain(|k| !k.contains(&prefix));
+        let open: Vec<String> = self
+            .files
+            .expanded
+            .iter()
+            .filter_map(|k| k.strip_prefix(&prefix).map(str::to_owned))
+            .collect();
+        for folder in open {
+            self.files_list(cwd, &folder);
+        }
+    }
+
+    /// A tree entry's menu (`FileBrowserPanel.tsx` `showEntryContextMenu`):
+    /// the file actions, Copy mention and Add to chat.
+    fn file_tree_menu(&mut self, ui: &mut Ui, cwd: &str) {
+        let Some((path, state)) = self.files.menu.take() else {
+            return;
+        };
+        let mut items = self.file_menu_items();
+        items.push(crate::ui::context_menu::Item::new(
+            "copy-mention",
+            "Copy mention",
+        ));
+        items.push(crate::ui::context_menu::Item::new(
+            "add-to-chat",
+            "Add to chat",
+        ));
+        let mut open = Some(state);
+        let chosen = crate::ui::context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.files.menu = Some((path.clone(), state));
+        }
+        let Some(chosen) = chosen else {
+            return;
+        };
+        self.files.menu = None;
+        let mention = crate::ui::command_menu::file_link(&path);
+        match chosen.as_str() {
+            "copy-mention" => {
+                ui.ctx().copy_text(mention);
+                self.toasts.add(
+                    crate::ui::toasts::Toast::new(
+                        crate::ui::toasts::Kind::Success,
+                        "Mention copied",
+                    )
+                    .description(path),
+                );
+            }
+            "add-to-chat" => {
+                if !self.composer.is_empty() && !self.composer.ends_with(char::is_whitespace) {
+                    self.composer.push(' ');
+                }
+                self.composer.push_str(&format!("{mention} "));
+            }
+            action => {
+                let absolute = format!("{}/{path}", cwd.trim_end_matches('/'));
+                self.activate_file_menu(action, &absolute);
             }
         }
     }

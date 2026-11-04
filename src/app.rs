@@ -375,9 +375,15 @@ pub struct App {
     pub(crate) keybinding_search: Option<String>,
     pub(crate) keybinding_search_focus: bool,
     pub(crate) panel_width: f32,
-    /// Diff scope per thread (`diffPanelStore.ts`), Working tree by default.
+    /// Diff scope per thread (`diffPanelStore.ts`), Changes (the branch) by default.
     pub(crate) diff_scopes: std::collections::HashMap<String, crate::ui::diff_panel::DiffScope>,
     pub(crate) diff_scope_menu: Option<crate::ui::context_menu::State>,
+    /// The diff file header whose file menu is open.
+    pub(crate) diff_file_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// The workspace mutation each surface last refreshed for.
+    pub(crate) workspace_refreshes: std::collections::HashMap<String, String>,
+    /// Files open in the editor.
+    pub(crate) edits: crate::ui::file_editor::Edits,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
@@ -777,6 +783,9 @@ impl App {
             panel_width: 540.0,
             diff_scopes: Default::default(),
             diff_scope_menu: None,
+            diff_file_menu: None,
+            workspace_refreshes: Default::default(),
+            edits: Default::default(),
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_rows: Default::default(),
@@ -1883,6 +1892,7 @@ impl eframe::App for App {
         self.poll_reconnect(ui.ctx());
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
+        self.flush_file_edits(ui.ctx());
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
             Screen::Main if self.settings_page.is_some() => {
@@ -2331,6 +2341,9 @@ impl App {
             || self.turn_send_result(&key, &result)
             || self.scratch_result(&key, &result)
             || self.open_in_result(&key, &result)
+            || self.file_menu_result(&key, &result)
+            || self.file_save_result(&key, &result)
+            || self.markdown_task_result(&key, &result)
             || self.git_result(&key, &result)
             || self.plan_result(&key, &result)
             || self.publish_result(&key, &result)

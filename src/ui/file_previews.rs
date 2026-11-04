@@ -279,6 +279,67 @@ impl App {
         }
     }
 
+    /// A rendered task ticked: `setMarkdownTaskChecked` on its marker,
+    /// shown at once and saved with `projects.writeFile`.
+    fn toggle_markdown_task(&mut self, cwd: &str, path: &str, task: usize) {
+        let key = format!("{cwd}\0{path}");
+        let Some(Ok(read)) = self.files.reads.get_mut(&key) else {
+            return;
+        };
+        let text = read["contents"].as_str().unwrap_or_default().to_owned();
+        let mut options = pulldown_cmark::Options::empty();
+        options.insert(pulldown_cmark::Options::ENABLE_TABLES);
+        options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+        options.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
+        options.insert(pulldown_cmark::Options::ENABLE_GFM);
+        options.insert(pulldown_cmark::Options::ENABLE_FOOTNOTES);
+        let Some((done, offset)) = pulldown_cmark::Parser::new_ext(&text, options)
+            .into_offset_iter()
+            .filter_map(|(event, range)| match event {
+                pulldown_cmark::Event::TaskListMarker(done) => Some((done, range.start)),
+                _ => None,
+            })
+            .nth(task)
+        else {
+            return;
+        };
+        let bytes = text.as_bytes();
+        if bytes.get(offset) != Some(&b'[')
+            || !matches!(bytes.get(offset + 1), Some(b' ' | b'x' | b'X'))
+            || bytes.get(offset + 2) != Some(&b']')
+        {
+            return;
+        }
+        let next = format!(
+            "{}{}{}",
+            &text[..offset + 1],
+            if done { ' ' } else { 'x' },
+            &text[offset + 2..]
+        );
+        read["contents"] = serde_json::json!(next);
+        self.send_request(
+            format!("markdown-task:{key}"),
+            "projects.writeFile",
+            serde_json::json!({"cwd": cwd, "relativePath": path, "contents": next}),
+        );
+    }
+
+    /// The task save's failure: the toast, and the file read again.
+    pub(crate) fn markdown_task_result(
+        &mut self,
+        key: &str,
+        result: &Result<serde_json::Value, String>,
+    ) -> bool {
+        let Some(file) = key.strip_prefix("markdown-task:") else {
+            return false;
+        };
+        if let Err(error) = result {
+            self.notify(crate::ui::toasts::Kind::Error, error.clone());
+            self.files.forget_read(file);
+        }
+        true
+    }
+
     /// `RenderedMarkdownSurface`: the document in a `max-w-4xl px-6 py-5`
     /// column, images resolved beside the file.
     pub(crate) fn rendered_markdown(&mut self, ui: &mut Ui, rect: Rect, cwd: &str, path: &str) {
@@ -287,6 +348,7 @@ impl App {
             return;
         };
         let text = read["contents"].as_str().unwrap_or_default().to_owned();
+        let tasks = read["truncated"].as_bool() != Some(true);
         let folder = path.rsplit_once('/').map(|(folder, _)| folder);
         let base = match folder {
             Some(folder) => format!("{}/{folder}", cwd.trim_end_matches('/')),
@@ -313,6 +375,7 @@ impl App {
                         markdown.media_root = Some(cwd.to_owned());
                         markdown.image_base = Some(base.clone());
                         markdown.media_thread = self.selected.clone();
+                        markdown.task_links = tasks;
                         let height = markdown.show(ui, &text, column);
                         outputs = Some((
                             markdown.opened_file.take(),
@@ -331,6 +394,12 @@ impl App {
                     Sense::hover(),
                 );
             });
+        if let Some(task) = ui
+            .ctx()
+            .data_mut(|d| d.remove_temp::<usize>(egui::Id::new(crate::ui::markdown::TASK_CLICKED)))
+        {
+            self.toggle_markdown_task(cwd, path, task);
+        }
         let Some((opened_file, asset_requests, opened_media, media_menu)) = outputs else {
             return;
         };

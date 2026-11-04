@@ -30,6 +30,8 @@ pub mod diff_panel;
 pub mod drafts;
 pub mod emoji;
 pub mod favicon;
+pub mod file_editor;
+pub mod file_menu;
 pub mod file_previews;
 pub mod files;
 pub mod git_actions;

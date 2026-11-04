@@ -39,6 +39,14 @@ const EDITORS: [(&str, &str, Option<&str>); 21] = [
 
 const REQUEST: &str = "open-in-editor";
 
+/// The editor's label (`EDITORS`).
+pub(crate) fn editor_label(id: &str) -> &str {
+    EDITORS
+        .iter()
+        .find(|(editor, ..)| *editor == id)
+        .map_or(id, |(_, label, _)| label)
+}
+
 /// The editor's mark, and whether it is a brand (drawn in the text color)
 /// rather than the generic folder (muted).
 pub(crate) fn editor_icon(id: &str) -> Option<(&'static str, bool)> {

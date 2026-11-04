@@ -112,8 +112,9 @@ impl DiffLoad {
     }
 }
 
-/// What the diff panel shows (`DiffPanelSelection`): the uncommitted working
-/// tree, the branch against its base, or one turn's checkpoint diff.
+/// What the diff panel shows (`DiffPanelSelection`): the branch against its
+/// base (the default), the uncommitted working tree, or one turn's
+/// checkpoint diff.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DiffScope {
     WorkingTree,
@@ -260,7 +261,7 @@ impl App {
             .diff_scopes
             .get(&thread.id)
             .copied()
-            .unwrap_or(DiffScope::WorkingTree);
+            .unwrap_or(DiffScope::Branch);
         // A selected turn that no longer exists falls back to the latest.
         let selected_turn = match scope {
             DiffScope::Turn(count) => turns
@@ -272,8 +273,8 @@ impl App {
         };
         let turn_scope = matches!(scope, DiffScope::Turn(_));
         let scope_label = match scope {
-            DiffScope::WorkingTree => "Working tree".to_owned(),
-            DiffScope::Branch => "Branch changes".to_owned(),
+            DiffScope::WorkingTree => "Uncommitted".to_owned(),
+            DiffScope::Branch => "Changes".to_owned(),
             DiffScope::Turn(_) if selected_turn == latest => "Latest turn".to_owned(),
             DiffScope::Turn(_) => format!("Turn {}", selected_turn.unwrap_or_default()),
         };
@@ -356,10 +357,14 @@ impl App {
                 )
             }),
         };
+        // Git previews load again after the workspace changes, keeping the
+        // shown diff until then.
+        let refresh = key.as_ref().is_some_and(|k| k.starts_with("preview:"))
+            && self.workspace_mutated(format!("diff:{}", thread.id));
         if let Some(key) = &key
-            && !self.diffs.contains_key(key)
+            && (!self.diffs.contains_key(key) || refresh)
         {
-            self.diffs.insert(key.clone(), DiffLoad::Loading);
+            self.diffs.entry(key.clone()).or_insert(DiffLoad::Loading);
             if let Some(turn) = selected_turn.filter(|_| turn_scope) {
                 let mut payload = json!({"threadId": thread.id, "fromTurnCount": turn.saturating_sub(1), "toTurnCount": turn});
                 if self.diff_ignore_whitespace {
@@ -671,8 +676,8 @@ impl App {
             _ => {
                 let label = match scope {
                     DiffScope::Turn(_) => "Loading checkpoint diff...",
-                    DiffScope::WorkingTree => "Loading working tree diff...",
-                    DiffScope::Branch => "Loading branch diff...",
+                    DiffScope::WorkingTree => "Loading uncommitted changes...",
+                    DiffScope::Branch => "Loading changes...",
                 };
                 centered_note(ui, body, label);
                 return;
@@ -741,7 +746,7 @@ impl App {
         self.diff_list_overflows = output.content_size.y > output.inner_rect.height() + 0.5;
     }
 
-    /// The scope dropdown: Working tree, Branch changes, Latest turn, and a
+    /// The scope dropdown: Changes, Uncommitted, Latest turn, and a
     /// Turn submenu listing every turn with its completion time.
     fn diff_scope_dropdown(
         &mut self,
@@ -766,12 +771,12 @@ impl App {
             .collect();
         let items = vec![
             Item {
-                selected: scope == DiffScope::WorkingTree,
-                ..Item::new("unstaged", "Working tree")
+                selected: scope == DiffScope::Branch,
+                ..Item::new("branch", "Changes")
             },
             Item {
-                selected: scope == DiffScope::Branch,
-                ..Item::new("branch", "Branch changes")
+                selected: scope == DiffScope::WorkingTree,
+                ..Item::new("unstaged", "Uncommitted")
             },
             Item {
                 selected: matches!(scope, DiffScope::Turn(_)) && selected_turn == latest,
@@ -1167,6 +1172,54 @@ impl App {
             font(13.0, Weight::Regular),
             theme::foreground(),
         );
+        // `openDiffFilePrimaryAction`: the path opens the file in a tab.
+        let workspace = self.workspace_cwd();
+        let relative = workspace
+            .as_deref()
+            .and_then(|cwd| crate::ui::file_menu::workspace_path(&file.path, cwd, None));
+        let path_rect = Rect::from_min_size(
+            Pos2::new(row.left() + 58.0, row.top()),
+            Vec2::new(path_width, row.height()),
+        );
+        if let Some(relative) = &relative {
+            let path_click = ui.interact(
+                path_rect,
+                ui.id().with(("diff-open", &file.path)),
+                Sense::click(),
+            );
+            if path_click.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if path_click.clicked() {
+                self.open_file(relative.clone());
+                return false;
+            }
+            if (path_click.secondary_clicked() || response.secondary_clicked())
+                && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+            {
+                self.diff_file_menu = Some((file.path.clone(), context_menu::State::new(pos)));
+            }
+        }
+        if self
+            .diff_file_menu
+            .as_ref()
+            .is_some_and(|(p, _)| *p == file.path)
+            && let (Some(relative), Some(cwd)) = (&relative, &workspace)
+        {
+            let items = self.file_menu_items();
+            let mut open = self.diff_file_menu.take().map(|(_, state)| state);
+            let chosen = context_menu::show(ui, &mut open, &items);
+            if let Some(state) = open {
+                self.diff_file_menu = Some((file.path.clone(), state));
+            }
+            if let Some(action) = chosen {
+                self.diff_file_menu = None;
+                self.activate_file_menu(
+                    &action,
+                    &format!("{}/{relative}", cwd.trim_end_matches('/')),
+                );
+            }
+        }
         let copy = Rect::from_min_size(
             Pos2::new(row.left() + 58.0 + path_width + 8.0, row.top() + 6.0),
             Vec2::splat(20.0),
