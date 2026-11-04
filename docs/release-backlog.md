@@ -68,6 +68,10 @@ Still open (polish, after the later milestones if time allows):
 
 ## 3. Pull requests
 
+Set aside on 2026-11-04 (the user does not use these): only the thread
+links were ported (Linked pull requests surface, Link dialog, palette
+entries). The items below stay unported unless asked for.
+
 - The detail panel (summary, timeline, code with review threads, guide,
   actions, edits, labels, reviewers, reactions, viewed files) and the right
   panel: about 20 `pullRequests.*` methods.
