@@ -386,6 +386,10 @@ pub struct App {
     pub(crate) edits: crate::ui::file_editor::Edits,
     /// Review comments on the diff panel's lines.
     pub(crate) review: crate::ui::diff_review::Review,
+    /// The panel tab whose right-click menu is open.
+    pub(crate) panel_tab_menu: Option<(usize, crate::ui::context_menu::State)>,
+    /// The panels last written to `ui-state.json`.
+    saved_panels: Option<String>,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
@@ -505,6 +509,99 @@ pub(crate) enum PanelTab {
         active: usize,
         vertical: bool,
     },
+}
+
+/// The panels as `ui-state.json` keeps them (`rightPanelStore`): open,
+/// maximized, the tabs and the active one per thread; Browser tabs, whose
+/// pages live in this run's browser, are left out.
+pub(crate) fn panels_to_json(
+    panels: &std::collections::HashMap<String, Panel>,
+) -> serde_json::Value {
+    use serde_json::json;
+    panels
+        .iter()
+        .map(|(thread, panel)| {
+            let tabs: Vec<serde_json::Value> = panel
+                .tabs
+                .iter()
+                .filter_map(|tab| {
+                    Some(match tab {
+                        PanelTab::Diff => json!({"kind": "diff"}),
+                        PanelTab::Files { file } => json!({"kind": "files", "file": file}),
+                        PanelTab::Agents => json!({"kind": "agents"}),
+                        PanelTab::PullRequests => json!({"kind": "pull-requests"}),
+                        PanelTab::Design => json!({"kind": "design"}),
+                        PanelTab::Terminal { id, number, split, active, vertical } => json!({
+                            "kind": "terminal", "id": id, "number": number, "split": split,
+                            "active": active, "vertical": vertical,
+                        }),
+                        PanelTab::Browser { .. } => return None,
+                    })
+                })
+                .collect();
+            let active = panel
+                .active_tab()
+                .and_then(|a| panel.tabs.iter().filter(|t| !matches!(t, PanelTab::Browser { .. })).position(|t| t == a))
+                .unwrap_or(0);
+            (
+                thread.clone(),
+                json!({"open": panel.open, "maximized": panel.maximized, "tabs": tabs, "active": active}),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+pub(crate) fn panels_from_json(
+    value: &serde_json::Value,
+) -> std::collections::HashMap<String, Panel> {
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(thread, panel)| {
+            let tabs: Vec<PanelTab> = panel["tabs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|tab| {
+                    Some(match tab["kind"].as_str()? {
+                        "diff" => PanelTab::Diff,
+                        "files" => PanelTab::Files {
+                            file: tab["file"].as_str().map(str::to_owned),
+                        },
+                        "agents" => PanelTab::Agents,
+                        "pull-requests" => PanelTab::PullRequests,
+                        "design" => PanelTab::Design,
+                        "terminal" => PanelTab::Terminal {
+                            id: tab["id"].as_str()?.to_owned(),
+                            number: tab["number"].as_u64().unwrap_or(1) as usize,
+                            split: tab["split"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|s| s.as_str().map(str::to_owned))
+                                .collect(),
+                            active: tab["active"].as_u64().unwrap_or(0) as usize,
+                            vertical: tab["vertical"] == true,
+                        },
+                        _ => return None,
+                    })
+                })
+                .collect();
+            let active =
+                (panel["active"].as_u64().unwrap_or(0) as usize).min(tabs.len().saturating_sub(1));
+            (
+                thread.clone(),
+                Panel {
+                    open: panel["open"] == true && !tabs.is_empty(),
+                    maximized: panel["maximized"] == true,
+                    tabs,
+                    active,
+                },
+            )
+        })
+        .collect()
 }
 
 impl Panel {
@@ -699,7 +796,9 @@ impl App {
             notice_busy: Default::default(),
             dismissed_thread_errors: Default::default(),
             favorite_models: Default::default(),
-            panels: Default::default(),
+            panels: panels_from_json(
+                &read_ui_state(options.client_settings_path.as_deref())["panels"],
+            ),
             launcher_highlight: None,
             launcher_focused: false,
             palette: Default::default(),
@@ -789,6 +888,8 @@ impl App {
             workspace_refreshes: Default::default(),
             edits: Default::default(),
             review: Default::default(),
+            panel_tab_menu: None,
+            saved_panels: None,
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_rows: Default::default(),
@@ -1896,6 +1997,14 @@ impl eframe::App for App {
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
         self.flush_file_edits(ui.ctx());
+        // The panels are saved when they change.
+        let panels = panels_to_json(&self.panels).to_string();
+        if self.saved_panels.as_deref() != Some(panels.as_str()) {
+            if self.saved_panels.is_some() {
+                save_ui_state(self);
+            }
+            self.saved_panels = Some(panels);
+        }
         match self.screen {
             Screen::Connect => self.connect_screen(ui, rect),
             Screen::Main if self.settings_page.is_some() => {
@@ -2643,6 +2752,7 @@ pub(crate) fn save_ui_state(app: &App) {
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
         "terminalDrawers": crate::ui::terminal_drawer::drawers_to_json(&app.drawers),
+        "panels": panels_to_json(&app.panels),
         "stickyModels": app.sticky_models,
         // Only the server version and permission notices are kept across runs.
         "dismissedNotices": app

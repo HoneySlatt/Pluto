@@ -325,6 +325,7 @@ impl App {
         let mut x = inner.left() + 8.0;
         let mut select = None;
         let mut close = None;
+        let mut menu = None;
         for (index, tab) in panel.tabs.iter().enumerate() {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
@@ -400,60 +401,129 @@ impl App {
                     theme::muted_foreground()
                 },
             );
-            if close_response.clicked() {
+            if close_response.clicked() || response.middle_clicked() {
                 close = Some(index);
             } else if response.clicked() {
                 select = Some(index);
             }
-        }
-        // Closing a terminal's tab ends its session.
-        if let Some(index) = close
-            && let Some(crate::app::PanelTab::Terminal { id, split, .. }) = panel.tabs.get(index)
-            && let Some(thread) = self.selected.clone()
-        {
-            let ids = std::iter::once(id).chain(split.iter()).cloned().collect();
-            self.confirm_close_terminals(&thread, ids, false);
-        } else if let Some(panel) = self.panel_mut() {
-            if let Some(index) = close {
-                if let Some(tab @ crate::app::PanelTab::Browser { id }) =
-                    panel.tabs.get(index).cloned()
-                {
-                    panel.close(index);
-                    let url = self
-                        .preview
-                        .engine
-                        .as_ref()
-                        .and_then(|e| e.tab(id))
-                        .map(|state| state.url)
-                        .filter(|u| !u.trim().is_empty());
-                    self.close_browser_tab(id);
-                    if let Some(thread) = self.selected.clone() {
-                        self.closed_views.insert(0, (thread, tab, url));
-                        self.closed_views.truncate(20);
-                    }
-                    return;
-                }
-                // Diff, Files, Agents and Design can come back
-                // (`closedViewStore`, newest first, 20 at most).
-                if let Some(tab) = panel.tabs.get(index).cloned()
-                    && !matches!(tab, crate::app::PanelTab::Terminal { .. })
-                {
-                    panel.close(index);
-                    if let Some(thread) = self.selected.clone() {
-                        self.closed_views
-                            .retain(|(t, v, _)| !(*t == thread && *v == tab));
-                        self.closed_views.insert(0, (thread, tab, None));
-                        self.closed_views.truncate(20);
-                    }
-                    return;
-                }
-                panel.close(index);
-            } else if let Some(index) = select {
-                panel.active = index;
+            if response.secondary_clicked()
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                menu = Some((index, crate::ui::context_menu::State::new(pos)));
             }
         }
+        if menu.is_some() {
+            self.panel_tab_menu = menu;
+        }
+        if let Some(index) = close {
+            self.close_panel_tab(index, true);
+        } else if let Some(index) = select
+            && let Some(panel) = self.panel_mut()
+        {
+            panel.active = index;
+        }
+        self.panel_tab_menu(ui);
         let add = Rect::from_min_size(Pos2::new(x, 14.0), Vec2::splat(24.0));
         self.add_surface_button(ui, add);
+    }
+
+    /// Closes tab `index`: a terminal's sessions end (asking first when
+    /// `confirm`), a browser tab's page and the other views can come back
+    /// (`closedViewStore`, newest first, 20 at most).
+    fn close_panel_tab(&mut self, index: usize, confirm: bool) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let Some(tab) = self.panel().tabs.get(index).cloned() else {
+            return;
+        };
+        if let crate::app::PanelTab::Terminal { id, split, .. } = &tab {
+            let ids: Vec<String> = std::iter::once(id).chain(split.iter()).cloned().collect();
+            if confirm {
+                self.confirm_close_terminals(&thread, ids, false);
+            } else {
+                for id in ids {
+                    self.close_terminal(&thread, &id);
+                }
+            }
+            return;
+        }
+        let url = match &tab {
+            crate::app::PanelTab::Browser { id } => {
+                let url = self
+                    .preview
+                    .engine
+                    .as_ref()
+                    .and_then(|e| e.tab(*id))
+                    .map(|state| state.url)
+                    .filter(|u| !u.trim().is_empty());
+                self.close_browser_tab(*id);
+                url
+            }
+            _ => None,
+        };
+        if let Some(panel) = self.panel_mut() {
+            panel.close(index);
+        }
+        self.closed_views
+            .retain(|(t, v, _)| !(*t == thread && *v == tab));
+        self.closed_views.insert(0, (thread, tab, url));
+        self.closed_views.truncate(20);
+    }
+
+    /// The tab's right-click menu: Copy path for a file, then Close,
+    /// Close others, Close to the right and Close all (terminals close
+    /// without asking, as upstream's bulk closes do).
+    fn panel_tab_menu(&mut self, ui: &mut Ui) {
+        let Some((index, state)) = self.panel_tab_menu.take() else {
+            return;
+        };
+        let tabs = self.panel().tabs.clone();
+        let Some(tab) = tabs.get(index) else {
+            return;
+        };
+        let mut items = Vec::new();
+        if let crate::app::PanelTab::Files { file: Some(_) } = tab {
+            items.push(crate::ui::context_menu::Item::new("copy-path", "Copy path"));
+        }
+        items.push(crate::ui::context_menu::Item::new("close", "Close"));
+        items.push(crate::ui::context_menu::Item {
+            disabled: tabs.len() <= 1,
+            ..crate::ui::context_menu::Item::new("close-others", "Close others")
+        });
+        items.push(crate::ui::context_menu::Item {
+            disabled: index + 1 >= tabs.len(),
+            ..crate::ui::context_menu::Item::new("close-to-right", "Close to the right")
+        });
+        items.push(crate::ui::context_menu::Item::new("close-all", "Close all"));
+        let mut open = Some(state);
+        let chosen = crate::ui::context_menu::show(ui, &mut open, &items);
+        if let Some(state) = open {
+            self.panel_tab_menu = Some((index, state));
+        }
+        let Some(chosen) = chosen else {
+            return;
+        };
+        self.panel_tab_menu = None;
+        let bulk: Vec<usize> = match chosen.as_str() {
+            "copy-path" => {
+                if let crate::app::PanelTab::Files { file: Some(path) } = tab {
+                    ui.ctx().copy_text(path.clone());
+                }
+                return;
+            }
+            "close" => {
+                self.close_panel_tab(index, true);
+                return;
+            }
+            "close-others" => (0..tabs.len()).filter(|&i| i != index).collect(),
+            "close-to-right" => (index + 1..tabs.len()).collect(),
+            "close-all" => (0..tabs.len()).collect(),
+            _ => return,
+        };
+        for i in bulk.into_iter().rev() {
+            self.close_panel_tab(i, false);
+        }
     }
 
     pub(crate) fn add_surface_button(&mut self, ui: &mut Ui, button: Rect) {
