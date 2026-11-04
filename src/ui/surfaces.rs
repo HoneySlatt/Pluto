@@ -83,7 +83,7 @@ const SURFACES: [Surface; 9] = [
     },
 ];
 
-const ADD_MENU: &str = "add-surface";
+pub(crate) const ADD_MENU: &str = "add-surface";
 const ROW: f32 = 32.0; // h-8
 const ROW_GAP: f32 = 2.0; // gap-0.5
 const WIDTH: f32 = 320.0; // max-w-xs
@@ -430,7 +430,7 @@ impl App {
     /// Closes tab `index`: a terminal's sessions end (asking first when
     /// `confirm`), a browser tab's page and the other views can come back
     /// (`closedViewStore`, newest first, 20 at most).
-    fn close_panel_tab(&mut self, index: usize, confirm: bool) {
+    pub(crate) fn close_panel_tab(&mut self, index: usize, confirm: bool) {
         let Some(thread) = self.selected.clone() else {
             return;
         };

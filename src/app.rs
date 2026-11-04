@@ -390,6 +390,8 @@ pub struct App {
     pub(crate) panel_tab_menu: Option<(usize, crate::ui::context_menu::State)>,
     /// The panels last written to `ui-state.json`.
     saved_panels: Option<String>,
+    /// What proactive panels last saw of each thread.
+    pub(crate) proactive: crate::ui::proactive_panels::Proactive,
     /// Head and base refs of loaded branch diffs, by request key.
     pub(crate) diff_branch_refs: std::collections::HashMap<String, (String, String)>,
     /// Full new-side files of git previews, by `diff-contents:` key.
@@ -890,6 +892,7 @@ impl App {
             review: Default::default(),
             panel_tab_menu: None,
             saved_panels: None,
+            proactive: Default::default(),
             diff_branch_refs: Default::default(),
             diff_contents: Default::default(),
             diff_rows: Default::default(),
@@ -1997,6 +2000,7 @@ impl eframe::App for App {
         let rect = ui.max_rect();
         self.quit_hold(ui, rect);
         self.flush_file_edits(ui.ctx());
+        self.proactive_panels();
         // The panels are saved when they change.
         let panels = panels_to_json(&self.panels).to_string();
         if self.saved_panels.as_deref() != Some(panels.as_str()) {

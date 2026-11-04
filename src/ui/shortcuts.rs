@@ -261,10 +261,16 @@ impl App {
                     return false;
                 };
                 let index = panel.active.min(panel.tabs.len() - 1);
-                panel.close(index);
-                if panel.tabs.is_empty() {
+                self.close_panel_tab(index, true);
+                if let Some(panel) = self.panel_mut()
+                    && panel.tabs.is_empty()
+                {
                     panel.open = false;
                 }
+            }
+            // The tab bar's "+" menu.
+            "rightPanel.new" if !self.panel().tabs.is_empty() => {
+                self.open_menu = Some(crate::ui::surfaces::ADD_MENU.to_owned());
             }
             "diff.toggle" if thread.is_some() => {
                 if let Some(panel) = self.panel_mut() {

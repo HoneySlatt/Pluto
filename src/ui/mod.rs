@@ -63,6 +63,7 @@ pub mod pickers;
 pub mod pixel_logo;
 pub mod plan_card;
 pub mod preview;
+pub mod proactive_panels;
 pub mod project_actions;
 pub mod project_file;
 pub mod project_grouping;
