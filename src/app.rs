@@ -380,6 +380,13 @@ pub struct App {
     pub(crate) diff_scope_menu: Option<crate::ui::context_menu::State>,
     /// The diff file header whose file menu is open.
     pub(crate) diff_file_menu: Option<(String, crate::ui::context_menu::State)>,
+    /// Git previews whose patch was cut: their files load one by one.
+    pub(crate) diff_lazy: std::collections::HashSet<String>,
+    /// Those files' patches by `diff-file:<preview key>\0<path>`: asked
+    /// (`None`), or the file and whether its own patch was cut.
+    #[allow(clippy::type_complexity)]
+    pub(crate) diff_file_patches:
+        std::collections::HashMap<String, Option<(Result<crate::diff::FileDiff, String>, bool)>>,
     /// The workspace mutation each surface last refreshed for.
     pub(crate) workspace_refreshes: std::collections::HashMap<String, String>,
     /// Files open in the editor.
@@ -887,6 +894,8 @@ impl App {
             diff_scopes: Default::default(),
             diff_scope_menu: None,
             diff_file_menu: None,
+            diff_lazy: Default::default(),
+            diff_file_patches: Default::default(),
             workspace_refreshes: Default::default(),
             edits: Default::default(),
             review: Default::default(),
@@ -2520,10 +2529,39 @@ impl App {
                 self.diff_branch_refs
                     .insert(key.clone(), (head.to_owned(), base.to_owned()));
             }
-            self.diffs.insert(
-                key,
-                crate::ui::diff_panel::DiffLoad::from_preview(result, &kind),
-            );
+            let (load, lazy) = crate::ui::diff_panel::DiffLoad::from_preview(result, &kind);
+            // A new comparison: its files' patches load again.
+            let prefix = format!("diff-file:{key}\0");
+            self.diff_file_patches
+                .retain(|k, _| !k.starts_with(&prefix));
+            if lazy {
+                self.diff_lazy.insert(key.clone());
+            } else {
+                self.diff_lazy.remove(&key);
+            }
+            self.diffs.insert(key, load);
+        } else if key.starts_with("diff-file:") {
+            let path = key.rsplit('\0').next().unwrap_or_default().to_owned();
+            let kind = key
+                .strip_prefix("diff-file:preview:")
+                .and_then(|rest| rest.split(':').next())
+                .unwrap_or_default()
+                .to_owned();
+            let truncated = result.as_ref().ok().is_some_and(|value| {
+                value["sources"]
+                    .as_array()
+                    .and_then(|s| s.iter().find(|s| s["kind"] == kind.as_str()))
+                    .is_some_and(|s| s["truncated"] == true)
+            });
+            let file = match crate::ui::diff_panel::DiffLoad::from_preview(result, &kind).0 {
+                crate::ui::diff_panel::DiffLoad::Loaded(files) => files
+                    .into_iter()
+                    .find(|f| f.path == path)
+                    .ok_or_else(|| "Diff no longer available. Refresh the comparison.".to_owned()),
+                crate::ui::diff_panel::DiffLoad::Failed(error) => Err(error),
+                crate::ui::diff_panel::DiffLoad::Loading => return,
+            };
+            self.diff_file_patches.insert(key, Some((file, truncated)));
         } else if key.starts_with("browse:") {
             self.browse
                 .insert(key, crate::ui::palette::Browse::from_result(result));

@@ -96,18 +96,45 @@ impl DiffLoad {
     }
 
     /// The `kind` source ("working-tree" or "branch-range") of a
-    /// `review.getDiffPreview` result.
-    pub fn from_preview(result: Result<Value, String>, kind: &str) -> Self {
+    /// `review.getDiffPreview` result, and whether its patch was cut: then
+    /// the files come from its complete statistics, sorted by path, their
+    /// patches loading one by one (`useReviewFilePatches`).
+    pub fn from_preview(result: Result<Value, String>, kind: &str) -> (Self, bool) {
         match result {
             Ok(value) => {
-                let patch = value["sources"]
+                let source = value["sources"]
                     .as_array()
-                    .and_then(|sources| sources.iter().find(|s| s["kind"] == kind))
-                    .and_then(|source| source["diff"].as_str())
-                    .unwrap_or_default();
-                DiffLoad::Loaded(diff::parse(patch))
+                    .and_then(|sources| sources.iter().find(|s| s["kind"] == kind));
+                if let Some(source) = source
+                    && source["truncated"] == true
+                    && let Some(stats) = source["files"].as_array()
+                {
+                    let mut files: Vec<FileDiff> = stats
+                        .iter()
+                        .map(|stat| {
+                            let old_path = stat["previousPath"].as_str().map(str::to_owned);
+                            FileDiff {
+                                path: stat["path"].as_str().unwrap_or_default().to_owned(),
+                                status: if old_path.is_some() {
+                                    FileStatus::Renamed
+                                } else {
+                                    FileStatus::Modified
+                                },
+                                old_path,
+                                hunks: Vec::new(),
+                                additions: stat["additions"].as_u64().unwrap_or(0) as u32,
+                                deletions: stat["deletions"].as_u64().unwrap_or(0) as u32,
+                                binary: false,
+                            }
+                        })
+                        .collect();
+                    files.sort_by_key(|f| f.path.to_lowercase());
+                    return (DiffLoad::Loaded(files), true);
+                }
+                let patch = source.and_then(|s| s["diff"].as_str()).unwrap_or_default();
+                (DiffLoad::Loaded(diff::parse(patch)), false)
             }
-            Err(message) => DiffLoad::Failed(message),
+            Err(message) => (DiffLoad::Failed(message), false),
         }
     }
 }
@@ -741,7 +768,10 @@ impl App {
                             self.diff_open_files.insert(open_key);
                         }
                     }
-                    if open {
+                    if open && self.diff_lazy.contains(&key) {
+                        self.lazy_file_body(ui, &key, file, list.width(), source.as_ref());
+                        ui.add_space(8.0);
+                    } else if open {
                         self.diff_file_body(ui, file, list.width(), source.as_ref());
                         ui.add_space(8.0);
                     }
@@ -1267,6 +1297,68 @@ impl App {
             right -= width + 6.0;
         }
         response.clicked()
+    }
+
+    /// A file of a cut patch: its own patch, asked for when it opens
+    /// (`review.getDiffPreview` with `file`), with its loading, failure
+    /// ("Retry loading diff") and partial notes (`DiffFileStatus`).
+    fn lazy_file_body(
+        &mut self,
+        ui: &mut Ui,
+        key: &str,
+        file: &FileDiff,
+        width: f32,
+        source: Option<&ContentsSource>,
+    ) {
+        let request = format!("diff-file:{key}\0{}", file.path);
+        let content = width - if self.diff_list_overflows { 6.0 } else { 0.0 };
+        let loaded = match self.diff_file_patches.get(&request) {
+            None => {
+                if let Some(source) = source {
+                    let mut payload = json!({
+                        "cwd": source.cwd,
+                        "ignoreWhitespace": self.diff_ignore_whitespace,
+                        "file": {"path": file.path, "previousPath": file.old_path, "sourceKind": source.kind},
+                    });
+                    if let Some(base) = &source.base {
+                        payload["baseRef"] = json!(base);
+                    }
+                    self.diff_file_patches.insert(request.clone(), None);
+                    self.send_request(request, "review.getDiffPreview", payload);
+                }
+                None
+            }
+            Some(None) => None,
+            Some(Some((Ok(loaded), truncated))) => Some((loaded.clone(), *truncated)),
+            Some(Some((Err(_), _))) => {
+                if separator_row(
+                    ui,
+                    width,
+                    content,
+                    "Retry loading diff",
+                    self.diff_split,
+                    true,
+                ) {
+                    self.diff_file_patches.remove(&request);
+                }
+                return;
+            }
+        };
+        let Some((loaded, truncated)) = loaded else {
+            separator_row(ui, width, content, "Loading diff…", self.diff_split, false);
+            return;
+        };
+        if truncated {
+            separator_row(
+                ui,
+                width,
+                content,
+                "This file is too large to show in full. Counts include all changes.",
+                self.diff_split,
+                false,
+            );
+        }
+        self.diff_file_body(ui, &loaded, width, source);
     }
 
     /// A file's hunks, unified or side by side (`diffStyle`). Rows mirror
