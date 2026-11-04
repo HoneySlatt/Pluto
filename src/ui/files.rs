@@ -590,6 +590,10 @@ impl App {
             self.workspace_image(ui, source, &cwd, &path);
             return;
         }
+        if crate::ui::video::is_video_path(&path) {
+            self.workspace_video(ui, source, &cwd, &path);
+            return;
+        }
         // The read must be in before a rendered view takes over.
         let key = format!("{cwd}\0{path}");
         match (rendered, delimiter, self.files.reads.get(&key)) {

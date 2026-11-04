@@ -48,7 +48,7 @@ Sizes: S = under a day / a few hundred lines, M = a few days, L = a subsystem.
 | Image preview + media menu | `FilePreviewPanel.tsx` `WorkspaceImagePreview` | Done (AVIF partial) | `.avif` is routed to the image preview but the `image` crate is built without AVIF, so it fails with "Unable to load workspace image." | `src/ui/file_previews.rs` 23-35, `Cargo.toml` | S |
 | HTML rendered in place ("Show rendered page" / "Show HTML source") | `FilePreviewPanel.tsx` `WorkspaceBrowserPreview`, `BrowserDocumentFrame.tsx` | Missing | Port only offers "Open file in preview browser" (new Browser tab) | `src/ui/files.rs` 418-425 | M |
 | PDF in place | `BrowserDocumentFrame.tsx` (`pdf`) | Missing | Same as HTML; only the Browser-tab hand-off | `src/ui/files.rs` | M |
-| Video preview | `FilePreviewPanel.tsx` `WorkspaceVideoPreview` | Missing | `<video>` with the `media-file` asset URL, refresh on mutation, "Unable to load video." | — | M/L |
+| Video preview | `FilePreviewPanel.tsx` `WorkspaceVideoPreview` | Done | Media menu | `src/ui/file_previews.rs` `workspace_video` | — |
 | Audio preview | `AudioPreview.tsx`, `WorkspaceAudioPreview` | Missing | `<audio>` player, "Unable to load audio." | — | M |
 | Attachment surfaces (chat attachments opened in the panel) | `AttachmentFilePreview.tsx`, `rightPanelStore.openAttachment` | Missing | Copy contents/preview, Save file, Remove from draft, word wrap, media modes (blocked on file attachments, not ported) | — | M |
 | Go to file | `ProjectFilePicker.tsx`, `ProjectFilePicker.logic.ts` | Done | Lives in the palette with upstream labels | `src/ui/palette.rs` | — |

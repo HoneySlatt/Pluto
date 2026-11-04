@@ -6,9 +6,10 @@
 //! `filePreviewMode.ts`.
 //!
 //! An image file shows through a signed `workspace-file` asset URL with its
-//! media menu; Markdown renders with the chat's renderer (read-only: task
-//! boxes are not toggled); a CSV/TSV renders as a table of at most 100 rows
-//! and 30 columns. Not ported: video, audio, PDF and HTML previews.
+//! media menu; Markdown renders with the chat's renderer (its task
+//! boxes tick and save); a CSV/TSV renders as a table of at most 100 rows
+//! and 30 columns; a video plays in the player (`WorkspaceVideoPreview`).
+//! Not ported: audio, PDF and HTML previews in place.
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, Galley, Pos2, Rect, Sense, Ui, Vec2};
@@ -215,6 +216,45 @@ impl App {
     /// `WorkspaceImagePreview`: the image centered at most at its natural
     /// size (`max-h-full max-w-full object-contain`, `p-4`), a spinner while
     /// it loads; a right click opens its menu.
+    /// `WorkspaceVideoPreview`: the file's `media-file` URL in the player,
+    /// centered (`max-w-5xl p-4`); a workspace change asks for it again.
+    pub(crate) fn workspace_video(&mut self, ui: &mut Ui, rect: Rect, cwd: &str, path: &str) {
+        let Some(thread) = self.selected.clone() else {
+            return;
+        };
+        let absolute = format!("{}/{}", cwd.trim_end_matches('/'), path);
+        let revision = self.workspace_mutation_id().unwrap_or_default();
+        let key = format!("file-video:{thread}:{absolute}\0{revision}");
+        if !crate::ui::video::requested(&key) {
+            crate::ui::video::mark_requested(&key);
+            self.send_request(
+                format!("video-url:{key}"),
+                "assets.createUrl",
+                serde_json::json!({"resource": {
+                    "_tag": "media-file", "threadId": thread, "path": absolute,
+                }}),
+            );
+        }
+        let area = rect.shrink(16.0);
+        let limit = Vec2::new(area.width().min(1024.0), area.height());
+        let size = crate::ui::video::natural_size(&key).map_or(
+            Vec2::new(limit.x, (limit.x * 9.0 / 16.0).min(limit.y)),
+            |(w, h)| {
+                let (w, h) = (w.max(1) as f32, h.max(1) as f32);
+                let scale = 1.0_f32.min(limit.x / w).min(limit.y / h);
+                Vec2::new((w * scale).round(), (h * scale).round())
+            },
+        );
+        let name = path.rsplit('/').next().unwrap_or(path);
+        crate::ui::video::player(
+            ui,
+            &key,
+            Rect::from_center_size(area.center(), size),
+            name,
+            false,
+        );
+    }
+
     pub(crate) fn workspace_image(&mut self, ui: &mut Ui, rect: Rect, cwd: &str, path: &str) {
         use crate::ui::attachments::{self, MediaState};
         let Some(thread) = self.selected.clone() else {
