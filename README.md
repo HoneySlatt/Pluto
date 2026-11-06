@@ -10,6 +10,11 @@ WebSocket protocol (Effect RPC envelopes, orchestration protocol 2, T3 Code
 v0.1.0). The interface was ported from v0.0.45; v0.1.0's interface changes are
 being ported (see "Protocol 2" below).
 
+Since 2026-11-06 Pluto no longer aims at parity with T3 Code. It gets a server of its own in Rust,
+and its client moves to uwui, the owner's UI framework. The parity sections below describe the
+client as it is, frozen meanwhile. The direction is in [`docs/ROADMAP.md`](docs/ROADMAP.md), the
+current work in [`docs/PLAN.md`](docs/PLAN.md).
+
 ## Running
 
 ```sh

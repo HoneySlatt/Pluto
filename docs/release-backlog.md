@@ -1,5 +1,9 @@
 # Backlog to the first release
 
+> Abandoned on 2026-11-06: Pluto no longer aims at parity with T3 Code
+> ([ADR-0010](adr/0010-todays-features-triaged.md)). This file stays as the record of what was
+> done until the triage has used it; the current work is in [`PLAN.md`](PLAN.md).
+
 The release is private (the repository stays private) and complete: every feature of T3 Code v0.1.0's client
 is ported (the ACP registry stays out on purpose), the Android app gets its
 background notifications, and the programs ship with their notices.
