@@ -2,24 +2,29 @@
 
 # Pluto
 
-A native [egui](https://github.com/emilk/egui) client for the Pluto server, a
-fork of the [T3 Code](https://t3.codes) server that adds native Kimi Code,
-Mistral Vibe and Z Code drivers (`~/Projects/pluto-server`, see its `PLUTO.md`). The
-client reproduces the interface of T3's web/Electron client and speaks its
-WebSocket protocol (Effect RPC envelopes, orchestration protocol 2, T3 Code
-v0.1.0). The interface was ported from v0.0.45; v0.1.0's interface changes are
-being ported (see "Protocol 2" below).
+Pluto aims to be one place to work with every coding agent and every model: Claude Code, Codex,
+OpenCode, Kimi Code, Mistral Vibe, Z Code, the ACP agents, DeepSeek and local models through
+Ollama, for code and for chat. It is native, frugal and private, in Rust, for Linux first.
 
-Since 2026-11-06 Pluto no longer aims at parity with T3 Code. It gets a server of its own in Rust,
-and its client moves to uwui, the owner's UI framework. The parity sections below describe the
-client as it is, frozen meanwhile. The direction is in [`docs/ROADMAP.md`](docs/ROADMAP.md), the
-current work in [`docs/PLAN.md`](docs/PLAN.md).
+Pluto changed direction on 2026-11-06 ([ADR-0003](docs/adr/0003-what-pluto-is-to-become.md)): it no
+longer aims at parity with T3 Code. What exists today:
+
+- a native desktop client on [egui](https://github.com/emilk/egui) (`src/`), frozen except fixes
+  until it moves to uwui, the owner's UI framework;
+- an Android app in Kotlin and Compose (`android/`) over the same Rust core (`crates/pluto-core`);
+- both speak to `pluto-server`, a frozen fork of [T3 Code](https://t3.codes)'s server, in its
+  protocol (Effect RPC envelopes, orchestration protocol 2). Pluto's own server, in Rust, replaces
+  it step by step ([ADR-0004](docs/adr/0004-plutos-own-server-in-rust.md)).
+
+How the code fits together is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the direction in
+[`docs/ROADMAP.md`](docs/ROADMAP.md); the current work in [`docs/PLAN.md`](docs/PLAN.md). The
+sections from *What is ported* on describe the desktop client as it is, frozen meanwhile.
 
 ## Running
 
 ```sh
-# NixOS: provides the Vulkan/Wayland/X11 libraries eframe loads at runtime.
-nix-shell --run 'cargo run --release -- --server http://127.0.0.1:3774'
+# NixOS: the toolchain, and the Vulkan/Wayland/X11 libraries eframe loads at runtime.
+nix develop --command cargo run --release -- --server http://127.0.0.1:3774
 ```
 
 The connection screen asks for the server address and an access token. Issue a
@@ -181,7 +186,7 @@ frame rates, latency and battery remain to be measured on a phone.
 ## Development
 
 ```sh
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+nix develop --command scripts/check.sh   # every check CI runs; its head lists them
 ```
 
 Visual parity is checked on identical synthetic data (the snapshot example

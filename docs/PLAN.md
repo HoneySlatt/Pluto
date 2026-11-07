@@ -15,14 +15,15 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
-- Stage 1 starts: today measured, then the triage. Next: [M1.1](#m11--under-the-method).
+- Stage 1: [M1.1](#m11--under-the-method) is done locally; its first CI run waits for the owner's
+  go. Next: [M1.2](#m12--today-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
 
 ## Status
 
 | Milestone | Goal | Status |
 |---|---|---|
-| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Planned |
+| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done locally; CI waits for the owner's go |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Planned |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Planned |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
@@ -31,8 +32,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 ## Stage 1 — The ground measured and triaged
 
 Start the new direction from facts: today's figures, and a feature set the owner has chosen. The
-server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triaged.md)), and on 2026-11-07 chose a harness of its own
-  ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
+server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triaged.md)).
 
 ### M1.1 — Under the method
 
@@ -49,6 +49,10 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **How to test.** `scripts/check.sh`, then the CI run.
 - **Measured.** The check's duration, locally and in CI: at most 20 minutes.
 - **By hand.** The owner allows the push, and the CI minutes of a private repository.
+- **Where it stands (2026-11-07).** The script, `deny.toml`, the CI workflow, `ARCHITECTURE.md`,
+  the README's top and [ADR-0012](adr/0012-the-checks-and-ci.md) are written; the check passes in
+  `nix develop`, timed in [`measurements.md`](measurements.md#the-check). Left: the first push and
+  its CI run, once the owner allows them.
 
 ### M1.2 — Today measured
 
@@ -126,7 +130,25 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - The Z Code driver has never run a real turn.
 - `docs/release-backlog.md` describes a plan that no longer exists. It stays for its record of what
   was done, and is removed once the triage has used it.
-- Visual checks against the reference are manual (`examples/snapshot.rs`).
+- Visual checks against the reference are manual (`examples/snapshot.rs`). M1.1 put it off: the
+  reference is T3's web client, whose parity is abandoned. M1.3 decides whether the comparison
+  stays; the uwui client's visual checks replace it.
+- `deny.toml` ignores six advisories of unmaintained crates with no maintained release their
+  parents accept: bincode (syntect), ttf-parser and rustybuzz (resvg 0.45, which egui_extras
+  requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5). Followed by the
+  dependency update at Stage 1's end; those of the egui client leave with it.
+- The core's connection thread wakes at least once a second while connected
+  (`wait` in `crates/pluto-core/src/protocol.rs`), against the bar's zero wake-ups at rest. M1.2
+  measures it with the client's other wake-ups. By the owner's decision of 2026-11-07, it stays
+  until Pluto's own protocol replaces this code in Stage 2.
+- The desktop fetches favicons from Google's favicon service and loads messages' `https:` images
+  of its own accord, against "nothing leaves the machine of Pluto's own accord". By the owner's
+  decision of 2026-11-07, the triage (M1.3) decides it and the cuts (M1.4) apply it.
+- CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
+  locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
+- `examples/tmp_shot.rs` calls itself throwaway but stays in the tree. Followed by M1.4.
+- CI's weekly run only happens on the default branch, `main`, which holds only the initial commit:
+  it starts when the work reaches `main`, which the owner decides. Followed by Stage 1's audit.
 
 Finished stages move to `docs/history.md`, created when the first one ends, in a few lines
 each, so that this file holds the current stage only, under about 2,000 words.

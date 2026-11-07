@@ -16,11 +16,11 @@ Bundled assets and their licenses:
 | pierre-dark, pierre-light code themes | @pierre/theme | MIT | `assets/PIERRE-THEME-LICENSE` |
 
 The provider logos (`assets/icons/provider-*`, `claude.svg`, `openai.svg`,
-and their copies in `mobile/assets/icons`) are trademarks of their owners
+and their copies in `crates/pluto-ffi/assets/marks`) are trademarks of their owners
 (Anthropic, OpenAI, Google, Moonshot AI, Mistral AI, Zhipu AI, xAI, GitHub,
 Anysphere, Ollama and the others shown). They only identify each provider;
 Pluto is not affiliated with these companies.
 
 The Rust crates the programs link keep their own licenses; their notices are
-generated with cargo-about (`scripts/mobile-notice.sh` for the Android app,
+generated with cargo-about (`android/app/notice.gradle.kts` for the Android app,
 shown on its Open source licenses page).

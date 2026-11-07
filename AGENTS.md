@@ -28,7 +28,7 @@ understand it from the repository alone. Documentation is part of every delivera
 
 - `docs/PLAN.md`, its *Current* section and the current milestone: what to do now.
 - When planning, or when the task touches a decision: `docs/ROADMAP.md` (direction, stages, the
-  quality bar), `docs/ARCHITECTURE.md` once it exists, and `docs/adr/`.
+  quality bar), `docs/ARCHITECTURE.md` (the code's parts and flows), and `docs/adr/`.
 - `docs/uwui-needs.md` before any change to what the client asks of its UI framework.
 
 You remember nothing from earlier sessions. What is not written in these files is lost.
@@ -45,8 +45,8 @@ You remember nothing from earlier sessions. What is not written in these files i
 ## Commands
 
 ```sh
-nix-shell                     # the libraries eframe loads; `nix develop .#mobile` for Android
-scripts/check.sh              # fmt, clippy -D warnings, tests; `--apk` builds Android too
+nix develop                   # the toolchain, the checks' tools, eframe's libraries; `.#mobile` for Android
+scripts/check.sh              # every check CI runs (its head lists them); `--apk` builds Android too
 scripts/fixture-server.sh     # a disposable server on :3999 with synthetic threads
 cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer
 ```
