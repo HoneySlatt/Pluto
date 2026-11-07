@@ -22,6 +22,8 @@ New ADRs copy the template below and take the next free number.
 | [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Accepted |
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
+| [0014](0014-how-today-is-measured.md) | How today is measured | Accepted |
+| [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted |
 
 ## Template
 

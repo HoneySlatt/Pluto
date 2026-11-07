@@ -50,26 +50,24 @@ Hardware:
   the client and a server with two or three agents. Its display and storage are not yet measured.
 - **Phone**: the owner's Pixel, under GrapheneOS.
 
-Budgets, validated by the owner on 2026-11-06. Most are not yet met: today's figures are beside
-them.
+Budgets, validated by the owner on 2026-11-06; the last six on 2026-11-07, from the measurements of
+[M1.2](PLAN.md#m12--today-measured) ([ADR-0015](adr/0015-the-budgets-set-from-todays-figures.md)).
+Most are not yet met: today's figures are beside them, and each gap is known debt.
 
 | Budget | Target | Today | Measured by | Checked in |
 |---|---|---|---|---|
-| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB resident with 15 threads open | 163 MB in use, not at rest | `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
-| Server at rest | at most 80 MB resident, agents' processes and Chromium excluded; 0 wake-ups of its own | Node: 514 MB under load, 37 threads | `/proc/<pid>/status`, `pidstat -w` | CI |
-| Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | not measured | the log's times, `hyperfine` | by hand at each milestone |
-| A long thread | 5,000 messages scroll at the display's rate: 240 Hz on the high tier (p99 4.17 ms), 60 Hz on the HP | not measured | `examples/bench.rs`, extended | by hand at each milestone |
-| Streaming | 15 threads streaming at once, no frame over budget at p99 | not measured | the bench, on recorded streams | by hand at each milestone |
-| The HP | the client, a server and three agents without swap | not measured | `/proc/meminfo`, `vmstat` | by hand at each stage |
-
-Without a figure yet: each is set from the measurements of [M1.2](PLAN.md#m12--today-measured),
-and the owner validates it:
-- input to present, within one frame at p99, as uwui's;
-- the binary's size;
-- an event's latency from server to client;
-- the history's import time;
-- an idle agent's resume time;
-- the database's growth per day of use.
+| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB resident with 15 threads open | 0.05 frames and 3.2 wake-ups a second; 143 MB ([measured](measurements.md#the-client-at-rest)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
+| Server at rest | at most 80 MB resident, agents' processes and Chromium excluded; 0 wake-ups of its own | the fork: 394 to 892 MB, 4 to 30 wake-ups a second ([measured](measurements.md#the-fork)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | CI |
+| Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | 125 ms warm, 195 ms cold, to its painting ([measured](measurements.md#the-start)) | `examples/live.rs`, `hyperfine` | by hand at each milestone |
+| A long thread | 5,000 messages scroll at the display's rate: 240 Hz on the high tier (p99 4.17 ms), 60 Hz on the HP | p99 8.5 ms, UI pass only, at 1440 × 900 ([measured](measurements.md#a-long-thread-and-streams)) | `examples/bench.rs` | by hand at each milestone |
+| Streaming | 15 threads streaming at once, no frame over budget at p99 | p99 3.6 ms, UI pass only, at 1440 × 900, on replayed streams ([measured](measurements.md#a-long-thread-and-streams)) | the bench, on recorded streams from M1.5 | by hand at each milestone |
+| The HP | the client, a server and three agents without swap | not measured: its commands are ready ([the HP](measurements.md#the-hp)) | `/proc/meminfo`, `vmstat` | by hand at each stage |
+| Input to present | within one frame at p99, as uwui's | not measured: the client does not ask for the compositor's presentation times | the compositor's presentation feedback | from Stage 6, on uwui |
+| The binary's size | each binary, client and server, at most 30 MB stripped | the client, 59.5 MB stripped ([measured](measurements.md#the-budgets-m12-set)) | the stripped binary's size | by hand at each stage |
+| An event's latency | server to client, p99 within 5 ms on loopback, 16 ms on the local network | not measured: the fixture runs no turn | the protocol's tests | from Stage 2 |
+| The history's import | at most 60 s on the high tier, 5 min on the HP, resumable | not measured: 2.79 GiB to import ([measured](measurements.md#the-forks-database)) | timed on a copy of the owner's history | Stage 3 |
+| An idle agent's resume | its first event within 2 s of the message sent, high tier | not measured: it needs a real agent | by the owner, by hand | from Stage 2 |
+| The database's growth | at most 25 MiB a day of heavy use | about 240 MiB a day ([measured](measurements.md#the-forks-database)) | the database's size, day by day | from Stage 2 |
 
 Also held, without a figure:
 - WCAG 2.2 AA: a screen reader, the whole application by the keyboard, contrasts checked, reduced

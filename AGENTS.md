@@ -132,7 +132,8 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
 
 ## Commits
 
-- No commit and no push without the owner's permission in this repository.
+- Commit and push whenever the work needs it, without asking (the owner's decision of
+  2026-11-07), once `scripts/check.sh` passes; then follow CI to the end.
 - One logical change per commit, in English, its subject in the imperative.
 - Never commit code that fails the checks. A check that fails on the main branch is fixed before
   any new work.

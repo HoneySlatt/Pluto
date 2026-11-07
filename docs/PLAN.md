@@ -15,8 +15,10 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
-- Stage 1: [M1.1](#m11--under-the-method) is done. Work happens on `main` since 2026-11-07. Next:
-  [M1.2](#m12--today-measured).
+- Stage 1: [M1.1](#m11--under-the-method) and [M1.2](#m12--today-measured) are done, the HP's
+  figures to come by the owner's hand. Work happens on `main` since 2026-11-07. Next: a short
+  session that fixes the thread opening at its top ([Known debt](#known-debt)), then
+  [M1.3](#m13--the-triage).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
 
 ## Status
@@ -24,7 +26,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | Milestone | Goal | Status |
 |---|---|---|
 | [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done |
-| [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Planned |
+| [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Planned |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Planned |
@@ -65,7 +67,7 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
     - its warm and cold start;
     - the bench on a long thread, extended to 5,000 messages and 15 streams replayed.
   - The fork's resident memory at rest, from outside.
-  - What fills the fork's 2.7 GiB database, on a copy: tables, sizes, the kinds of rows.
+  - What fills the fork's 2.8 GiB database, on a copy: tables, sizes, the kinds of rows.
   - The commands for the HP, which the owner runs there.
   - The figures in `docs/measurements.md`; proposed figures for the budgets left without one.
 - **Done when.** Each budget of the quality bar has a measured figure or says why not. The owner
@@ -73,6 +75,12 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **How to test.** The bench and the scripts named in `docs/measurements.md`.
 - **Measured.** Everything above.
 - **By hand.** The HP's figures, run by the owner.
+- **Done (2026-11-07).** Everything but the HP is measured on the desktop, in
+  [`measurements.md`](measurements.md), by `scripts/measure.sh` in the new `.#measure` shell
+  ([ADR-0014](adr/0014-how-today-is-measured.md)). The fixture builds again: T3 v0.0.45 is pinned
+  in the flake. The six budgets without a figure are set, validated by the owner
+  ([ADR-0015](adr/0015-the-budgets-set-from-todays-figures.md)). The HP's commands are written;
+  the owner runs them, and their figures go to `measurements.md`.
 
 ### M1.3 — The triage
 
@@ -123,6 +131,8 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   - voice dictation with whisper;
   - Ollama's model management (now in Stage 3);
   - a Nix build without the web client.
+- For `uwui-needs.md`: accessibility that wakes nothing at rest (AccessKit wakes today's client
+  twice a second); fonts held once (today's client holds 12.7 MiB of them, some bytes twice).
 
 ## Known debt
 
@@ -139,9 +149,26 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5). Followed by the
   dependency update at Stage 1's end; those of the egui client leave with it.
 - The core's connection thread wakes at least once a second while connected
-  (`wait` in `crates/pluto-core/src/protocol.rs`), against the bar's zero wake-ups at rest. M1.2
-  measures it with the client's other wake-ups. By the owner's decision of 2026-11-07, it stays
-  until Pluto's own protocol replaces this code in Stage 2.
+  (`wait` in `crates/pluto-core/src/protocol.rs`), against the bar's zero wake-ups at rest: 1.1 a
+  second, measured by M1.2. By the owner's decision of 2026-11-07, it stays until Pluto's own
+  protocol replaces this code in Stage 2.
+- AccessKit's D-Bus thread (`blocking-1`, zbus) wakes the client twice a second at rest, the
+  largest of its wake-ups (M1.2). It comes with eframe's accessibility, which the screen reader
+  needs. Followed by Stage 6: the uwui client leaves eframe.
+- A thread opened after another was left scrolled away from its end opens at its top, not its
+  end, and so does not follow an answer streaming in until scrolled down. Found by M1.2's frame
+  bench, not yet seen in a real window. The likely cause, unconfirmed: `TimelineView::open`
+  (`src/ui/timeline_view.rs`) resets `follow` but keeps the previous thread's offset. By the
+  owner's decision of 2026-11-07, a short session fixes it before M1.3, test first.
+- The budgets M1.2 found missed ([`measurements.md`](measurements.md)), kept as debt by the owner's
+  decision of 2026-11-07:
+  - the client at rest: 143 MB against 100, 3.2 wake-ups a second against 0;
+  - its warm start: 125 ms against 100;
+  - the 5,000-message thread: p99 8.5 ms a frame against 4.17;
+  - the fork at rest: 394 to 892 MB against 80, 4 to 30 wake-ups a second against 0.
+
+  Followed by Stage 2 for the server, whose Rust server replaces the fork, and by Stage 6 for the
+  client, which the uwui client replaces. The egui client is frozen and is not tuned meanwhile.
 - The desktop fetches favicons from Google's favicon service and loads messages' `https:` images
   of its own accord, against "nothing leaves the machine of Pluto's own accord". By the owner's
   decision of 2026-11-07, the triage (M1.3) decides it and the cuts (M1.4) apply it.

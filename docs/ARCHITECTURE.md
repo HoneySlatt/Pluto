@@ -163,19 +163,26 @@ The desktop client re-exports most of these modules under its own name (`src/lib
 - Tests: in the modules of each crate, and `tests/ui.rs`, which drives the desktop's screens with
   `egui_kittest` without rendering them, so without a GPU. The Android app has one file of Kotlin unit tests (`LocalNetworkTest.kt`), which
   `scripts/check.sh --apk` runs.
-- `examples/bench.rs` measures the cost of each frame against a server; `examples/snapshot.rs`
-  renders the client to a PNG for comparison with the reference; `examples/probe.rs` prints what a
-  server sends at connection. `examples/tmp_shot.rs` is a leftover of the snapshot work.
+- `examples/bench.rs` measures the cost of each frame against a server, the 5,000-message thread
+  and 15 replayed streams among its scenarios; `examples/live.rs` runs the client in a real window
+  for the start and the rest; `examples/snapshot.rs` renders the client to a PNG for comparison with
+  the reference; `examples/probe.rs` prints what a server sends at connection.
+  `examples/tmp_shot.rs` is a leftover of the snapshot work. The examples drive `App` through a few
+  public methods marked for benches (`open_thread_titled`, `load_earlier_turns`,
+  `load_offline_shell` and their kin, in `src/app.rs`); the client itself never calls them.
+- `scripts/measure.sh`, in `nix develop .#measure`, takes the figures of
+  [`measurements.md`](measurements.md) ([ADR-0014](adr/0014-how-today-is-measured.md)).
 - `scripts/fixture-server.sh` starts a disposable server with synthetic threads
-  (`scripts/seed-fixture.mjs`); `scripts/reference/` captures T3's web client for the visual
-  comparison; `scripts/gen-*.mjs` generate the icons' sources.
+  (`scripts/seed-fixture.mjs`), seeded through T3 Code v0.0.45's server, the flake's `fixture-t3`;
+  `scripts/reference/` captures T3's web client for the visual comparison; `scripts/gen-*.mjs`
+  generate the icons' sources.
 
 ## Limits of the code as it is
 
 - The core uses `eventfd` and `poll()`: it builds for Linux and Android only.
 - The connection's thread wakes at least once a second while connected, to check its deadlines and
-  send the ping every 15 seconds: not yet the zero wake-ups at rest of the quality bar. M1.2
-  measures it.
+  send the ping every 15 seconds: 1.1 times a second at rest, measured by M1.2, against the zero
+  wake-ups of the quality bar.
 - The interface, the core's errors and the server's routes keep T3's names, and many comments cite
   the T3 file a piece was ported from: Pluto was a port until
   [ADR-0003](adr/0003-what-pluto-is-to-become.md).

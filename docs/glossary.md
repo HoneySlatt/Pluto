@@ -10,10 +10,18 @@ Terms this project uses in a sense of its own.
   agent.
 - **The bench**: Pluto's small fixed set of coding tasks, run on the owner's local models to measure
   the harness and each of its components.
+- **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
+  against a server; not to be confused with the bench above.
 - **Model profile**: the harness's settings for one model: its edit format, tool names, message
   format, and which components are on.
 - **Driver**: the server's code that speaks one agent's protocol and turns it into Pluto's threads.
   *Native* when written for that agent, *ACP* when it goes through the Agent Client Protocol.
+- **At rest**: a client or a server with nothing to do: no input, no turn running. The quality bar
+  asks it to draw nothing and wake for nothing.
+- **First useful frame**: the first frame the client draws with the server's projects and threads;
+  the start's budget ends when it is painted ([ADR-0014](adr/0014-how-today-is-measured.md)).
+- **The fixture**: the disposable server of synthetic threads that `scripts/fixture-server.sh`
+  builds, on which every automated measurement runs, never on the owner's data.
 - **The fork**: `pluto-server`, the TypeScript fork of T3 Code's server, frozen since 2026-11-06.
 - **The gateway**: the part of Pluto's Rust server that forwards to the fork what is not yet
   ported, and translates its protocol into Pluto's. It disappears when the fork stops.

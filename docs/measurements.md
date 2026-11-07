@@ -39,3 +39,219 @@ branch, and every run before it was on another branch.
 The warm run ([run 42339784714](https://github.com/HoneySlatt/Pluto/actions/runs/42339784714),
 commit `c0d0671`): restoring the cache 59 s, the Nix shell 38 s, clippy 17 s, the tests 54 s,
 cargo-deny and the links 2 s.
+
+## How the client and the fork are measured
+
+`scripts/measure.sh`, in `nix develop .#measure`, with `scripts/fixture-server.sh` running, takes
+every figure below except the database's ([ADR-0014](adr/0014-how-today-is-measured.md)). Its head
+says what each step does; it writes its raw output to `/tmp/pluto-measure`. The client runs in a
+headless weston, 1920 × 1080 at scale 1, in its default window of 1440 × 900, with a throwaway home
+and session bus; turns are blocked. The frame bench, `examples/bench.rs`, runs without a window, in
+a screen of 1440 × 900 points at scale 1, and counts each frame's CPU time only: neither the GPU's
+work nor the compositor's. A window of the high tier's 3840 × 2160 lays out more rows a frame, so
+the costs there are likely higher than these.
+
+The fixture, since M1.2: the threads of before, plus "Fil de 5 000 messages" (2,500 turns of a
+prompt, a command and a Markdown answer with a list, a code block and a table), and "Flux 01" to
+"Flux 15", three turns each, for the streams (`scripts/seed-fixture.mjs`).
+
+Every figure of the sections below: the owner's desktop, the high tier, 2026-11-07, the client at
+`d0d79f5` with M1.2's measuring hooks.
+
+## The client at rest
+
+Budget: 0 frames and 0 wake-ups of its own a second; at most 100 MB resident with 15 threads open.
+At rest here: the 15 "Flux" threads and the 5,000-message one opened in turn, 5 seconds to settle,
+then 60 seconds counted. The long thread is held as it opens, on its last ten turns. Timers of a
+longer period, such as the core's five-minute retention of threads left, fall outside the 60
+seconds.
+
+| What | Today |
+|---|---|
+| Frames | 4 in 60 s, one of them the measurement's own: 0.05 a second |
+| Wake-ups | 3.2 a second: AccessKit's D-Bus thread `blocking-1` 2.0, the core's connection thread 1.1, the clipboard's 0.07, the interface's thread 0.05 |
+| Resident | 143 MB: 95 MB of mapped files, 48 MB anonymous |
+| The heap, live | 34 MB (32.1 MiB), split below |
+
+Of the 4 frames, one is the measurement's own timer; which of the client's 46
+`request_repaint_after` calls (counted in `src/`) asked for the 3 others is not known. The connection
+thread's wake-up a second is known debt ([PLAN](PLAN.md#known-debt)). `blocking-1` belongs to zbus,
+which only AccessKit, egui's accessibility, brings in; it woke as often in the first runs, before
+the sandbox had a session bus of its own, as with one.
+
+The mapped files are the binary, 74.5 MB unstripped, and the libraries, the GPU driver's among
+them. The anonymous memory is the heap, plus the allocator's slack, the threads' stacks and the
+driver's own mappings.
+
+The heap at rest, by what holds it (heaptrack, `heap_split` in the script):
+
+| What holds it | MiB | Share |
+|---|---|---|
+| Fonts: their files, read and copied, and the glyph atlas | 12.69 | 39.6 % |
+| Syntax highlighting: syntect's syntaxes and their compiled expressions | 8.12 | 25.3 % |
+| The GPU driver and wgpu, their CPU side | 6.35 | 19.8 % |
+| Text laid out (egui's galleys) | 1.84 | 5.8 % |
+| The timeline and the server's state | 1.65 | 5.1 % |
+| Images and icons | 1.04 | 3.2 % |
+| The rest | 0.37 | 1.1 % |
+| In all | 32.05 | |
+
+The fonts' share holds the same bytes several times: `install_fonts` (`src/theme.rs`) reads font
+files, then egui copies each one again (`blob_from_font_data`, 4.9 MiB). The timeline's share is
+small because each thread opens on its last ten turns.
+
+## The start
+
+Budget: the first useful frame warm in 100 ms, cold in 500 ms, high tier. The first useful frame is
+the first one drawn with the server's projects and threads; its time ends when its painting does,
+before the compositor presents it.
+
+| Part | Warm | Cold |
+|---|---|---|
+| Before `main`: the binary loaded and linked | 2.0 ms | 11.4 ms |
+| From `main`: the window and the GPU ready | 66 ms | 125 ms |
+| From `main`: the first useful frame painted, median of 10 | 123 ms | 184 ms |
+| In all | 125 ms | 195 ms |
+
+Warm is a start after the last one, every file cached. Cold drops from the page cache every file
+the client maps, those other programs map excepted; it is not a reboot. Files the client reads
+without mapping them stay cached: the system's symbol fonts read by `src/theme.rs`, the `fc-match`
+it runs, fontconfig's caches. The cold figure is therefore optimistic. Between the GPU ready and
+the useful frame, the frame bench's `startup` lines put 19.5 ms in `App::new` and 31 ms more until
+the shell is shown: the connection and the server's first answers. (In the run before, the frame
+bench ran before anything had filled the throwaway home's font cache: `App::new` took 212 ms. The
+script now starts the client once first.) In each of two runs of the script, two warm starts of ten
+painted it near 330 to 365 ms, and one cold start once. Their likely cause, not proven: a probe of
+the frames' times found the frame after the useful one beginning 183 ms after it, its own CPU work
+done in 5 ms, which points at the headless weston's pacing. The median is not moved by them.
+
+## A long thread and streams
+
+Budget: 5,000 messages scroll at the display's rate, p99 within 4.17 ms on the high tier and 16.7
+ms on the HP; 15 threads streaming at once, no frame over budget at p99. The frame bench's figures
+are each frame's UI pass in milliseconds, at 1440 × 900; tessellation adds 0.1 to 0.4 ms.
+
+| Scenario | p50 | p99 | max |
+|---|---|---|---|
+| The 60-turn thread, scrolled | 0.47 | 0.88 | 1.84 |
+| The 5,000-message thread, its pages loading | 2.76 | 15.27 | 28.09 |
+| The 5,000-message thread, scrolled at 120 points a frame | 7.07 | 8.52 | 14.16 |
+| 15 streams, the open thread "Flux 01" | 0.49 | 2.41 | 3.24 |
+| 15 streams, scrolling meanwhile | 0.47 | 3.63 | 7.14 |
+| 15 streams, the 5,000-message thread open | 0.51 | 1.74 | 2.40 |
+| 15 streams, the 5,000-message thread open and scrolled | 0.54 | 3.54 | 5.53 |
+
+The streams replay what a server sends while 15 threads run: the open thread's answer grows ten
+times a second to 15,000 characters, and the 14 others' sidebar rows change as often, 150 events a
+second in all. The owner's busiest day averaged about one event a second
+([the database](#the-forks-database)). The frame bench resident at its end: 256 MB, the 5,000
+messages loaded. Loading all their pages took 22.4 s in this run and 5.0 s in the one before; where
+that time goes, the fork or the client, is not known. The loading row's p99 also depends on how
+many cheap frames fall between two pages.
+
+The long thread misses its budget: scrolling it costs 7 to 8.5 ms a frame, against 0.5 ms for the
+60-turn thread; loading its pages costs up to 28 ms a frame. The streams stay within it.
+
+## The fork
+
+Budget: at most 80 MB resident at rest, agents' processes and Chromium excluded; 0 wake-ups of its
+own.
+
+| Which fork | Resident | Threads | Wake-ups a second |
+|---|---|---|---|
+| The fixture's, before the client, served nothing since its start | 394 MB | 13 | 4.4 |
+| The fixture's, restarted, a minute idle (by hand, before the script read it) | 474 MB | 13 | not counted |
+| The fixture's, after serving the measurements | 889 to 892 MB | 13 | 6 to 30 over five readings, the main thread most |
+| The owner's service, up an hour, five agents' processes attached | 455 MB | 13 | 228: the main thread 133, libuv's workers 85 |
+
+The fixture's fork keeps the memory of what it served: the 5,000-message thread's pages above all.
+Right after the import that builds the fixture it held 300 MB more, which is why
+`scripts/fixture-server.sh` restarts it. The owner's service was in use, so its figure is not one at
+rest; it was read from `/proc/<pid>/status` and `pidstat` only. Its agents' processes held 1.1 GB
+more.
+
+## The fork's database
+
+`statev2.sqlite` of the owner's fork, 2,990,153,728 bytes (2.79 GiB) on 2026-11-07, examined on a
+copy taken with `sqlite3 -readonly … ".backup"`, then deleted. Only its tables' sizes and the kinds
+and sizes of its rows were read.
+
+| Part | Tables | Indexes | In all |
+|---|---|---|---|
+| The event log, `orchestration_events` | 1,597 MiB | 318 MiB | 1,915 MiB, 67 % |
+| The projections, `orchestration_v2_projection_*` and the turn items' positions | 770 MiB | 157 MiB | 927 MiB, 33 % |
+| Everything else | 4 MiB | 4 MiB | 8 MiB |
+
+The event log holds 508,717 events of 596 threads; their payloads weigh 1,035 MiB, their metadata
+104 MiB. By kind:
+
+| Event | Events | Payloads | Average |
+|---|---|---|---|
+| `turn-item.updated` | 222,462 | 708 MiB | 3.3 KB |
+| `node.updated` | 132,501 | 123 MiB | 1.0 KB |
+| `provider-turn.updated` | 70,971 | 67 MiB | 1.0 KB |
+| `message.updated` | 23,049 | 57 MiB | 2.6 KB |
+| `subagent.updated` | 17,778 | 25 MiB | 1.5 KB |
+| `context-handoff.updated` | 128 | 14 MiB | 112 KB |
+| The other kinds | 41,828 | 42 MiB | |
+
+What fills it:
+
+- **Every update repeats the whole item.** The 104,891 turn items were written 222,462 times: an
+  item's states before its last weigh 299 MiB, its last 409 MiB. The projections then keep the last
+  state a second time, 554 MiB of turn items.
+- **Tools' output.** Command runs, MCP tools and file changes are 313 MiB of the projected turn
+  items; one MCP tool's output weighs 1 MiB.
+- **Reasoning while it runs**: 126 MiB of `reasoning` items in their running states, superseded by
+  their final text.
+
+Its growth: nearly every event was written in the last 12 days of use, since the fork imported
+the history (3,670 are older). Those days wrote about 95 MiB of payloads and metadata a day, 198
+MiB on the busiest. The whole file laid over them, indexes and projections included, is about 240
+MiB a day. The threads hold 17,053 messages; the longest thread 3,785.
+
+## The budgets M1.2 set
+
+Six budgets of the [quality bar](ROADMAP.md#quality-bar) had no figure; M1.2 set them, and the owner
+validated them on 2026-11-07 ([ADR-0015](adr/0015-the-budgets-set-from-todays-figures.md)). Today:
+
+| Budget | Today |
+|---|---|
+| Input to present | not measured: the client does not ask for the compositor's presentation times |
+| The binary's size | the client, 74.5 MB, 59.5 MB stripped, its icons and fonts within |
+| An event's latency, server to client | not measured: the fixture runs no turn |
+| The history's import | 2.79 GiB, 596 threads, 508,717 events; the final states, which [ADR-0008](adr/0008-storage-and-the-history-moved.md) imports, are 927 MiB of it |
+| An idle agent's resume | not measured: it needs a real agent |
+| The database's growth | about 240 MiB a day of use, 95 MiB of it events ([the database](#the-forks-database)) |
+
+## The HP
+
+The owner runs these on the HP Laptop 17-ca2xxx; the figures go in the sections above, one row
+each, marked HP. The first two steps download and build much (the fixture's server is 3.5 GB);
+with 4 GB of memory, build with one job at a time. `scripts/fixture-server.sh` needs `node` and
+`pluto-server` on the PATH, as on the desktop.
+
+```sh
+nix develop .#measure                        # the tools, once
+scripts/fixture-server.sh                    # the fixture, on :3999
+CARGO_BUILD_JOBS=1 SKIP_HEAP=1 scripts/measure.sh /tmp/pluto-measure-hp
+```
+
+Then the budget "the client, a server and three agents without swap", by hand, in a working
+session: the owner's server, the client, and three agents running turns.
+
+```sh
+grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree)' /proc/meminfo   # before
+vmstat 5 120 > /tmp/hp-vmstat.txt                                     # ten minutes of work
+awk 'NR > 3 { si += $7; so += $8 } END { print "swapped in", si, "out", so, "(KiB/s, summed)" }' /tmp/hp-vmstat.txt
+grep -E '^(MemAvailable|SwapFree)' /proc/meminfo                      # after
+```
+
+And what the quality bar does not know of it yet, its display and its storage:
+
+```sh
+for m in /sys/class/drm/card*-*/modes; do echo "$m: $(head -1 "$m")"; done
+lsblk -d -o NAME,ROTA,TRAN,MODEL,SIZE
+```
+
+None of these has been run yet: they were not tried on the HP.
