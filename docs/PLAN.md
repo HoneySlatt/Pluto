@@ -16,8 +16,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
 - Stage 1: [M1.1](#m11--under-the-method) and [M1.2](#m12--today-measured) are done, the HP's
-  figures to come by the owner's hand. Work happens on `main` since 2026-11-07. Next: a short
-  session that fixes the thread opening at its top ([Known debt](#known-debt)), then
+  figures to come by the owner's hand. Work happens on `main` since 2026-11-07. Next:
   [M1.3](#m13--the-triage).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
 
@@ -155,11 +154,11 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - AccessKit's D-Bus thread (`blocking-1`, zbus) wakes the client twice a second at rest, the
   largest of its wake-ups (M1.2). It comes with eframe's accessibility, which the screen reader
   needs. Followed by Stage 6: the uwui client leaves eframe.
-- A thread opened after another was left scrolled away from its end opens at its top, not its
-  end, and so does not follow an answer streaming in until scrolled down. Found by M1.2's frame
-  bench, not yet seen in a real window. The likely cause, unconfirmed: `TimelineView::open`
-  (`src/ui/timeline_view.rs`) resets `follow` but keeps the previous thread's offset. By the
-  owner's decision of 2026-11-07, a short session fixes it before M1.3, test first.
+- What is left of a wheel step egui spreads over frames reaches whatever the pointer is over next.
+  The timeline drops what began before its thread opened (2026-11-07). The terminal
+  (`src/ui/terminal_surface.rs`) and the context menus (`src/ui/context_menu.rs`) read it too and
+  may scroll a terminal or menu shown during the glide; not reproduced. A trackpad's kinetic
+  events after a thread opens still stop the view following its end. Followed by the uwui client.
 - The budgets M1.2 found missed ([`measurements.md`](measurements.md)), kept as debt by the owner's
   decision of 2026-11-07:
   - the client at rest: 143 MB against 100, 3.2 wake-ups a second against 0;

@@ -152,6 +152,13 @@ many cheap frames fall between two pages.
 The long thread misses its budget: scrolling it costs 7 to 8.5 ms a frame, against 0.5 ms for the
 60-turn thread; loading its pages costs up to 28 ms a frame. The streams stay within it.
 
+Until 2026-11-07 the bench turned the wheel to each thread's end before measuring it, to work
+around a fault of the client since fixed ([CHANGELOG](../CHANGELOG.md)). It no longer does. Run
+alternately three times on the desktop at rest, with the fix, the long thread scrolled at a p50 of
+7.60 to 7.68 ms with that step and 7.50 to 7.67 ms without: no difference. Without the step, the
+streams' answer is on screen in 594 of 600 frames, and was in none before the fix; why the 6 others
+miss is not known. The streams' times stay within the table's.
+
 ## The fork
 
 Budget: at most 80 MB resident at rest, agents' processes and Chromium excluded; 0 wake-ups of its

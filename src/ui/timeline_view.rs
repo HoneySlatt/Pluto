@@ -19,6 +19,8 @@ pub(crate) struct TimelineView {
     heights: HashMap<Id, f32>,
     /// The thread `offset` and `follow` belong to.
     pub thread_id: String,
+    /// When that thread opened (egui's input time).
+    pub opened_at: f64,
     /// The scroll offset for the next pass.
     pub offset: f32,
     /// The view sticks to the end as rows grow or arrive.
@@ -85,12 +87,13 @@ impl TimelineView {
         self.first_entry.clone()
     }
 
-    /// Starts over on another thread: it opens at its end.
-    pub fn open(&mut self, thread_id: &str) {
+    /// Starts over on another thread, opened at `now`: it opens at its end.
+    pub fn open(&mut self, thread_id: &str, now: f64) {
         if self.thread_id == thread_id {
             return;
         }
         self.thread_id = thread_id.to_owned();
+        self.opened_at = now;
         self.follow = true;
         self.pinned.clear();
         self.first = None;

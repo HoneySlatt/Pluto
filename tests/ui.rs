@@ -852,3 +852,96 @@ fn without_projects_the_hero_offers_to_add_one() {
     assert!(find_text(&harness, "Add project").is_some());
     assert!(find_text(&harness, "Start without a project").is_none());
 }
+
+/// A thread's detail of `count` user messages, `Message 0` first.
+fn long_detail(thread: &str, title: &str, count: usize) -> Value {
+    let items: Vec<Value> = (0..count)
+        .map(|n| {
+            json!({"id": format!("{thread}-u{n}"), "threadId": thread,
+                "runId": format!("{thread}-r{n}"), "ordinal": n, "status": "completed",
+                "startedAt": at(60), "updatedAt": at(60), "type": "user_message",
+                "messageId": format!("{thread}-u{n}"), "text": format!("Message {n}"),
+                "inputIntent": "turn_start", "attachments": []})
+        })
+        .collect();
+    let visible: Vec<Value> = items
+        .iter()
+        .enumerate()
+        .map(|(n, item)| {
+            json!({"position": n, "visibility": "local", "sourceThreadId": thread,
+                "sourceItemId": item["id"], "item": item})
+        })
+        .collect();
+    json!({"kind": "snapshot", "snapshotSequence": 2, "projection": {
+        "thread": {"id": thread, "projectId": "p", "title": title},
+        "turnItems": items, "visibleTurnItems": visible, "updatedAt": at(5)},
+        "hasMoreHistory": false, "latestLocalTurnOrdinal": count})
+}
+
+/// Thread b open at its end, both threads 60 messages long.
+fn two_long_threads() -> Harness<'static, App> {
+    let mut harness = harness();
+    for (id, title) in [("a", "Newest thread"), ("b", "Older thread")] {
+        assert!(harness.state_mut().open_thread_titled(title));
+        harness
+            .state_mut()
+            .load_offline_thread(&long_detail(id, title, 60))
+            .unwrap();
+        harness.run_steps(3);
+    }
+    assert!(
+        find_text(&harness, "Message 59").is_some(),
+        "b opens at its end"
+    );
+    harness
+}
+
+/// Turns the wheel by `dy` points over the chat.
+fn wheel(harness: &mut Harness<'static, App>, dy: f32) {
+    harness.event(egui::Event::PointerMoved(egui::pos2(900.0, 450.0)));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, dy),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+}
+
+#[test]
+fn a_wheel_still_gliding_does_not_scroll_the_thread_opened_next() {
+    let mut harness = two_long_threads();
+    // egui spreads a wheel step over a few frames; the thread changes
+    // (by a shortcut, the pointer still over the chat) before it ends.
+    wheel(&mut harness, 3000.0);
+    harness.run_steps(2);
+    assert!(harness.state_mut().open_thread_titled("Newest thread"));
+    harness.run_steps(30);
+    assert!(
+        find_text(&harness, "Message 59").is_some(),
+        "a opens at its end"
+    );
+    // A step taken on the new thread does scroll it.
+    wheel(&mut harness, 3000.0);
+    harness.run_steps(30);
+    assert!(find_text(&harness, "Message 59").is_none(), "a scrolls up");
+}
+
+#[test]
+fn a_wheel_step_while_a_thread_loads_leaves_it_at_its_end() {
+    let mut harness = harness();
+    // The thread opens empty; a step toward the end is still gliding when
+    // its messages arrive.
+    assert!(harness.state_mut().open_thread_titled("Newest thread"));
+    harness.run_steps(2);
+    wheel(&mut harness, -120.0);
+    harness.run_steps(1);
+    harness
+        .state_mut()
+        .load_offline_thread(&long_detail("a", "Newest thread", 60))
+        .unwrap();
+    harness.run_steps(30);
+    assert!(
+        find_text(&harness, "Message 59").is_some(),
+        "a stays at its end"
+    );
+}

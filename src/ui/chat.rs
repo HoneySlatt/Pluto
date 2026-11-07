@@ -863,7 +863,7 @@ impl App {
             (plugin.select_all, plugin.has_range || plugin.select_all)
         };
         let mut view = std::mem::take(&mut self.timeline_view);
-        view.open(&thread.id);
+        view.open(&thread.id, ui.input(|i| i.time));
         // The open search does not follow the live end.
         if self.find.is_open() {
             view.follow = false;
@@ -924,15 +924,32 @@ impl App {
         }
         view.first = keys.first().copied();
         view.header = history_height;
+        // A view that follows starts from the end as it is now: the rows
+        // may have grown, or arrived, since the last pass.
+        let mut offset = if view.follow && !keep_scroll {
+            (content_height - viewport_height).max(0.0)
+        } else {
+            view.offset
+        };
+        let mut scrolled = false;
         // The wheel moves the view in this pass; egui would apply it after
         // drawing, a frame late.
-        let mut offset = view.offset;
-        let mut scrolled = false;
-        let wheel = if ui.rect_contains_pointer(rect) && ui.ctx().dragged_id().is_none() {
+        let mut wheel = if ui.rect_contains_pointer(rect) && ui.ctx().dragged_id().is_none() {
             ui.input(|i| i.smooth_scroll_delta.y)
         } else {
             0.0
         };
+        // egui spreads a wheel step over the next frames. What is left of a
+        // step taken before this thread opened belongs to the previous
+        // thread: here it would stop the view following the end. Both
+        // durations are rounded to f32 alike, so a step taken in the frame
+        // the thread opened counts as this thread's.
+        let before_open =
+            ui.input(|i| i.time_since_last_scroll() > (i.time - view.opened_at) as f32);
+        if wheel != 0.0 && before_open {
+            ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
+            wheel = 0.0;
+        }
         // `pageScrollController`: PageUp and PageDown page the timeline (from
         // the composer too), a page less 36px; Home and End go to its ends
         // when nothing editable has the focus.
@@ -967,8 +984,6 @@ impl App {
             let max = (content_height - viewport_height).max(0.0);
             offset = (offset - wheel).clamp(0.0, max);
             scrolled = true;
-        } else if view.follow && !keep_scroll {
-            offset = (content_height - viewport_height).max(0.0);
         }
         let mut drawn = Vec::new();
         let mut used = offset;

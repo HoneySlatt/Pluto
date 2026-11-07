@@ -450,10 +450,6 @@ fn long_thread(bench: &mut Bench) {
     );
     report("long (loading)", &loading);
     bench.settle(Duration::from_secs(1), |_| false);
-    // From the end, as the thread opens when no other was left scrolled up
-    // (see `streams`).
-    wheel(bench, -1_000_000.0);
-    bench.settle(Duration::from_millis(500), |_| false);
     let mut scroll = Samples::default();
     for i in 0..960 {
         wheel(bench, if i < 480 { 120.0 } else { -120.0 });
@@ -479,11 +475,6 @@ fn streams(bench: &mut Bench) {
         assert!(bench.app.open_thread_titled(open), "no thread {open:?}");
         bench.settle(Duration::from_secs(15), |app| app.is_loaded());
         bench.settle(Duration::from_secs(1), |_| false);
-        // A thread opened after another was scrolled away from its end
-        // opens at its top (docs/PLAN.md, Known debt), as the long one was:
-        // the wheel takes the view to the end, where one watches an answer.
-        wheel(bench, -100_000.0);
-        bench.settle(Duration::from_millis(200), |_| false);
         let thread = bench
             .app
             .selected_thread_id()
