@@ -15,15 +15,15 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
-- Stage 1: [M1.1](#m11--under-the-method) is done locally; its first CI run waits for the owner's
-  go. Next: [M1.2](#m12--today-measured).
+- Stage 1: [M1.1](#m11--under-the-method) is green in CI, but its cold run took 30 minutes against
+  a budget of 20; a warm run is measured next, then the owner decides. Next: [M1.2](#m12--today-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
 
 ## Status
 
 | Milestone | Goal | Status |
 |---|---|---|
-| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done locally; CI waits for the owner's go |
+| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | CI green; its cold run is over budget, the owner decides |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Planned |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Planned |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
@@ -51,8 +51,8 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **By hand.** The owner allows the push, and the CI minutes of a private repository.
 - **Where it stands (2026-11-07).** The script, `deny.toml`, the CI workflow, `ARCHITECTURE.md`,
   the README's top and [ADR-0012](adr/0012-the-checks-and-ci.md) are written; the check passes in
-  `nix develop`, timed in [`measurements.md`](measurements.md#the-check). Left: the first push and
-  its CI run, once the owner allows them.
+  `nix develop`, and in CI, timed in [`measurements.md`](measurements.md#the-check). Left: a warm
+  CI run measured, and the owner's decision on the cold run's 30 minutes.
 
 ### M1.2 — Today measured
 
