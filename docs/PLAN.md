@@ -18,7 +18,8 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 - Stage 1: [M1.1](#m11--under-the-method) and [M1.2](#m12--today-measured) are done, the HP's
   figures to come by the owner's hand. Work happens on `main` since 2026-11-07. Next:
   [M1.3](#m13--the-triage).
-- What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
+- What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
+  and M6d.10.
 
 ## Status
 
@@ -130,8 +131,6 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   - voice dictation with whisper;
   - Ollama's model management (now in Stage 3);
   - a Nix build without the web client.
-- For `uwui-needs.md`: accessibility that wakes nothing at rest (AccessKit wakes today's client
-  twice a second); fonts held once (today's client holds 12.7 MiB of them, some bytes twice).
 
 ## Known debt
 
