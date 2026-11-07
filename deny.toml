@@ -1,0 +1,55 @@
+# cargo-deny's policy, which scripts/check.sh runs (docs/adr/0012-the-checks-and-ci.md): the
+# licenses accepted from dependencies, the advisories that fail the check, and where crates may
+# come from. The graph is the desktop client's and the Android app's.
+
+[graph]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu", "aarch64-linux-android", "x86_64-linux-android"]
+
+# Every advisory fails the check, a yanked crate too, but these: crates declared unmaintained with
+# no maintained release that the crates above them accept. Each is followed in docs/PLAN.md, Known
+# debt.
+[advisories]
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1, through syntect 5, which loads its bundled syntaxes with it; no syntect release drops it" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser, through resvg 0.45, which egui_extras 0.36 requires; pluto-ffi's resvg 0.49 no longer uses it" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz, through resvg 0.45, which egui_extras 0.36 requires; pluto-ffi's resvg 0.49 no longer uses it" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
+]
+
+# The permissive licenses of the dependencies today, all compatible with MIT OR Apache-2.0.
+# MPL-2.0 is weak copyleft per file: those crates' own files stay under it, unchanged.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+exceptions = [
+    # egui's default fonts (Ubuntu Light, Noto Emoji, Emoji Icon Font), which eframe's
+    # `default_fonts` feature embeds.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+# The desktop and pluto-ffi pin different resvg releases, among others: duplicates are listed,
+# not refused.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

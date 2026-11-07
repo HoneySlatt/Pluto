@@ -1,0 +1,61 @@
+# Runs scripts/check.sh, unchanged, in the project's Nix shell, at every push to any branch and once a
+# week (docs/adr/0012-the-checks-and-ci.md). Actions are pinned to commit SHAs, with the release
+# they correspond to in a comment.
+name: CI
+
+# A new push to the same branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+  # Every Monday at 06:17 UTC, without a push: a project at rest still learns of new advisories
+  # against its dependencies. Off the hour, when GitHub delays scheduled runs. GitHub runs it on the
+  # default branch only.
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    # The budget is 20 minutes a run (docs/measurements.md). The limit is wider so that a run over
+    # budget, such as a first one that builds everything, is measured and fills the cache rather
+    # than being stopped; it still stops a run that hangs.
+    timeout-minutes: 45
+    # Only what CI's own disk and time need, not what is checked: an incremental build's files and
+    # full debug information would only swell the cache.
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # The crates downloaded and built, kept from one run to the next. The key changes with the
+      # dependencies and the toolchain; a run with a new key starts from the latest cache.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      # Without the flag, an incomplete flake.lock would be completed with an unpinned revision.
+      - run: nix develop --no-update-lock-file --command scripts/check.sh
+      # Saved even when a check fails, so that the next run does not build everything again; not
+      # when the key already had its cache.
+      - if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}

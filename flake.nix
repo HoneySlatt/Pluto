@@ -1,5 +1,5 @@
 {
-  description = "Pluto: the desktop client and the Android app's build tools";
+  description = "Pluto: the development shells of the desktop client, the checks and the Android app";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -46,6 +46,34 @@
         systemImageTypes = [ "default" ];
         abiVersions = [ "x86_64" ];
       };
+      # The libraries eframe loads at runtime (wgpu/Vulkan, Wayland, X11), and
+      # libdbus, which rfd opens to reach the desktop portal's file chooser.
+      runtimeLibraries = pkgs.lib.makeLibraryPath (
+        with pkgs;
+        [
+          vulkan-loader
+          libGL
+          wayland
+          libxkbcommon
+          libx11
+          libxcursor
+          libxi
+          libxrandr
+          dbus
+        ]
+      );
+      # What scripts/check.sh runs besides cargo (docs/adr/0012-the-checks-and-ci.md).
+      checkTools = [
+        pkgs.cargo-deny
+        pkgs.lychee
+      ];
+      # The desktop toolchain is kept minimal: CI downloads it at every run.
+      desktopRust = pkgs.rust-bin.stable.latest.minimal.override {
+        extensions = [
+          "clippy"
+          "rustfmt"
+        ];
+      };
       rust = pkgs.rust-bin.stable.latest.default.override {
         extensions = [ "rust-src" ];
         targets = [
@@ -56,6 +84,11 @@
     in
     {
       devShells.${system} = {
+        # The desktop client and every check: `nix develop`, then scripts/check.sh.
+        default = pkgs.mkShell {
+          packages = [ desktopRust ] ++ checkTools;
+          LD_LIBRARY_PATH = runtimeLibraries;
+        };
         emulator = pkgs.mkShell {
           packages = [
             emulator.androidsdk
@@ -64,8 +97,9 @@
           ANDROID_HOME = "${emulator.androidsdk}/libexec/android-sdk";
           ANDROID_SDK_ROOT = "${emulator.androidsdk}/libexec/android-sdk";
         };
+        # The Android app, and `scripts/check.sh --apk`.
         mobile = pkgs.mkShell {
-          packages = [
+          packages = checkTools ++ [
             rust
             # The app (android/): Gradle, and the Rust core built for each
             # ABI.

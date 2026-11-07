@@ -3,6 +3,7 @@ name = "pluto-core"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+publish = false
 description = "Pluto's connection to the server and its conversation model, shared by the desktop and mobile clients."
 
 [dependencies]

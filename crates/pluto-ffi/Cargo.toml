@@ -3,6 +3,7 @@ name = "pluto-ffi"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+publish = false
 description = "Pluto's core for the Android app: the session with the server and the screens' data, exposed to Kotlin through UniFFI."
 
 [lib]
