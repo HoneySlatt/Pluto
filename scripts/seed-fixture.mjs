@@ -342,18 +342,10 @@ request(question, questionTurn, "user-input.requested", "User input requested", 
   ],
 }, 19);
 
-// A long thread (60 turns of mixed markdown and tool work), for measuring
-// frame times while scrolling and switching threads.
-const long = thread(web, "Long fil de discussion", 2000);
-let firstLongAnswer;
-for (let i = 0; i < 60; i++) {
-  const minutes = 1990 - i * 3;
-  const longTurn = randomUUID();
-  message(long, "user", `Étape ${i + 1} : peux-tu revoir le module \`step_${i + 1}.rs\` et expliquer ce qui change ?`, minutes);
-  tool(long, longTurn, "Ran command", "command_execution", `rg -n "fn " src/step_${i + 1}.rs`, minutes - 1, { command: `rg -n "fn " src/step_${i + 1}.rs` });
-  tool(long, longTurn, "Read file", "file_read", `src/step_${i + 1}.rs`, minutes - 1);
-  tool(long, longTurn, "File change", "file_change", `src/step_${i + 1}.rs`, minutes - 1);
-  const longAnswer = message(long, "assistant", [
+// The answer of step i of the long threads: markdown with a list, a code
+// block and a table, as an agent writes them.
+function stepAnswer(i) {
+  return [
     `## Étape ${i + 1}`,
     "",
     `Le module \`src/step_${i + 1}.rs\` regroupe maintenant la **lecture**, la *validation* et l'écriture des données. Chaque fonction garde une seule responsabilité, et les erreurs remontent avec leur contexte au lieu d'être avalées.`,
@@ -381,7 +373,21 @@ for (let i = 0; i < 60; i++) {
     `| \`validate\` | ${30 + i} lignes | ${25 + i} lignes |`,
     "",
     "> Les tests existants passent sans modification.",
-  ].join("\n"), minutes - 2, longTurn);
+  ].join("\n");
+}
+
+// A long thread (60 turns of mixed markdown and tool work), for measuring
+// frame times while scrolling and switching threads.
+const long = thread(web, "Long fil de discussion", 2000);
+let firstLongAnswer;
+for (let i = 0; i < 60; i++) {
+  const minutes = 1990 - i * 3;
+  const longTurn = randomUUID();
+  message(long, "user", `Étape ${i + 1} : peux-tu revoir le module \`step_${i + 1}.rs\` et expliquer ce qui change ?`, minutes);
+  tool(long, longTurn, "Ran command", "command_execution", `rg -n "fn " src/step_${i + 1}.rs`, minutes - 1, { command: `rg -n "fn " src/step_${i + 1}.rs` });
+  tool(long, longTurn, "Read file", "file_read", `src/step_${i + 1}.rs`, minutes - 1);
+  tool(long, longTurn, "File change", "file_change", `src/step_${i + 1}.rs`, minutes - 1);
+  const longAnswer = message(long, "assistant", stepAnswer(i), minutes - 2, longTurn);
   firstLongAnswer ??= longAnswer;
 }
 // A follow-up citing the first answer, far up the thread.
@@ -390,6 +396,30 @@ const longCite = new URLSearchParams({
 });
 message(long, "user", `[Assistant quote](t3-citation://v1/${[environmentId, long, firstLongAnswer].map(encodeURIComponent).join("/")}?${longCite}) Et pour la toute première étape ?`, 1800);
 message(long, "assistant", "La première étape suit le même découpage.", 1799, randomUUID());
+
+// The quality bar's long thread: 5,000 messages, 2,500 turns of the same
+// shape, each with one command. The client opens it on its last turns and
+// pages the rest in (examples/bench.rs loads them all).
+const veryLong = thread(web, "Fil de 5 000 messages", 9000);
+for (let i = 0; i < 2500; i++) {
+  const minutes = 8999 - i * 3;
+  const turn = randomUUID();
+  message(veryLong, "user", `Étape ${i + 1} : peux-tu revoir le module \`step_${i + 1}.rs\` ?`, minutes);
+  tool(veryLong, turn, "Ran command", "command_execution", `cargo test step_${i + 1}`, minutes - 1, { command: `cargo test step_${i + 1}` });
+  message(veryLong, "assistant", stepAnswer(i), minutes - 2, turn);
+}
+
+// Fifteen short threads, the most recent of the sidebar, which the bench
+// streams into at once (the quality bar's 15 threads streaming).
+for (let n = 1; n <= 15; n++) {
+  const streamThread = thread(rust, `Flux ${String(n).padStart(2, "0")}`, 60 + n);
+  for (let i = 0; i < 3; i++) {
+    const minutes = 59 + n - i * 0.2;
+    const turn = randomUUID();
+    message(streamThread, "user", `Flux ${n}, question ${i + 1} : que fait \`step_${i + 1}.rs\` ?`, minutes);
+    message(streamThread, "assistant", stepAnswer(i), minutes - 0.1, turn);
+  }
+}
 
 // A turn rewriting one large file, for measuring the diff panel.
 const bigDiff = thread(web, "Grand diff", 2100);
