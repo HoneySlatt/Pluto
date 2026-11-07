@@ -5,6 +5,9 @@ Pluto is released under the MIT license (`LICENSE`). It ports the client of
 Tools Inc.), whose notice `LICENSE` keeps; the built-in environment themes
 (`assets/themes/built-in-dark.json`) come from its `themePalettes.ts`.
 
+Pluto's logo (`assets/logo/pluto.svg`) is not under MIT: its author keeps its rights, and
+`assets/logo/README.md` says how it may be shown.
+
 Bundled assets and their licenses:
 
 | Asset | Source | License | Text |

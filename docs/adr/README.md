@@ -21,6 +21,7 @@ New ADRs copy the template below and take the next free number.
 | [0010](0010-todays-features-triaged.md) | Today's features triaged, and the egui client frozen | Accepted |
 | [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Accepted |
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted |
+| [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
 
 ## Template
 

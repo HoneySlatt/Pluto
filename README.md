@@ -1,4 +1,6 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<p align="center">
+  <img src="assets/logo/pluto.svg" alt="Pluto's logo: an amber planet with rounded lobes, circled by a ring" width="192">
+</p>
 
 # Pluto
 
