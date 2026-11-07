@@ -15,15 +15,15 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
-- Stage 1: [M1.1](#m11--under-the-method) is green in CI, but its cold run took 30 minutes against
-  a budget of 20; a warm run is measured next, then the owner decides. Next: [M1.2](#m12--today-measured).
+- Stage 1: [M1.1](#m11--under-the-method) is done. Work happens on `main` since 2026-11-07. Next:
+  [M1.2](#m12--today-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.1b3b.
 
 ## Status
 
 | Milestone | Goal | Status |
 |---|---|---|
-| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | CI green; its cold run is over budget, the owner decides |
+| [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Planned |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Planned |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
@@ -47,12 +47,13 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **Done when.** CI is green on a push. A newcomer can find each part of the code from
   ARCHITECTURE.md.
 - **How to test.** `scripts/check.sh`, then the CI run.
-- **Measured.** The check's duration, locally and in CI: at most 20 minutes.
+- **Measured.** The check's duration, locally and in CI: at most 20 minutes with CI's cache. A run
+  without it, the first of a branch or after GitHub drops an unused cache, takes about 30 minutes:
+  accepted by the owner on 2026-11-07.
 - **By hand.** The owner allows the push, and the CI minutes of a private repository.
-- **Where it stands (2026-11-07).** The script, `deny.toml`, the CI workflow, `ARCHITECTURE.md`,
-  the README's top and [ADR-0012](adr/0012-the-checks-and-ci.md) are written; the check passes in
-  `nix develop`, and in CI, timed in [`measurements.md`](measurements.md#the-check). Left: a warm
-  CI run measured, and the owner's decision on the cold run's 30 minutes.
+- **Done (2026-11-07).** The check passes locally and in CI, timed in
+  [`measurements.md`](measurements.md#the-check); the choices are in
+  [ADR-0012](adr/0012-the-checks-and-ci.md).
 
 ### M1.2 — Today measured
 
@@ -147,8 +148,6 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 - `examples/tmp_shot.rs` calls itself throwaway but stays in the tree. Followed by M1.4.
-- CI's weekly run only happens on the default branch, `main`, which holds only the initial commit:
-  it starts when the work reaches `main`, which the owner decides. Followed by Stage 1's audit.
 
 Finished stages move to `docs/history.md`, created when the first one ends, in a few lines
 each, so that this file holds the current stage only, under about 2,000 words.

@@ -37,8 +37,8 @@ tools too, for `--apk`.
 every Monday. Actions are pinned to commit SHAs. The crates and `target/` are cached between runs,
 keyed by `Cargo.lock` and `flake.lock`, and saved even when a check fails. CI builds without
 incremental files and with line tables only for debug information, which changes the cache's size,
-not what is checked. The budget is 20 minutes a run; the job's limit, 45 minutes, only stops a run
-that hangs.
+not what is checked. The job's limit, 45 minutes, lets a run without the cache finish and fill it,
+and stops a run that hangs; the budget and the figures are in `docs/measurements.md`.
 
 **Android stays out of CI.** CI checks `pluto-ffi` on the host, with clippy and its tests; the
 Kotlin tests and the APK need the Android SDK and NDK, which `--apk` runs locally. Bringing them to
@@ -61,7 +61,6 @@ CI waits for a need, such as a release of the app.
 - CI runs the same script with the same pinned tools as a local run. It can still differ: its
   runner is smaller, so slower; cargo-deny needs the network; and `nix develop` keeps the host's
   `PATH` behind its own.
-- The weekly run happens on the default branch only, as GitHub schedules it there: it starts once
-  the work reaches `main`.
+- The weekly run happens on the default branch, `main`, only, as GitHub schedules it there.
 - CI on a private repository spends the owner's GitHub minutes; the cache keeps a run short.
 - The advisories ignored in `deny.toml` are debt, each followed in `docs/PLAN.md`.

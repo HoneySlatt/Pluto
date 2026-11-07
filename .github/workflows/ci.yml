@@ -22,9 +22,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    # The budget is 20 minutes a run (docs/measurements.md). The limit is wider so that a run over
-    # budget, such as a first one that builds everything, is measured and fills the cache rather
-    # than being stopped; it still stops a run that hangs.
+    # The budget is 20 minutes a run with the cache; a run without it takes about 30
+    # (docs/measurements.md). The limit lets that run finish and fill the cache, and stops a run that
+    # hangs.
     timeout-minutes: 45
     # Only what CI's own disk and time need, not what is checked: an incremental build's files and
     # full debug information would only swell the cache.
