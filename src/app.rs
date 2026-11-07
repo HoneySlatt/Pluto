@@ -2248,6 +2248,34 @@ impl App {
         found
     }
 
+    /// The id, project and title of the first thread whose title starts
+    /// with `prefix` (dev benches).
+    pub fn thread_titled(&self, prefix: &str) -> Option<(String, String, String)> {
+        self.state
+            .threads
+            .iter()
+            .find(|t| t.title.starts_with(prefix))
+            .map(|t| (t.id.clone(), t.project_id.clone(), t.title.clone()))
+    }
+
+    /// Asks for the open thread's next page of older turns; whether some are
+    /// still to load or loading (dev benches).
+    pub fn load_earlier_turns(&mut self) -> bool {
+        self.load_earlier_history();
+        self.current_detail()
+            .is_some_and(|d| d.history.has_more || d.history.loading)
+    }
+
+    /// How many messages of the open thread are loaded (dev benches).
+    pub fn loaded_messages(&self) -> usize {
+        self.current_detail().map_or(0, |d| {
+            d.turn_items
+                .iter()
+                .filter(|i| i.kind == "user_message" || i.kind == "assistant_message")
+                .count()
+        })
+    }
+
     /// Opens the diff panel on the open thread's last run (dev benches).
     pub fn open_last_diff(&mut self) {
         let run = self
@@ -2389,6 +2417,11 @@ impl App {
     /// Answers an RPC request without a server (`key` as the client asked).
     pub fn load_offline_reply(&mut self, key: &str, value: Value) {
         self.rpc_result(key.to_owned(), Ok(value));
+    }
+
+    /// Applies a shell stream item without a server (benches).
+    pub fn load_offline_shell(&mut self, item: &Value) -> Result<(), String> {
+        self.state.shell(item)
     }
 
     /// Applies a thread stream item for the selected thread without a server.
