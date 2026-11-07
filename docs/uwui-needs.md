@@ -4,8 +4,10 @@ Pluto's desktop client is drawn with egui today. It will move to uwui, the owner
 once uwui runs applications ([ADR-0001](adr/0001-a-native-client-on-egui-until-uwui.md),
 [ADR-0003](adr/0003-what-pluto-is-to-become.md)). Pluto's client is one of the programs of uwui's
 first stage, and uwui's API is not declared stable before it runs Pluto at its bar (SlimeEngine's
-ADR-0203). SlimeEngine's M6d.1b3b chooses how an application's state changes its interface once
-three lists like this exist: Opium's, Pluto's and a DAW's. This file is Pluto's.
+ADR-0203). SlimeEngine's M6d.1b3b chose how an application's state changes its interface,
+signals, from three lists like this one: Opium's, Pluto's and a DAW's (SlimeEngine's ADR-0205).
+This file is Pluto's. SlimeEngine's M6d.10 weighs it again for uwui's first stage, and its M6d.9a
+and M6d.9b design what agents may do in an application.
 
 Because Pluto is a pilot, the components it needs belong to uwui's first stage. uwui's ROADMAP
 lists several of them only "to its 1.0":
@@ -17,7 +19,8 @@ The diff view below is new to uwui altogether.
 uwui takes an application's need only if it is general, never to win one benchmark (SlimeEngine's
 ADR-0170). The needs are therefore split in two: the general ones, which uwui may take, and
 Pluto's own, which stay here. The third column of the table says whether uwui's requirements
-(SlimeEngine's ADR-0190 and ADR-0199, uwui's ROADMAP) already hold the need, as read on 2026-11-06:
+(SlimeEngine's ADR-0190 and ADR-0199, uwui's ROADMAP) already hold the need, as read on 2026-11-06,
+and again against SlimeEngine's ADR-0213 to ADR-0220 on 2026-11-07:
 
 - *Yes*: they hold it.
 - *Precision*: they hold it in general terms, and Pluto says what it needs exactly.
@@ -90,7 +93,7 @@ SlimeEngine's ADR-0202 does not script either case yet.
 | A texture replaced at each frame from decoded images, decoded away from the interface's thread, input forwarded from the element | The browser on the server, seen through its screencast (`server_browser.rs`) | Yes: uwui's ROADMAP, "textures updated at each frame" |
 | Docking of panels with tabs, splits and tab drag; their layout kept per context (per thread) and across restarts | The right panel: diff, files, terminal, browser | Precision: ADR-0190 has docking and restores panels, not per context |
 | A palette of commands with fuzzy matching and results that arrive while typing | Ctrl+K, Go to file, search | Yes: ADR-0190 |
-| Shortcuts remapped by the user, with chords, and bound to a context (active only in the composer, in the terminal, in a dialog) | Keyboard first (`ui/keybindings.rs`) | Precision: ADR-0190 has remapping and chords, not contexts |
+| Shortcuts remapped by the user, with chords, and bound to a context (active only in the composer, in the terminal, in a dialog); written with the primary modifier, which Pluto writes `Mod` | Keyboard first (`ui/keybindings.rs`) | Precision: ADR-0190 has remapping and chords, not contexts; the primary modifier, Ctrl or Cmd, comes with SlimeEngine's M6d.3 (ADR-0220) |
 | Popovers, hover cards, context menus with submenus, toasts with actions, sheets and dialogs | Everywhere | Yes: ADR-0190 |
 | Notifications with actions answered from the notification (approve, reply), an icon in the tray, a start with the session, one instance, deep links (`pluto://`), files dropped in and dragged out | The server works while the window is closed | Precision: ADR-0190 has all of it except actions in notifications |
 | Charts, live ones | The dashboard: quotas, usage, resources | Yes: ADR-0190's optional crate |
@@ -101,14 +104,34 @@ SlimeEngine's ADR-0202 does not script either case yet.
 | Text that streams announced to screen readers politely, batched by sentence, never flooding | Accessibility of the timeline | New: ADR-0190 has screen readers, not live regions that stream |
 | The window's state restored: the open thread, each list's scroll by the item shown, panels and tabs per thread | Pluto reopens where the user was | Precision: Opium asks the same |
 | One interface's code for the desktop, the phone and the web, with screens of one platform where needed | Android and the web client move to uwui (ADR-0003) | Yes: ADR-0190 |
-| A whole Android application in Rust, a Kotlin service beside it for the system's services | The phone app, its background connection | Yes: ADR-0190 |
+| A whole Android application in Rust, with a connection kept alive in the background and notifications pushed without Google's service | The phone app, its background connection | Precision: ADR-0190 has whole Android applications; ADR-0213 gives uwui long work and a porting budget where only a package's configuration differs, but names no connection kept in the background |
 | Glass, motion interrupted without a jump, effects lightened on low tiers and on battery | Pluto's look (ADR-0003) | Yes: ADR-0190 |
-| Themes in files, a theme and a density of Pluto's own over uwui's design system | Pluto's look | Yes: ADR-0190 |
-| Settings kept where the system keeps them, written atomically, versioned and migrated | Client settings | Yes: ADR-0190 |
+| Themes in files, a theme and a density of Pluto's own that extend uwui's core look; Glass taken from uwui's official theme Glass, or its glass material | Pluto's look ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)) | Yes: ADR-0213, the core's look and the official themes |
+| Settings kept where the system keeps them, written atomically, versioned and migrated | Client settings | Yes: ADR-0190; ADR-0213's services of files and settings |
+| Accessibility that wakes nothing at rest | AccessKit's D-Bus thread wakes today's client twice a second, the largest of its wake-ups ([measured](measurements.md#the-client-at-rest)) | Precision: uwui's budget at rest, which AccessKit's adapter must keep too |
+| Fonts held once in memory, each loaded when a text first needs it | Today's client holds 12.7 MiB of fonts, some of their bytes twice | Precision: uwui's ROADMAP loads fonts when first needed, and does not say they are held once |
 | Microphone capture, for dictation | Voice dictation, a future idea (ADR-0003) | New, wished: not needed before Pluto builds dictation |
 
-All are indispensable except the last, which is wished: the port would lose a function Pluto has,
-or ADR-0003 asks for it.
+All are indispensable except microphone capture, which is wished: the port would lose a function
+Pluto has, or ADR-0003 asks for it.
+
+## Pluto as an agent, and as an application driven
+
+Pluto stands on both sides of uwui's core for agents (SlimeEngine's ADR-0213 and ADR-0218). The
+agents it drives may attach to any application on uwui that the owner has open. And Pluto's client
+on uwui is itself an application that agents may drive, including the agents running inside it.
+Pluto's sandbox keeps uwui's applications closed to agents unless the owner opens them, and keeps
+what only a person may do from every agent ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
+
+What Pluto asks of uwui's core for agents, for SlimeEngine's M6d.9a and M6d.9b. All are general
+needs:
+
+| Need | Pluto's use | In uwui's decisions |
+|---|---|---|
+| An action kept for a person: never offered to an agent, never run for one, whatever consent the agent holds | Approving an agent's request, changing a sandbox, revealing a masked secret, pairing a device: an agent inside Pluto must never approve itself | New: ADR-0213 gives each action the permission it asks, not one that no agent may hold. A password manager or a bank's application needs it too |
+| Consent scoped and revocable: given to one session of an agent, or for a time, and withdrawn at once | An overnight task must not inherit the consent given to a session the owner watched | Precision: ADR-0218 has consent agent by agent |
+| An identity that names the harness and its session beside the agent, bound to the consent given rather than only declared by the agent | "Claude Code, in Pluto, thread X"; any program on the machine can call itself Claude Code | Precision: ADR-0218's first message names the agent |
+| A way to find the applications on uwui that are open and accept agents, on Linux, where the system offers none | An agent in Pluto reaching Opium or SlimeEngine's editor | New: ADR-0213 notes that Linux has no such mechanism |
 
 ## Pluto's own
 
@@ -126,5 +149,6 @@ These stay in Pluto. uwui gives them only the general pieces above.
 - The terminal's emulation state, if uwui's terminal crate does not own one: today
   `alacritty_terminal`.
 - On Android, the foreground service that keeps the connection, and the notifications through a
-  push service without Google's. Both are in the Kotlin layer, which the system draws, not uwui.
+  push service without Google's, unless uwui's long work comes to cover them. Today both are in
+  the Kotlin layer, which the system draws, not uwui.
 - Pluto's theme and its density.

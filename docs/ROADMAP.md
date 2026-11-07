@@ -40,6 +40,8 @@ References, as surveyed on 2026-11-06:
 - **T3 Code**: many providers through one server and thin clients. Pluto's starting point.
 
 Pluto aims to beat each of them on what it does best, at a fraction of their memory, on Linux first.
+None of them is measured yet: they are measured before Stage 6 is designed, and the margin by which
+Pluto beats them is set from their figures ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
 
 Hardware:
 
@@ -51,7 +53,8 @@ Hardware:
 - **Phone**: the owner's Pixel, under GrapheneOS.
 
 Budgets, validated by the owner on 2026-11-06; the last six on 2026-11-07, from the measurements of
-[M1.2](PLAN.md#m12--today-measured) ([ADR-0015](adr/0015-the-budgets-set-from-todays-figures.md)).
+[M1.2](PLAN.md#m12--today-measured) ([ADR-0015](adr/0015-the-budgets-set-from-todays-figures.md)); hours without a
+crash on 2026-11-07, from uwui's rules ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
 Most are not yet met: today's figures are beside them, and each gap is known debt.
 
 | Budget | Target | Today | Measured by | Checked in |
@@ -68,6 +71,7 @@ Most are not yet met: today's figures are beside them, and each gap is known deb
 | The history's import | at most 60 s on the high tier, 5 min on the HP, resumable | not measured: 2.79 GiB to import ([measured](measurements.md#the-forks-database)) | timed on a copy of the owner's history | Stage 3 |
 | An idle agent's resume | its first event within 2 s of the message sent, high tier | not measured: it needs a real agent | by the owner, by hand | from Stage 2 |
 | The database's growth | at most 25 MiB a day of heavy use | about 240 MiB a day ([measured](measurements.md#the-forks-database)) | the database's size, day by day | from Stage 2 |
+| Hours without a crash | at least 99.9 % of hours of use without a crash, client and server; no work lost after one, a draft in the composer included, as uwui asks of its applications | not measured: neither hours nor crashes are counted | the hours of use and the crashes, counted on the machine | from Stage 2 for the server, from Stage 6 for the client |
 
 Also held, without a figure:
 - WCAG 2.2 AA: a screen reader, the whole application by the keyboard, contrasts checked, reduced
@@ -94,6 +98,7 @@ Also held, without a figure:
 | Features | Today's, triaged; egui frozen ([ADR-0010](adr/0010-todays-features-triaged.md)) |
 | License | MIT OR Apache-2.0 for new code ([ADR-0003](adr/0003-what-pluto-is-to-become.md)) |
 | Pluto's own agent | A minimal harness, measured on Pluto's bench, after Stage 3 ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)) |
+| uwui's decisions of 2026-11-07 | Agents reach uwui's applications only where the sandbox allows it; what only a person may do is never offered to agents; uwui's rules for applications in the bar; macOS decided when Pluto goes public ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)) |
 
 ### Open
 
@@ -109,8 +114,11 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | When the client moves to uwui | when uwui takes its pilots, from uwui's plan | uwui's first stage |
 | The phone's notifications | a kept connection, as today; through the relay with a push service without Google's | Stage 5, the relay's milestone |
 | A thread moved between machines | how, and whether | after Stage 5 |
-| Going public | each provider's terms (Anthropic forbids third-party products to offer claude.ai sign-in without approval); the name; Flatpak, AppImage, Windows; the sandbox on Windows and Android | Stage 7 |
+| Going public | each provider's terms (Anthropic forbids third-party products to offer claude.ai sign-in without approval); the name; Flatpak, AppImage, Windows; macOS, the client through uwui and the server's sandbox, keyring and terminals ported; the sandbox on Windows and Android | Stage 7 |
 | The bench's tasks | a subset of Terminal-Bench through Harbor; SWE-bench Verified Mini; tasks of Pluto's own | Stage 4, its first milestone |
+| The library of the server's MCP tools | the official Rust SDK (`rmcp`); uwui's MCP library, only if it pulls no crate of uwui's interface; Pluto's own | Stage 3, the MCP tools' milestone |
+| The margin over the rivals | from the rivals' figures, measured first | when Stage 6 is designed |
+| Pluto as the owner's assistant on the desktop, calling the actions that uwui's applications declare, where Linux has no such mechanism | built or not, and how | after Stage 4, once uwui's local MCP server exists |
 | A command-line client | when, and how much of the protocol it covers | after Stage 4 |
 | Voice dictation; extensions; OpenDesign's catalog | built or not, and when | the owner's go; extensions after uwui's 1.0 |
 
@@ -152,7 +160,8 @@ others through the fork behind it. The server's budgets are measured.
 - The chat space, its memory and projects, and design projects.
 - Pluto's MCP tools, scheduled tasks, usage and quotas.
 - The browser through CDP.
-- The sandbox and the masking of secrets.
+- The sandbox and the masking of secrets; reaching uwui's applications is a right of the sandbox,
+  closed when it is locked ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
 - The history imported and verified.
 
 **Exit.** The fork is stopped, and the history is imported and checked. The budgets are met on the
@@ -189,7 +198,9 @@ daily use.
 **Goal.** Pluto's client, written anew on uwui from the triaged specification, as one of uwui's
 pilots.
 
-- The desktop client on Pluto's protocol, with Pluto's theme, the dashboard and keyboard-first use.
+- First, the rivals of the quality bar measured, and the margin over them set ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
+- The desktop client on Pluto's protocol, with Pluto's theme over uwui's own look, the dashboard
+  and keyboard-first use. Its actions for agents keep for the person what only a person may do.
 - WCAG 2.2 AA.
 - Then the phone, then the web.
 

@@ -1,6 +1,7 @@
 # 0009. Secrets, privacy and the agents' sandbox
 
-- Status: Accepted
+- Status: Accepted; amended by [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (uwui's applications as a right of the sandbox;
+  actions kept for a person)
 - Date: 2026-11-06
 
 ## Context

@@ -1,6 +1,6 @@
 # 0001. A native client, on egui until uwui
 
-- Status: Accepted
+- Status: Accepted; amended by [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (Pluto depends on uwui from its own repository)
 - Date: 2026-11-06, recording a decision of 2026-10-20
 
 ## Context

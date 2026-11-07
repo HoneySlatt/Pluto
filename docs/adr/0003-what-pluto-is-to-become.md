@@ -1,6 +1,7 @@
 # 0003. What Pluto is to become
 
-- Status: Accepted; amended by [0011](0011-plutos-own-harness-minimal-and-measured.md) (Pluto's own harness)
+- Status: Accepted; amended by [0011](0011-plutos-own-harness-minimal-and-measured.md) (Pluto's own harness) and
+  [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (the look, the bar and macOS, after uwui's decisions)
 - Date: 2026-11-06
 
 ## Context

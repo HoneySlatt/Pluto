@@ -12,6 +12,16 @@ Terms this project uses in a sense of its own.
   the harness and each of its components.
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
   against a server; not to be confused with the bench above.
+- **uwui's agent bench**: the fixed tasks that uwui gives the same agents with uwui and with its
+  rivals, to measure how well agents build applications on it (SlimeEngine's ADR-0213); not to be
+  confused with Pluto's bench.
+- **Declared action**: an action that an application on uwui declares once for agents, with its
+  name, typed parameters, description, permission and family (SlimeEngine's ADR-0218).
+- **Kept for a person**: an action that no agent may run, whatever consent it holds, such as
+  approving an agent's request ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)).
+- **uwui's core look and official themes**: the sober look that uwui's core ships, light, dark and
+  of high contrast; and the looks in crates of their own beside it, Glass, Material 3 Expressive
+  and Pro, which an application adds if it wants them.
 - **Model profile**: the harness's settings for one model: its edit format, tool names, message
   format, and which components are on.
 - **Driver**: the server's code that speaks one agent's protocol and turns it into Pluto's threads.
