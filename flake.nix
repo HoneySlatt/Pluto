@@ -7,10 +7,18 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # The last nixpkgs with T3 Code v0.0.45, whose server builds the fixture
+    # (scripts/fixture-server.sh). Pinned to a revision, so updates never move it.
+    nixpkgs-t3-fixture.url = "github:NixOS/nixpkgs/09063bd1f2b36fd9fd793c36dfade7bd40a93dfc";
   };
 
   outputs =
-    { nixpkgs, rust-overlay, ... }:
+    {
+      nixpkgs,
+      rust-overlay,
+      nixpkgs-t3-fixture,
+      ...
+    }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -67,6 +75,14 @@
         pkgs.cargo-deny
         pkgs.lychee
       ];
+      # What scripts/measure.sh runs (docs/measurements.md): the heap by call stack, repeated
+      # starts, wake-ups per thread, and a headless compositor for the client's real window.
+      measureTools = [
+        pkgs.heaptrack
+        pkgs.hyperfine
+        pkgs.sysstat
+        pkgs.weston
+      ];
       # The desktop toolchain is kept minimal: CI downloads it at every run.
       desktopRust = pkgs.rust-bin.stable.latest.minimal.override {
         extensions = [
@@ -83,10 +99,19 @@
       };
     in
     {
+      # T3 Code v0.0.45, about 3.5 GB with its Electron app: a package of its own, so that only
+      # scripts/fixture-server.sh downloads it, rather than every shell.
+      packages.${system}.fixture-t3 = nixpkgs-t3-fixture.legacyPackages.${system}.t3code;
+
       devShells.${system} = {
         # The desktop client and every check: `nix develop`, then scripts/check.sh.
         default = pkgs.mkShell {
           packages = [ desktopRust ] ++ checkTools;
+          LD_LIBRARY_PATH = runtimeLibraries;
+        };
+        # The measurements of docs/measurements.md: `nix develop .#measure`, then scripts/measure.sh.
+        measure = pkgs.mkShell {
+          packages = [ desktopRust ] ++ measureTools;
           LD_LIBRARY_PATH = runtimeLibraries;
         };
         emulator = pkgs.mkShell {
