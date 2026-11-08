@@ -13,10 +13,11 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   official local Web protocol ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)). It
   streams text, reasoning and tool activity, answers approvals and questions, supports Stop and
   resume, and maps Pluto's four runtime modes onto Harness permission presets. Tests use fake
-  peers and a recorded 0.2.1-rc.3 wire capture; the real binary was run against a fake local
-  model, and no real account turn was made. Sign-in and a paid turn remain the owner's
-  validation. Limits, stated in the provider guide: no native forks, rollback, plan mode,
-  application text or token usage.
+  peers and a recorded 0.2.1-rc.3 wire capture. Since 2026-11-08 the owner's delegated tasks run
+  on it with real turns; they showed a delegated task reported its first message, fixed with
+  token usage (live and in the usage history) and provider errors' real causes in the server's
+  log (fork commits 17ce1c3c0e to 981056cf08). Limits, stated in the provider guide: no native
+  forks, rollback, plan mode or application text.
 - On 2026-11-06 Pluto came under the owner's method, and changed direction in a design session with
   the owner ([ADR-0003](adr/0003-what-pluto-is-to-become.md) to
   [ADR-0010](adr/0010-todays-features-triaged.md)), and on 2026-11-07 chose a harness of its own

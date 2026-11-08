@@ -33,7 +33,7 @@ const TICK_COUNT: f64 = 4.0;
 
 /// `PROVIDER_PRESENTATION`, in its reading order: kind, label, color
 /// (`PLACEHOLDER` for Codex's `--contrast-foreground`).
-const PROVIDERS: [(&str, &str, Color32); 10] = [
+const PROVIDERS: [(&str, &str, Color32); 11] = [
     ("codex", "Codex", Color32::PLACEHOLDER),
     ("claude", "Claude Code", Color32::from_rgb(0xd9, 0x77, 0x57)),
     // `color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))`.
@@ -51,6 +51,11 @@ const PROVIDERS: [(&str, &str, Color32); 10] = [
     ("vibe", "Mistral Vibe", Color32::from_rgb(0xfa, 0x50, 0x0f)),
     // `color-mix(in oklab, var(--contrast-foreground) 56%, var(--background))`.
     ("zcode", "Z Code", Color32::from_rgb(147, 147, 147)),
+    (
+        "deepseek",
+        "DeepSeek Harness",
+        Color32::from_rgb(0x4d, 0x6b, 0xfe),
+    ),
 ];
 
 fn presentation(provider: &str) -> (&'static str, Color32) {
@@ -80,10 +85,11 @@ fn paint_mark(ui: &Ui, provider: &str, min: Pos2, size: f32, current: Color32) {
             ui,
             Rect::from_center_size(rect.center(), Vec2::new(size * 0.8, size)),
         ),
-        "kimi" | "vibe" | "zcode" => {
+        "kimi" | "vibe" | "zcode" | "deepseek" => {
             let driver = match provider {
                 "kimi" => "kimiCode",
                 "vibe" => "mistralVibe",
+                "deepseek" => "deepseekHarness",
                 _ => "zcode",
             };
             if let Some((icon, tint)) = crate::ui::pickers::provider_icon(driver) {
@@ -1537,6 +1543,14 @@ mod tests {
         assert_eq!(format_percent(0.995), "99.5%");
         assert_eq!(format_count(1234.0), "1,234");
         assert_eq!(format_day_short("2026-09-21"), "Sep 21");
+    }
+
+    #[test]
+    fn deepseek_usage_is_named_in_its_mark_color() {
+        assert_eq!(
+            presentation("deepseek"),
+            ("DeepSeek Harness", Color32::from_rgb(0x4d, 0x6b, 0xfe))
+        );
     }
 
     #[test]
