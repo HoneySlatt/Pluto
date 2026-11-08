@@ -1,6 +1,7 @@
 # 0006. Agents' drivers
 
 - Status: Accepted; amended by [0011](0011-plutos-own-harness-minimal-and-measured.md) (Pluto's own agent)
+  and [0021](0021-deepseek-harness-in-todays-pluto.md) (DeepSeek Harness's native Web interface)
 - Date: 2026-11-06
 
 ## Context

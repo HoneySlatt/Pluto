@@ -317,6 +317,7 @@ pub fn mark(driver: &str) -> Option<&'static str> {
         "claudeAgent" | "claude" => "claude",
         "codex" => "openai",
         "kimiCode" | "kimi" => "provider-kimi-dark",
+        "deepseekHarness" => "provider-deepseek",
         "mistralVibe" | "vibe" | "mistral" => "provider-mistral-vibe",
         "ollama" => "provider-ollama",
         "zcode" => "provider-zcode",
@@ -336,6 +337,7 @@ pub fn driver_label(driver: &str) -> String {
         "claudeAgent" | "claude" => "Claude".into(),
         "codex" => "Codex".into(),
         "kimiCode" | "kimi" => "Kimi Code".into(),
+        "deepseekHarness" => "DeepSeek Harness".into(),
         "mistralVibe" | "vibe" => "Mistral Vibe".into(),
         "zcode" => "Z Code".into(),
         "ollama" => "Ollama".into(),
@@ -382,6 +384,41 @@ mod tests {
                 ("ollama_code".into(), "ollama".into())
             ]
         );
+    }
+
+    #[test]
+    fn deepseek_is_available_in_code_and_chat_with_its_model_options() {
+        let all = vec![json!({
+            "instanceId": "deepseek_work",
+            "driver": "deepseekHarness",
+            "displayName": "DeepSeek Harness",
+            "enabled": true,
+            "status": "ready",
+            "models": [{
+                "slug": "deepseek-official/deepseek-flash",
+                "name": "DeepSeek Flash (API)",
+                "capabilities": {"optionDescriptors": [{
+                    "id": "reasoningEffort", "type": "select", "currentValue": "high",
+                    "options": [{"id": "high", "label": "High"}, {"id": "max", "label": "Max"}]
+                }]}
+            }]
+        })];
+        let selection = ModelSelection {
+            instance_id: "deepseek_work".into(),
+            model: "deepseek-official/deepseek-flash".into(),
+            options: None,
+        };
+        for chat in [false, true] {
+            let groups = model_groups(&all, chat, Some(&selection));
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].mark.as_deref(), Some("provider-deepseek"));
+            assert_eq!(groups[0].name, "DeepSeek Harness");
+            assert_eq!(groups[0].models[0].label, "DeepSeek Flash (API)");
+            assert!(groups[0].models[0].checked);
+        }
+        let max = with_option(&selection, "reasoningEffort", "max");
+        assert_eq!(effort(&all, &max).unwrap().2, "max");
+        assert_eq!(wire(&max)["options"]["reasoningEffort"], "max");
     }
 
     #[test]

@@ -163,7 +163,7 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | The protocol's wire format and transports | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 2, the protocol's milestone |
 | The storage's model | an event log, or plain tables | Stage 2, the storage's milestone |
 | A keyring without a graphical session | systemd's credentials; a file sealed by the session's keyring; another | Stage 2, the secrets' milestone |
-| DeepSeek Harness | native, ACP, or a small Node module if its only interface is TypeScript | when its interface is stable, at the latest Stage 3 |
+| DeepSeek Harness in Pluto's own server | native, ACP, or a small Node module if its only interface is TypeScript; the fork already drives its local Web protocol ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)) | when its interface is stable, at the latest Stage 3 |
 | When the client moves to uwui | when uwui takes its pilots, from uwui's plan | uwui's first stage |
 | A thread moved between machines | how, and whether | after Stage 5 |
 | Going public | each provider's terms, kept in the table of the vendors' paths ([ADR-0020](adr/0020-the-chat.md)); the name; Flatpak, AppImage, Windows packages; macOS, the client through uwui and the server's sandbox, keyring and terminals ported; the sandbox on Windows and Android; editing with other people in the editor | Stage 8 |

@@ -14,11 +14,11 @@ New ADRs copy the template below and take the next free number.
 | [0003](0003-what-pluto-is-to-become.md) | What Pluto is to become | Accepted; amended by 0011, 0016, 0018, 0019 and 0020 |
 | [0004](0004-plutos-own-server-in-rust.md) | Pluto's own server, in Rust, in front of the frozen fork | Accepted |
 | [0005](0005-plutos-own-typed-protocol.md) | Pluto's own typed protocol | Accepted |
-| [0006](0006-agents-drivers.md) | Agents' drivers | Accepted; amended by 0011 |
+| [0006](0006-agents-drivers.md) | Agents' drivers | Accepted; amended by 0011 and 0021 |
 | [0007](0007-several-servers-and-a-relay.md) | Several servers in one view, and a relay of Pluto's own | Accepted; amended by 0018 |
 | [0008](0008-storage-and-the-history-moved.md) | The server's storage, and the history moved from the fork | Accepted |
 | [0009](0009-secrets-privacy-and-the-sandbox.md) | Secrets, privacy and the agents' sandbox | Accepted; amended by 0016, 0018 and 0019 |
-| [0010](0010-todays-features-triaged.md) | Today's features triaged, and the egui client frozen | Accepted |
+| [0010](0010-todays-features-triaged.md) | Today's features triaged, and the egui client frozen | Accepted; amended by 0021 |
 | [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Accepted |
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
@@ -29,6 +29,7 @@ New ADRs copy the template below and take the next free number.
 | [0018](0018-the-markets-features-and-the-triage.md) | The market's features, and the triage by family | Accepted; amends 0002, 0003, 0007 and 0009 |
 | [0019](0019-a-code-editor-in-pluto.md) | A code editor in Pluto | Accepted; amends 0003 and 0009 |
 | [0020](0020-the-chat.md) | The chat | Accepted; amends 0003 |
+| [0021](0021-deepseek-harness-in-todays-pluto.md) | DeepSeek Harness in today's Pluto | Accepted; amends 0006 and 0010 |
 
 ## Template
 

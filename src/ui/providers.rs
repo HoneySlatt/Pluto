@@ -48,11 +48,12 @@ const HEALTH_STEP_SECONDS: i64 = 30;
 
 /// `DEFAULT_DISABLED_PROVIDER_DRIVERS` (contracts `settings.ts`): built-in
 /// drivers that stay off until the user turns them on.
-const DEFAULT_DISABLED_DRIVERS: [&str; 10] = [
+const DEFAULT_DISABLED_DRIVERS: [&str; 11] = [
     "cursor",
     "grok",
     "muse",
     "kimiCode",
+    "deepseekHarness",
     "mistralVibe",
     "zcode",
     "ollama",
@@ -139,7 +140,7 @@ fn driver_secrets(driver: &str) -> &'static [Field] {
 }
 
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
-const DRIVERS: [(&str, &str, &str, Option<&str>); 10] = [
+const DRIVERS: [(&str, &str, &str, Option<&str>); 11] = [
     ("codex", "Codex", "openai", None),
     ("claudeAgent", "Claude", "claude", None),
     ("cursor", "Cursor", "provider-cursor", Some("Early Access")),
@@ -149,6 +150,12 @@ const DRIVERS: [(&str, &str, &str, Option<&str>); 10] = [
     // Pluto's own drivers (packages/provider-kimi-code, provider-mistral-vibe,
     // provider-zcode).
     ("kimiCode", "Kimi Code", "provider-kimi-dark", Some("Beta")),
+    (
+        "deepseekHarness",
+        "DeepSeek Harness",
+        "provider-deepseek",
+        Some("Preview"),
+    ),
     (
         "mistralVibe",
         "Mistral Vibe",
@@ -277,6 +284,12 @@ fn driver_fields(driver: &str) -> &'static [Field] {
             "Binary path",
             "Path to the Kimi Code binary on this environment. Sign in by running kimi and /login on that host.",
             "kimi",
+        )],
+        "deepseekHarness" => &[(
+            "binaryPath",
+            "Binary path",
+            "Path to the DeepSeek Harness binary on this environment. Sign in once in that instance's Harness home before the first turn.",
+            "dsh",
         )],
         "mistralVibe" => &[(
             "binaryPath",
@@ -2469,6 +2482,8 @@ mod tests {
         };
         assert!(row(json!({"driver": "codex"})).enabled());
         assert!(!row(json!({"driver": "kimiCode"})).enabled());
+        assert!(!row(json!({"driver": "deepseekHarness"})).enabled());
+        assert!(row(json!({"driver": "deepseekHarness", "enabled": true})).enabled());
         assert!(row(json!({"driver": "kimiCode", "config": {"enabled": true}})).enabled());
         assert!(
             !row(json!({"driver": "codex", "enabled": true, "config": {"enabled": false}}))

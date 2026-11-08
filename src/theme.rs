@@ -1173,6 +1173,7 @@ pub fn icon(name: &str) -> egui::ImageSource<'static> {
         "ellipsis-vertical",
         "provider-cursor",
         "provider-grok",
+        "provider-deepseek",
         "provider-kimi-dark",
         "provider-kimi-light",
         "provider-mistral-vibe",

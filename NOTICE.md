@@ -12,6 +12,7 @@ Bundled assets and their licenses:
 
 | Asset | Source | License | Text |
 | --- | --- | --- | --- |
+| DeepSeek provider mark (`provider-deepseek.svg`, desktop and Android) | [DeepSeek Harness v0.2.1-rc.3](https://github.com/deepseek-ai/deepseek-harness), `website/public/favicon.svg` | MIT; trademark retained by DeepSeek | `assets/DEEPSEEK-LICENSE` |
 | Geist, Geist Mono fonts | Vercel | SIL OFL 1.1 | `assets/fonts/OFL.txt` |
 | Lucide icons (`assets/icons`, `assets/lucide`) | Lucide Contributors | ISC (portions MIT, Feather) | `assets/icons/LUCIDE-LICENSE` |
 | `diffs-symbol-*` file status icons | @pierre/diffs | Apache-2.0 | `assets/PIERRE-DIFFS-LICENSE` |
@@ -21,7 +22,7 @@ Bundled assets and their licenses:
 The provider logos (`assets/icons/provider-*`, `claude.svg`, `openai.svg`,
 and their copies in `crates/pluto-ffi/assets/marks`) are trademarks of their owners
 (Anthropic, OpenAI, Google, Moonshot AI, Mistral AI, Zhipu AI, xAI, GitHub,
-Anysphere, Ollama and the others shown). They only identify each provider;
+Anysphere, Ollama, DeepSeek and the others shown). They only identify each provider;
 Pluto is not affiliated with these companies.
 
 The Rust crates the programs link keep their own licenses; their notices are

@@ -10,6 +10,11 @@ Pluto today is two clients over one shared Rust core. Both speak to one server, 
 (`pluto-server`, T3 Code's server in TypeScript, outside this repository; see the
 [glossary](glossary.md)).
 
+DeepSeek Harness is a provider of the fork ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)):
+the server launches the official `dsh` local Web server and drives its protocol. The clients
+receive its models and options through the existing provider snapshots; they never connect to
+the Harness process themselves.
+
 | Part | Where | What it is | Size |
 |---|---|---|---|
 | Desktop client | `src/` | The native client, on egui and eframe, for Linux. Frozen except fixes ([ADR-0010](adr/0010-todays-features-triaged.md)) | 109,000 lines of Rust |

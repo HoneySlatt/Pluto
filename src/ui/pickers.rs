@@ -55,6 +55,7 @@ pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
             },
             Color32::WHITE,
         )),
+        "deepseekHarness" => Some(("provider-deepseek", Color32::WHITE)),
         "mistralVibe" => Some(("provider-mistral-vibe", Color32::WHITE)),
         // Z Code's monochrome Z follows the text color, like Codex's mark.
         "zcode" => Some(("provider-zcode", theme::foreground())),
