@@ -224,7 +224,7 @@ validated them on 2026-11-07 ([ADR-0015](adr/0015-the-budgets-set-from-todays-fi
 
 | Budget | Today |
 |---|---|
-| Input to present | not measured: the client does not ask for the compositor's presentation times |
+| Input to photon | not measured: the client does not ask for the compositor's presentation times |
 | The binary's size | the client, 74.5 MB, 59.5 MB stripped, its icons and fonts within |
 | An event's latency, server to client | not measured: the fixture runs no turn |
 | The history's import | 2.79 GiB, 596 threads, 508,717 events; the final states, which [ADR-0008](adr/0008-storage-and-the-history-moved.md) imports, are 927 MiB of it |

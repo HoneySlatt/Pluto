@@ -1,7 +1,10 @@
 # 0003. What Pluto is to become
 
 - Status: Accepted; amended by [0011](0011-plutos-own-harness-minimal-and-measured.md) (Pluto's own harness) and
-  [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (the look, the bar and macOS, after uwui's decisions)
+  [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (the look, the bar and macOS, after uwui's decisions),
+  [0018](0018-the-markets-features-and-the-triage.md) (review in Pluto, the market's features
+  added), [0019](0019-a-code-editor-in-pluto.md) (a code editor in Pluto; going public at Stage 8)
+  and [0020](0020-the-chat.md) (the chat replaces the vendors' applications)
 - Date: 2026-11-06
 
 ## Context

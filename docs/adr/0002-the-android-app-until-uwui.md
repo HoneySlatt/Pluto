@@ -1,6 +1,7 @@
 # 0002. The Android app, in Kotlin until uwui
 
-- Status: Accepted
+- Status: Accepted; amended by [0018](0018-the-markets-features-and-the-triage.md) (notifications
+  through UnifiedPush; models on the phone)
 - Date: 2026-11-06, recording decisions of 2026-10-28 and 2026-10-29
 
 ## Context

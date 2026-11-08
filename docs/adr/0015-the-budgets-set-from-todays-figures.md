@@ -1,6 +1,7 @@
 # 0015. The budgets set from today's figures
 
-- Status: Accepted
+- Status: Accepted; amended by [0017](0017-pluto-measured-against-the-market.md) (rivals may
+  tighten each budget, never loosen it; frames at 99.9 %; input timed to the photon)
 - Date: 2026-11-07
 
 ## Context

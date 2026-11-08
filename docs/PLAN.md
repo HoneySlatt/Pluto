@@ -16,8 +16,12 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 - Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
   `docs/parity/` stays as an inventory.
 - Stage 1: [M1.1](#m11--under-the-method) and [M1.2](#m12--today-measured) are done, the HP's
-  figures to come by the owner's hand. Work happens on `main` since 2026-11-07. Next:
-  [M1.3](#m13--the-triage).
+  figures to come by the owner's hand. Work happens on `main` since 2026-11-07.
+- On 2026-11-08 an interview with the owner set Pluto against the market, the market's features,
+  the triage by family, a code editor in Pluto and the chat
+  ([ADR-0017](adr/0017-pluto-measured-against-the-market.md) to [ADR-0020](adr/0020-the-chat.md)).
+  [M1.3](#m13--the-triage) is under way: the families are marked, their rows come next. Then
+  [M1.6](#m16--the-rivals-measured), beside M1.4 and M1.5.
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -27,9 +31,10 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 |---|---|---|
 | [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
-| [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Planned |
+| [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Under way: families marked, rows to come |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Planned |
+| [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
 
 ## Stage 1 — The ground measured and triaged
 
@@ -97,6 +102,13 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   specification.
 - **Measured.** Nothing.
 - **By hand.** The marks, by the owner, in several sittings if needed.
+- **Where it stands (2026-11-08).** The 31 families are listed and marked in
+  [`features.md`](features.md) ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)): 11
+  kept, 20 rethought with the phone, none cut. The features added by the interview are listed
+  there too. Next: the rows of each rethought family, each with its problem, the rival that does it
+  best, and core or optional; the owner's reasons for the families rethought against the
+  recommendation (2, 7, 15, 28) and the direction of design projects (25); Bitbucket and T3's
+  environment themes. Then `docs/specification.md`.
 
 ### M1.4 — The cuts
 
@@ -122,13 +134,36 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **Measured.** Nothing.
 - **By hand.** The real sessions, which only the owner starts: they spend the owner's quota.
 
+### M1.6 — The rivals measured
+
+- **Goal.** The quality bar holds the rivals' figures, so that Stage 2's server starts from them
+  ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+- **Delivers.**
+  - A scripted fake model service that streams one workload, a long thread and 15 threads, to any
+    application that takes a custom endpoint, Pluto included; it counts the tokens it receives.
+  - A disposable, isolated profile for each rival, its network cut unless the measure needs it.
+  - The agents' applications and the chats of the quality bar measured on the desktop and the HP:
+    memory and processor at rest, wake-ups, start, frames, energy, the whole system over a day of
+    15 threads. Each with its version and date in `measurements.md`. ChatGPT's desktop application
+    runs in the owner's Windows machine. The applications that take no custom endpoint, Claude's
+    and ChatGPT's, are measured at rest and over a session the owner runs by hand, with the owner's
+    go per account. The editor's rivals are measured when Stage 7 starts, the phone's with Stage 5.
+  - The bar's figures tightened where a rival's figure and its margin are stricter.
+- **Done when.** Every agents' application and chat of the bar has its figures, or a written
+  reason; the ROADMAP's budgets are the stricter of the two.
+- **How to test.** The fake model's own tests, in `scripts/check.sh`; the measures by
+  `scripts/measure.sh`.
+- **Measured.** Everything above.
+- **By hand.** The owner's one go for downloading the list of rivals outside Nix, and a go per
+  account for the Claude and ChatGPT applications. Each rival's licence checked before any figure
+  is published.
+
 ## Ideas
 
 - Two weeks of local, private counts of which features the owner uses, to inform the triage. Kept
   on the machine, never sent; ask before building.
 - From the 2026-10-27/28 backlog, set aside by the owner:
   - OpenDesign's catalog of design systems;
-  - voice dictation with whisper;
   - Ollama's model management (now in Stage 3);
   - a Nix build without the web client.
 

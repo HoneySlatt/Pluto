@@ -95,7 +95,8 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
 - Nothing leaves the machine of Pluto's own accord: no telemetry, no update check without consent.
 - Every format the server or client writes is versioned and migrated; writes are atomic; a
   migration backs up first ([ADR-0008](docs/adr/0008-storage-and-the-history-moved.md)).
-- Honour each provider's terms: drive their official CLIs, never scrape their web services.
+- Honour each provider's terms: drive their official CLIs, or a sign-in the provider offers to
+  third-party applications ([ADR-0020](docs/adr/0020-the-chat.md)); never scrape their web services.
 - When reading T3 Code's original sources, extract them from the installed package's source maps;
   never vendor them here. Code taken from T3 (MIT) keeps its notice in `NOTICE.md`.
 

@@ -4,7 +4,8 @@
   uwui from uwui's own repository), [0003](0003-what-pluto-is-to-become.md) (the look over uwui's
   core look; uwui's rules for applications in the bar; macOS decided when Pluto goes public) and
   [0009](0009-secrets-privacy-and-the-sandbox.md) (uwui's applications as a right of the sandbox;
-  actions kept for a person)
+  actions kept for a person); amended by [0017](0017-pluto-measured-against-the-market.md)
+  (rivals measured from Stage 1, the margin set now)
 - Date: 2026-11-07
 
 ## Context

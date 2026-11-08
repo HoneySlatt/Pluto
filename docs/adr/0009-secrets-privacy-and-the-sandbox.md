@@ -1,7 +1,9 @@
 # 0009. Secrets, privacy and the agents' sandbox
 
 - Status: Accepted; amended by [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (uwui's applications as a right of the sandbox;
-  actions kept for a person)
+  actions kept for a person) and [0018](0018-the-markets-features-and-the-triage.md) (computer
+  use in an isolated session; triggers run locked) and [0019](0019-a-code-editor-in-pluto.md) (the
+  sandbox on Windows decided when Stage 7 starts)
 - Date: 2026-11-06
 
 ## Context

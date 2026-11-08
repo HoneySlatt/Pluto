@@ -10,6 +10,13 @@ Terms this project uses in a sense of its own.
   agent.
 - **The bench**: Pluto's small fixed set of coding tasks, run on the owner's local models to measure
   the harness and each of its components.
+- **A rival**: a program of the market that Pluto is measured against, named only to be measured,
+  with its version and date ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+- **The fake model service**: a scripted service that streams the same workload to Pluto and its
+  rivals as a model would, so that they compare with no quota spent; it counts the tokens it
+  receives ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+- **The margin**: how much better than the best rival Pluto must be on a family of criteria, such
+  as twice on resources ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
   against a server; not to be confused with the bench above.
 - **uwui's agent bench**: the fixed tasks that uwui gives the same agents with uwui and with its

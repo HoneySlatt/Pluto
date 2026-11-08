@@ -1,6 +1,7 @@
 # 0007. Several servers in one view, and a relay of Pluto's own
 
-- Status: Accepted
+- Status: Accepted; amended by [0018](0018-the-markets-features-and-the-triage.md) (the phone's
+  notifications decided; Tailscale as one more path)
 - Date: 2026-11-06
 
 ## Context
