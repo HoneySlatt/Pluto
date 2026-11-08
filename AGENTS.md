@@ -49,6 +49,7 @@ nix develop                   # the toolchain, the checks' tools, eframe's libra
 scripts/check.sh              # every check CI runs (its head lists them); `--apk` builds Android too
 scripts/fixture-server.sh     # a disposable server on :3999 with synthetic threads
 cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer
+cargo build --release -j2     # the binary the owner's shortcut starts; more jobs get OOM-killed
 ```
 
 The README's *Development* section has the snapshot comparison and the rest.
