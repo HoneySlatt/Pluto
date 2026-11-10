@@ -121,7 +121,7 @@ The screens of `src/ui/`, by group:
 | The conversation | `chat`, `chat_export`, `composer*`, `drafts`, `attachments`, `mentions`, `pickers`, `prompt_editor`, `prompt_history`, `typing_guard`, `tasks`, `context_meter`, `timeline_view`, `live_activity`, `minimap`, `markdown`, `md_*`, `cite*`, `citations`, `plan_card`, `queue`, `rewind`, `inspector`, `tool_images`, `tool_icons`, `proactive_panels`, `thread_*` |
 | Navigation | `sidebar*`, `palette`, `command_menu`, `content_search`, `keybindings`, `when_builder`, `shortcuts`, `toasts`, `lifecycle`, `park`, `undo`, `snooze_dialog`, `context_menu`, `text_menu` |
 | Projects | `projects_page`, `project_actions`, `project_file`, `script_import`, `project_grouping`, `project_icon`, `project_scope`, `favicon`, `scratch`, `open_in` |
-| Code and Git | `diff_panel`, `diff_review`, `changed_files`, `files`, `file_*`, `branch_picker`, `git_actions`, `source_control`, `stash`, `pull_requests`, `linked_pull_requests`, `bitbucket`, `worktree_setup`, `publish` |
+| Code and Git | `diff_panel`, `diff_review`, `changed_files`, `files`, `file_*`, `branch_picker`, `git_actions`, `source_control`, `stash`, `pull_requests`, `linked_pull_requests`, `worktree_setup`, `publish` |
 | Panels | `surfaces` (the right panel's launcher), `terminal_drawer`, `terminal_surface`, `preview`, `server_browser`, `html_render`, `mcp_apps`, `agents_panel`, `video`, `media`, `lightbox` |
 | Settings | `settings*`, `setting_inheritance`, `providers*` (and `providers/`), `memory_settings`, `usage*`, `scheduled_tasks`, `custom_model_editor`, `action_editor` |
 | Chats | `chat_mode`, `chat_projects`, `chat_research`, `chat_image`, `chat_versions` |

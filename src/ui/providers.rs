@@ -1,19 +1,18 @@
 //! The Providers settings page (`ProviderSettingsPanel.tsx`,
 //! `ProviderInstanceCard.tsx`, `ProviderSettingsForm.tsx`,
-//! `ProviderModelsSection.tsx`, `providerStatus.ts`, `providerDriverMeta.ts`,
-//! `UsageProviderSettings.tsx`).
+//! `ProviderModelsSection.tsx`, `providerStatus.ts`, `providerDriverMeta.ts`).
 //!
 //! Ported: the provider instance list (status, version, update marker,
 //! enable switch), the selected instance's editor (display name with the
 //! redacted account, the driver's runtime fields, models with favorites,
-//! visibility and ordering) and the health check interval. Edits are saved
+//! visibility and ordering). Edits are saved
 //! as `server.updateSettings` patches like upstream's
 //! `buildProviderInstanceUpdatePatch` (without resetting the legacy
 //! `providers` mirror); model preferences are client settings.
 //!
 //! Not ported (a notice shows instead): adding or deleting instances, the
-//! accent color picker, environment variable editing, custom models, usage
-//! limit hubs, update installs and the Codex/Antigravity setup flows.
+//! accent color picker, environment variable editing, custom models, update
+//! installs and the Codex/Antigravity setup flows.
 //! Credential fields (`control: "password"`) are write-only where
 //! `driver_secrets` lists them (Z Code's API key): the server sends only a
 //! redaction, and a typed value is saved, then dropped. The others (the
@@ -44,12 +43,10 @@ const CARD_HEIGHT: f32 = 704.0;
 const LIST_WIDTH: f32 = 272.0;
 const FIELD_WIDTH: f32 = 224.0;
 const ACCENT_DEFAULT: Color32 = Color32::from_rgb(37, 99, 235); // blue-600
-const HEALTH_STEP_SECONDS: i64 = 30;
 
 /// `DEFAULT_DISABLED_PROVIDER_DRIVERS` (contracts `settings.ts`): built-in
 /// drivers that stay off until the user turns them on.
-const DEFAULT_DISABLED_DRIVERS: [&str; 11] = [
-    "cursor",
+const DEFAULT_DISABLED_DRIVERS: [&str; 10] = [
     "grok",
     "muse",
     "kimiCode",
@@ -140,10 +137,9 @@ fn driver_secrets(driver: &str) -> &'static [Field] {
 }
 
 /// `PROVIDER_CLIENT_DEFINITIONS`: driver, label, mark, early-access badge.
-const DRIVERS: [(&str, &str, &str, Option<&str>); 11] = [
+const DRIVERS: [(&str, &str, &str, Option<&str>); 10] = [
     ("codex", "Codex", "openai", None),
     ("claudeAgent", "Claude", "claude", None),
-    ("cursor", "Cursor", "provider-cursor", Some("Early Access")),
     ("grok", "Grok", "provider-grok", Some("Early Access")),
     ("opencode", "OpenCode", "opencode", None),
     ("antigravity", "Antigravity", "provider-antigravity", None),
@@ -223,20 +219,6 @@ fn driver_fields(driver: &str) -> &'static [Field] {
                 "Launch arguments",
                 "Additional CLI arguments passed on session start.",
                 "e.g. --chrome",
-            ),
-        ],
-        "cursor" => &[
-            (
-                "binaryPath",
-                "Binary path",
-                "Path to the Cursor agent binary.",
-                "cursor-agent",
-            ),
-            (
-                "apiEndpoint",
-                "API endpoint",
-                "Override the Cursor API endpoint for this instance.",
-                "https://...",
             ),
         ],
         "grok" => &[(
@@ -655,15 +637,11 @@ impl App {
     /// synthesized from the legacy `providers` blob, or, for Codex and
     /// Claude, which run unconfigured, the driver's default config), its
     /// custom instances, then instances of drivers this build does not know.
-    /// Cursor is listed only when the server reports its default instance.
     fn provider_rows(&self) -> Vec<InstanceRow> {
         let settings = &self.state.config["settings"];
         let instances = settings["providerInstances"].as_object();
         let mut rows = Vec::new();
         for (driver, ..) in DRIVERS {
-            if driver == "cursor" && self.live_provider(driver).is_none() {
-                continue;
-            }
             let explicit = instances.and_then(|i| i.get(driver)).cloned();
             let synthesized = settings["providers"][driver].as_object().map(|legacy| {
                 let mut config = legacy.clone();
@@ -788,7 +766,7 @@ impl App {
     /// The Providers page from `top` (the scope sentence's top); returns the
     /// bottom of its last card.
     pub(crate) fn providers_page(&mut self, ui: &mut Ui, left: f32, top: f32) -> f32 {
-        let mut y = self.providers_scope_sentence(ui, left, top);
+        let y = self.providers_scope_sentence(ui, left, top);
         let rows = self.provider_rows();
         let selected = self
             .providers_selected
@@ -929,134 +907,7 @@ impl App {
                 20.0,
             );
         }
-        y = card.bottom() + 32.0;
-
-        // Usage providers (limit hubs).
-        section_title(ui, Pos2::new(left + 16.0, y), "Usage providers");
-        let hub_label_width = widgets::outline_button_width(ui, true, "Add hub") - 2.0;
-        let hub = Rect::from_min_size(
-            Pos2::new(right - hub_label_width, y + 2.0),
-            Vec2::new(hub_label_width, 24.0),
-        );
-        let response = ui.interact(hub, ui.id().with("add-hub"), Sense::click());
-        ui.painter().rect(
-            hub,
-            CornerRadius::same(8),
-            if response.hovered() {
-                theme::overlay(0.05)
-            } else {
-                theme::control_surface()
-            },
-            Stroke::new(1.0, theme::input()),
-            StrokeKind::Inside,
-        );
-        theme::paint_icon(
-            ui,
-            "plus",
-            Rect::from_min_size(
-                Pos2::new(hub.left() + 6.0, hub.center().y - 6.0),
-                Vec2::splat(12.0),
-            ),
-            12.0,
-            theme::muted_foreground(),
-        );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(hub.left() + 22.0, hub.top()), hub.max),
-            "Add hub",
-            font(12.0, Weight::Medium),
-            theme::foreground(),
-        );
-        if response.clicked() {
-            self.notify(
-                crate::ui::toasts::Kind::Info,
-                "Usage limit hubs are not implemented yet",
-            );
-        }
-        let hubs = Rect::from_min_size(Pos2::new(left, y + 38.0), Vec2::new(WIDTH, 46.0));
-        paint_card(ui, hubs);
-        let sources = self.state.config["settings"]["usageLimitSources"]
-            .as_object()
-            .map_or(0, |s| s.len());
-        let hub_text = if sources == 0 {
-            "No hubs configured.".to_owned()
-        } else {
-            format!("{sources} hubs configured.")
-        };
-        widgets::text(
-            ui,
-            Pos2::new(hubs.left() + 17.0, hubs.top() + 13.0),
-            &hub_text,
-            font(14.0, Weight::Medium),
-            theme::foreground(),
-            20.0,
-        );
-        y = hubs.bottom() + 32.0;
-
-        // Advanced: the health check interval.
-        section_title(ui, Pos2::new(left + 16.0, y), "Advanced");
-        let advanced = Rect::from_min_size(Pos2::new(left, y + 38.0), Vec2::new(WIDTH, 68.0));
-        paint_card(ui, advanced);
-        let title_font = font(14.0, Weight::Medium);
-        let title = "Health check interval";
-        widgets::text(
-            ui,
-            Pos2::new(advanced.left() + 17.0, advanced.top() + 13.0),
-            title,
-            title_font.clone(),
-            theme::foreground(),
-            20.0,
-        );
-        let info = Rect::from_min_size(
-            Pos2::new(
-                advanced.left() + 17.0 + widgets::text_width(ui, title, title_font) + 6.0,
-                advanced.top() + 13.0,
-            ),
-            Vec2::splat(20.0),
-        );
-        theme::paint_icon(ui, "info", info, 14.0, theme::muted_foreground());
-        ui.interact(info, ui.id().with("health-info"), Sense::hover()).on_hover_text(
-            "This interval is configured here, then the shared Background activity policy decides whether provider probes may run when the timer fires. Custom intervals appear as Advanced in General settings.",
-        );
-        widgets::text(
-            ui,
-            Pos2::new(advanced.left() + 17.0, advanced.top() + 37.0),
-            "Refresh provider status, versions, and models in the background. Set to 0 to disable.",
-            font(12.0, Weight::Regular),
-            theme::alpha(theme::muted_foreground(), 0.8),
-            18.0,
-        );
-        let seconds = self.state.config["settings"]["providerHealthRefreshInterval"]
-            .as_i64()
-            .map_or(300, |ms| ms / 1000);
-        let seconds_width = widgets::text_width(ui, "seconds", font(12.0, Weight::Regular));
-        let field = Rect::from_min_size(
-            Pos2::new(
-                advanced.right() - 17.0 - seconds_width - 8.0 - 128.0,
-                advanced.center().y - 14.0,
-            ),
-            Vec2::new(128.0, 28.0),
-        );
-        if let Some(next) = self.interval_field(
-            ui,
-            field,
-            seconds,
-            "provider-health-interval",
-            HEALTH_STEP_SECONDS,
-        ) {
-            self.patch_server_settings(
-                json!({"providerHealthRefreshInterval": next.max(0) * 1000}),
-            );
-        }
-        widgets::text(
-            ui,
-            Pos2::new(field.right() + 8.0, advanced.center().y - 8.0),
-            "seconds",
-            font(12.0, Weight::Regular),
-            theme::muted_foreground(),
-            16.0,
-        );
-        advanced.bottom()
+        card.bottom()
     }
 
     /// `SettingsScopeSentence` with one environment: "on" and its machine.
@@ -2197,7 +2048,6 @@ impl App {
             let placeholder = match row.driver.as_str() {
                 "codex" => "gpt-6.7-codex-ultra-preview",
                 "claudeAgent" => "claude-sonnet-5",
-                "cursor" => "claude-sonnet-4-6",
                 "opencode" => "openai/gpt-5",
                 _ => "model-slug",
             };
@@ -2363,8 +2213,6 @@ impl App {
         card.bottom()
     }
 
-    /// A `NumberField size="sm" w-32` with a 30-second step; returns the
-    /// committed value.
     /// A `NumberField size="sm"` of seconds (decrement, digits, increment);
     /// returns the new value.
     pub(crate) fn interval_field(

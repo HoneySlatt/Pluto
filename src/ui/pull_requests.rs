@@ -1,17 +1,16 @@
 //! The Pull requests page (`routes/_chat.pull-requests.tsx`,
 //! `PullRequestRow.tsx`, `PullRequestListRow.tsx`, `PullRequestListEmptyState.tsx`,
-//! `PullRequestGhosts.tsx`, `PullRequestListFilters.tsx`,
+//! `PullRequestGhosts.tsx`,
 //! `pullRequestList.logic.ts`, `pullRequestPresentation.tsx`).
 //!
-//! Ported: the toolbar (search, sort, filters, provider, refresh), the
+//! Ported: the toolbar (sort, refresh), the
 //! `pullRequests.list` listing grouped by involvement and sorted like
 //! upstream, the rows (state and conflict glyphs, number, title, checks and
 //! review verdict, line counts, author, repository, labels, update time), the
 //! loading ghost and the empty and error states.
 //!
 //! Not ported: the detail panel and right panel (selecting a row shows a
-//! notice), searching on the hosts (the search filters loaded rows), the
-//! author and label filters, line-count backfill (`pullRequests.listStats`),
+//! notice), line-count backfill (`pullRequests.listStats`),
 //! paging past the first 99 rows per repository, stacks, avatars (initials
 //! are shown) and the condensed topbar.
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -40,65 +39,20 @@ const SORTS: [(&str, &str, &str); 7] = [
     ("largest", "Largest shown", "maximize-2"),
     ("smallest", "Smallest shown", "minimize-2"),
 ];
-const STATES: [(&str, &str, &str); 4] = [
-    ("all", "All", "layers"),
-    ("open", "Open", "git-pull-request-arrow"),
-    ("closed", "Closed", "git-pull-request-closed"),
-    ("merged", "Merged", "git-merge"),
-];
-const INVOLVEMENTS: [(&str, &str, &str); 3] = [
-    ("all", "All", "layers"),
-    ("reviewing", "Reviewing", "eye"),
-    ("authored", "Authored", "pen-line"),
-];
-const DRAFTS: [(&str, &str, &str); 3] = [
-    ("", "All", "layers"),
-    ("only", "Drafts only", "git-pull-request-draft"),
-    ("hide", "Hide drafts", "eye-off"),
-];
-const REVIEWS: [(&str, &str, &str); 5] = [
-    ("", "All", "layers"),
-    ("approved", "Approved", "circle-check"),
-    ("changes-requested", "Changes requested", "circle-x"),
-    ("review-required", "Review required", "circle-dashed"),
-    ("none", "No reviews", "circle-slash"),
-];
-const CHECKS: [(&str, &str, &str); 3] = [
-    ("", "All", "layers"),
-    ("passing", "Passing", "circle-check"),
-    ("failing", "Failing", "circle-x"),
-];
-
-/// List preferences (`pullRequestListPreferences.ts`: open, all, merge readiness).
+/// The page's state: the sort order and the listings fetched so far.
 pub struct PullRequestsState {
-    pub query: String,
     pub sort: &'static str,
-    pub state: &'static str,
-    pub involvement: &'static str,
-    pub draft: &'static str,
-    pub review: &'static str,
-    pub checks: &'static str,
-    pub project: Option<String>,
-    pub host: Option<String>,
     /// Listing results by request key, and the key last asked for.
     pub results: std::collections::HashMap<String, Result<Value, String>>,
     pub requested: std::collections::HashSet<String>,
     pub refreshing: bool,
-    pub menu: Option<(&'static str, context_menu::State)>,
+    pub menu: Option<context_menu::State>,
 }
 
 impl Default for PullRequestsState {
     fn default() -> Self {
         Self {
-            query: String::new(),
             sort: "ready",
-            state: "open",
-            involvement: "all",
-            draft: "",
-            review: "",
-            checks: "",
-            project: None,
-            host: None,
             results: Default::default(),
             requested: Default::default(),
             refreshing: false,
@@ -108,40 +62,9 @@ impl Default for PullRequestsState {
 }
 
 impl PullRequestsState {
-    /// The `pullRequests.list` input: involvement and search are narrowed
-    /// here, so switching them never waits on the hosts.
-    fn input(&self) -> Value {
-        let mut input = json!({"state": self.state, "limit": PAGE_SIZE});
-        let mut filters = serde_json::Map::new();
-        for (key, value) in [
-            ("draft", self.draft),
-            ("review", self.review),
-            ("checks", self.checks),
-        ] {
-            if !value.is_empty() {
-                filters.insert(key.into(), json!(value));
-            }
-        }
-        if !filters.is_empty() {
-            input["filters"] = Value::Object(filters);
-        }
-        if let Some(project) = &self.project {
-            input["projectId"] = json!(project);
-        }
-        if let Some(host) = &self.host {
-            input["host"] = json!(host);
-        }
-        input
-    }
-
-    fn filtered(&self) -> bool {
-        self.state != "open"
-            || self.involvement != "all"
-            || self.project.is_some()
-            || self.host.is_some()
-            || !self.draft.is_empty()
-            || !self.review.is_empty()
-            || !self.checks.is_empty()
+    /// The `pullRequests.list` input: the open pull requests of every project.
+    fn input() -> Value {
+        json!({"state": "open", "limit": PAGE_SIZE})
     }
 }
 
@@ -163,22 +86,6 @@ fn authored(entry: &Value, viewers: &Value) -> bool {
             .as_str()
             .is_some_and(|login| login.eq_ignore_ascii_case(viewer.trim()))
     })
-}
-
-/// `matchesPullRequestQuery`.
-fn matches_query(entry: &Value, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || format!(
-            "#{} {} {} {} {}",
-            entry["number"],
-            str_field(entry, "title"),
-            str_field(entry, "repository"),
-            str_field(entry, "headBranch"),
-            entry["author"]["login"].as_str().unwrap_or_default()
-        )
-        .to_lowercase()
-        .contains(&query)
 }
 
 /// One involvement group (`groupPullRequestsByInvolvement`).
@@ -217,14 +124,14 @@ fn group_entries(entries: Vec<Value>, viewers: &Value) -> Vec<Group> {
 }
 
 /// `sortPullRequestGroups` (the listing arrives newest update first).
-fn sort_groups(groups: &mut [Group], sort: &str, searching: bool, involvement: &str) {
+fn sort_groups(groups: &mut [Group], sort: &str) {
     let updated = |e: &Value| str_field(e, "updatedAt").to_owned();
     let created = |e: &Value| str_field(e, "createdAt").to_owned();
     let measured = |e: &Value| lines(e) > 0;
     for group in groups.iter_mut() {
         let entries = &mut group.entries;
         match sort {
-            "ready" if !searching => {
+            "ready" => {
                 let tier = |e: &Value| {
                     if e["mergeability"] == "conflicting" {
                         4
@@ -248,9 +155,9 @@ fn sort_groups(groups: &mut [Group], sort: &str, searching: bool, involvement: &
                         .then(updated(b).cmp(&updated(a)))
                 });
             }
-            "blocked" if !searching => {
+            "blocked" => {
                 let role = match group.key {
-                    "others" => involvement,
+                    "others" => "all",
                     "authored" => "authored",
                     _ => "reviewing",
                 };
@@ -418,7 +325,7 @@ impl App {
     }
 
     fn request_pull_requests(&mut self, force: bool) {
-        let input = self.prs.input();
+        let input = PullRequestsState::input();
         let key = format!("prs:{input}");
         if force || !self.prs.requested.contains(&key) {
             self.prs.requested.insert(key.clone());
@@ -480,7 +387,7 @@ impl App {
                     Sense::hover(),
                 );
             });
-        self.pull_requests_menu(ui);
+        self.sort_menu(ui);
     }
 
     fn pull_requests_toolbar(&mut self, ui: &mut Ui, left: f32, top: f32, width: f32) {
@@ -494,80 +401,29 @@ impl App {
             self.prs.refreshing = true;
             self.request_pull_requests(true);
         }
-        let host_label = self.prs.host.clone().unwrap_or_else(|| "All".into());
-        let mut x = refresh.left() - 8.0;
-        let mut buttons: Vec<(&'static str, &'static str, String)> = vec![
-            ("host", "plug-2", host_label),
-            ("filters", "list-filter", "Filters".into()),
-            ("sort", "arrow-down-up", "Sort".into()),
-        ];
-        let filter_count = [self.prs.draft, self.prs.review, self.prs.checks]
-            .iter()
-            .filter(|v| !v.is_empty())
-            .count()
-            + usize::from(self.prs.project.is_some());
-        if filter_count > 0 {
-            buttons[1].2 = format!("Filters {filter_count}");
-        }
-        for (id, icon, label) in buttons {
-            let w = outline_width(ui, Some(16.0), &label, true);
-            let rect = Rect::from_min_size(Pos2::new(x - w, top + 1.0), Vec2::new(w, 32.0));
-            x = rect.left() - 8.0;
-            if outline_button(ui, rect, id, Some((icon, 16.0)), &label, true).clicked() {
-                let open = self.prs.menu.as_ref().is_some_and(|(menu, _)| *menu == id);
-                self.prs.menu = if open {
-                    None
-                } else {
-                    Some((
-                        id,
-                        context_menu::State::dropdown(Pos2::new(rect.left(), rect.bottom() + 4.0)),
-                    ))
-                };
-            }
-        }
-        // Search (`Input` with a leading search glyph).
-        let search = Rect::from_min_max(Pos2::new(left, top), Pos2::new(x, top + 34.0));
-        ui.painter().rect(
-            search,
-            CornerRadius::same(8),
-            theme::control_surface(),
-            Stroke::new(1.0, theme::input()),
-            StrokeKind::Inside,
+        let w = outline_width(ui, Some(16.0), "Sort", true);
+        let rect = Rect::from_min_size(
+            Pos2::new(refresh.left() - 8.0 - w, top + 1.0),
+            Vec2::new(w, 32.0),
         );
-        theme::paint_icon(
+        if outline_button(
             ui,
-            "search",
-            Rect::from_min_size(
-                Pos2::new(search.left() + 10.0, search.center().y - 8.0),
-                Vec2::splat(16.0),
-            ),
-            16.0,
-            theme::foreground(),
-        );
-        let inner = Rect::from_min_max(
-            Pos2::new(search.left() + 32.0, search.top() + 7.0),
-            Pos2::new(search.right() - 10.0, search.bottom() - 7.0),
-        );
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        child.add(
-            egui::TextEdit::singleline(&mut self.prs.query)
-                .id_salt("pr-search")
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .font(font(14.0, Weight::Regular))
-                .text_color(theme::foreground())
-                .desired_width(inner.width())
-                .vertical_align(egui::Align::Center),
-        );
-        if self.prs.query.is_empty() {
-            widgets::text(
-                ui,
-                Pos2::new(inner.left(), search.top() + 7.0),
-                "Search pull requests, or label:bug",
-                font(14.0, Weight::Regular),
-                theme::muted_foreground(),
-                20.0,
-            );
+            rect,
+            "sort",
+            Some(("arrow-down-up", 16.0)),
+            "Sort",
+            true,
+        )
+        .clicked()
+        {
+            self.prs.menu = if self.prs.menu.is_some() {
+                None
+            } else {
+                Some(context_menu::State::dropdown(Pos2::new(
+                    rect.left(),
+                    rect.bottom() + 4.0,
+                )))
+            };
         }
     }
 
@@ -580,7 +436,7 @@ impl App {
         width: f32,
         min_bottom: f32,
     ) -> f32 {
-        let key = format!("prs:{}", self.prs.input());
+        let key = format!("prs:{}", PullRequestsState::input());
         let result = self.prs.results.get(&key).cloned();
         let Some(result) = result else {
             return pull_request_ghost(ui, left, top, width);
@@ -605,27 +461,9 @@ impl App {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|e| self.prs.state == "all" || e["state"] == self.prs.state)
-            .filter(|e| match self.prs.involvement {
-                "reviewing" => e["viewerReviewRequested"] == true,
-                "authored" => authored(e, &viewers),
-                _ => true,
-            })
-            .filter(|e| match self.prs.draft {
-                "only" => e["isDraft"] == true,
-                "hide" => e["isDraft"] != true,
-                _ => true,
-            })
-            .filter(|e| match self.prs.review {
-                "" => true,
-                "none" => e["reviewDecision"].is_null(),
-                review => e["reviewDecision"] == review,
-            })
-            .filter(|e| matches_query(e, &self.prs.query))
             .cloned()
             .collect();
         if entries.is_empty() {
-            let query = self.prs.query.trim().to_owned();
             if self.state.projects.is_empty() {
                 return self.pull_requests_empty(
                     ui,
@@ -638,52 +476,19 @@ impl App {
                     None,
                 );
             }
-            if !query.is_empty() {
-                let shown = if query.chars().count() > 48 {
-                    format!("{}…", query.chars().take(48).collect::<String>())
-                } else {
-                    query
-                };
-                return self.pull_requests_empty(
-                    ui,
-                    left,
-                    top,
-                    width,
-                    min_bottom,
-                    &format!("Nothing matches \u{201c}{shown}\u{201d}"),
-                    "The hosts were searched for it. Try fewer words, or search by number, author or branch.",
-                    Some("Check again"),
-                );
-            }
-            let (title, description) = if self.prs.filtered() {
-                (
-                    "Nothing under these filters",
-                    "Widen the state, involvement or project filter to see more.",
-                )
-            } else {
-                (
-                    "No pull requests",
-                    "Pull requests from every project in this workspace appear here.",
-                )
-            };
             return self.pull_requests_empty(
                 ui,
                 left,
                 top,
                 width,
                 min_bottom,
-                title,
-                description,
+                "No pull requests",
+                "Pull requests from every project in this workspace appear here.",
                 Some("Check again"),
             );
         }
         let mut groups = group_entries(entries, &viewers);
-        sort_groups(
-            &mut groups,
-            self.prs.sort,
-            !self.prs.query.trim().is_empty(),
-            self.prs.involvement,
-        );
+        sort_groups(&mut groups, self.prs.sort);
         let multiple_hosts = value["providers"].as_array().is_some_and(|p| p.len() > 1);
         let mut y = top;
         for (index, group) in groups.iter().enumerate() {
@@ -705,7 +510,7 @@ impl App {
             widgets::text(
                 ui,
                 Pos2::new(left + width / 2.0 - 120.0, y + 12.0),
-                "Narrow your search to find more pull requests.",
+                &format!("Only the first {PAGE_SIZE} pull requests of each repository are shown."),
                 font(12.0, Weight::Regular),
                 theme::muted_foreground(),
                 16.0,
@@ -1041,117 +846,26 @@ impl App {
         region_bottom.max(y)
     }
 
-    /// The open toolbar menu: sort, filters (submenus) or provider.
-    fn pull_requests_menu(&mut self, ui: &mut Ui) {
-        let Some((which, mut state)) = self.prs.menu.take() else {
+    /// The open sort menu.
+    fn sort_menu(&mut self, ui: &mut Ui) {
+        let Some(state) = self.prs.menu.take() else {
             return;
         };
-        let radio =
-            |prefix: &str, options: &[(&str, &str, &'static str)], current: &str| -> Vec<Item> {
-                options
-                    .iter()
-                    .map(|(value, label, icon)| Item {
-                        selected: *value == current,
-                        ..Item::new(format!("{prefix}:{value}"), *label).icon(icon)
-                    })
-                    .collect()
-            };
-        let items: Vec<Item> = match which {
-            "sort" => radio("sort", &SORTS, self.prs.sort),
-            "host" => {
-                // Each host with its source control provider's mark.
-                let mut hosts: Vec<(String, &'static str)> = self
-                    .prs
-                    .results
-                    .values()
-                    .filter_map(|r| r.as_ref().ok())
-                    .flat_map(|v| v["providers"].as_array().cloned().unwrap_or_default())
-                    .filter_map(|p| {
-                        let kind = p["provider"]
-                            .as_str()
-                            .or(p["kind"].as_str())
-                            .unwrap_or_default();
-                        Some((p["host"].as_str()?.to_owned(), provider_icon(kind)))
-                    })
-                    .collect();
-                hosts.sort();
-                hosts.dedup_by(|a, b| a.0 == b.0);
-                let current = self.prs.host.clone().unwrap_or_default();
-                let mut items = vec![Item {
-                    selected: current.is_empty(),
-                    ..Item::new("host:", "All").icon("plug-2")
-                }];
-                items.extend(hosts.into_iter().map(|(host, icon)| Item {
-                    selected: host == current,
-                    ..Item::new(format!("host:{host}"), host.clone()).icon(icon)
-                }));
-                items
-            }
-            _ => {
-                let mut projects = vec![Item {
-                    selected: self.prs.project.is_none(),
-                    ..Item::new("project:", "All projects").icon("layers")
-                }];
-                projects.extend(self.state.projects.iter().map(|p| Item {
-                    selected: self.prs.project.as_deref() == Some(p.id.as_str()),
-                    ..Item::new(format!("project:{}", p.id), p.title.clone())
-                }));
-                let submenu = |id: &str, label: &str, children: Vec<Item>| Item {
-                    children,
-                    ..Item::new(id, label)
-                };
-                vec![
-                    submenu("state", "State", radio("state", &STATES, self.prs.state)),
-                    submenu(
-                        "involvement",
-                        "Involvement",
-                        radio("involvement", &INVOLVEMENTS, self.prs.involvement),
-                    ),
-                    Item {
-                        separator_before: true,
-                        ..submenu("draft", "Draft", radio("draft", &DRAFTS, self.prs.draft))
-                    },
-                    submenu(
-                        "review",
-                        "Review",
-                        radio("review", &REVIEWS, self.prs.review),
-                    ),
-                    submenu(
-                        "checks",
-                        "Checks",
-                        radio("checks", &CHECKS, self.prs.checks),
-                    ),
-                    Item {
-                        separator_before: true,
-                        ..submenu("project", "Project", projects)
-                    },
-                ]
-            }
-        };
+        let items: Vec<Item> = SORTS
+            .iter()
+            .map(|(value, label, icon)| Item {
+                selected: *value == self.prs.sort,
+                ..Item::new(*value, *label).icon(icon)
+            })
+            .collect();
         let mut open = Some(state);
         let chosen = context_menu::show(ui, &mut open, &items);
-        if let Some(next) = open.take() {
-            state = next;
-            self.prs.menu = Some((which, state));
-        }
-        let Some(chosen) = chosen else {
-            return;
-        };
-        self.prs.menu = None;
-        let (group, value) = chosen.split_once(':').unwrap_or((chosen.as_str(), ""));
-        let pick = |options: &[(&'static str, &str, &str)]| {
-            options.iter().find(|o| o.0 == value).map(|o| o.0)
-        };
-        match group {
-            "sort" => self.prs.sort = pick(&SORTS).unwrap_or("ready"),
-            "state" => self.prs.state = pick(&STATES).unwrap_or("open"),
-            "involvement" => self.prs.involvement = pick(&INVOLVEMENTS).unwrap_or("all"),
-            "draft" => self.prs.draft = pick(&DRAFTS).unwrap_or(""),
-            "review" => self.prs.review = pick(&REVIEWS).unwrap_or(""),
-            "checks" => self.prs.checks = pick(&CHECKS).unwrap_or(""),
-            "project" => self.prs.project = (!value.is_empty()).then(|| value.to_owned()),
-            "host" => self.prs.host = (!value.is_empty()).then(|| value.to_owned()),
-            _ => {}
+        self.prs.menu = open;
+        if let Some(chosen) = chosen {
+            self.prs.menu = None;
+            if let Some((value, _, _)) = SORTS.iter().find(|(value, _, _)| *value == chosen) {
+                self.prs.sort = value;
+            }
         }
     }
 }
@@ -1318,8 +1032,6 @@ fn paint_branch_mark(ui: &Ui, rect: Rect) {
 fn provider_icon(provider: &str) -> &'static str {
     match provider {
         "gitlab" => "sc-gitlab",
-        "azure-devops" => "sc-azure-devops",
-        "bitbucket" => "sc-bitbucket",
         "forgejo" => "sc-forgejo",
         _ => "sc-github",
     }
@@ -1363,15 +1075,7 @@ mod tests {
             label: "Others",
             entries: vec![a, b],
         }];
-        sort_groups(&mut groups, "ready", false, "all");
+        sort_groups(&mut groups, "ready");
         assert_eq!(groups[0].entries[0]["number"], 2);
-    }
-
-    #[test]
-    fn queries_match_number_title_and_author() {
-        let e = entry(42, "octocat", false);
-        assert!(matches_query(&e, "#42"));
-        assert!(matches_query(&e, "octo"));
-        assert!(!matches_query(&e, "nope"));
     }
 }

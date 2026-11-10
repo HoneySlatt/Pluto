@@ -339,8 +339,6 @@ pub struct App {
     pub(crate) add_instance: Option<crate::ui::providers::AddInstance>,
     /// Source control rows with their details open (by kind).
     pub(crate) source_control_expanded: std::collections::HashSet<String>,
-    /// The Bitbucket credentials drafts (tokens are cleared once sent).
-    pub(crate) bitbucket: crate::ui::bitbucket::BitbucketDraft,
     /// The settings scope ("Applying settings for <project> across …").
     pub(crate) settings_scope: crate::ui::settings_scope::SettingsScope,
     /// The open Add/Edit Action dialog.
@@ -863,7 +861,6 @@ impl App {
             env_drafts: Default::default(),
             add_instance: None,
             source_control_expanded: Default::default(),
-            bitbucket: Default::default(),
             settings_scope: Default::default(),
             action_editor: None,
             last_script: Default::default(),

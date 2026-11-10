@@ -47,8 +47,6 @@ fn source_control_icon(status: Option<&Value>) -> &'static str {
     match status.and_then(|s| s["sourceControlProvider"]["kind"].as_str()) {
         Some("gitlab") => "sc-gitlab",
         Some("forgejo") => "sc-forgejo",
-        Some("azure-devops") => "sc-azure-devops",
-        Some("bitbucket") => "sc-bitbucket",
         Some("unknown") => "git-pull-request-arrow",
         _ => "sc-github",
     }

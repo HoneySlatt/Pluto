@@ -3,9 +3,8 @@
 //! hosting integrations from `server.discoverSourceControl`, with their
 //! status dot, version, authentication summary and availability switch.
 //!
-//! Not ported: the Git fetch interval and Bitbucket credentials panels behind
-//! the row chevrons (the chevron shows a notice), and the scan button's
-//! tooltip. Accounts stay redacted (blurred placeholder) until clicked.
+//! Not ported: the scan button's tooltip. Accounts stay redacted (blurred
+//! placeholder) until clicked.
 use std::collections::HashSet;
 
 use eframe::egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
@@ -69,8 +68,6 @@ fn icon_name(item: &Value) -> Option<&'static str> {
         "jj" => "vcs-jj",
         "github" => "sc-github",
         "gitlab" => "sc-gitlab",
-        "azure-devops" => "sc-azure-devops",
-        "bitbucket" => "sc-bitbucket",
         "forgejo" => "sc-forgejo",
         _ => return None,
     })
@@ -148,9 +145,17 @@ fn summary_color() -> Color32 {
     theme::alpha(theme::muted_foreground(), 0.8)
 }
 
+/// The height of a row's expanded details (`px-4 pb-4 pt-1`).
+fn details_height(item: &Value) -> f32 {
+    match item["kind"].as_str() {
+        Some("git") => 4.0 + 43.5 + 16.0,
+        _ => 0.0,
+    }
+}
+
 /// Rows with a details panel show a chevron before the switch.
 fn has_details(item: &Value) -> bool {
-    matches!(item["kind"].as_str(), Some("git" | "bitbucket"))
+    matches!(item["kind"].as_str(), Some("git"))
 }
 
 /// `GIT_FETCH_INTERVAL_STEP_SECONDS`.
@@ -276,7 +281,7 @@ impl App {
         });
         let kind = item["kind"].as_str().unwrap_or_default();
         let details = if has_details(item) && self.source_control_expanded.contains(kind) {
-            self.details_height(ui, item)
+            details_height(item)
         } else {
             0.0
         };
@@ -489,11 +494,7 @@ impl App {
 
         // Controls: the details chevron and the read-only availability switch.
         let expanded = has_details(item) && self.source_control_expanded.contains(&kind);
-        let details = if expanded {
-            self.details_height(ui, item)
-        } else {
-            0.0
-        };
+        let details = if expanded { details_height(item) } else { 0.0 };
         let center_y = rect.center().y - details / 2.0 + if index > 0 { 0.5 } else { 0.0 };
         let right = rect.right() - 16.0;
         if has_details(item) {
@@ -558,19 +559,7 @@ impl App {
             "git" if expanded => {
                 self.git_fetch_interval(ui, rect.left() + 16.0, rect.right() - 16.0, top);
             }
-            "bitbucket" if expanded => {
-                self.bitbucket_form(ui, rect.left() + 16.0, rect.right() - 16.0, top);
-            }
             _ => {}
-        }
-    }
-
-    /// The height of a row's expanded details (`px-4 pb-4 pt-1`).
-    fn details_height(&self, ui: &Ui, item: &Value) -> f32 {
-        match item["kind"].as_str() {
-            Some("git") => 4.0 + 43.5 + 16.0,
-            Some("bitbucket") => 4.0 + self.bitbucket_height(ui) + 16.0,
-            _ => 0.0,
         }
     }
 
@@ -800,7 +789,7 @@ mod tests {
             summary(&missing).as_deref(),
             Some("Not available on this server: Install glab.")
         );
-        let api = json!({"label": "Bitbucket", "status": "available", "installHint": "Add a token.", "auth": {"status": "unauthenticated"}});
+        let api = json!({"label": "Forgejo", "status": "available", "installHint": "Add a token.", "auth": {"status": "unauthenticated"}});
         assert_eq!(summary(&api).as_deref(), Some("Available. Add a token."));
         let jj = json!({"label": "Jujutsu", "kind": "jj", "implemented": false, "status": "missing", "installHint": ""});
         assert_eq!(

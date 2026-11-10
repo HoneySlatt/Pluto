@@ -22,7 +22,7 @@ const REQUEST: &str = "publish-repository";
 const SUCCESS: Color32 = Color32::from_rgb(0, 188, 125); // --success
 
 /// `PUBLISH_PROVIDER_OPTIONS`: kind, label, host, path placeholder, mark.
-const PROVIDERS: [(&str, &str, &str, &str, &str); 5] = [
+const PROVIDERS: [(&str, &str, &str, &str, &str); 3] = [
     (
         "forgejo",
         "Forgejo / Gitea",
@@ -37,20 +37,6 @@ const PROVIDERS: [(&str, &str, &str, &str, &str); 5] = [
         "gitlab.com",
         "group/project",
         "sc-gitlab",
-    ),
-    (
-        "bitbucket",
-        "Bitbucket",
-        "bitbucket.org",
-        "workspace/repository",
-        "sc-bitbucket",
-    ),
-    (
-        "azure-devops",
-        "Azure DevOps",
-        "dev.azure.com",
-        "project/repository",
-        "sc-azure-devops",
     ),
 ];
 
@@ -983,27 +969,21 @@ mod tests {
         let discovered = vec![
             json!({"kind": "github", "label": "GitHub", "status": "available", "auth": {"status": "authenticated"}}),
             json!({"kind": "gitlab", "label": "GitLab", "status": "available", "auth": {"status": "unauthenticated", "detail": {"_tag": "None"}}}),
-            json!({"kind": "bitbucket", "status": "missing", "installHint": "Install it", "auth": {}}),
+            json!({"kind": "forgejo", "status": "missing", "installHint": "Install it", "auth": {}}),
         ];
         assert!(readiness(&discovered, "github").is_ok());
         assert_eq!(
             readiness(&discovered, "gitlab").unwrap_err(),
             "GitLab is not authenticated. Open Settings -> Source Control for setup guidance."
         );
-        assert_eq!(
-            readiness(&discovered, "bitbucket").unwrap_err(),
-            "Install it"
-        );
+        assert_eq!(readiness(&discovered, "forgejo").unwrap_err(), "Install it");
         assert!(
-            readiness(&discovered, "forgejo")
+            readiness(&discovered, "gitea")
                 .unwrap_err()
                 .starts_with("Provider status unavailable")
         );
         let order: Vec<&str> = sorted_providers(&discovered).iter().map(|p| p.0).collect();
-        assert_eq!(
-            order,
-            ["github", "azure-devops", "bitbucket", "forgejo", "gitlab"]
-        );
+        assert_eq!(order, ["github", "forgejo", "gitlab"]);
         assert!(valid_repository("me/app"));
         assert!(!valid_repository("me/"));
         assert!(!valid_repository("/app"));

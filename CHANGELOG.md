@@ -21,6 +21,12 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
   a setting: the new thread's project picker gathers a repository's checkouts, newest first.
 - The "Legacy features" fold of the General settings: plan mode and the context window indicator
   are now plain rows of its Behavior section.
+- Bitbucket and Azure DevOps: their settings row, their pull requests and their links. GitHub,
+  GitLab and Forgejo (Codeberg) stay.
+- The pull requests page's search and filters: it lists the open pull requests, sorted as chosen.
+- The Providers page's usage limit hubs, which could not be added, and its health check interval;
+  the server keeps checking providers at the interval it has.
+- Cursor as a provider. "Open in Cursor" stays.
 
 ### Fixed
 

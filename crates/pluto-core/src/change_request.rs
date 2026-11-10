@@ -89,17 +89,6 @@ pub fn parse_change_request_url(target: &str) -> Option<ChangeRequest> {
     if let Some(link) = nested(&host, &segments, &["-", "merge_requests"]) {
         return Some(link);
     }
-    if is_host_of(&host, "bitbucket.org", Some("bitbucket")) {
-        return two_segments(&host, &segments, "pull-requests");
-    }
-    if is_host_of(&host, "dev.azure.com", None) || host.ends_with(".visualstudio.com") {
-        let at = (0..segments.len().saturating_sub(3)).rev().find(|&i| {
-            segments[i] == "_git"
-                && segments[i + 2] == "pullrequest"
-                && number(segments[i + 3]).is_some()
-        })?;
-        return claim(&host, &segments[..at + 2], number(segments[at + 3]));
-    }
     None
 }
 
@@ -134,10 +123,6 @@ pub fn change_request_url_for(
             }
         }
         "gitlab" => format!("https://{host}/{repository}/-/merge_requests/{number}"),
-        "bitbucket" => format!("https://{host}/{repository}/pull-requests/{number}"),
-        "azure-devops" => {
-            format!("https://{host}/{repository}/pullrequest/{number}").to_lowercase()
-        }
         _ => return None,
     })
 }
@@ -332,14 +317,6 @@ mod tests {
         assert_eq!(
             parsed("https://gitlab.com/group/sub/repo/-/merge_requests/7"),
             got("gitlab.com", "group/sub/repo", 7)
-        );
-        assert_eq!(
-            parsed("https://bitbucket.org/team/repo/pull-requests/3"),
-            got("bitbucket.org", "team/repo", 3)
-        );
-        assert_eq!(
-            parsed("https://dev.azure.com/org/proj/_git/repo/pullrequest/9"),
-            got("dev.azure.com", "org/proj/_git/repo", 9)
         );
         let forgejo = parse_change_request_url("http://forge.example:3000/a/b/pulls/4").unwrap();
         assert_eq!(forgejo.authority.as_deref(), Some("forge.example:3000"));

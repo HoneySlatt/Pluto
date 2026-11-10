@@ -1138,15 +1138,6 @@ fn command_score(command: &str, description: &str, query: &str) -> Option<i64> {
 /// `sourceControlRepositorySelector`.
 fn repository_selector(identity: &Value) -> Option<String> {
     let text = |key: &str| identity[key].as_str().filter(|s| !s.is_empty());
-    if identity["provider"] == "azure-devops" {
-        let last = text("displayName")
-            .unwrap_or_default()
-            .split('/')
-            .rfind(|part| *part != "_git")
-            .filter(|part| !part.is_empty())
-            .map(str::to_owned);
-        return text("name").map(str::to_owned).or(last);
-    }
     if let Some(name) = text("displayName") {
         return Some(name.to_owned());
     }

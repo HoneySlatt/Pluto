@@ -94,11 +94,6 @@ fn presets(driver: &str) -> &'static [Preset] {
         toggle("fastMode", "Fast Mode"),
         toggle("thinking", "Thinking"),
     ];
-    const CURSOR: &[Preset] = &[
-        select("reasoning", "Reasoning", EFFORT),
-        toggle("fastMode", "Fast Mode"),
-        toggle("thinking", "Thinking"),
-    ];
     const GROK: &[Preset] = &[select("reasoningEffort", "Reasoning", EFFORT)];
     const OPENCODE: &[Preset] = &[
         select("variant", "Reasoning", EFFORT),
@@ -111,7 +106,6 @@ fn presets(driver: &str) -> &'static [Preset] {
     match driver {
         "codex" => CODEX,
         "claudeAgent" => CLAUDE,
-        "cursor" => CURSOR,
         "grok" => GROK,
         "opencode" => OPENCODE,
         _ => &[],
