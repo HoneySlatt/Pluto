@@ -56,15 +56,9 @@ pub fn default_client_settings() -> Value {
         "confirmThreadArchive": false,
         "confirmThreadDelete": true,
         "confirmQuit": "hold",
-        "sidebarProjectGroupingMode": "repository",
-        "sidebarProjectGroupingOverrides": {},
         "sidebarWorkingShelfEnabled": false,
         "planModeEnabled": false,
         "contextWindowMeterEnabled": true,
-        "legacySidebarEnabled": false,
-        "sidebarProjectSortOrder": "updated_at",
-        "sidebarThreadSortOrder": "updated_at",
-        "sidebarThreadPreviewCount": 6,
         "favorites": [],
         "providerModelPreferences": {},
         // Typography (Settings → Appearance).
@@ -231,7 +225,6 @@ pub const CONNECTIONS_PAGE: usize = 8;
 pub const SNAP_SHOT_PAGE: usize = 3;
 /// Index of the Archive page in `PAGES`.
 pub const ARCHIVE_PAGE: usize = 9;
-const LEGACY: &str = "Legacy features";
 /// A select trigger sized to its label (`w-auto`).
 const AUTO_WIDTH: f32 = 0.0;
 const ROW_PAD_X: f32 = 16.0;
@@ -651,15 +644,6 @@ impl App {
         let auto_settle_days = self.server_setting("sidebarAutoSettleAfterDays");
         let mut organization = vec![
             Row {
-                id: "project-grouping".into(),
-                title: "Project grouping".into(),
-                description: "Combine matching repositories across environments.".into(),
-                status: None,
-                layers: false,
-                reset: !is_default("sidebarProjectGroupingMode"),
-                control: Control::Switch(self.client_setting("sidebarProjectGroupingMode") != "separate"),
-            },
-            Row {
                 id: "working-shelf".into(),
                 title: "Working section (beta)".into(),
                 description: "Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you.".into(),
@@ -901,6 +885,24 @@ impl App {
                     icon: None,
                 },
             },
+            Row {
+                id: "plan-mode".into(),
+                title: "Plan mode".into(),
+                description: "Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode.".into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: switch("planModeEnabled"),
+            },
+            Row {
+                id: "context-window-indicator".into(),
+                title: "Context window indicator".into(),
+                description: "Shows context window usage as a circular indicator in the composer.".into(),
+                status: None,
+                layers: false,
+                reset: false,
+                control: switch("contextWindowMeterEnabled"),
+            },
         ];
 
         let projects = vec![
@@ -1066,44 +1068,6 @@ impl App {
                     },
                 ],
             },
-            Section {
-                title: LEGACY.into(),
-                project: None,
-                unavailable: None,
-                rows: if self.settings_legacy_open {
-                    vec![
-                        Row {
-                            id: "legacy-plan-mode".into(),
-                            title: "Plan mode (legacy)".into(),
-                            description: "Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode.".into(),
-                            status: None,
-                            layers: false,
-                            reset: false,
-                            control: switch("planModeEnabled"),
-                        },
-                        Row {
-                            id: "legacy-context-window-indicator".into(),
-                            title: "Context window indicator (legacy)".into(),
-                            description: "Shows context window usage as a circular indicator in the composer.".into(),
-                            status: None,
-                            layers: false,
-                            reset: false,
-                            control: switch("contextWindowMeterEnabled"),
-                        },
-                        Row {
-                            id: "legacy-sidebar".into(),
-                            title: "Sidebar (legacy)".into(),
-                            description: "Restore per-project thread trees instead of the default flat sidebar.".into(),
-                            status: None,
-                            layers: false,
-                            reset: false,
-                            control: switch("legacySidebarEnabled"),
-                        },
-                    ]
-                } else {
-                    Vec::new()
-                },
-            },
         ]
     }
 
@@ -1124,9 +1088,8 @@ impl App {
             "unpin-confirmation" => Some("confirmThreadUnpin"),
             "archive-confirmation" => Some("confirmThreadArchive"),
             "delete-confirmation" => Some("confirmThreadDelete"),
-            "legacy-plan-mode" => Some("planModeEnabled"),
-            "legacy-context-window-indicator" => Some("contextWindowMeterEnabled"),
-            "legacy-sidebar" => Some("legacySidebarEnabled"),
+            "plan-mode" => Some("planModeEnabled"),
+            "context-window-indicator" => Some("contextWindowMeterEnabled"),
             "thread-notifications" => Some("notificationMode"),
             "time-format" => Some("timestampFormat"),
             "quit-confirmation" => Some("confirmQuit"),
@@ -1148,14 +1111,6 @@ impl App {
             _ => None,
         };
         match (id, action) {
-            ("project-grouping", Toggle(on)) => client(
-                self,
-                "sidebarProjectGroupingMode",
-                json!(if on { "repository" } else { "separate" }),
-            ),
-            ("project-grouping", Reset) => {
-                client(self, "sidebarProjectGroupingMode", json!("repository"))
-            }
             ("auto-settle-inactive-threads", Toggle(on)) => server(
                 self,
                 "sidebarAutoSettleAfterDays",
@@ -2651,122 +2606,71 @@ impl App {
                     if page == SOURCE_CONTROL_PAGE && section.title == "Text generation" {
                         y = self.discovery_sections(ui, left, y);
                     }
-                    if section.title == LEGACY {
-                        // A collapsible header (`Collapsible`, min-h-8) instead of a title.
-                        let header =
-                            Rect::from_min_size(Pos2::new(left, y), Vec2::new(card_width, 32.0));
+                    // Archive groups lead with the project icon (`gap-2`).
+                    let mut title_left = left + 16.0;
+                    if let Some(project) = &section.project {
+                        crate::ui::project_icon::paint(
+                            ui,
+                            Rect::from_min_size(Pos2::new(title_left, y + 6.0), Vec2::splat(16.0)),
+                            project,
+                        );
+                        title_left += 24.0;
+                    }
+                    widgets::text_in(
+                        ui,
+                        Rect::from_min_size(Pos2::new(title_left, y), Vec2::new(card_width, 28.0)),
+                        &section.title,
+                        font(14.0, Weight::Regular),
+                        theme::alpha(theme::foreground(), 0.7),
+                    );
+                    // `headerAction`: Scheduled Tasks' "New task".
+                    if page == SCHEDULED_TASKS_PAGE && self.connected() {
+                        let label = "New task";
+                        let width = widgets::text_width(ui, label, font(12.0, Weight::Medium))
+                            + 7.0 * 2.0
+                            + 12.0
+                            + 4.0;
+                        let button = Rect::from_min_size(
+                            Pos2::new(left + card_width - width, y + 2.0),
+                            Vec2::new(width, 24.0),
+                        );
                         let response =
-                            ui.interact(header, ui.id().with("settings-legacy"), Sense::click());
+                            ui.interact(button, ui.id().with("scheduled-new-task"), Sense::click());
                         let color = if response.hovered() {
+                            ui.painter().rect_filled(
+                                button,
+                                CornerRadius::same(6),
+                                theme::accent(),
+                            );
                             theme::foreground()
                         } else {
-                            theme::alpha(theme::foreground(), 0.7)
+                            theme::muted_foreground()
                         };
-                        let width = widgets::text_in(
-                            ui,
-                            Rect::from_min_max(Pos2::new(left + 16.0, y), header.max),
-                            LEGACY,
-                            font(14.0, Weight::Regular),
-                            color,
-                        );
                         theme::paint_icon(
                             ui,
-                            if self.settings_legacy_open {
-                                "chevron-down"
-                            } else {
-                                "chevron-right"
-                            },
-                            Rect::from_min_size(
-                                Pos2::new(left + 16.0 + width + 8.0, y),
-                                Vec2::new(16.0, 32.0),
+                            "plus",
+                            Rect::from_center_size(
+                                Pos2::new(button.left() + 7.0 + 6.0, button.center().y),
+                                Vec2::splat(12.0),
                             ),
-                            16.0,
-                            theme::muted_foreground(),
+                            12.0,
+                            color,
                         );
-                        if response.clicked() {
-                            self.settings_legacy_open = !self.settings_legacy_open;
-                        }
-                        y += 32.0;
-                        bottom = y;
-                        if section.rows.is_empty() {
-                            continue;
-                        }
-                    } else {
-                        // Archive groups lead with the project icon (`gap-2`).
-                        let mut title_left = left + 16.0;
-                        if let Some(project) = &section.project {
-                            crate::ui::project_icon::paint(
-                                ui,
-                                Rect::from_min_size(
-                                    Pos2::new(title_left, y + 6.0),
-                                    Vec2::splat(16.0),
-                                ),
-                                project,
-                            );
-                            title_left += 24.0;
-                        }
                         widgets::text_in(
                             ui,
-                            Rect::from_min_size(
-                                Pos2::new(title_left, y),
-                                Vec2::new(card_width, 28.0),
+                            Rect::from_min_max(
+                                Pos2::new(button.left() + 7.0 + 16.0, button.top()),
+                                button.max,
                             ),
-                            &section.title,
-                            font(14.0, Weight::Regular),
-                            theme::alpha(theme::foreground(), 0.7),
+                            label,
+                            font(12.0, Weight::Medium),
+                            color,
                         );
-                        // `headerAction`: Scheduled Tasks' "New task".
-                        if page == SCHEDULED_TASKS_PAGE && self.connected() {
-                            let label = "New task";
-                            let width = widgets::text_width(ui, label, font(12.0, Weight::Medium))
-                                + 7.0 * 2.0
-                                + 12.0
-                                + 4.0;
-                            let button = Rect::from_min_size(
-                                Pos2::new(left + card_width - width, y + 2.0),
-                                Vec2::new(width, 24.0),
-                            );
-                            let response = ui.interact(
-                                button,
-                                ui.id().with("scheduled-new-task"),
-                                Sense::click(),
-                            );
-                            let color = if response.hovered() {
-                                ui.painter().rect_filled(
-                                    button,
-                                    CornerRadius::same(6),
-                                    theme::accent(),
-                                );
-                                theme::foreground()
-                            } else {
-                                theme::muted_foreground()
-                            };
-                            theme::paint_icon(
-                                ui,
-                                "plus",
-                                Rect::from_center_size(
-                                    Pos2::new(button.left() + 7.0 + 6.0, button.center().y),
-                                    Vec2::splat(12.0),
-                                ),
-                                12.0,
-                                color,
-                            );
-                            widgets::text_in(
-                                ui,
-                                Rect::from_min_max(
-                                    Pos2::new(button.left() + 7.0 + 16.0, button.top()),
-                                    button.max,
-                                ),
-                                label,
-                                font(12.0, Weight::Medium),
-                                color,
-                            );
-                            if response.clicked() {
-                                self.new_scheduled_task();
-                            }
+                        if response.clicked() {
+                            self.new_scheduled_task();
                         }
-                        y += 28.0 + 10.0;
                     }
+                    y += 28.0 + 10.0;
                     // Every row but the first carries a 1px divider.
                     let heights: Vec<f32> = section
                         .rows
@@ -4528,6 +4432,36 @@ mod tests {
         assert_eq!(settings["confirmThreadDelete"], true);
         assert!(settings.get("bogus").is_none());
         assert_eq!(load_client_settings(None), default_client_settings());
+    }
+
+    #[test]
+    fn plan_mode_and_the_context_meter_are_behavior_rows_found_by_search() {
+        use crate::app::{App, Options};
+        let harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: false,
+                },
+            )
+        });
+        let behavior = harness
+            .state()
+            .general_sections()
+            .into_iter()
+            .find(|section| section.title == "Behavior")
+            .unwrap();
+        for (query, row) in [
+            ("plan mode", "plan-mode"),
+            ("context window", "context-window-indicator"),
+        ] {
+            assert!(behavior.rows.iter().any(|r| r.id == row));
+            let found = crate::ui::settings_search::search(query, false);
+            assert!(found.iter().any(|f| f.page == 0 && f.target == row));
+        }
     }
 }
 

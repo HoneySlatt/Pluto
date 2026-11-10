@@ -1,24 +1,23 @@
 //! Logical project groups (`projectGrouping.ts` in client-runtime and
 //! `sidebarProjectGrouping.ts`): projects whose repository identity matches
-//! share one sidebar entry, by repository or by repository-relative path,
-//! with per-project overrides (`sidebarProjectGroupingOverrides`).
+//! share one entry of the draft hero's project picker, newest first.
 //!
 //! This client connects to one environment, so groups only form inside it
 //! (a repository's root and its packages, or two checkouts of one remote).
 use std::collections::HashMap;
 
-use serde_json::Value;
+use crate::app::App;
+use crate::model::{Project, Thread};
+use crate::timeline::parse_time;
 
-use crate::model::Project;
-
-/// A sidebar entry: its key, label and the physical projects it gathers.
+/// A project picker entry: its key, label and the physical projects it gathers.
 #[derive(Clone, Debug)]
 pub struct ProjectGroup {
     pub key: String,
     pub label: String,
     pub representative: Project,
-    /// (physical key, project), in first-appearance order.
-    pub members: Vec<(String, Project)>,
+    /// The projects it gathers, in first-appearance order.
+    pub members: Vec<Project>,
 }
 
 /// `normalizeProjectPathForComparison` (POSIX paths).
@@ -32,18 +31,12 @@ pub fn normalize_path(path: &str) -> String {
     }
 }
 
-/// `derivePhysicalProjectKey`: the environment and the normalized path. It
-/// also keys grouping overrides and the manual project order.
-pub fn physical_key(environment_id: &str, project: &Project) -> String {
+/// `derivePhysicalProjectKey`: the environment and the normalized path.
+fn physical_key(environment_id: &str, project: &Project) -> String {
     format!(
         "{environment_id}:{}",
         normalize_path(&project.workspace_root)
     )
-}
-
-/// `legacyProjectCwdPreferenceKey`.
-pub fn legacy_cwd_key(workspace_root: &str) -> String {
-    format!("legacy-project-cwd:{}", normalize_path(workspace_root))
 }
 
 fn identity_field<'a>(project: &'a Project, field: &str) -> Option<&'a str> {
@@ -56,51 +49,16 @@ fn identity_field<'a>(project: &'a Project, field: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-/// `deriveRepositoryRelativeProjectPath`.
-fn repository_relative_path(project: &Project) -> Option<String> {
-    let root = normalize_path(identity_field(project, "rootPath")?);
-    let path = normalize_path(&project.workspace_root);
-    if root.is_empty() || path.is_empty() {
-        return None;
-    }
-    if path == root {
-        return Some(String::new());
-    }
-    path.strip_prefix(&format!("{root}/")).map(str::to_owned)
-}
-
-/// `deriveLogicalProjectKey`.
-fn logical_key(environment_id: &str, project: &Project, mode: &str) -> String {
-    if mode != "separate"
-        && let Some(canonical) = identity_field(project, "canonicalKey")
-    {
-        if mode == "repository" {
-            return canonical.to_owned();
-        }
-        return match repository_relative_path(project) {
-            Some(relative) if !relative.is_empty() => format!("{canonical}::{relative}"),
-            _ => canonical.to_owned(),
-        };
-    }
-    physical_key(environment_id, project)
-}
-
-/// `resolveProjectGroupingMode`: the project's override, else the default.
-pub fn grouping_mode(
-    environment_id: &str,
-    project: &Project,
-    default_mode: &str,
-    overrides: &Value,
-) -> String {
-    overrides[physical_key(environment_id, project)]
-        .as_str()
-        .unwrap_or(default_mode)
-        .to_owned()
+/// `deriveLogicalProjectKey` in the "repository" mode: the repository's
+/// canonical key, else the project's own path.
+fn logical_key(environment_id: &str, project: &Project) -> String {
+    identity_field(project, "canonicalKey")
+        .map_or_else(|| physical_key(environment_id, project), str::to_owned)
 }
 
 fn freshness(project: &Project) -> i64 {
-    crate::timeline::parse_time(&project.updated_at)
-        .or_else(|| crate::timeline::parse_time(&project.created_at))
+    parse_time(&project.updated_at)
+        .or_else(|| parse_time(&project.created_at))
         .map(|d| d.timestamp_millis())
         .unwrap_or(0)
 }
@@ -139,12 +97,7 @@ fn group_label(representative: &Project, members: &[&Project]) -> String {
 
 /// `buildProjectGroups` for one environment: projects sharing a path keep
 /// the freshest, then physical projects join by logical key.
-pub fn build_groups(
-    environment_id: &str,
-    projects: &[&Project],
-    default_mode: &str,
-    overrides: &Value,
-) -> Vec<ProjectGroup> {
+pub fn build_groups(environment_id: &str, projects: &[&Project]) -> Vec<ProjectGroup> {
     let mut physical_order: Vec<String> = Vec::new();
     let mut by_physical: HashMap<String, Vec<&Project>> = HashMap::new();
     for project in projects {
@@ -155,7 +108,7 @@ pub fn build_groups(
         by_physical.entry(key).or_default().push(project);
     }
     let mut group_order: Vec<String> = Vec::new();
-    let mut groups: HashMap<String, Vec<(String, Project)>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<Project>> = HashMap::new();
     for physical in physical_order {
         let candidates = &by_physical[&physical];
         let winner = candidates
@@ -180,23 +133,19 @@ pub fn build_groups(
                 .max_by_key(|p| (freshness(p), p.id.clone()))
                 .unwrap_or(winner)
         };
-        let mode = grouping_mode(environment_id, winner, default_mode, overrides);
-        let key = logical_key(environment_id, identity, &mode);
+        let key = logical_key(environment_id, identity);
         if !groups.contains_key(&key) {
             group_order.push(key.clone());
         }
-        groups
-            .entry(key)
-            .or_default()
-            .push((physical, winner.clone()));
+        groups.entry(key).or_default().push(winner.clone());
     }
     group_order
         .into_iter()
         .map(|key| {
             let members = groups.remove(&key).unwrap_or_default();
-            let representative = members[0].1.clone();
+            let representative = members[0].clone();
             let label = if members.len() > 1 {
-                let refs: Vec<&Project> = members.iter().map(|(_, p)| p).collect();
+                let refs: Vec<&Project> = members.iter().collect();
                 group_label(&representative, &refs)
             } else {
                 representative.title.clone()
@@ -211,71 +160,86 @@ pub fn build_groups(
         .collect()
 }
 
-/// `orderItemsByPreferredIds`: projects named in the saved order first (by
-/// physical key or legacy cwd key), then the rest in their given order.
-pub fn order_projects<'a>(
-    environment_id: &str,
-    projects: &[&'a Project],
-    preferred: &[String],
-) -> Vec<&'a Project> {
-    if preferred.is_empty() {
-        return projects.to_vec();
-    }
-    let mut emitted = vec![false; projects.len()];
-    let mut ordered = Vec::new();
-    for id in preferred {
-        let found = projects.iter().enumerate().position(|(index, project)| {
-            !emitted[index]
-                && (physical_key(environment_id, project) == *id
-                    || legacy_cwd_key(&project.workspace_root) == *id)
-        });
-        if let Some(index) = found {
-            emitted[index] = true;
-            ordered.push(projects[index]);
-        }
-    }
-    ordered.extend(
-        projects
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !emitted[*index])
-            .map(|(_, project)| *project),
-    );
-    ordered
+fn millis(iso: &str) -> Option<i64> {
+    parse_time(iso).map(|d| d.timestamp_millis())
 }
 
-/// `reorderProjects`: moves the dragged keys to the target's slot; None
-/// when nothing changes.
-pub fn reorder(order: &[String], dragged: &[String], target: &[String]) -> Option<Vec<String>> {
-    if dragged.is_empty() || dragged.iter().all(|id| target.contains(id)) {
-        return None;
-    }
-    let target_index = order.iter().position(|id| target.contains(id))?;
-    let mut next = order.to_vec();
-    let mut removed = Vec::new();
-    let mut before_target: usize = 0;
-    for index in (0..next.len()).rev() {
-        if dragged.contains(&next[index]) {
-            removed.insert(0, next.remove(index));
-            if index < target_index {
-                before_target += 1;
-            }
+/// `getThreadSortTimestamp`: the latest user message, else the last update,
+/// else the creation.
+fn thread_timestamp(thread: &Thread) -> i64 {
+    thread
+        .latest_user_message_at
+        .as_deref()
+        .and_then(millis)
+        .or(millis(&thread.updated_at))
+        .or(millis(&thread.created_at))
+        .unwrap_or(i64::MIN)
+}
+
+/// `sortProjectsForSidebar`: groups by their newest thread (or their
+/// representative's stamp), ties by title then key.
+fn sort_groups(groups: &mut [ProjectGroup], threads: &[&Thread]) {
+    let thread_stamps: Vec<(&str, i64)> = threads
+        .iter()
+        .map(|t| (t.project_id.as_str(), thread_timestamp(t)))
+        .collect();
+    let stamp = |group: &ProjectGroup| -> i64 {
+        let latest = thread_stamps
+            .iter()
+            .filter(|(project, _)| group.members.iter().any(|m| m.id == *project))
+            .map(|(_, stamp)| *stamp)
+            .max();
+        if let Some(latest) = latest {
+            return latest;
         }
+        let project = &group.representative;
+        millis(&project.updated_at)
+            .or(millis(&project.created_at))
+            .unwrap_or(i64::MIN)
+    };
+    let stamps: HashMap<String, i64> = groups.iter().map(|g| (g.key.clone(), stamp(g))).collect();
+    groups.sort_by(|a, b| {
+        stamps[&b.key]
+            .cmp(&stamps[&a.key])
+            .then_with(|| a.representative.title.cmp(&b.representative.title))
+            .then_with(|| a.key.cmp(&b.key))
+    });
+}
+
+impl App {
+    fn environment_id(&self) -> String {
+        self.state.config["environment"]["environmentId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
     }
-    if removed.is_empty() {
-        return None;
+
+    /// The logical projects, the one with the newest thread first
+    /// (`sortLogicalProjectsForSidebar`).
+    pub(crate) fn sorted_project_groups(&self) -> Vec<ProjectGroup> {
+        let projects: Vec<&Project> = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| !self.is_chats(p))
+            .collect();
+        let threads: Vec<&Thread> = self
+            .state
+            .threads
+            .iter()
+            .filter(|t| t.archived_at.is_none() && !t.is_subagent() && !self.is_chat_thread(t))
+            .map(std::sync::Arc::as_ref)
+            .collect();
+        let mut groups = build_groups(&self.environment_id(), &projects);
+        sort_groups(&mut groups, &threads);
+        groups
     }
-    let insert = target_index - before_target.saturating_sub(1).min(target_index);
-    for (offset, id) in removed.into_iter().enumerate() {
-        next.insert(insert + offset, id);
-    }
-    Some(next)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn project(id: &str, title: &str, root: &str, identity: Option<Value>) -> Project {
         Project {
@@ -306,28 +270,42 @@ mod tests {
         );
         let other = project("c", "other", "/w/other", None);
         let projects = [&web, &ui, &other];
-        let groups = build_groups("env", &projects, "repository", &json!({}));
+        let groups = build_groups("env", &projects);
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].members.len(), 2);
         assert_eq!(groups[0].label, "example/web-demo");
-        let by_path = build_groups("env", &projects, "repository_path", &json!({}));
-        assert_eq!(by_path.len(), 3);
-        let overridden = build_groups(
-            "env",
-            &projects,
-            "repository",
-            &json!({ "env:/w/web-demo/packages/ui": "separate" }),
-        );
-        assert_eq!(overridden.len(), 3);
+    }
+
+    fn thread(id: &str, project: &str, created: &str, message: Option<&str>) -> Thread {
+        Thread {
+            id: id.into(),
+            project_id: project.into(),
+            created_at: created.into(),
+            updated_at: created.into(),
+            latest_user_message_at: message.map(str::to_owned),
+            ..Thread::default()
+        }
     }
 
     #[test]
-    fn reorder_moves_dragged_projects_to_the_target() {
-        let order: Vec<String> = ["a", "b", "c", "d"].map(String::from).to_vec();
-        let moved = reorder(&order, &["d".into()], &["b".into()]).unwrap();
-        assert_eq!(moved, ["a", "d", "b", "c"]);
-        let down = reorder(&order, &["a".into()], &["c".into()]).unwrap();
-        assert_eq!(down, ["b", "c", "a", "d"]);
-        assert!(reorder(&order, &["a".into()], &["a".into()]).is_none());
+    fn a_thread_is_stamped_by_its_latest_user_message_then_its_creation() {
+        let with_message = thread(
+            "a",
+            "p",
+            "2026-01-01T00:00:00Z",
+            Some("2026-01-05T00:00:00Z"),
+        );
+        let without = thread("b", "p", "2026-01-03T00:00:00Z", None);
+        assert!(thread_timestamp(&with_message) > thread_timestamp(&without));
+    }
+
+    #[test]
+    fn projects_follow_their_newest_thread() {
+        let p1 = project("p1", "Alpha", "/w/alpha", None);
+        let p2 = project("p2", "Beta", "/w/beta", None);
+        let t = thread("t", "p1", "2026-01-09T00:00:00Z", None);
+        let mut groups = build_groups("env", &[&p2, &p1]);
+        sort_groups(&mut groups, &[&t]);
+        assert_eq!(groups[0].representative.id, "p1");
     }
 }

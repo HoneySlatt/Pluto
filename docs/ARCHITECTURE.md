@@ -119,7 +119,7 @@ The screens of `src/ui/`, by group:
 |---|---|
 | Connection | `connect` (the connection screen), `requests_panel` (approvals and questions above the composer), `secret_request`, `prompt_links` (`pluto://` links), `quit_hold`, `mod` (the modules and shared helpers) |
 | The conversation | `chat`, `chat_export`, `composer*`, `drafts`, `attachments`, `mentions`, `pickers`, `prompt_editor`, `prompt_history`, `typing_guard`, `tasks`, `context_meter`, `timeline_view`, `live_activity`, `minimap`, `markdown`, `md_*`, `cite*`, `citations`, `plan_card`, `queue`, `rewind`, `inspector`, `tool_images`, `tool_icons`, `proactive_panels`, `thread_*` |
-| Navigation | `sidebar*`, `legacy_sidebar`, `palette`, `command_menu`, `content_search`, `keybindings`, `when_builder`, `shortcuts`, `toasts`, `lifecycle`, `park`, `undo`, `snooze_dialog`, `context_menu`, `text_menu` |
+| Navigation | `sidebar*`, `palette`, `command_menu`, `content_search`, `keybindings`, `when_builder`, `shortcuts`, `toasts`, `lifecycle`, `park`, `undo`, `snooze_dialog`, `context_menu`, `text_menu` |
 | Projects | `projects_page`, `project_actions`, `project_file`, `script_import`, `project_grouping`, `project_icon`, `project_scope`, `favicon`, `scratch`, `open_in` |
 | Code and Git | `diff_panel`, `diff_review`, `changed_files`, `files`, `file_*`, `branch_picker`, `git_actions`, `source_control`, `stash`, `pull_requests`, `linked_pull_requests`, `bitbucket`, `worktree_setup`, `publish` |
 | Panels | `surfaces` (the right panel's launcher), `terminal_drawer`, `terminal_surface`, `preview`, `server_browser`, `html_render`, `mcp_apps`, `agents_panel`, `video`, `media`, `lightbox` |

@@ -381,7 +381,7 @@ impl App {
             self.draft_key = key.to_owned();
             self.select_thread(None);
         }
-        self.legacy_selection.clear();
+        self.selection.clear();
         self.draft_project_id = session.project_id.clone();
         self.draft_env_mode = session
             .env_mode

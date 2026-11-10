@@ -706,10 +706,8 @@ impl App {
             .sorted_project_groups()
             .into_iter()
             .map(|group| {
-                let own = group.members.iter().find(|(_, p)| p.id == project.id);
-                let target = own
-                    .map(|(_, p)| p.clone())
-                    .unwrap_or_else(|| group.representative.clone());
+                let own = group.members.iter().find(|p| p.id == project.id);
+                let target = own.cloned().unwrap_or_else(|| group.representative.clone());
                 (group.key, group.label, target, own.is_some())
             })
             .filter(|(_, _, target, _)| !self.is_scratch(target))

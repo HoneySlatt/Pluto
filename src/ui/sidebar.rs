@@ -28,6 +28,20 @@ const LIST_TOP: f32 = 208.0;
 const SIDEBAR_MIN_WIDTH: f32 = 220.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 const FOOTER_HEIGHT: f32 = 48.0;
+const TEAL_300: Color32 = Color32::from_rgb(0x46, 0xec, 0xd5);
+
+/// The status pulse (`animate-status-pulse`): 2s, full then half opacity,
+/// each change in six steps.
+fn pulse_alpha(time: f64) -> f32 {
+    let t = (time % 2.0) / 2.0;
+    let step = |from: f64| ((t - from) / 0.1 * 6.0).floor() / 6.0;
+    (match t {
+        t if t < 0.4 => 1.0,
+        t if t < 0.5 => 1.0 - 0.5 * step(0.4),
+        t if t < 0.9 => 0.5,
+        _ => 0.5 + 0.5 * step(0.9),
+    }) as f32
+}
 
 fn timestamp_ms(iso: Option<&str>) -> i64 {
     iso.and_then(parse_time)
@@ -379,12 +393,8 @@ impl App {
     }
 
     /// Pluto: the sidebar's width, dragged by its right edge and kept with
-    /// the client settings; the legacy sidebar keeps the fixed width its
-    /// layout is drawn for.
+    /// the client settings.
     pub fn sidebar_width(&self) -> f32 {
-        if self.client_setting("legacySidebarEnabled") == true {
-            return theme::SIDEBAR_WIDTH;
-        }
         self.client_settings["plutoSidebarWidth"]
             .as_f64()
             .map_or(theme::SIDEBAR_WIDTH, |w| {
@@ -395,9 +405,6 @@ impl App {
     /// The docked sidebar's right edge: dragging it resizes the sidebar,
     /// a double click brings back the default width.
     pub(crate) fn sidebar_resize_handle(&mut self, ui: &mut Ui, sidebar: Rect) {
-        if self.client_setting("legacySidebarEnabled") == true {
-            return;
-        }
         // Mostly outside the sidebar, clear of its list's scroll bar.
         let handle = Rect::from_min_max(
             Pos2::new(sidebar.right() - 2.0, sidebar.top()),
@@ -498,8 +505,6 @@ impl App {
         self.mode_switch(ui, rect);
         if self.chat_mode() {
             self.chat_sidebar(ui, rect);
-        } else if self.client_setting("legacySidebarEnabled") == true {
-            self.legacy_sidebar(ui, rect);
         } else {
             self.inbox_sidebar(ui, rect);
             self.sidebar_selection_menu(ui);
@@ -508,10 +513,53 @@ impl App {
         self.sidebar_footer(ui, rect);
     }
 
+    /// Opens the stream behind the cards' running-terminal badge, once
+    /// connected (`useThreadRunningTerminalIds`).
+    pub(crate) fn watch_terminal_metadata(&mut self) {
+        if !self.terminal_metadata_open && self.connected() {
+            self.terminal_metadata_open = true;
+            self.send(crate::protocol::Action::Stream {
+                key: "sidebar-terminal-metadata".into(),
+                method: "subscribeTerminalMetadata",
+                payload: serde_json::json!({}),
+            });
+        }
+    }
+
+    /// `terminalMetadata` stream events: the snapshot, then upserts and removals.
+    pub(crate) fn terminal_metadata_event(&mut self, event: &serde_json::Value) {
+        let key = |t: &serde_json::Value| {
+            (
+                t["threadId"].as_str().unwrap_or_default().to_owned(),
+                t["terminalId"].as_str().unwrap_or_default().to_owned(),
+            )
+        };
+        match event["type"].as_str() {
+            Some("snapshot") => {
+                self.terminal_metadata = event["terminals"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|t| (key(t), t.clone()))
+                    .collect();
+            }
+            Some("upsert") => {
+                let terminal = &event["terminal"];
+                self.terminal_metadata
+                    .insert(key(terminal), terminal.clone());
+            }
+            Some("remove") => {
+                self.terminal_metadata.remove(&key(event));
+            }
+            _ => {}
+        }
+    }
+
     /// The default sidebar's search row and thread inbox.
     fn inbox_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
         let left = rect.left();
+        self.watch_terminal_metadata();
 
         if self.sidebar_new_and_search(ui, rect, "New thread", "Search threads") {
             self.start_draft(None);
@@ -1087,7 +1135,7 @@ impl App {
         let painter = ui.painter().clone();
         if active {
             painter.rect_filled(rect, widgets::radius(8.0), theme::row_active());
-        } else if self.legacy_selection.contains(&thread.id) || swept {
+        } else if self.selection.contains(&thread.id) || swept {
             // `bg-sidebar-row-selected`.
             painter.rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
@@ -1473,7 +1521,7 @@ impl App {
         }
         let mut gx = after_branch.min(branch_right);
         if terminals > 0 {
-            let alpha = crate::ui::legacy_sidebar::pulse_alpha(ui.input(|i| i.time));
+            let alpha = pulse_alpha(ui.input(|i| i.time));
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
             let slot = Rect::from_min_size(Pos2::new(gx, center - 7.0), Vec2::splat(14.0));
@@ -1482,7 +1530,7 @@ impl App {
                 "terminal",
                 slot,
                 14.0,
-                theme::alpha(crate::ui::legacy_sidebar::TEAL_300, 0.9 * alpha),
+                theme::alpha(TEAL_300, 0.9 * alpha),
             );
             let label = if terminals == 1 {
                 "1 terminal process running. Open terminal".to_owned()
@@ -1561,9 +1609,9 @@ impl App {
             && let Some(at) = response.interact_pointer_pos()
         {
             // A selected row opens the selection's menu, another its own.
-            if self.legacy_selection.contains(&thread.id) {
+            if self.selection.contains(&thread.id) {
                 self.open_menu = None;
-                self.legacy_multi_menu = Some(crate::ui::context_menu::State::new(at));
+                self.selection_menu = Some(crate::ui::context_menu::State::new(at));
             } else {
                 self.open_thread_menu(&thread.id, at);
             }
@@ -1636,7 +1684,7 @@ impl App {
         if active {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::row_active());
-        } else if self.legacy_selection.contains(&thread.id) || swept {
+        } else if self.selection.contains(&thread.id) || swept {
             ui.painter()
                 .rect_filled(rect, widgets::radius(8.0), theme::muted());
         } else if hovered {
@@ -1859,9 +1907,9 @@ impl App {
             && let Some(at) = response.interact_pointer_pos()
         {
             // A selected row opens the selection's menu, another its own.
-            if self.legacy_selection.contains(&thread.id) {
+            if self.selection.contains(&thread.id) {
                 self.open_menu = None;
-                self.legacy_multi_menu = Some(crate::ui::context_menu::State::new(at));
+                self.selection_menu = Some(crate::ui::context_menu::State::new(at));
             } else {
                 self.open_thread_menu(&thread.id, at);
             }
@@ -1903,30 +1951,30 @@ impl App {
     fn sidebar_row_clicked(&mut self, ui: &Ui, thread: &Thread) {
         let modifiers = ui.input(|i| i.modifiers);
         if modifiers.command {
-            if !self.legacy_selection.remove(&thread.id) {
-                self.legacy_selection.insert(thread.id.clone());
-                self.legacy_anchor = Some(thread.id.clone());
+            if !self.selection.remove(&thread.id) {
+                self.selection.insert(thread.id.clone());
+                self.selection_anchor = Some(thread.id.clone());
             }
         } else if modifiers.shift {
             let ordered = self.ordered_sidebar_threads();
             let anchor = self
-                .legacy_anchor
+                .selection_anchor
                 .as_ref()
                 .and_then(|a| ordered.iter().position(|id| id == a));
             match (anchor, ordered.iter().position(|id| *id == thread.id)) {
                 (Some(a), Some(t)) => {
                     for id in &ordered[a.min(t)..=a.max(t)] {
-                        self.legacy_selection.insert(id.clone());
+                        self.selection.insert(id.clone());
                     }
                 }
                 _ => {
-                    self.legacy_selection.insert(thread.id.clone());
-                    self.legacy_anchor = Some(thread.id.clone());
+                    self.selection.insert(thread.id.clone());
+                    self.selection_anchor = Some(thread.id.clone());
                 }
             }
         } else {
-            self.legacy_selection.clear();
-            self.legacy_anchor = Some(thread.id.clone());
+            self.selection.clear();
+            self.selection_anchor = Some(thread.id.clone());
             self.thread_row_clicked(ui, thread);
         }
     }
@@ -1936,22 +1984,22 @@ impl App {
     pub(crate) fn sidebar_selection_menu(&mut self, ui: &mut Ui) {
         use crate::ui::context_menu::{self, Item};
         // Escape clears the selection.
-        if !self.legacy_selection.is_empty()
-            && self.legacy_multi_menu.is_none()
+        if !self.selection.is_empty()
+            && self.selection_menu.is_none()
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.legacy_selection.clear();
-            self.legacy_anchor = None;
+            self.selection.clear();
+            self.selection_anchor = None;
             return;
         }
-        let Some(state) = self.legacy_multi_menu.take() else {
+        let Some(state) = self.selection_menu.take() else {
             return;
         };
         let threads: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
-            .filter(|t| self.legacy_selection.contains(&t.id))
+            .filter(|t| self.selection.contains(&t.id))
             .cloned()
             .collect();
         let count = threads.len();
@@ -2020,14 +2068,14 @@ impl App {
         });
         let mut open = Some(state);
         let clicked = context_menu::show(ui, &mut open, &items);
-        self.legacy_multi_menu = open;
+        self.selection_menu = open;
         let Some(clicked) = clicked else {
             return;
         };
         let ids: Vec<String> = threads.iter().map(|t| t.id.clone()).collect();
         let clear = |app: &mut App| {
-            app.legacy_selection.clear();
-            app.legacy_anchor = None;
+            app.selection.clear();
+            app.selection_anchor = None;
         };
         match clicked.as_str() {
             "unpin" => {

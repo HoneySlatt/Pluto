@@ -712,6 +712,6 @@ mod tests {
             row_server_keys("days-before-auto-settle"),
             &["sidebarAutoSettleAfterDays"]
         );
-        assert!(row_server_keys("project-grouping").is_empty());
+        assert!(row_server_keys("in-app-notifications").is_empty());
     }
 }

@@ -263,22 +263,6 @@ pub struct App {
     pub(crate) renaming: Option<(String, String)>,
     pub(crate) rename_focus: bool,
     pub(crate) last_row_click: Option<(String, f64)>,
-    /// Legacy sidebar: collapsed or expanded projects (`projectExpandedById`,
-    /// persisted), projects showing all their threads, a pending archive.
-    pub(crate) legacy_project_expanded: std::collections::HashMap<String, bool>,
-    pub(crate) legacy_thread_lists: std::collections::HashSet<String>,
-    pub(crate) legacy_confirm_archive: Option<String>,
-    pub(crate) legacy_project_menu: Option<(String, crate::ui::context_menu::State)>,
-    /// The "Rename project" dialog: project, edited title, focus request.
-    pub(crate) legacy_project_rename: Option<(String, String, bool)>,
-    /// Manual project order (`projectOrder`, physical keys, persisted).
-    pub(crate) legacy_project_order: Vec<String>,
-    /// The project group being dragged in manual sorting.
-    pub(crate) legacy_drag: Option<String>,
-    /// Where the dragged header was grabbed, below its top.
-    pub(crate) legacy_drag_grab: f32,
-    /// The member picker of a grouped project's New thread button.
-    pub(crate) legacy_new_thread_menu: Option<(String, crate::ui::context_menu::State)>,
     /// The draft hero's project picker, while open.
     pub(crate) hero_project_menu: Option<crate::ui::context_menu::State>,
     /// Toasts, newest last.
@@ -300,20 +284,17 @@ pub struct App {
     pub(crate) media_menu: Option<(crate::ui::media::Source, crate::ui::context_menu::State)>,
     /// A Scratch project asked for, until it is in the shell.
     pub(crate) scratch: Option<crate::ui::scratch::Pending>,
-    /// The "Project grouping" dialog: member project id and the selection.
-    pub(crate) legacy_grouping: Option<(String, String)>,
-    pub(crate) legacy_grouping_select: Option<crate::ui::context_menu::State>,
-    /// Selected legacy sidebar threads and the range anchor
+    /// Selected sidebar threads, the range anchor and the selection's menu
     /// (`threadSelectionStore`).
-    pub(crate) legacy_selection: std::collections::HashSet<String>,
-    pub(crate) legacy_anchor: Option<String>,
-    pub(crate) legacy_multi_menu: Option<crate::ui::context_menu::State>,
+    pub(crate) selection: std::collections::HashSet<String>,
+    pub(crate) selection_anchor: Option<String>,
+    pub(crate) selection_menu: Option<crate::ui::context_menu::State>,
     /// `subscribeTerminalMetadata`: terminal summaries by (thread, terminal).
     pub(crate) terminal_metadata: std::collections::HashMap<(String, String), Value>,
     /// `subscribeDiscoveredLocalServers`: the latest server list.
     pub(crate) discovered_servers: Vec<Value>,
-    /// Whether the legacy sidebar's metadata streams are open.
-    pub(crate) legacy_streams: bool,
+    /// Whether `subscribeTerminalMetadata` runs.
+    pub(crate) terminal_metadata_open: bool,
     /// Whether `subscribeDiscoveredLocalServers` runs.
     discovery_stream: bool,
     /// The text menu (Electron's context menu) and the link under it.
@@ -341,8 +322,6 @@ pub struct App {
     /// A chat to export as Markdown once its history is loaded.
     pub(crate) pending_chat_export: Option<String>,
     pub(crate) memory: crate::ui::memory_settings::MemorySettings,
-    /// `pullRequests.summary` by PR URL, with when it was asked for.
-    pub(crate) pr_summaries: std::collections::HashMap<String, (Option<Value>, std::time::Instant)>,
     pub(crate) confirm: Option<crate::ui::thread_menu::Confirm>,
     pub(crate) snooze_dialog: Option<crate::ui::snooze_dialog::SnoozeDialog>,
     /// The Linked pull requests surface's menu and the Link dialog.
@@ -474,7 +453,6 @@ pub struct App {
     pub(crate) settings_search: String,
     pub(crate) settings_search_active: usize,
     pub(crate) settings_target: Option<crate::ui::settings_search::Target>,
-    pub(crate) settings_legacy_open: bool,
     /// The archived shell snapshot for the Archive page; `None` while loading.
     pub(crate) archived: Option<Result<Value, String>>,
     pub(crate) archive_menu: Option<(String, crate::ui::context_menu::State)>,
@@ -839,11 +817,6 @@ impl App {
             renaming: None,
             rename_focus: false,
             last_row_click: None,
-            legacy_project_expanded: load_ui_state(options.client_settings_path.as_deref()).0,
-            legacy_project_order: load_ui_state(options.client_settings_path.as_deref()).1,
-            legacy_drag: None,
-            legacy_drag_grab: 0.0,
-            legacy_new_thread_menu: None,
             hero_project_menu: None,
             scratch: None,
             media_menu: None,
@@ -853,16 +826,16 @@ impl App {
             git: Default::default(),
             plans: Default::default(),
             publish: None,
-            last_editor: load_ui_state(options.client_settings_path.as_deref()).2,
+            last_editor: read_ui_state(options.client_settings_path.as_deref())["lastEditor"]
+                .as_str()
+                .map(str::to_owned),
             open_in_menu: None,
-            legacy_grouping: None,
-            legacy_grouping_select: None,
-            legacy_selection: Default::default(),
-            legacy_anchor: None,
-            legacy_multi_menu: None,
+            selection: Default::default(),
+            selection_anchor: None,
+            selection_menu: None,
             terminal_metadata: Default::default(),
             discovered_servers: Vec::new(),
-            legacy_streams: false,
+            terminal_metadata_open: false,
             discovery_stream: false,
             text_menu: None,
             pending_copy: false,
@@ -880,11 +853,6 @@ impl App {
             chat_projects: Default::default(),
             pending_chat_export: None,
             memory: Default::default(),
-            pr_summaries: Default::default(),
-            legacy_thread_lists: Default::default(),
-            legacy_confirm_archive: None,
-            legacy_project_menu: None,
-            legacy_project_rename: None,
             confirm: None,
             snooze_dialog: None,
             linked_prs: Default::default(),
@@ -972,7 +940,6 @@ impl App {
             settings_search: String::new(),
             settings_search_active: 0,
             settings_target: None,
-            settings_legacy_open: false,
             archived: None,
             archive_menu: None,
             settings_edits: Default::default(),
@@ -1671,8 +1638,8 @@ impl App {
         self.leave_draft();
         self.select_thread(None);
         // A draft clears the sidebar's selection.
-        self.legacy_selection.clear();
-        self.legacy_anchor = None;
+        self.selection.clear();
+        self.selection_anchor = None;
         self.draft_project_id = project_id;
         // A new draft starts from its project's default or the last model
         // picked (`applyStickyState`), not from the last draft's pick.
@@ -1877,19 +1844,12 @@ impl App {
     }
 
     pub(crate) fn connect_now(&mut self, ctx: &egui::Context) {
-        // Another server: nothing of the last one's shell stays.
         if self
             .shell_server
             .as_deref()
             .is_some_and(|server| server != self.connect.server.trim())
         {
-            self.shell_server = None;
-            self.state = State::default();
-            self.selected = None;
-            self.thread_retry = None;
-            self.streams.clear();
-            self.vcs = None;
-            self.watched_vcs = None;
+            self.forget_server();
         }
         self.connect.error = None;
         self.connect.busy = true;
@@ -1903,6 +1863,21 @@ impl App {
                 self.connect.busy = false;
             }
         }
+    }
+
+    /// Another server: nothing of the last one's shell stays, and the
+    /// streams the sidebar and the preview keep open are asked for again.
+    fn forget_server(&mut self) {
+        self.shell_server = None;
+        self.state = State::default();
+        self.selected = None;
+        self.thread_retry = None;
+        self.streams.clear();
+        self.vcs = None;
+        self.watched_vcs = None;
+        self.terminal_metadata.clear();
+        self.terminal_metadata_open = false;
+        self.discovery_stream = false;
     }
 
     fn sync_vcs_watch(&mut self) {
@@ -2189,8 +2164,6 @@ impl eframe::App for App {
                 self.design_end_frame();
                 self.status_toast(ui, workspace);
                 self.command_palette(ui, rect);
-                self.legacy_rename_dialog(ui, rect);
-                self.legacy_grouping_dialog(ui, rect);
                 self.chat_project_dialog(ui, rect);
                 self.memory_edit_dialog(ui, rect);
                 self.confirm_dialog(ui, rect);
@@ -2410,8 +2383,8 @@ impl App {
         Some(self.panels.entry(id).or_default())
     }
 
-    /// Starts `subscribeDiscoveredLocalServers` once (the sidebar's port
-    /// indicators and the preview's local servers share it).
+    /// Starts `subscribeDiscoveredLocalServers` once, for the preview's
+    /// local servers.
     pub(crate) fn watch_discovered_servers(&mut self) {
         if !self.discovery_stream && self.connected() {
             self.discovery_stream = true;
@@ -2582,13 +2555,6 @@ impl App {
             self.prs.results.insert(key, result);
         } else if key == "providers-refresh" {
             self.providers_refreshing = false;
-        } else if let Some(url) = key.strip_prefix("pr-summary:") {
-            if let Some(entry) = self.pr_summaries.get_mut(url) {
-                // A failed refresh keeps the last summary.
-                if let Ok(summary) = result {
-                    entry.0 = Some(summary);
-                }
-            }
         } else if key == "sidebar-terminal-metadata" {
             if let Ok(event) = result {
                 self.terminal_metadata_event(&event);
@@ -2742,30 +2708,11 @@ fn read_ui_state(settings: Option<&std::path::Path>) -> serde_json::Value {
         .unwrap_or_default()
 }
 
-/// The persisted UI state (upstream's `uiStateStore`): project expansion
-/// and the manual project order.
-fn load_ui_state(
-    settings: Option<&std::path::Path>,
-) -> (
-    std::collections::HashMap<String, bool>,
-    Vec<String>,
-    Option<String>,
-) {
-    let value = read_ui_state(settings);
-    (
-        serde_json::from_value(value["projectExpandedById"].clone()).unwrap_or_default(),
-        serde_json::from_value(value["projectOrder"].clone()).unwrap_or_default(),
-        value["lastEditor"].as_str().map(str::to_owned),
-    )
-}
-
 pub(crate) fn save_ui_state(app: &App) {
     let Some(path) = ui_state_path(app.client_settings_path.as_deref()) else {
         return;
     };
     let value = serde_json::json!({
-        "projectExpandedById": app.legacy_project_expanded,
-        "projectOrder": app.legacy_project_order,
         "lastEditor": app.last_editor,
         "renderMarkdown": app.files.render_markdown,
         "renderTable": app.files.render_table,
@@ -2950,5 +2897,31 @@ mod thread_retry_tests {
             selected |= matches!(action, Action::Select(Some(ref id)) if id == "t");
         }
         assert!(selected);
+    }
+
+    #[test]
+    fn the_terminal_badges_stream_opens_once_per_server() {
+        let mut harness = app();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        let opened = |app: &mut App| {
+            let (connection, actions, _events) = Connection::fake(crate::repaint(&ctx));
+            app.connection = Some(connection);
+            app.synced = true;
+            app.screen = Screen::Main;
+            app.watch_terminal_metadata();
+            app.watch_terminal_metadata();
+            std::iter::from_fn(|| actions.try_recv().ok())
+                .filter(|action| {
+                    matches!(action, Action::Stream { key, .. } if key == "sidebar-terminal-metadata")
+                })
+                .count()
+        };
+        assert_eq!(opened(app), 1);
+        app.terminal_metadata
+            .insert(("e".into(), "t".into()), serde_json::json!({}));
+        app.forget_server();
+        assert!(app.terminal_metadata.is_empty());
+        assert_eq!(opened(app), 1);
     }
 }

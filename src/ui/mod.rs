@@ -40,7 +40,6 @@ pub mod html_render;
 pub mod icon_picker;
 pub mod inspector;
 pub mod keybindings;
-pub mod legacy_sidebar;
 pub mod lifecycle;
 pub mod lightbox;
 pub mod linked_pull_requests;

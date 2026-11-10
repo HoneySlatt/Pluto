@@ -477,9 +477,6 @@ impl App {
 
     /// `orderedThreads`: pinned, active, then the shelves as rendered.
     pub(crate) fn ordered_sidebar_threads(&self) -> Vec<String> {
-        if self.client_setting("legacySidebarEnabled") == true {
-            return self.legacy_visible_thread_ids();
-        }
         let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
         let threads: Vec<std::sync::Arc<crate::model::Thread>> = self

@@ -14,6 +14,14 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 - DeepSeek Harness reports its token usage: each turn's tokens and the context's fill in the
   thread, and its history on the usage page, under its own name and color.
 
+### Removed
+
+- The legacy sidebar, with its project trees, sorts, project menu, rename and grouping dialogs,
+  thread glyphs and Mod+digit chips; the setting that chose it. Projects are no longer grouped by
+  a setting: the new thread's project picker gathers a repository's checkouts, newest first.
+- The "Legacy features" fold of the General settings: plan mode and the context window indicator
+  are now plain rows of its Behavior section.
+
 ### Fixed
 
 - A task delegated to DeepSeek Harness reported its first message as its result instead of its
