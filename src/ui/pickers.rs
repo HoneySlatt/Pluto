@@ -69,6 +69,8 @@ pub fn provider_icon(driver: &str) -> Option<(&'static str, Color32)> {
 /// refuses other projects; their code runs through its OpenCode companion).
 const CHAT_ONLY_DRIVERS: [&str; 1] = ["ollama"];
 
+pub(crate) use pluto_core::model::is_cut_driver;
+
 /// Pluto: whether `provider` is the OpenCode instance the server runs beside
 /// an Ollama instance for code projects (`<ollama id>_code`, provider-ollama's
 /// `codeModels.ts`). It shows as Ollama, in code projects only.
@@ -152,7 +154,11 @@ impl App {
         let selection = sticky.by_provider.get(sticky.active.as_deref()?)?;
         self.providers()
             .iter()
-            .any(|p| p["instanceId"] == selection.instance_id.as_str() && p["enabled"] != false)
+            .any(|p| {
+                p["instanceId"] == selection.instance_id.as_str()
+                    && p["enabled"] != false
+                    && !is_cut_driver(p)
+            })
             .then(|| selection.clone())
     }
 
@@ -438,7 +444,7 @@ impl App {
         let providers = sort_instances(
             self.providers()
                 .iter()
-                .filter(|p| p["enabled"] != false)
+                .filter(|p| p["enabled"] != false && !is_cut_driver(p))
                 .filter(|p| {
                     chats || !CHAT_ONLY_DRIVERS.contains(&p["driver"].as_str().unwrap_or(""))
                 })
@@ -1374,6 +1380,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn cut_drivers_are_hidden_even_when_enabled() {
+        use serde_json::json;
+        assert!(is_cut_driver(
+            &json!({"instanceId": "cursor", "driver": "cursor", "enabled": true})
+        ));
+        assert!(!is_cut_driver(
+            &json!({"instanceId": "codex", "driver": "codex"})
+        ));
+        assert!(!is_cut_driver(&json!({})));
+    }
 
     #[test]
     fn driver_kinds_read_as_words() {

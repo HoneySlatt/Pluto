@@ -139,6 +139,11 @@ fn conflict_labels(rows: &[KbRow], id: &str, key: &str, when: &str) -> Vec<Strin
     labels
 }
 
+/// Commands of the theme features the triage cut (rows 20.1–20.3): the
+/// frozen fork still binds them by default, but they do nothing, so their
+/// rows are not shown.
+const CUT_COMMANDS: [&str; 3] = ["theme.select", "appearance.cycle", "themeEditor.toggle"];
+
 /// `buildKeybindingRows` without the query: source, defaults and conflicts.
 pub(crate) fn build_rows(bindings: &Value, when_expression: fn(&Value) -> String) -> Vec<KbRow> {
     let mut rows: Vec<KbRow> = bindings
@@ -146,6 +151,9 @@ pub(crate) fn build_rows(bindings: &Value, when_expression: fn(&Value) -> String
         .into_iter()
         .flatten()
         .enumerate()
+        .filter(|(_, binding)| {
+            !CUT_COMMANDS.contains(&binding["command"].as_str().unwrap_or_default())
+        })
         .map(|(index, binding)| {
             let command = binding["command"].as_str().unwrap_or_default().to_owned();
             let key = shortcut_input(&binding["shortcut"]);
@@ -907,9 +915,6 @@ const DEFAULTS: &[(&str, &str, &str)] = &[
     ("mod+p", "filePicker.toggle", "!terminalFocus"),
     ("mod+shift+f", "projectSearch.toggle", "!terminalFocus"),
     ("mod+u", "usage.open", "!terminalFocus"),
-    ("mod+alt+a", "theme.select", "!terminalFocus"),
-    ("mod+alt+shift+a", "appearance.cycle", "!terminalFocus"),
-    ("mod+alt+shift+t", "themeEditor.toggle", ""),
     ("mod+s", "composer.stash", "!terminalFocus"),
     (
         "mod+shift+enter",
@@ -1065,6 +1070,21 @@ mod tests {
             Some("mod+[")
         );
         assert_eq!(binding_from_key(Key::Insert, Modifiers::NONE), None);
+    }
+
+    #[test]
+    fn the_cut_theme_commands_leave_the_page_and_the_rest_keep_their_place() {
+        let bindings = json!([
+            {"command": "theme.select", "shortcut": {"key": "a", "modKey": true, "altKey": true}},
+            {"command": "sidebar.toggle", "shortcut": {"key": "b", "modKey": true}},
+            {"command": "appearance.cycle", "shortcut": {"key": "a", "modKey": true}},
+            {"command": "themeEditor.toggle", "shortcut": {"key": "t", "modKey": true}},
+        ]);
+        let rows = build_rows(&bindings, |_| String::new());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "sidebar.toggle");
+        assert!(!rows[0].custom);
+        assert!(rows[0].id.ends_with("\u{0}1"), "{:?}", rows[0].id);
     }
 
     #[test]

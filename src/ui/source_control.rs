@@ -316,10 +316,7 @@ impl App {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let providers: Vec<Value> = result["sourceControlProviders"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let providers = kept_providers(&result["sourceControlProviders"]);
         let mut y = top;
         if !systems.is_empty() {
             y = self.discovery_section(ui, left, y, "Version Control", true, &systems);
@@ -746,9 +743,40 @@ fn paint_card(ui: &Ui, card: Rect) {
     );
 }
 
+/// The forges Pluto keeps: GitHub, GitLab and Forgejo. The server also reports
+/// Bitbucket and Azure DevOps; the client does not show them.
+fn kept_providers(providers: &Value) -> Vec<Value> {
+    providers
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|provider| {
+            matches!(
+                provider["kind"].as_str(),
+                Some("github" | "gitlab" | "forgejo")
+            )
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_kept_forges_are_listed() {
+        let reported = json!([
+            {"kind": "github"}, {"kind": "bitbucket"}, {"kind": "gitlab"},
+            {"kind": "azure-devops"}, {"kind": "forgejo"}, {"label": "no kind"}
+        ]);
+        let kinds: Vec<_> = kept_providers(&reported)
+            .iter()
+            .map(|p| p["kind"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(kinds, ["github", "gitlab", "forgejo"]);
+        assert!(kept_providers(&json!(null)).is_empty());
+    }
 
     #[test]
     fn git_fetch_interval_resolves_like_upstream() {

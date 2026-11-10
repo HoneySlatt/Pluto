@@ -428,6 +428,7 @@ impl App {
                     .as_str()
                     .is_some_and(|d| d.eq_ignore_ascii_case(&driver))
                     && p["enabled"] != false
+                    && !crate::ui::pickers::is_cut_driver(p)
             })
             .min_by_key(|p| match p["status"].as_str() {
                 Some("ready") => 0,

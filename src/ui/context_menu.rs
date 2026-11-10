@@ -113,12 +113,6 @@ impl State {
         }
     }
 
-    /// A `SelectPopup` at least as wide as its trigger.
-    pub fn with_min_width(mut self, width: f32) -> Self {
-        self.min_width = self.min_width.max(width);
-        self
-    }
-
     /// Its right edge at `at`.
     pub fn aligned_end(mut self) -> Self {
         self.end = true;

@@ -443,6 +443,17 @@ impl App {
         );
     }
 
+    /// Pluto cuts provider update checks (ADR-0022): each time the server's
+    /// settings arrive with them on (or without the key, which the server
+    /// reads as on), asks the server to turn them off. The local copy is
+    /// patched at once, so one arrival sends one request.
+    pub(crate) fn turn_off_provider_update_checks(&mut self) {
+        let settings = &self.state.config["settings"];
+        if settings.is_object() && settings["enableProviderUpdateChecks"] != false {
+            self.patch_server_settings(json!({"enableProviderUpdateChecks": false}));
+        }
+    }
+
     /// The picker's favorites from the client `favorites` setting
     /// (`{provider, model}` entries, keyed `provider/model` here).
     pub(crate) fn load_favorites(&mut self) {

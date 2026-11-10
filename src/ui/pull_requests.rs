@@ -1028,18 +1028,30 @@ fn paint_branch_mark(ui: &Ui, rect: Rect) {
     );
 }
 
-/// A source control provider's mark.
+/// A source control provider's mark: GitHub's when none is given, as the git
+/// quick action does. Any forge Pluto does not keep (Bitbucket, Azure DevOps)
+/// gets the neutral pull-request mark, not GitHub's.
 fn provider_icon(provider: &str) -> &'static str {
     match provider {
         "gitlab" => "sc-gitlab",
         "forgejo" => "sc-forgejo",
-        _ => "sc-github",
+        "github" | "" => "sc-github",
+        _ => "git-pull-request-arrow",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_forges_get_the_neutral_mark() {
+        assert_eq!(provider_icon("github"), "sc-github");
+        assert_eq!(provider_icon("gitlab"), "sc-gitlab");
+        assert_eq!(provider_icon("forgejo"), "sc-forgejo");
+        assert_eq!(provider_icon("bitbucket"), "git-pull-request-arrow");
+        assert_eq!(provider_icon("azure-devops"), "git-pull-request-arrow");
+    }
 
     fn entry(number: u64, author: &str, review: bool) -> Value {
         json!({"number": number, "host": "github.com", "author": {"login": author},

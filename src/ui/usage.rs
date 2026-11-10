@@ -169,6 +169,7 @@ fn limit_pools(providers: &[Value], now: i64, environment: Option<&str>) -> Vec<
     for provider in providers {
         let limits = &provider["usageLimits"];
         let usable = provider["enabled"] != false
+            && !crate::ui::pickers::is_cut_driver(provider)
             && provider["installed"] != false
             && limits.is_object()
             && limits["unavailable"].is_null()
@@ -277,7 +278,10 @@ fn limit_notices(providers: &[Value]) -> Vec<String> {
     providers
         .iter()
         .filter(|p| {
-            p["enabled"] == true && p["installed"] == true && p["availability"] != "unavailable"
+            p["enabled"] == true
+                && p["installed"] == true
+                && p["availability"] != "unavailable"
+                && !crate::ui::pickers::is_cut_driver(p)
         })
         .filter_map(|provider| {
             let limits = provider["usageLimits"].as_object()?;
@@ -348,7 +352,6 @@ fn driver_label(driver: &str) -> &str {
     match driver {
         "codex" => "Codex",
         "claudeAgent" => "Claude",
-        "cursor" => "Cursor",
         "grok" => "Grok",
         "kimiCode" => "Kimi Code",
         "mistralVibe" => "Mistral Vibe",
@@ -1097,6 +1100,17 @@ mod tests {
                 "Z Code: Could not read limits."
             ]
         );
+    }
+
+    #[test]
+    fn a_cut_driver_has_no_limits_pool_or_notice() {
+        let cursor = json!({"driver": "cursor", "enabled": true, "installed": true,
+            "usageLimits": {"windows": [{"id": "p", "kind": "session", "label": "Session",
+                "usedPercent": 10, "windowDurationMins": 300}]}});
+        assert!(limit_pools(std::slice::from_ref(&cursor), 0, None).is_empty());
+        let failing = json!({"driver": "cursor", "enabled": true, "installed": true,
+            "usageLimits": {"windows": [], "unavailable": {"reason": "probeFailed"}}});
+        assert!(limit_notices(&[cursor, failing]).is_empty());
     }
 
     #[test]

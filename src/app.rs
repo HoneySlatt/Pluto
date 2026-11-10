@@ -1011,6 +1011,9 @@ impl App {
                             self.screen = Screen::Main;
                             self.restore_open_draft();
                         }
+                        if matches!(value["type"].as_str(), Some("snapshot" | "settingsUpdated")) {
+                            self.turn_off_provider_update_checks();
+                        }
                     }
                     Route::Shell => {
                         // The open thread deleted elsewhere: its draft takes
@@ -2745,6 +2748,62 @@ mod thread_retry_tests {
         assert!(matches!(actions.try_recv(), Ok(Action::Select(Some(id))) if id == "new"));
         app.poll_events();
         assert!(actions.try_recv().is_err());
+    }
+
+    #[test]
+    fn provider_update_checks_are_turned_off_once_per_settings_arrival() {
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: false,
+                },
+            )
+        });
+        let ctx = harness.ctx.clone();
+        let (connection, actions, events) = Connection::fake(crate::repaint(&ctx));
+        let app = harness.state_mut();
+        app.connection = Some(connection);
+        let turn_off_requests = |app: &mut App, event: serde_json::Value| {
+            events.send(Event::Data(Route::Config, event)).unwrap();
+            app.poll_events();
+            let mut found = Vec::new();
+            while let Ok(action) = actions.try_recv() {
+                if let Action::Request {
+                    method: "server.updateSettings",
+                    payload,
+                    ..
+                } = action
+                {
+                    found.push(payload);
+                }
+            }
+            found
+        };
+        let off = serde_json::json!({"patch": {"enableProviderUpdateChecks": false}});
+        let updated = |settings: serde_json::Value| serde_json::json!({"type": "settingsUpdated", "payload": {"settings": settings}});
+
+        // The key absent, as in a server that never set it: one request.
+        let snapshot = serde_json::json!({"type": "snapshot", "config": {"settings": {}}});
+        assert_eq!(turn_off_requests(app, snapshot), std::slice::from_ref(&off));
+        assert_eq!(
+            app.state.config["settings"]["enableProviderUpdateChecks"],
+            false
+        );
+        // True: one request; false: none; absent again: one.
+        let on = updated(serde_json::json!({"enableProviderUpdateChecks": true}));
+        assert_eq!(turn_off_requests(app, on), std::slice::from_ref(&off));
+        let already_off = updated(serde_json::json!({"enableProviderUpdateChecks": false}));
+        assert!(turn_off_requests(app, already_off).is_empty());
+        let absent = updated(serde_json::json!({"theme": "dark"}));
+        assert_eq!(turn_off_requests(app, absent), [off]);
+        // Other config events carry no settings.
+        let providers =
+            serde_json::json!({"type": "providerStatuses", "payload": {"providers": []}});
+        assert!(turn_off_requests(app, providers).is_empty());
     }
 
     fn app() -> egui_kittest::Harness<'static, App> {

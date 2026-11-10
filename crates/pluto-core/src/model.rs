@@ -1469,6 +1469,15 @@ pub fn command(kind: &str, thread_id: &str) -> Value {
     json!({"type":kind,"commandId":uuid::Uuid::new_v4().to_string(),"threadId":thread_id})
 }
 
+/// Whether Pluto's clients hide a provider instance from every list they
+/// draw and every choice they make: its driver was cut by the triage
+/// (ADR-0022), though the frozen fork still offers it. A thread already on
+/// it keeps its mark and its model's name.
+pub fn is_cut_driver(provider: &Value) -> bool {
+    const CUT_DRIVERS: [&str; 1] = ["cursor"];
+    CUT_DRIVERS.contains(&provider["driver"].as_str().unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

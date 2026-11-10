@@ -47,8 +47,10 @@ fn source_control_icon(status: Option<&Value>) -> &'static str {
     match status.and_then(|s| s["sourceControlProvider"]["kind"].as_str()) {
         Some("gitlab") => "sc-gitlab",
         Some("forgejo") => "sc-forgejo",
-        Some("unknown") => "git-pull-request-arrow",
-        _ => "sc-github",
+        // Any other forge (the server reports Bitbucket and Azure DevOps) and
+        // an unknown host get the neutral mark, not GitHub's.
+        Some("github") | None => "sc-github",
+        Some(_) => "git-pull-request-arrow",
     }
 }
 
@@ -1594,6 +1596,20 @@ fn start_truncated(ui: &Ui, path: &str, font: &egui::FontId, width: f32) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_forges_get_the_neutral_mark() {
+        let icon = |kind: &str| {
+            source_control_icon(Some(&json!({"sourceControlProvider": {"kind": kind}})))
+        };
+        assert_eq!(icon("github"), "sc-github");
+        assert_eq!(icon("gitlab"), "sc-gitlab");
+        assert_eq!(icon("forgejo"), "sc-forgejo");
+        for kind in ["bitbucket", "azure-devops", "unknown"] {
+            assert_eq!(icon(kind), "git-pull-request-arrow");
+        }
+        assert_eq!(source_control_icon(None), "sc-github");
+    }
 
     fn status(fields: Value) -> Value {
         let mut base = json!({"isRepo": true, "refName": "feature", "hasWorkingTreeChanges": false,

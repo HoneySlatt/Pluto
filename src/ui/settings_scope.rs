@@ -186,7 +186,7 @@ impl App {
         self.providers()
             .iter()
             .find(|p| p["instanceId"] == id)
-            .is_none_or(|p| p["enabled"] != false)
+            .is_none_or(|p| p["enabled"] != false && !crate::ui::pickers::is_cut_driver(p))
     }
 
     /// Whether `key`'s effective value comes from the scoped project's

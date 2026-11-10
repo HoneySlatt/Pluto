@@ -399,26 +399,6 @@ impl App {
                     "Add project",
                     Action::Push(View::AddProject),
                 ));
-                let mut theme_item =
-                    Item::new("palette", "Change theme", Action::Missing("Themes"));
-                theme_item.shortcut = Some("Ctrl+Alt+A");
-                theme_item.submenu = true;
-                actions.push(theme_item);
-                let mut appearance = Item::new(
-                    "monitor",
-                    "Change appearance",
-                    Action::Missing("Appearance"),
-                );
-                appearance.shortcut = Some("Ctrl+Alt+Shift+A");
-                appearance.submenu = true;
-                actions.push(appearance);
-                let mut editor = Item::new(
-                    "palette",
-                    "Toggle theme editor",
-                    Action::Missing("The theme editor"),
-                );
-                editor.shortcut = Some("Ctrl+Alt+Shift+T");
-                actions.push(editor);
                 actions.push(Item::new(
                     "git-pull-request-arrow",
                     "Open pull requests",

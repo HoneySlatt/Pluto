@@ -30,12 +30,18 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
   a setting: the new thread's project picker gathers a repository's checkouts, newest first.
 - The "Legacy features" fold of the General settings: plan mode and the context window indicator
   are now plain rows of its Behavior section.
-- Bitbucket and Azure DevOps: their settings row, their pull requests and their links. GitHub,
-  GitLab and Forgejo (Codeberg) stay.
+- Bitbucket and Azure DevOps: their settings row, their place on the Source Control page, and
+  their marks (a pull request from another forge gets a neutral one). GitHub, GitLab and Forgejo
+  (Codeberg) stay.
 - The pull requests page's search and filters: it lists the open pull requests, sorted as chosen.
 - The Providers page's usage limit hubs, which could not be added, and its health check interval;
   the server keeps checking providers at the interval it has.
-- Cursor as a provider. "Open in Cursor" stays.
+- Cursor as a provider: no list, picker or default offers it, on the desktop and the phone, even
+  if the server reports it enabled. A thread already on it keeps its mark. "Open in Cursor" stays.
+- Provider update checks: the client turns them off on the server whenever it sees them on, and
+  the Providers page no longer shows "Update available".
+- The command palette's "Change theme", "Change appearance" and "Toggle theme editor", which did
+  nothing, and their rows on the Keybindings page.
 - The right panel's Agents, Device and pull request surfaces, and the Device settings.
 - The keybindings' when-clause builder. Bindings keep the conditions they have.
 - Reading the repository's `t3.json`: its scripts are no longer offered for import, and a project
@@ -43,7 +49,7 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
   recursive). Project actions are still added and edited from the action editor.
 - T3's environment themes: Pluto always wears its own dark look.
 - The advanced typography: the interface font and one monospace font remain, as with Advanced off.
-- The "Working section" and "Provider update checks" switches; the server keeps the value it has.
+- The "Working section" switch; the server keeps the value it has.
 - The sidebar's own search field in Code mode: the palette (Ctrl+K) searches threads, their
   messages included. Chat mode keeps its search.
 

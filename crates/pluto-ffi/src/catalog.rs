@@ -33,7 +33,10 @@ fn ollama_companion(providers: &[Value], provider: &Value) -> bool {
 pub fn providers(all: &[Value], chat: bool) -> Vec<Provider> {
     let mut out = Vec::new();
     for provider in all {
-        if provider["enabled"] == false || provider["status"] != "ready" {
+        if provider["enabled"] == false
+            || provider["status"] != "ready"
+            || pluto_core::model::is_cut_driver(provider)
+        {
             continue;
         }
         let companion = ollama_companion(all, provider);
@@ -362,6 +365,7 @@ mod tests {
             json!({"instanceId": "ollama", "driver": "ollama", "status": "ready", "models": [{"slug": "q"}]}),
             json!({"instanceId": "ollama_code", "driver": "opencode", "status": "ready", "models": [{"slug": "q"}]}),
             json!({"instanceId": "off", "driver": "codex", "status": "ready", "enabled": false, "models": [{"slug": "g"}]}),
+            json!({"instanceId": "cursor", "driver": "cursor", "status": "ready", "models": [{"slug": "c"}]}),
         ]
     }
 

@@ -159,12 +159,9 @@ pub fn palette() -> Palette {
     *PALETTE.read().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Installs `palette`; returns whether it changed.
-pub fn set_palette(palette: Palette) -> bool {
-    let mut current = PALETTE.write().unwrap_or_else(|e| e.into_inner());
-    let changed = *current != palette;
-    *current = palette;
-    changed
+/// Installs `palette`.
+pub fn set_palette(palette: Palette) {
+    *PALETTE.write().unwrap_or_else(|e| e.into_inner()) = palette;
 }
 
 /// Pluto's own look, the only one the client draws: near-black tinted toward

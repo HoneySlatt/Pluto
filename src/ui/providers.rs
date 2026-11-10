@@ -415,19 +415,6 @@ fn summary(provider: Option<&Value>, enabled: bool) -> (String, Option<String>) 
     ("Available".into(), message(p))
 }
 
-/// Whether the version advisory offers an update (`Update available`).
-fn update_available(provider: Option<&Value>) -> bool {
-    let Some(p) = provider else {
-        return false;
-    };
-    let latest_broken = matches!(
-        p["compatibilityAdvisory"]["latestVersionStatus"].as_str(),
-        Some("broken" | "unsupported")
-    );
-    let status = p["versionAdvisory"]["status"].as_str().unwrap_or("unknown");
-    !latest_broken && !matches!(status, "current" | "unknown")
-}
-
 /// `describeModelCapabilities`.
 fn capabilities(model: &Value) -> String {
     let descriptors: Vec<&Value> = model["capabilities"]["optionDescriptors"]
@@ -669,7 +656,7 @@ impl App {
         }
         for (id, instance) in instances.into_iter().flatten() {
             let driver = instance["driver"].as_str().unwrap_or_default();
-            if driver_meta(driver).is_none() {
+            if driver_meta(driver).is_none() && !crate::ui::pickers::is_cut_driver(instance) {
                 rows.push(InstanceRow {
                     id: id.clone(),
                     driver: driver.into(),
@@ -1044,7 +1031,7 @@ impl App {
             theme::alpha(theme::foreground(), fade),
             20.0,
         );
-        let mut x = text_left + widgets::text_width(ui, &name, name_font) + 8.0;
+        let x = text_left + widgets::text_width(ui, &name, name_font) + 8.0;
         if let Some(version) = version_label(live.as_ref().and_then(|p| p["version"].as_str())) {
             widgets::text(
                 ui,
@@ -1053,16 +1040,6 @@ impl App {
                 theme::mono(12.0),
                 theme::alpha(theme::muted_foreground(), fade),
                 16.0,
-            );
-            x += widgets::text_width(ui, &version, theme::mono(12.0)) + 8.0;
-        }
-        if enabled && update_available(live.as_ref()) {
-            theme::paint_icon(
-                ui,
-                "circle-arrow-up",
-                Rect::from_min_size(Pos2::new(x, line + 3.0), Vec2::splat(14.0)),
-                14.0,
-                theme::alpha(theme::muted_foreground(), fade),
             );
         }
         ui.painter().galley(
@@ -1113,9 +1090,8 @@ impl App {
         let width = ui.max_rect().right() - 16.0 - left;
         let right = left + width;
         let name = row.display_name();
-        let enabled = row.enabled();
 
-        // Title: mark, name, version and the update marker.
+        // Title: mark, name and version.
         self.paint_provider_mark(ui, &row.driver, Pos2::new(left + 16.0, top + 4.0), 1.0);
         section_title(ui, Pos2::new(left + 44.0, top), &name);
         let mut x = right - 16.0;
@@ -1144,26 +1120,6 @@ impl App {
                 self.delete_instance(&row.id);
             }
             x = button.left() - 2.0;
-        }
-        if enabled && update_available(live.as_ref()) {
-            let button = Rect::from_min_size(Pos2::new(x - 24.0, top + 2.0), Vec2::splat(24.0));
-            if widgets::icon_button(
-                ui,
-                button,
-                ("provider-update", &row.id),
-                "circle-arrow-up",
-                14.0,
-                theme::muted_foreground(),
-                "Update available",
-            )
-            .clicked()
-            {
-                self.notify(
-                    crate::ui::toasts::Kind::Info,
-                    "Provider updates are not implemented yet",
-                );
-            }
-            x = button.left();
         }
         x -= 6.0;
         if let Some(version) = version_label(live.as_ref().and_then(|p| p["version"].as_str())) {

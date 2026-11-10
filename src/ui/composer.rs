@@ -12,6 +12,7 @@ use crate::app::App;
 use crate::model::ModelSelection;
 use crate::requests::{PendingApproval, PendingUserInput};
 use crate::theme::{self, Weight, font};
+use crate::ui::pickers::is_cut_driver;
 use crate::ui::requests_panel::OVERLAP;
 use crate::ui::{cite, widgets};
 
@@ -1859,6 +1860,10 @@ impl App {
         };
         if let Ok(selection) = serde_json::from_value::<ModelSelection>(settings)
             && !selection.model.is_empty()
+            && !self
+                .providers()
+                .iter()
+                .any(|p| p["instanceId"] == selection.instance_id.as_str() && is_cut_driver(p))
         {
             return selection;
         }
@@ -1867,7 +1872,7 @@ impl App {
             return selection;
         }
         for provider in self.providers() {
-            if provider["status"] != "ready" {
+            if provider["status"] != "ready" || is_cut_driver(provider) {
                 continue;
             }
             let models = provider["models"]
