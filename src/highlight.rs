@@ -1,5 +1,5 @@
 //! Code highlighting with the upstream `pierre-dark` and `pierre-light`
-//! Shiki themes (light under a light environment theme), applied to syntect's
+//! Shiki themes (light when the palette is light), applied to syntect's
 //! TextMate-derived grammars. Token boundaries can differ slightly from
 //! Shiki's grammars.
 //!

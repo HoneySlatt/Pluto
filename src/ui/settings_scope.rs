@@ -75,7 +75,6 @@ pub(crate) fn row_server_keys(id: &str) -> &'static [&'static str] {
             &["sidebarAutoSettleAfterDays"]
         }
         "response-streaming" => &["responseStreamingMode"],
-        "provider-update-checks" => &["enableProviderUpdateChecks"],
         "continue-threads-after-server-update" => &["continueThreadsAfterServerUpdate"],
         "background-activity" => &["backgroundActivity"],
         "start-from-origin" => &["newWorktreesStartFromOrigin"],

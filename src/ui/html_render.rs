@@ -6,9 +6,9 @@
 //! Upstream frames the page in a sandboxed iframe. egui has no web view,
 //! so the preview browser (`crate::preview`) renders each page off screen
 //! and the row draws its frames, the pointer and keys going back to the
-//! page like in the Browser panel. The page loads from its signed asset URL
-//! with the app theme in its fragment, fits its reported height, and pauses
-//! while scrolled out of view; a page unseen for a while gives its tab back.
+//! page like in the Browser panel. The page loads from its signed asset URL,
+//! fits its reported height, and pauses while scrolled out of view; a page
+//! unseen for a while gives its tab back.
 //!
 //! Differences from upstream: the hover buttons open the page in the Design
 //! surface (`crate::ui::design`, instead of a full-screen dialog) or in the
@@ -52,7 +52,7 @@ enum Url {
     #[default]
     Unrequested,
     Pending,
-    /// The signed URL, without the theme fragment.
+    /// The signed URL, without any fragment.
     Ready(String),
     Failed,
 }
@@ -101,11 +101,11 @@ impl App {
         }
     }
 
-    /// A page's URL with the app theme in its fragment: `Some(Ok)` once
-    /// signed, `Some(Err)` when it could not be, `None` while waiting.
+    /// A page's URL: `Some(Ok)` once signed, `Some(Err)` when it could not
+    /// be, `None` while waiting.
     pub(crate) fn html_render_url(&self, id: &str) -> Option<Result<String, ()>> {
         match &self.html_renders.pages.get(id)?.url {
-            Url::Ready(url) => Some(Ok(format!("{url}{}", self.html_render_fragment()))),
+            Url::Ready(url) => Some(Ok(url.clone())),
             Url::Failed => Some(Err(())),
             Url::Unrequested | Url::Pending => None,
         }
@@ -244,7 +244,7 @@ impl App {
         let Url::Ready(url) = &page.url else {
             return None;
         };
-        let url = format!("{url}{}", self.html_render_fragment());
+        let url = url.clone();
         self.preview.next_tab += 1;
         let tab = self.preview.next_tab;
         self.preview_engine(ctx).open_render(tab, url);
@@ -253,25 +253,6 @@ impl App {
             page.shown = true;
         }
         None
-    }
-
-    /// The app theme for a page (`useHtmlRenderTheme`), as its URL
-    /// fragment; empty on the stock theme, which the page already wears.
-    fn html_render_fragment(&self) -> String {
-        let Some(theme) = self.active_theme() else {
-            return String::new();
-        };
-        let Some(colors) = theme["colors"].as_object() else {
-            return String::new();
-        };
-        let text = |key: &str| self.client_setting(key).as_str().unwrap_or("").to_owned();
-        let theme = crate::html_render::theme(
-            colors,
-            theme["appearance"] != "light",
-            &text("fontFamilySans"),
-            &text("fontFamilyCode"),
-        );
-        crate::html_render::theme_fragment(&theme)
     }
 
     /// A page's signed URL.
@@ -290,7 +271,7 @@ impl App {
         });
         if let Some(page) = self.html_renders.pages.get_mut(id) {
             page.url = match url {
-                // The fragment is the theme's; the page drops it on load.
+                // A fragment would carry a theme the page no longer takes.
                 Some(mut url) => {
                     url.set_fragment(None);
                     Url::Ready(url.to_string())

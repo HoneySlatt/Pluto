@@ -508,14 +508,14 @@ mod tests {
         );
         // Environment-wide keys have no project layer.
         let chain = layers(
-            "enableProviderUpdateChecks",
+            "addProjectBaseDirectory",
             true,
             Source::Project,
-            &json!(false),
-            &json!(false),
+            &json!("~/code"),
+            &json!("~/code"),
         );
         assert_eq!(chain[0].label, "Environment");
-        assert_eq!(chain[0].value, "Off");
+        assert_eq!(chain[0].value, "~/code");
         assert!(chain[0].effective);
     }
 

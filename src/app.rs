@@ -194,7 +194,7 @@ pub struct App {
     /// The thread details card's paging and folds.
     pub(crate) thread_details: crate::ui::thread_details::DetailsState,
     /// Every thread's messages searched (`orchestration.searchThreads`).
-    pub(crate) thread_search: [crate::ui::thread_search::ThreadSearch; 2],
+    pub(crate) thread_search: crate::ui::thread_search::ThreadSearch,
     /// Storage cleanup's last report (`server.getStorageCleanupReport`), the
     /// stream asked, and a manual run in flight.
     pub(crate) storage_report: Option<serde_json::Value>,
@@ -1991,7 +1991,6 @@ impl eframe::App for App {
         if self.connected() {
             self.request_favicons();
         }
-        self.sync_theme(ui.ctx());
         self.save_drafts_when_idle(ui.ctx());
         self.watch_project_clones();
         self.watch_worktree_setup();
@@ -2177,37 +2176,6 @@ impl eframe::App for App {
 }
 
 impl App {
-    /// Follows the environment's theme (`useDefaultThemeAdoption`): the
-    /// published theme named by the `defaultTheme` server setting replaces
-    /// the stock dark palette; a built-in theme id takes that theme's dark
-    /// variant (this client renders dark appearances only).
-    fn sync_theme(&self, ctx: &egui::Context) {
-        let palette = self
-            .active_theme()
-            .as_ref()
-            .and_then(crate::theme::Palette::from_theme)
-            .unwrap_or_else(crate::theme::pluto_stock);
-        if crate::theme::set_palette(palette) {
-            crate::theme::apply_palette(ctx);
-            ctx.request_repaint();
-        }
-    }
-
-    /// The theme the `defaultTheme` server setting names
-    /// (`getThemeDefinition`: a built-in first, then the published themes);
-    /// none on the stock theme.
-    pub(crate) fn active_theme(&self) -> Option<Value> {
-        let id = self.state.config["settings"]["defaultTheme"]
-            .as_str()
-            .unwrap_or_default();
-        crate::theme::built_in_theme(id).or_else(|| {
-            (!id.is_empty())
-                .then(|| self.state.config["environmentThemes"].as_array())
-                .flatten()
-                .and_then(|themes| themes.iter().find(|t| t["id"] == id).cloned())
-        })
-    }
-
     /// Opens the first thread whose title starts with `prefix` (dev snapshots).
     pub fn open_thread_titled(&mut self, prefix: &str) -> bool {
         let id = self

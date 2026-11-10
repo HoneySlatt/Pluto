@@ -1150,10 +1150,6 @@ impl State {
             Some("settingsUpdated") => {
                 self.config["settings"] = item["payload"]["settings"].clone()
             }
-            // Themes this environment publishes (`t3 theme set`).
-            Some("environmentThemesUpdated") => {
-                self.config["environmentThemes"] = item["payload"]["themes"].clone()
-            }
             Some("keybindingsUpdated") => {
                 if let Some(bindings) = item["payload"].get("keybindings") {
                     self.config["keybindings"] = bindings.clone();

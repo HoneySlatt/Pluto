@@ -19,11 +19,11 @@ const CARD_HEIGHT: f32 = 78.0; // h-[4.875rem]
 const CARD_SLOT: f32 = 83.0; // card + py-0.5, measured
 const SLIM_HEIGHT: f32 = 36.0; // h-9
 const LIST_GAP: f32 = 1.0; // gap-px between list items
-// Pluto: header (52), Code | Chat (36 + 12), New and Search (2 × 34), then
-// the project scope row (28 + 8).
+// Pluto: header (52), Code | Chat (36 + 12), New (34) and, in chat mode, its
+// search (34); then the project scope row (28 + 8).
 pub(crate) const NEW_TOP: f32 = 100.0;
-const SCOPE_TOP: f32 = 172.0;
-const LIST_TOP: f32 = 208.0;
+const SCOPE_TOP: f32 = 138.0;
+const LIST_TOP: f32 = 174.0;
 /// The range the sidebar can be dragged to.
 const SIDEBAR_MIN_WIDTH: f32 = 220.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
@@ -555,13 +555,13 @@ impl App {
         }
     }
 
-    /// The default sidebar's search row and thread inbox.
+    /// The default sidebar's New row, scope and thread inbox.
     fn inbox_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
         let left = rect.left();
         self.watch_terminal_metadata();
 
-        if self.sidebar_new_and_search(ui, rect, "New thread", "Search threads") {
+        if Self::sidebar_new_row(ui, rect, "New thread") {
             self.start_draft(None);
         }
 
@@ -663,16 +663,9 @@ impl App {
         self.sweep_frame(ui, list_rect);
     }
 
-    /// Pluto: the New and Search rows under Code | Chat, shared by both
-    /// modes (`hint` names what the search filters); returns whether New was
-    /// clicked.
-    pub(crate) fn sidebar_new_and_search(
-        &mut self,
-        ui: &mut Ui,
-        rect: Rect,
-        new_label: &str,
-        hint: &str,
-    ) -> bool {
+    /// Pluto: the New row under Code | Chat, shared by both modes; returns
+    /// whether it was clicked.
+    pub(crate) fn sidebar_new_row(ui: &mut Ui, rect: Rect, new_label: &str) -> bool {
         let left = rect.left();
         let width = rect.width() - 1.0 - 16.0;
         let new_row = Rect::from_min_size(Pos2::new(left + 8.0, NEW_TOP), Vec2::new(width, 34.0));
@@ -694,33 +687,6 @@ impl App {
             new_label,
             font(14.0, Weight::Medium),
             theme::sidebar_foreground(),
-        );
-
-        let search_top = NEW_TOP + 34.0;
-        theme::paint_icon(
-            ui,
-            "search",
-            Rect::from_min_size(Pos2::new(left + 18.0, search_top + 9.0), Vec2::splat(16.0)),
-            16.0,
-            theme::sidebar_icon(),
-        );
-        let input_rect = Rect::from_min_size(
-            Pos2::new(left + 44.0, search_top + 6.5),
-            Vec2::new(width - 44.0, 21.0),
-        );
-        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
-        search_ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .frame(egui::Frame::NONE)
-                .margin(egui::Margin::ZERO)
-                .font(font(14.0, Weight::Medium))
-                .text_color(theme::sidebar_foreground())
-                .hint_text(
-                    egui::RichText::new(hint)
-                        .font(font(14.0, Weight::Medium))
-                        .color(theme::sidebar_muted()),
-                )
-                .desired_width(input_rect.width()),
         );
         response.clicked()
     }
@@ -778,25 +744,15 @@ impl App {
     }
 
     fn thread_list(&mut self, ui: &mut Ui, rect: Rect) {
-        let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
-        // `searchSidebarThreads`: title matches, then message matches.
-        let search = self.search.clone();
-        let found = self.thread_search(ui.ctx(), crate::ui::thread_search::Slot::Sidebar, &search);
-        let mut threads: Vec<std::sync::Arc<Thread>> = self
+        let threads: Vec<std::sync::Arc<Thread>> = self
             .state
             .threads
             .iter()
-            .filter(|t| {
-                query.is_empty()
-                    || t.title.to_lowercase().contains(&query)
-                    || found.contains_key(&t.id)
-            })
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
             .filter(|t| !self.is_chat_thread(t))
             .cloned()
             .collect();
-        threads.sort_by_key(|t| !query.is_empty() && !t.title.to_lowercase().contains(&query));
         let sections = sections(threads.iter().map(std::sync::Arc::as_ref), self.now);
         let cards: Vec<&Thread> = sections
             .pinned
@@ -825,12 +781,8 @@ impl App {
             0.0
         };
         let tail_height = snoozed_block + 32.0 + settled_rows as f32 * (LIST_GAP + SLIM_HEIGHT);
-        // Unsent drafts lead the list, outside search.
-        let draft_rows = if query.is_empty() {
-            self.draft_rows(scope.as_deref())
-        } else {
-            Vec::new()
-        };
+        // Unsent drafts lead the list.
+        let draft_rows = self.draft_rows(scope.as_deref());
         let drafts_height = Self::draft_block_height(&draft_rows);
         let content_height = drafts_height + cards.len() as f32 * CARD_SLOT + tail_height + 4.0;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
@@ -1494,19 +1446,8 @@ impl App {
         });
         let terminal_width = if terminals > 0 { 14.0 + 6.0 } else { 0.0 };
         let branch_right = stack_left - pr_width - terminal_width;
-        // A search found by its messages shows the matching one instead.
         let mut after_branch = lx;
-        if let Some(found) = self.sidebar_excerpt(thread) {
-            crate::ui::thread_search::paint_excerpt(
-                ui,
-                Rect::from_min_max(
-                    Pos2::new(lx, row3.top()),
-                    Pos2::new(branch_right, row3.bottom()),
-                ),
-                found,
-            );
-            after_branch = branch_right;
-        } else if let Some(branch) = &thread.branch {
+        if let Some(branch) = &thread.branch {
             let width = widgets::text_in(
                 ui,
                 Rect::from_min_max(

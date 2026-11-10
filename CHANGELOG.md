@@ -32,6 +32,11 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 - Reading the repository's `t3.json`: its scripts are no longer offered for import, and a project
   that does not set where threads start or how submodules are handled uses the defaults (local,
   recursive). Project actions are still added and edited from the action editor.
+- T3's environment themes: Pluto always wears its own dark look.
+- The advanced typography: the interface font and one monospace font remain, as with Advanced off.
+- The "Working section" and "Provider update checks" switches; the server keeps the value it has.
+- The sidebar's own search field in Code mode: the palette (Ctrl+K) searches threads, their
+  messages included. Chat mode keeps its search.
 
 ### Fixed
 

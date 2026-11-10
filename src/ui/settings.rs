@@ -56,7 +56,6 @@ pub fn default_client_settings() -> Value {
         "confirmThreadArchive": false,
         "confirmThreadDelete": true,
         "confirmQuit": "hold",
-        "sidebarWorkingShelfEnabled": false,
         "planModeEnabled": false,
         "contextWindowMeterEnabled": true,
         "favorites": [],
@@ -64,12 +63,8 @@ pub fn default_client_settings() -> Value {
         // Typography (Settings → Appearance).
         "fontFamilySans": "",
         "fontSizeInterface": 16,
-        "fontFamilyComposer": "",
-        "fontSizePrompt": 14,
         "fontFamilyCode": "",
         "fontSizeCode": 13,
-        "fontFamilyTerminal": "",
-        "fontSizeTerminal": 12,
         "wordWrap": true,
     })
 }
@@ -100,7 +95,6 @@ pub fn load_client_settings(path: Option<&std::path::Path>) -> Value {
 pub(crate) fn default_server_setting(key: &str) -> Value {
     match key {
         "responseStreamingMode" => json!("paragraph"),
-        "enableProviderUpdateChecks" => json!(true),
         "continueThreadsAfterServerUpdate" => json!(false),
         "sidebarAutoSettleOnMerge" => json!(true),
         "sidebarAutoSettleAfterDays" => json!(3),
@@ -637,15 +631,6 @@ impl App {
         let auto_settle_days = self.server_setting("sidebarAutoSettleAfterDays");
         let mut organization = vec![
             Row {
-                id: "working-shelf".into(),
-                title: "Working section (beta)".into(),
-                description: "Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you.".into(),
-                status: None,
-                layers: false,
-                reset: !is_default("sidebarWorkingShelfEnabled"),
-                control: switch("sidebarWorkingShelfEnabled"),
-            },
-            Row {
                 id: "auto-settle-merged-threads".into(),
                 title: "Auto-settle merged threads".into(),
                 description: "Settle a thread when its pull request merges. Closed pull requests still settle automatically.".into(),
@@ -836,15 +821,6 @@ impl App {
                 layers: false,
                 reset: !is_default("followUpBehavior"),
                 control: client_select("followUpBehavior", &FOLLOW_UPS, AUTO_WIDTH),
-            },
-            Row {
-                id: "provider-update-checks".into(),
-                title: "Provider update checks".into(),
-                description: "Check installed provider CLIs for newer available versions.".into(),
-                status: None,
-                layers: true,
-                reset: !server_default("enableProviderUpdateChecks"),
-                control: Control::Switch(self.server_setting("enableProviderUpdateChecks") == true),
             },
             Row {
                 id: "continue-threads-after-server-update".into(),
@@ -1071,7 +1047,6 @@ impl App {
         let server =
             |app: &mut App, key: &str, value: Value| app.update_setting(Store::Server, key, value);
         let client_key = match id {
-            "working-shelf" => Some("sidebarWorkingShelfEnabled"),
             "in-app-notifications" => Some("inAppNotificationsEnabled"),
             "hide-whitespace-changes" => Some("diffIgnoreWhitespace"),
             "proactive-panels" => Some("proactivePanelsEnabled"),
@@ -1096,7 +1071,6 @@ impl App {
         let server_key = match id {
             "auto-settle-merged-threads" => Some("sidebarAutoSettleOnMerge"),
             "response-streaming" => Some("responseStreamingMode"),
-            "provider-update-checks" => Some("enableProviderUpdateChecks"),
             "continue-threads-after-server-update" => Some("continueThreadsAfterServerUpdate"),
             "start-from-origin" => Some("newWorktreesStartFromOrigin"),
             "add-project-starts-in" => Some("addProjectBaseDirectory"),

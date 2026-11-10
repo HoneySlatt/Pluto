@@ -123,7 +123,7 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
         })
         .collect();
     let mut harness = harness();
-    // Nine cards from y = 210 run past 900px; the window grows to show them all.
+    // Nine cards from y = 176 run past 900px; the window grows to show them all.
     harness.set_size(egui::vec2(1440.0, 1100.0));
     let config = json!({"type": "snapshot", "config": {"providers": providers, "settings": {}}});
     let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2,
@@ -133,7 +133,7 @@ fn sidebar_cards_draw_provider_marks_for_all_supported_drivers() {
     harness.run_steps(5);
     for (i, driver) in drivers.iter().enumerate() {
         let slot = egui::Rect::from_min_size(
-            egui::pos2(216.0, 258.0 + i as f32 * 83.0),
+            egui::pos2(216.0, 224.0 + i as f32 * 83.0),
             egui::vec2(28.0, 25.0),
         );
         assert!(
@@ -258,14 +258,14 @@ fn project_scope_filters_the_thread_list() {
         json!([thread("a", "Newest thread", 5), other]),
     );
     // Scope row, then the second project row: "All projects" spans
-    // y = 252..280 and project rows (most recent first) follow every 32px.
-    click(&mut harness, egui::pos2(40.0, 186.0));
-    click(&mut harness, egui::pos2(100.0, 328.0));
+    // y = 218..246 and project rows (most recent first) follow every 32px.
+    click(&mut harness, egui::pos2(40.0, 152.0));
+    click(&mut harness, egui::pos2(100.0, 294.0));
     click(&mut harness, egui::pos2(60.0, 248.0));
     assert_eq!(harness.state().selected_thread_id(), Some("c"));
     // Back to all projects: the newest thread leads again.
-    click(&mut harness, egui::pos2(40.0, 186.0));
-    click(&mut harness, egui::pos2(100.0, 266.0));
+    click(&mut harness, egui::pos2(40.0, 152.0));
+    click(&mut harness, egui::pos2(100.0, 232.0));
     click(&mut harness, egui::pos2(60.0, 248.0));
     assert_eq!(harness.state().selected_thread_id(), Some("a"));
 }
@@ -681,47 +681,6 @@ fn a_new_worktree_picks_its_base_ref() {
 }
 
 #[test]
-fn the_sidebar_search_finds_threads_by_their_messages() {
-    let mut harness = harness();
-    let texts = |harness: &Harness<'static, App>| -> Vec<(String, egui::Rect)> {
-        harness
-            .output()
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some((
-                    text.galley.text().to_owned(),
-                    text.galley.rect.translate(text.pos.to_vec2()),
-                )),
-                _ => None,
-            })
-            .collect()
-    };
-    let (_, field) = texts(&harness)
-        .into_iter()
-        .find(|(text, _)| text == "Search threads")
-        .unwrap_or_else(|| panic!("{:?}", texts(&harness)));
-    click(&mut harness, field.center());
-    harness.event(egui::Event::Text("parser".into()));
-    // Past the 200ms pause, the server is asked.
-    harness.run_steps(20);
-    harness.state_mut().load_offline_reply(
-        "thread-search:0:parser",
-        json!({"matches": [{"threadId": "b", "projectId": "p", "source": "user",
-            "snippet": "fix the parser first", "messageCreatedAt": null}]}),
-    );
-    harness.run_steps(3);
-    let shown: Vec<String> = texts(&harness).into_iter().map(|(t, _)| t).collect();
-    assert!(shown.iter().any(|t| t == "Older thread"), "{shown:?}");
-    assert!(!shown.iter().any(|t| t == "Newest thread"), "{shown:?}");
-    assert!(shown.iter().any(|t| t == "You:"), "{shown:?}");
-    assert!(
-        shown.iter().any(|t| t == "fix the parser first"),
-        "{shown:?}"
-    );
-}
-
-#[test]
 fn a_failed_workspace_preparation_offers_a_retry() {
     let mut harness = harness();
     click(&mut harness, egui::pos2(60.0, 248.0));
@@ -943,5 +902,50 @@ fn a_wheel_step_while_a_thread_loads_leaves_it_at_its_end() {
     assert!(
         find_text(&harness, "Message 59").is_some(),
         "a stays at its end"
+    );
+}
+
+#[test]
+fn the_palette_finds_threads_by_their_messages() {
+    let mut harness = harness();
+    // The server's binding for the palette.
+    let config = json!({"type": "snapshot", "config": {"providers": [], "settings": {},
+        "keybindings": [{"command": "commandPalette.toggle",
+            "shortcut": {"key": "k", "modKey": true}}]}});
+    let shell = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
+        "projects": [{"id": "p", "title": "Demo", "workspaceRoot": "/fixture/demo"}],
+        "threads": [thread("a", "Newest thread", 5), thread("b", "Older thread", 90)]}});
+    harness.state_mut().load_offline(&config, &shell).unwrap();
+    harness.run_steps(3);
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        command: true,
+        ..egui::Modifiers::NONE
+    };
+    harness.key_press_modifiers(ctrl, egui::Key::K);
+    harness.run_steps(2);
+    harness.event(egui::Event::Text("parser".into()));
+    // Past the 200ms pause, the server is asked.
+    harness.run_steps(20);
+    harness.state_mut().load_offline_reply(
+        "thread-search:parser",
+        json!({"matches": [{"threadId": "b", "projectId": "p", "source": "user",
+            "snippet": "fix the parser first", "messageCreatedAt": null}]}),
+    );
+    harness.run_steps(3);
+    let shown: Vec<String> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(shown.iter().any(|t| t == "Older thread"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "You:"), "{shown:?}");
+    assert!(
+        shown.iter().any(|t| t == "fix the parser first"),
+        "{shown:?}"
     );
 }

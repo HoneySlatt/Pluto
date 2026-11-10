@@ -794,8 +794,7 @@ impl App {
         } else {
             String::new()
         };
-        self.palette.matches =
-            self.thread_search(ui.ctx(), crate::ui::thread_search::Slot::Palette, &query);
+        self.palette.matches = self.thread_search(ui.ctx(), &query);
         let (groups, empty) = self.palette_groups();
         let rows: Vec<&Item> = groups.iter().flat_map(|g| g.items.iter()).collect();
         let count = rows.len();

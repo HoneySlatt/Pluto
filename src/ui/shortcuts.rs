@@ -477,13 +477,11 @@ impl App {
 
     /// `orderedThreads`: pinned, active, then the shelves as rendered.
     pub(crate) fn ordered_sidebar_threads(&self) -> Vec<String> {
-        let query = self.search.trim().to_lowercase();
         let scope = self.scoped_project().map(|p| p.id.clone());
         let threads: Vec<std::sync::Arc<crate::model::Thread>> = self
             .state
             .threads
             .iter()
-            .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
             .filter(|t| scope.as_ref().is_none_or(|id| &t.project_id == id))
             .cloned()
             .collect();

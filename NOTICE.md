@@ -2,8 +2,7 @@
 
 Pluto is released under the MIT license (`LICENSE`). It ports the client of
 [T3 Code](https://t3.codes) (MIT, Copyright (c) 2026 T3
-Tools Inc.), whose notice `LICENSE` keeps; the built-in environment themes
-(`assets/themes/built-in-dark.json`) come from its `themePalettes.ts`.
+Tools Inc.), whose notice `LICENSE` keeps.
 
 Pluto's logo (`assets/logo/pluto.svg`) is not under MIT: its author keeps its rights, and
 `assets/logo/README.md` says how it may be shown.

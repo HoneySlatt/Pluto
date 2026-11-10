@@ -691,12 +691,45 @@ impl App {
         }
     }
 
-    /// Chat mode's sidebar: search, a new chat, and the chats by day.
+    /// The search field under "New chat", filtering the chats by day.
+    fn chat_search_row(&mut self, ui: &mut Ui, rect: Rect) {
+        let left = rect.left();
+        let width = rect.width() - 1.0 - 16.0;
+        let search_top = crate::ui::sidebar::NEW_TOP + 34.0;
+        theme::paint_icon(
+            ui,
+            "search",
+            Rect::from_min_size(Pos2::new(left + 18.0, search_top + 9.0), Vec2::splat(16.0)),
+            16.0,
+            theme::sidebar_icon(),
+        );
+        let input_rect = Rect::from_min_size(
+            Pos2::new(left + 44.0, search_top + 6.5),
+            Vec2::new(width - 44.0, 21.0),
+        );
+        let mut search_ui = ui.new_child(egui::UiBuilder::new().max_rect(input_rect));
+        search_ui.add(
+            egui::TextEdit::singleline(&mut self.search)
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::ZERO)
+                .font(font(14.0, Weight::Medium))
+                .text_color(theme::sidebar_foreground())
+                .hint_text(
+                    egui::RichText::new("Search chats")
+                        .font(font(14.0, Weight::Medium))
+                        .color(theme::sidebar_muted()),
+                )
+                .desired_width(input_rect.width()),
+        );
+    }
+
+    /// Chat mode's sidebar: a new chat, its search, and the chats by day.
     pub(crate) fn chat_sidebar(&mut self, ui: &mut Ui, rect: Rect) {
         let left = rect.left();
-        if self.sidebar_new_and_search(ui, rect, "New chat", "Search chats") {
+        if Self::sidebar_new_row(ui, rect, "New chat") {
             self.new_chat();
         }
+        self.chat_search_row(ui, rect);
 
         // The chats, newest first, by day.
         let query = self.search.trim().to_lowercase();

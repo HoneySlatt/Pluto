@@ -6,10 +6,8 @@ use eframe::egui::{
 // palette, no contrast boost), converted from oklch/color-mix to sRGB and
 // checked against rendered reference screenshots. Geometry is in CSS pixels.
 //
-// An environment theme (`t3 theme set`, published over the config stream as
-// `environmentThemesUpdated`) replaces the palette at runtime; the stock dark
-// palette below stays pixel-exact. Pluto: without a theme the client shows
-// `pluto_stock()`, the violet theme of its logo, rather than `DARK`.
+// Pluto: the client draws `pluto_stock()`, the violet look of its logo, set
+// once by `install`. `DARK` holds the upstream tokens until then.
 pub const DIFF_ADDITION: Color32 = Color32::from_rgb(0, 212, 146); // --diff-addition-foreground
 pub const DIFF_DELETION: Color32 = Color32::from_rgb(255, 100, 103); // --diff-deletion-foreground
 const BLUE_400_DIFF: Color32 = Color32::from_rgb(81, 162, 255);
@@ -78,7 +76,7 @@ const fn white(alpha: f32) -> Color32 {
 /// The app's color tokens (`--background`, `--foreground`, …).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
-    /// An environment theme replaced the stock dark palette.
+    /// Pluto's own look, not the upstream `DARK` tokens.
     pub custom: bool,
     /// A dark canvas (code takes `pierre-dark`, else `pierre-light`).
     pub dark: bool,
@@ -109,8 +107,8 @@ pub struct Palette {
     pub control_surface: Color32,
     pub row_active: Color32,
     pub code_foreground: Color32,
-    /// The base of `overlay` tints: white on the stock palette, the text
-    /// color in a theme (so light themes darken where dark ones lighten).
+    /// The base of `overlay` tints: white on `DARK`, the text color on
+    /// Pluto's look.
     pub overlay: Color32,
     /// Pluto: the logo keeps its own violets (`"logo": "brand"`) instead of
     /// taking the palette's colors.
@@ -169,163 +167,44 @@ pub fn set_palette(palette: Palette) -> bool {
     changed
 }
 
-/// `#rrggbb` or `#rrggbbaa`.
-/// `oklch(L C H)` (L as a fraction or a percentage) in sRGB, clamped to
-/// the gamut.
-fn parse_oklch(value: &str) -> Option<Color32> {
-    let inner = value.trim().strip_prefix("oklch(")?.strip_suffix(')')?;
-    let parts: Vec<&str> = inner.split_whitespace().collect();
-    let [l, c, h] = parts.get(..3)? else {
-        return None;
-    };
-    let l: f32 = match l.strip_suffix('%') {
-        Some(percent) => percent.parse::<f32>().ok()? / 100.0,
-        None => l.parse().ok()?,
-    };
-    let c: f32 = c.parse().ok()?;
-    let h: f32 = h.trim_end_matches("deg").parse().ok()?;
-    let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
-    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
-    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
-    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
-    let (l3, m3, s3) = (l_.powi(3), m_.powi(3), s_.powi(3));
-    let linear = [
-        4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3,
-        -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3,
-        -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3,
-    ];
-    let encode = |v: f32| {
-        let v = v.clamp(0.0, 1.0);
-        let srgb = if v <= 0.003_130_8 {
-            12.92 * v
-        } else {
-            1.055 * v.powf(1.0 / 2.4) - 0.055
-        };
-        (srgb * 255.0).round() as u8
-    };
-    Some(Color32::from_rgb(
-        encode(linear[0]),
-        encode(linear[1]),
-        encode(linear[2]),
-    ))
-}
-
-/// A theme color: `#rrggbb[aa]` or `oklch(…)`.
-fn parse_hex(value: &serde_json::Value) -> Option<Color32> {
-    let text = value.as_str()?;
-    if text.trim_start().starts_with("oklch(") {
-        return parse_oklch(text);
-    }
-    let hex = text.strip_prefix('#')?;
-    let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
-    match hex.len() {
-        6 => Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?)),
-        8 => Some(Color32::from_rgba_unmultiplied(
-            byte(0)?,
-            byte(2)?,
-            byte(4)?,
-            byte(6)?,
-        )),
-        _ => None,
-    }
-}
-
-/// The built-in themes' dark variants (`BUILT_IN_THEMES` of
-/// `packages/shared/src/themePalettes.ts`, `getThemeColorsForAppearance`).
-pub fn built_in_theme(id: &str) -> Option<serde_json::Value> {
-    static THEMES: std::sync::OnceLock<Vec<serde_json::Value>> = std::sync::OnceLock::new();
-    THEMES
-        .get_or_init(|| {
-            serde_json::from_str(include_str!("../assets/themes/built-in-dark.json"))
-                .unwrap_or_default()
-        })
-        .iter()
-        .find(|theme| theme["id"] == id)
-        .cloned()
-}
-
-impl Palette {
-    /// The tokens of a published environment theme (`EnvironmentTheme`),
-    /// mapped like the web client's `html[data-theme-id]` rule: canvas to
-    /// `--background`, text to `--foreground`, surface to `--card`, …
-    /// Missing roles fall back to the canvas, text or accent.
-    pub fn from_theme(theme: &serde_json::Value) -> Option<Palette> {
-        let colors = &theme["colors"];
-        let canvas = parse_hex(&colors["canvas"]).or_else(|| parse_hex(&theme["canvas"]))?;
-        let accent = parse_hex(&colors["accent"]).or_else(|| parse_hex(&theme["accent"]))?;
-        let dark = theme["appearance"] != "light";
-        let text = parse_hex(&colors["text"]).unwrap_or(if dark {
-            DARK.foreground
-        } else {
-            Color32::from_rgb(10, 10, 10)
-        });
-        let pick = |key: &str, fallback: Color32| parse_hex(&colors[key]).unwrap_or(fallback);
-        let muted_text = pick("mutedForeground", mix(canvas, text, 0.55));
-        let surface = pick("surface", canvas);
-        let input = pick("input", mix(canvas, text, 0.2));
-        let primary = pick("messageAction", accent);
-        Some(Palette {
-            custom: true,
-            dark: luminance(canvas) < 0.179,
-            background: canvas,
-            sidebar: pick("sidebar", canvas),
-            card: surface,
-            popover: pick("surfaceOverlay", surface),
-            foreground: text,
-            sidebar_foreground: pick("sidebarForeground", text),
-            muted_foreground: muted_text,
-            secondary_label: pick("secondaryLabel", muted_text),
-            sidebar_muted: pick("sidebarMutedForeground", muted_text),
-            sidebar_icon: pick("iconMuted", muted_text),
-            sidebar_border: pick("sidebarBorder", pick("border", input)),
-            primary,
-            primary_hover: pick("messageActionHover", primary),
-            primary_foreground: pick("messageActionForeground", canvas),
-            warning: pick("warning", DARK.warning),
-            warning_foreground: pick("warningForeground", DARK.warning_foreground),
-            error: pick("error", DARK.error),
-            error_foreground: pick("errorForeground", DARK.error_foreground),
-            border: pick("border", input),
-            input,
-            accent: pick("accentSurface", mix(canvas, text, 0.08)),
-            muted: pick("muted", mix(canvas, text, 0.05)),
-            message_surface: pick("messageSurface", surface),
-            control_surface: alpha(input, 0.32),
-            row_active: pick("sidebarRowActive", mix(canvas, text, 0.11)),
-            code_foreground: pick("codeForeground", text),
-            overlay: text,
-            // `colors.logo`: the server keeps the open colors record but drops
-            // top-level keys it does not know, so a published theme says it there.
-            brand_logo: theme["logo"] == "brand" || colors["logo"] == "brand",
-            glow: theme["glow"] == true,
-        })
-    }
-}
-
-/// Pluto's own theme, shown when no environment theme is set: near-black
-/// tinted toward the logo, its violet as the accent, the logo in its own
-/// colors and the glow. A theme rather than an edit of `DARK`, so every
-/// derived tint (`overlay`, `shade`, `stock_or`) follows it.
+/// Pluto's own look, the only one the client draws: near-black tinted toward
+/// the logo, its violet as the accent, the logo in its own colors and the
+/// glow. Set once at start-up (`install`).
 pub fn pluto_stock() -> Palette {
-    static STOCK: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
-    *STOCK.get_or_init(|| {
-        let theme = serde_json::json!({
-            "name": "Pluto", "appearance": "dark", "logo": "brand", "glow": true,
-            "canvas": "#0b0a0f", "accent": "#a78bfa",
-            "colors": {
-                "canvas": "#0b0a0f", "sidebar": "#07060a", "surface": "#121018",
-                "surfaceOverlay": "#16141d", "text": "#f3f1f8", "sidebarForeground": "#f1eff7",
-                "mutedForeground": "#8f8a9c", "secondaryLabel": "#8f8a9c",
-                "sidebarMutedForeground": "#a6a1b3", "iconMuted": "#625d70",
-                "sidebarBorder": "#1c1a23", "border": "#1b1a20", "input": "#26252c",
-                "accentSurface": "#16151b", "muted": "#141319", "messageSurface": "#19171d",
-                "sidebarRowActive": "#1f1d29", "messageAction": "#a78bfa",
-                "messageActionHover": "#c4b5fd", "messageActionForeground": "#1a1426",
-                "codeForeground": "#f3f1f8"
-            }
-        });
-        Palette::from_theme(&theme).unwrap_or(DARK)
-    })
+    Palette {
+        custom: true,
+        dark: true,
+        background: Color32::from_rgb(0x0b, 0x0a, 0x0f),
+        sidebar: Color32::from_rgb(0x07, 0x06, 0x0a),
+        card: Color32::from_rgb(0x12, 0x10, 0x18),
+        popover: Color32::from_rgb(0x16, 0x14, 0x1d),
+        foreground: Color32::from_rgb(0xf3, 0xf1, 0xf8),
+        sidebar_foreground: Color32::from_rgb(0xf1, 0xef, 0xf7),
+        muted_foreground: Color32::from_rgb(0x8f, 0x8a, 0x9c),
+        secondary_label: Color32::from_rgb(0x8f, 0x8a, 0x9c),
+        sidebar_muted: Color32::from_rgb(0xa6, 0xa1, 0xb3),
+        sidebar_icon: Color32::from_rgb(0x62, 0x5d, 0x70),
+        sidebar_border: Color32::from_rgb(0x1c, 0x1a, 0x23),
+        primary: Color32::from_rgb(0xa7, 0x8b, 0xfa),
+        primary_hover: Color32::from_rgb(0xc4, 0xb5, 0xfd),
+        primary_foreground: Color32::from_rgb(0x1a, 0x14, 0x26),
+        warning: DARK.warning,
+        warning_foreground: DARK.warning_foreground,
+        error: DARK.error,
+        error_foreground: DARK.error_foreground,
+        border: Color32::from_rgb(0x1b, 0x1a, 0x20),
+        input: Color32::from_rgb(0x26, 0x25, 0x2c),
+        accent: Color32::from_rgb(0x16, 0x15, 0x1b),
+        muted: Color32::from_rgb(0x14, 0x13, 0x19),
+        message_surface: Color32::from_rgb(0x19, 0x17, 0x1d),
+        // `input` at 32%.
+        control_surface: Color32::from_rgba_premultiplied(0x0c, 0x0c, 0x0e, 0x52),
+        row_active: Color32::from_rgb(0x1f, 0x1d, 0x29),
+        code_foreground: Color32::from_rgb(0xf3, 0xf1, 0xf8),
+        overlay: Color32::from_rgb(0xf3, 0xf1, 0xf8),
+        brand_logo: true,
+        glow: true,
+    }
 }
 
 /// The pixel logo's colors.
@@ -370,19 +249,6 @@ impl LogoColors {
 
 pub fn logo_colors() -> LogoColors {
     LogoColors::for_palette(&palette())
-}
-
-/// WCAG relative luminance (`themeRelativeLuminance`).
-fn luminance(color: Color32) -> f32 {
-    let linear = |c: u8| {
-        let c = f32::from(c) / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
 }
 
 /// `a` mixed toward `b` by `t` (sRGB, opaque).
@@ -474,8 +340,8 @@ pub fn code_foreground() -> Color32 {
     palette().code_foreground
 }
 
-/// A translucent tint: `#fff` at `alpha` on the stock palette (the upstream
-/// `white/N` utilities), the theme's text color at `alpha` in a theme.
+/// A translucent tint: `#fff` at `alpha` on `DARK` (the upstream `white/N`
+/// utilities), the text color at `alpha` on Pluto's look.
 pub fn overlay(alpha: f32) -> Color32 {
     let palette = palette();
     if palette.custom {
@@ -486,9 +352,9 @@ pub fn overlay(alpha: f32) -> Color32 {
     }
 }
 
-/// An opaque surface measured on the stock palette as gray `level` (white
-/// over the #0a0a0a background); in a theme, the same share of the overlay
-/// color over the theme's background.
+/// An opaque surface measured on `DARK` as gray `level` (white over the
+/// #0a0a0a background); on Pluto's look, the same share of the overlay color
+/// over its background.
 pub fn shade(level: u8) -> Color32 {
     let palette = palette();
     if palette.custom {
@@ -502,7 +368,7 @@ pub fn shade(level: u8) -> Color32 {
     }
 }
 
-/// `color` on the stock palette, `themed` in an environment theme.
+/// `color` on `DARK`, `themed` on Pluto's look.
 pub fn stock_or(color: Color32, themed: impl FnOnce(&Palette) -> Color32) -> Color32 {
     let palette = palette();
     if palette.custom {
@@ -569,14 +435,12 @@ pub fn font(size: f32, weight: Weight) -> FontId {
     FontId::new(size, family)
 }
 
-/// Sizes from Settings → Appearance: code, prompt and terminal text stay
-/// absolute pixels while the interface size zooms everything else
+/// Sizes from Settings → Appearance: code and terminal text stay absolute
+/// pixels while the interface size zooms everything else
 /// (`applyAppearanceFontVariables`).
 #[derive(Clone, Copy, PartialEq)]
 pub struct TypeSizes {
     pub code: f32,
-    pub prompt: f32,
-    pub terminal: f32,
     /// The interface zoom (interface size / 16).
     pub zoom: f32,
 }
@@ -585,8 +449,6 @@ impl Default for TypeSizes {
     fn default() -> Self {
         Self {
             code: 13.0,
-            prompt: 14.0,
-            terminal: 12.0,
             zoom: 1.0,
         }
     }
@@ -613,20 +475,23 @@ pub fn code_font() -> FontId {
     FontId::monospace(sizes.code / sizes.zoom)
 }
 
-/// The prompt editor's font (`--font-composer`, `--font-size-prompt`).
+/// The prompt text's size, in absolute pixels.
+const PROMPT_SIZE: f32 = 14.0;
+
+/// The prompt editor's font: the interface font at the prompt size.
 pub fn composer_font() -> FontId {
-    let sizes = type_sizes();
-    FontId::new(
-        sizes.prompt / sizes.zoom,
-        FontFamily::Name("composer".into()),
-    )
+    FontId::new(PROMPT_SIZE / type_sizes().zoom, FontFamily::Proportional)
 }
 
-/// The terminal's font, regular or bold.
+/// The terminal's font, regular or bold: the code font at the code size.
 pub fn terminal_font(bold: bool) -> FontId {
     let sizes = type_sizes();
-    let family = if bold { "terminal-bold" } else { "terminal" };
-    FontId::new(sizes.terminal / sizes.zoom, FontFamily::Name(family.into()))
+    let family = if bold {
+        FontFamily::Name("mono-bold".into())
+    } else {
+        FontFamily::Monospace
+    };
+    FontId::new(sizes.code / sizes.zoom, family)
 }
 
 /// A code line height given at the default 13px code size, scaled with it.
@@ -637,15 +502,14 @@ pub fn code_line(default: f32) -> f32 {
 
 /// The prompt's line height (`leading-relaxed`).
 pub fn composer_line() -> f32 {
-    let sizes = type_sizes();
-    sizes.prompt * 1.625 / sizes.zoom
+    PROMPT_SIZE * 1.625 / type_sizes().zoom
 }
 
 /// The terminal's cell height: Ghostty's measured 18px at 12 and 13px
 /// (the font's line height, about 1.385em), never under 18px.
 pub fn terminal_cell_height() -> f32 {
     let sizes = type_sizes();
-    (sizes.terminal * 18.0 / 13.0).round().max(18.0) / sizes.zoom
+    (sizes.code * 18.0 / 13.0).round().max(18.0) / sizes.zoom
 }
 
 pub fn mono(size: f32) -> FontId {
@@ -772,17 +636,16 @@ fn installed_symbols_font() -> Option<Vec<u8>> {
 
 /// Fonts chosen in Settings → Appearance (`appearanceFonts.ts`), each
 /// prepended to its default family so Geist and the fallbacks keep covering
-/// missing glyphs: the interface by weight (regular, medium, semibold, bold),
-/// the prompt, code (regular, bold) and the terminal (regular, bold).
+/// missing glyphs: the interface by weight (regular, medium, semibold, bold)
+/// and code (regular, bold).
 #[derive(Clone, Default, PartialEq)]
 pub struct CustomFonts {
     pub sans: [Option<std::sync::Arc<Vec<u8>>>; 4],
-    pub composer: Option<std::sync::Arc<Vec<u8>>>,
     pub code: [Option<std::sync::Arc<Vec<u8>>>; 2],
-    pub terminal: [Option<std::sync::Arc<Vec<u8>>>; 2],
 }
 
 pub fn install(ctx: &egui::Context) {
+    set_palette(pluto_stock());
     egui_extras::install_image_loaders(ctx);
     install_fonts(ctx, &CustomFonts::default());
     install_styles(ctx);
@@ -857,18 +720,11 @@ pub fn install_fonts(ctx: &egui::Context, custom: &CustomFonts) {
         .enumerate()
         .map(|(i, slot)| custom_name(slot, &format!("custom-sans-{i}")))
         .collect();
-    let composer = custom_name(&custom.composer, "custom-composer");
     let code: Vec<Option<String>> = custom
         .code
         .iter()
         .enumerate()
         .map(|(i, slot)| custom_name(slot, &format!("custom-code-{i}")))
-        .collect();
-    let terminal: Vec<Option<String>> = custom
-        .terminal
-        .iter()
-        .enumerate()
-        .map(|(i, slot)| custom_name(slot, &format!("custom-terminal-{i}")))
         .collect();
     for (name, bytes) in custom_names {
         fonts
@@ -902,19 +758,6 @@ pub fn install_fonts(ctx: &egui::Context, custom: &CustomFonts) {
     fonts.families.insert(
         FontFamily::Name("mono-bold".into()),
         chain(&[&code[1], &code[0]], "Geist Mono Bold"),
-    );
-    // The prompt follows the interface font unless it has its own.
-    fonts.families.insert(
-        FontFamily::Name("composer".into()),
-        chain(&[&composer, &sans[0]], "Geist"),
-    );
-    fonts.families.insert(
-        FontFamily::Name("terminal".into()),
-        chain(&[&terminal[0]], "Geist Mono"),
-    );
-    fonts.families.insert(
-        FontFamily::Name("terminal-bold".into()),
-        chain(&[&terminal[1], &terminal[0]], "Geist Mono Bold"),
     );
     ctx.set_fonts(fonts);
 }
@@ -1243,37 +1086,6 @@ mod palette_tests {
     use super::*;
 
     #[test]
-    fn environment_themes_map_to_tokens() {
-        let theme = serde_json::json!({
-            "id": "amane", "appearance": "light", "canvas": "#F8E9EE", "accent": "#E0486B",
-            "colors": {"canvas": "#F8E9EE", "text": "#3B2730", "surface": "#F0DCE3",
-                       "border": "#E6C6D1", "sidebar": "#ECD4DB", "messageAction": "#E0486B"}
-        });
-        let palette = Palette::from_theme(&theme).expect("palette");
-        assert!(palette.custom && !palette.dark);
-        assert_eq!(palette.background, Color32::from_rgb(0xf8, 0xe9, 0xee));
-        assert_eq!(palette.foreground, Color32::from_rgb(0x3b, 0x27, 0x30));
-        assert_eq!(palette.card, Color32::from_rgb(0xf0, 0xdc, 0xe3));
-        assert_eq!(palette.primary, Color32::from_rgb(0xe0, 0x48, 0x6b));
-        // Missing roles fall back: the sidebar text takes the text color.
-        assert_eq!(palette.sidebar_foreground, palette.foreground);
-        assert!(!palette.brand_logo && !palette.glow);
-        assert!(Palette::from_theme(&serde_json::json!({"colors": {}})).is_none());
-    }
-
-    #[test]
-    fn a_theme_can_keep_the_brand_logo() {
-        let theme = serde_json::json!({"canvas": "#191724", "accent": "#c4a7e7",
-                                       "colors": {"logo": "brand"}});
-        let palette = Palette::from_theme(&theme).expect("palette");
-        assert!(palette.brand_logo && !palette.glow);
-        assert_eq!(
-            LogoColors::for_palette(&palette).front,
-            Color32::from_rgb(0x6d, 0x28, 0xd9)
-        );
-    }
-
-    #[test]
     fn pluto_stock_is_a_violet_theme_with_the_glow() {
         let stock = pluto_stock();
         assert!(stock.custom && stock.dark && stock.brand_logo && stock.glow);
@@ -1282,48 +1094,36 @@ mod palette_tests {
             stock.primary_foreground,
             Color32::from_rgb(0x1a, 0x14, 0x26)
         );
-        let upstream = DARK;
-        assert!(!upstream.brand_logo && !upstream.glow);
+        assert_eq!(
+            stock.control_surface,
+            alpha(stock.input, 0.32),
+            "the control surface is the input color at 32%"
+        );
+    }
+
+    #[test]
+    fn the_brand_logo_keeps_its_own_violets() {
+        assert_eq!(
+            LogoColors::for_palette(&pluto_stock()).front,
+            Color32::from_rgb(0x6d, 0x28, 0xd9)
+        );
     }
 
     #[test]
     fn a_white_accent_keeps_the_logo_rings_apart_from_the_planet() {
-        // Carbonfox: the accent is the text color.
-        let theme = serde_json::json!({"canvas": "#161616", "accent": "#ffffff",
-                                       "colors": {"text": "#f2f4f8"}});
-        let logo = LogoColors::for_palette(&Palette::from_theme(&theme).expect("palette"));
+        let palette = Palette {
+            brand_logo: false,
+            background: Color32::from_rgb(0x16, 0x16, 0x16),
+            foreground: Color32::from_rgb(0xf2, 0xf4, 0xf8),
+            primary: Color32::WHITE,
+            ..pluto_stock()
+        };
+        let logo = LogoColors::for_palette(&palette);
         assert_ne!(logo.ring, logo.planet);
         assert_eq!(logo.ring, logo.band);
         assert!(
             logo.front.r() < logo.ring.r(),
             "the front ring is the darker one"
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn oklch_colors_convert_to_srgb() {
-        let rgb = |v: &str| parse_hex(&json!(v)).map(|c| (c.r(), c.g(), c.b()));
-        assert_eq!(rgb("oklch(1 0 0)"), Some((255, 255, 255)));
-        assert_eq!(rgb("oklch(0 0 0)"), Some((0, 0, 0)));
-        assert_eq!(rgb("oklch(0.627955 0.257683 29.2339)"), Some((255, 0, 0)));
-        assert_eq!(rgb("oklch(62.7955% 0.257683 29.2339)"), Some((255, 0, 0)));
-        assert_eq!(rgb("#0a0b0c"), Some((10, 11, 12)));
-        assert!(rgb("oklch(bad)").is_none());
-    }
-
-    #[test]
-    fn built_in_themes_have_dark_palettes() {
-        for id in ["t3-chat", "grove", "ocean", "ember", "iris"] {
-            let theme = built_in_theme(id).expect(id);
-            let palette = Palette::from_theme(&theme).expect(id);
-            assert!(palette.dark, "{id} dark variant");
-        }
-        assert!(built_in_theme("t3-code").is_none());
     }
 }

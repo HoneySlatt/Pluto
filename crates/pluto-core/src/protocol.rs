@@ -534,7 +534,7 @@ fn run(
         &mut pending,
         Route::Config,
         "subscribeServerConfig",
-        json!({"environmentThemes":true}),
+        json!({}),
         true,
     )?;
     let mut negotiated = false;

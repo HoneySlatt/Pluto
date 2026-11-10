@@ -2,8 +2,7 @@
 //! `orchestration.searchThreads`, `ThreadSearchMatch.tsx`): once typing
 //! pauses (200ms) on two characters or more, the server returns the threads
 //! whose messages match, with an excerpt. The command palette lists them
-//! with their thread rows and the sidebar's search keeps them after the
-//! title matches, both showing "You:" or "Agent:" and the excerpt.
+//! with their thread rows, showing "You:" or "Agent:" and the excerpt.
 //!
 //! Not ported: searching several environments (this client has one).
 
@@ -28,19 +27,6 @@ pub(crate) struct Match {
     pub(crate) snippet: String,
 }
 
-/// Who searches: the sidebar's field and the palette's query search apart.
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Slot {
-    Sidebar,
-    Palette,
-}
-
-impl Slot {
-    fn index(self) -> usize {
-        self as usize
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct ThreadSearch {
     /// The query typed, and when (egui's clock).
@@ -57,12 +43,11 @@ impl App {
     pub(crate) fn thread_search(
         &mut self,
         ctx: &egui::Context,
-        slot: Slot,
         query: &str,
     ) -> HashMap<String, Match> {
         let query = query.trim().to_owned();
         let now = ctx.input(|i| i.time);
-        let search = &mut self.thread_search[slot.index()];
+        let search = &mut self.thread_search;
         if query.chars().count() < 2 {
             *search = ThreadSearch::default();
             return HashMap::new();
@@ -74,7 +59,7 @@ impl App {
                         search.typed = None;
                         search.asked = query.clone();
                         self.send_request(
-                            format!("thread-search:{}:{query}", slot.index()),
+                            format!("thread-search:{query}"),
                             "orchestration.searchThreads",
                             json!({"query": query}),
                         );
@@ -89,26 +74,12 @@ impl App {
             }
         }
         // A query still settling shows no stale matches.
-        let search = &self.thread_search[slot.index()];
+        let search = &self.thread_search;
         if search.settled == query {
             search.matches.clone()
         } else {
             HashMap::new()
         }
-    }
-
-    /// The settled match of a thread for the sidebar's search, when its
-    /// title does not match already.
-    pub(crate) fn sidebar_excerpt(&self, thread: &crate::model::Thread) -> Option<&Match> {
-        let query = self.search.trim();
-        let search = &self.thread_search[Slot::Sidebar.index()];
-        if query.is_empty()
-            || search.settled != query
-            || thread.title.to_lowercase().contains(&query.to_lowercase())
-        {
-            return None;
-        }
-        search.matches.get(&thread.id)
     }
 
     /// `orchestration.searchThreads`' answer; true when `key` was one.
@@ -117,19 +88,10 @@ impl App {
         key: &str,
         result: &Result<Value, String>,
     ) -> bool {
-        let Some((slot, query)) = key
-            .strip_prefix("thread-search:")
-            .and_then(|rest| rest.split_once(':'))
-        else {
+        let Some(query) = key.strip_prefix("thread-search:") else {
             return false;
         };
-        let Some(search) = slot
-            .parse::<usize>()
-            .ok()
-            .and_then(|slot| self.thread_search.get_mut(slot))
-        else {
-            return true;
-        };
+        let search = &mut self.thread_search;
         if query == search.asked {
             search.settled = query.to_owned();
             search.matches = matches(result.as_ref().ok());

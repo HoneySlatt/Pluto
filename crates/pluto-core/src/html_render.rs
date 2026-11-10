@@ -1,11 +1,10 @@
 //! Pages agents publish with T3's `html_render` tool
 //! (`packages/shared/src/htmlRender.ts`, `toolOutput.ts`'s
 //! `htmlRenderFromToolItem`, `t3McpToolPresentation.ts`'s tool name
-//! resolution, and the web client's `useHtmlRenderTheme.ts`): the reference a
-//! completed call carries, the frame height at a width, and the theme handed
-//! to the page in its URL fragment.
+//! resolution): the reference a completed call carries, and the frame height
+//! at a width.
 
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 use crate::model::TurnItem;
 
@@ -126,115 +125,10 @@ impl HtmlRender {
     }
 }
 
-/// `HTML_RENDER_DEFAULT_FONTS`.
-const DEFAULT_SANS: &str =
-    r#"-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif"#;
-const DEFAULT_MONO: &str =
-    r#""SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace"#;
-
-/// `appearanceFontStack`: the chosen families before the default stack.
-fn font_stack(custom: &str, default: &str) -> String {
-    let families: Vec<String> = custom
-        .split(',')
-        .map(|f| f.trim().trim_matches(|c| c == '"' || c == '\''))
-        .filter(|f| !f.is_empty())
-        .map(|f| format!("\"{}\"", f.replace('"', "")))
-        .collect();
-    if families.is_empty() {
-        default.to_owned()
-    } else {
-        format!("{}, {default}", families.join(", "))
-    }
-}
-
-/// `htmlRenderTheme` for a theme's colors (`ThemeColors`), with the
-/// interface and code fonts chosen in Settings.
-pub fn theme(colors: &Map<String, Value>, dark: bool, sans: &str, mono: &str) -> Value {
-    // `FIXED_COLORS`.
-    let (success, success_fg, info, info_fg, chart) = if dark {
-        (
-            "#10b981",
-            "#34d399",
-            "#3b82f6",
-            "#60a5fa",
-            ["#2dd4bf", "#fbbf24", "#c084fc", "#fb7185", "#a3e635"],
-        )
-    } else {
-        (
-            "#10b981",
-            "#047857",
-            "#3b82f6",
-            "#1d4ed8",
-            ["#0d9488", "#d97706", "#9333ea", "#e11d48", "#65a30d"],
-        )
-    };
-    let mut variables = Map::new();
-    let mut role = |name: &str, key: &str| {
-        if let Some(color) = colors.get(key).and_then(Value::as_str) {
-            variables.insert(name.to_owned(), json!(color));
-        }
-    };
-    for (name, key) in [
-        ("--background", "canvas"),
-        ("--foreground", "text"),
-        ("--muted", "muted"),
-        ("--muted-foreground", "mutedForeground"),
-        ("--card", "surface"),
-        ("--card-foreground", "text"),
-        ("--popover", "surfaceOverlay"),
-        ("--popover-foreground", "text"),
-        ("--secondary", "secondary"),
-        ("--secondary-foreground", "secondaryForeground"),
-        ("--border", "border"),
-        ("--input", "input"),
-        ("--ring", "focus"),
-        ("--primary", "messageAction"),
-        ("--primary-foreground", "messageActionForeground"),
-        ("--accent", "accent"),
-        ("--accent-foreground", "accentForeground"),
-        ("--accent-surface", "accentSurface"),
-        ("--accent-surface-foreground", "accentSurfaceForeground"),
-        ("--destructive", "error"),
-        ("--destructive-foreground", "errorForeground"),
-        ("--destructive-surface", "errorSurface"),
-        ("--warning", "warning"),
-        ("--warning-foreground", "warningForeground"),
-        ("--warning-surface", "warningSurface"),
-        ("--code-background", "codeBackground"),
-        ("--code-foreground", "codeForeground"),
-        ("--chart-1", "accent"),
-    ] {
-        role(name, key);
-    }
-    for (name, value) in [
-        ("--success", success),
-        ("--success-foreground", success_fg),
-        ("--info", info),
-        ("--info-foreground", info_fg),
-    ] {
-        variables.insert(name.into(), json!(value));
-    }
-    for (index, color) in chart.iter().enumerate() {
-        variables.insert(format!("--chart-{}", index + 2), json!(color));
-    }
-    variables.insert("--radius".into(), json!("0.625rem"));
-    variables.insert("--font-sans".into(), json!(font_stack(sans, DEFAULT_SANS)));
-    variables.insert("--font-mono".into(), json!(font_stack(mono, DEFAULT_MONO)));
-    json!({"appearance": if dark { "dark" } else { "light" }, "variables": variables})
-}
-
-/// `htmlRenderThemeFragment`: the page reads it before its first paint.
-pub fn theme_fragment(theme: &Value) -> String {
-    let encoded: String = url::form_urlencoded::byte_serialize(theme.to_string().as_bytes())
-        .collect::<String>()
-        // `encodeURIComponent` keeps spaces as %20.
-        .replace('+', "%20");
-    format!("#t3-theme={encoded}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn item(tool: &str, status: &str, output: Value) -> TurnItem {
         serde_json::from_value(json!({
@@ -296,23 +190,5 @@ mod tests {
             ..capped
         };
         assert_eq!(unmeasured.frame_height(728.0, Some(10.0)), MIN_HEIGHT);
-    }
-
-    #[test]
-    fn theme_travels_in_the_fragment() {
-        let colors = json!({"canvas": "#161616", "text": "#f2f4f8", "accent": "#ffffff"});
-        let theme = theme(colors.as_object().unwrap(), true, "Geist Mono", "");
-        assert_eq!(theme["variables"]["--background"], "#161616");
-        assert_eq!(theme["variables"]["--chart-1"], "#ffffff");
-        assert_eq!(theme["variables"]["--chart-2"], "#2dd4bf");
-        assert!(
-            theme["variables"]["--font-sans"]
-                .as_str()
-                .unwrap()
-                .starts_with("\"Geist Mono\", -apple-system")
-        );
-        let fragment = theme_fragment(&theme);
-        assert!(fragment.starts_with("#t3-theme=%7B"));
-        assert!(!fragment.contains('+'));
     }
 }

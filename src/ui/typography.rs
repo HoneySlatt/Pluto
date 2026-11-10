@@ -1,21 +1,20 @@
 //! Settings → Appearance, Typography only (`TypographySection` and the font
 //! rows of `settings/SettingsPanels.tsx`, `SettingsFontPreviews.tsx`,
-//! `FontFamilyPicker.tsx`, applied like `appearanceFonts.ts`): the simple
-//! view (interface and monospace fonts) or, with Advanced, the interface,
-//! prompt, code and terminal fonts, then word wrap. Each row picks an
-//! installed family (`fc-list`; code surfaces list monospace families only)
-//! and a size, with live previews: the prompt text and its chips, the diff
-//! panel's rendering of a small patch, and the terminal's rendering of a dev
-//! server transcript.
+//! `FontFamilyPicker.tsx`, applied like `appearanceFonts.ts`): the interface
+//! and monospace fonts, then word wrap. Each row picks an installed family
+//! (`fc-list`; the monospace row lists monospace families only) and a size,
+//! with live previews: the prompt text and its chips, the diff panel's
+//! rendering of a small patch, and the terminal's rendering of a dev server
+//! transcript.
 //!
 //! The interface size zooms the whole client (upstream scales every rem);
-//! prompt, code and terminal sizes stay absolute. Chosen families are loaded
+//! the monospace size stays absolute and also sizes the terminal. The prompt
+//! uses the interface font at a fixed size. Chosen families are loaded
 //! through fontconfig by weight and put in front of Geist, which keeps
 //! covering missing glyphs. The Interface rows are in `settings.rs`; the
 //! theme library, contrast, glass and motion rows are not ported,
 //! the family list draws every name in the interface font (upstream draws
-//! each in its own face), the prompt preview is not editable, and the
-//! Advanced switch lives in memory (upstream: local storage).
+//! each in its own face), and the prompt preview is not editable.
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -28,9 +27,7 @@ use crate::theme::{self, CustomFonts, TypeSizes, Weight, font};
 use crate::ui::md_links;
 #[cfg(test)]
 use crate::ui::settings::default_client_settings;
-use crate::ui::settings::{
-    Control, Row, RowAction, Store, card_border, card_fill, row_divider, switch,
-};
+use crate::ui::settings::{Control, Row, RowAction, Store, card_border, card_fill, row_divider};
 use crate::ui::widgets::{self, MenuEntry, MenuItem};
 
 pub(crate) const APPEARANCE_PAGE: usize = 1;
@@ -40,16 +37,12 @@ const SIZE_WIDTH: f32 = 144.0;
 const PICKER_MENU: &str = "typography-family";
 
 /// The defaults of the typography client settings.
-pub(crate) fn defaults() -> [(&'static str, Value); 9] {
+pub(crate) fn defaults() -> [(&'static str, Value); 5] {
     [
         ("fontFamilySans", json!("")),
         ("fontSizeInterface", json!(16)),
-        ("fontFamilyComposer", json!("")),
-        ("fontSizePrompt", json!(14)),
         ("fontFamilyCode", json!("")),
         ("fontSizeCode", json!(13)),
-        ("fontFamilyTerminal", json!("")),
-        ("fontSizeTerminal", json!(12)),
         ("wordWrap", json!(true)),
     ]
 }
@@ -66,73 +59,36 @@ struct FontRow {
     preview: Preview,
 }
 
+/// What a font row previews: the interface font shows the prompt, the
+/// monospace font shows a diff and the terminal.
 #[derive(Clone, Copy, PartialEq)]
 enum Preview {
-    None,
     Prompt,
-    Code,
-    Terminal,
     CodeAndTerminal,
 }
 
-/// The rows of the simple or the Advanced view.
-fn font_rows(advanced: bool) -> Vec<FontRow> {
-    let interface = |preview| FontRow {
-        id: "interface-font",
-        title: "Interface font",
-        description: "Everything outside code blocks and the terminal.",
-        family_key: "fontFamilySans",
-        size_key: "fontSizeInterface",
-        range: (12, 20),
-        monospace: false,
-        preview,
-    };
-    let code = |title, description, preview| FontRow {
-        id: "code-font",
-        title,
-        description,
-        family_key: "fontFamilyCode",
-        size_key: "fontSizeCode",
-        range: (10, 18),
-        monospace: true,
-        preview,
-    };
-    if !advanced {
-        return vec![
-            interface(Preview::Prompt),
-            code(
-                "Monospace font",
-                "Code blocks, diffs, file previews, and the terminal.",
-                Preview::CodeAndTerminal,
-            ),
-        ];
-    }
-    vec![
-        interface(Preview::None),
+/// The two font rows.
+fn font_rows() -> [FontRow; 2] {
+    [
         FontRow {
-            id: "prompt-font",
-            title: "Prompt font",
-            description: "Only the box you write prompts in. Mono works well here.",
-            family_key: "fontFamilyComposer",
-            size_key: "fontSizePrompt",
+            id: "interface-font",
+            title: "Interface font",
+            description: "Everything outside code blocks and the terminal.",
+            family_key: "fontFamilySans",
+            size_key: "fontSizeInterface",
             range: (12, 20),
             monospace: false,
             preview: Preview::Prompt,
         },
-        code(
-            "Code font",
-            "Code blocks, diffs, and file previews.",
-            Preview::Code,
-        ),
         FontRow {
-            id: "terminal-font",
-            title: "Terminal font",
-            description: "Terminal output, independent from code blocks and diffs.",
-            family_key: "fontFamilyTerminal",
-            size_key: "fontSizeTerminal",
-            range: (8, 20),
+            id: "code-font",
+            title: "Monospace font",
+            description: "Code blocks, diffs, file previews, and the terminal.",
+            family_key: "fontFamilyCode",
+            size_key: "fontSizeCode",
+            range: (10, 18),
             monospace: true,
-            preview: Preview::Terminal,
+            preview: Preview::CodeAndTerminal,
         },
     ]
 }
@@ -241,15 +197,13 @@ fn installed_families(monospace: bool) -> Arc<Vec<String>> {
 /// What the typography settings resolve to, to notice changes.
 #[derive(Clone, PartialEq)]
 struct Applied {
-    families: [String; 4],
+    families: [String; 2],
     sizes: TypeSizes,
 }
 
-/// Typography state: the Advanced switch, the applied settings, the
-/// family picker's search.
+/// Typography state: the applied settings and the family picker's search.
 #[derive(Default)]
 pub(crate) struct Typography {
-    pub(crate) advanced: bool,
     applied: Option<Applied>,
     query: String,
 }
@@ -267,10 +221,9 @@ impl App {
     }
 
     /// `applyAppearanceFontVariables`: the zoom, the sizes and the fonts,
-    /// applied when the settings change. Outside Advanced the terminal
-    /// follows the code font (`resolveTerminalFontPreference`).
+    /// applied when the settings change. The terminal follows the code font
+    /// (`resolveTerminalFontPreference`).
     pub(crate) fn apply_typography(&mut self, ctx: &egui::Context) {
-        let advanced = self.typography.advanced;
         let text = |key: &str| {
             self.type_setting(key)
                 .as_str()
@@ -278,26 +231,10 @@ impl App {
                 .trim()
                 .to_owned()
         };
-        let code_size = self.type_size("fontSizeCode", (10, 18), 13);
         let applied = Applied {
-            families: [
-                text("fontFamilySans"),
-                text("fontFamilyComposer"),
-                text("fontFamilyCode"),
-                if advanced {
-                    text("fontFamilyTerminal")
-                } else {
-                    text("fontFamilyCode")
-                },
-            ],
+            families: [text("fontFamilySans"), text("fontFamilyCode")],
             sizes: TypeSizes {
-                code: code_size,
-                prompt: self.type_size("fontSizePrompt", (12, 20), 14),
-                terminal: if advanced {
-                    self.type_size("fontSizeTerminal", (8, 20), 12)
-                } else {
-                    code_size
-                },
+                code: self.type_size("fontSizeCode", (10, 18), 13),
                 zoom: self.type_size("fontSizeInterface", (12, 20), 16) / 16.0,
             },
         };
@@ -310,12 +247,10 @@ impl App {
             ctx.set_zoom_factor(applied.sizes.zoom);
         }
         if previous.as_ref().map(|p| &p.families) != Some(&applied.families) {
-            let [sans, composer, code, terminal] = &applied.families;
+            let [sans, code] = &applied.families;
             let custom = CustomFonts {
                 sans: [80, 100, 180, 200].map(|w| resolve_font(sans, w, false)),
-                composer: resolve_font(composer, 80, false),
                 code: [80, 200].map(|w| resolve_font(code, w, true)),
-                terminal: [80, 200].map(|w| resolve_font(terminal, w, true)),
             };
             theme::install_fonts(ctx, &custom);
         }
@@ -323,8 +258,7 @@ impl App {
 
     /// The Appearance page: the Typography section; returns its bottom.
     pub(crate) fn appearance_page(&mut self, ui: &mut Ui, left: f32, top: f32) -> f32 {
-        let advanced = self.typography.advanced;
-        // `SettingsSection` header with its Advanced switch.
+        // `SettingsSection` header.
         widgets::text_in(
             ui,
             Rect::from_min_size(Pos2::new(left + 16.0, top), Vec2::new(CARD_WIDTH, 28.0)),
@@ -332,31 +266,10 @@ impl App {
             font(14.0, Weight::Regular),
             theme::alpha(theme::foreground(), 0.7),
         );
-        let card_right = left + CARD_WIDTH;
-        if switch(
-            ui,
-            card_right - 16.0,
-            top + 14.0,
-            advanced,
-            "typography-advanced",
-        ) {
-            self.typography.advanced = !advanced;
-        }
-        let label_width = widgets::text_width(ui, "Advanced", font(12.0, Weight::Medium));
-        widgets::text_in(
-            ui,
-            Rect::from_min_size(
-                Pos2::new(card_right - 16.0 - 32.0 - 8.0 - label_width, top),
-                Vec2::new(label_width + 1.0, 28.0),
-            ),
-            "Advanced",
-            font(12.0, Weight::Medium),
-            theme::muted_foreground(),
-        );
         let card_top = top + 28.0 + 10.0;
 
         // Row heights: the row itself, then its preview (`pt-3 pb-1`).
-        let rows = font_rows(advanced);
+        let rows = font_rows();
         let width = CARD_WIDTH - 2.0 * 16.0;
         let previews: Vec<f32> = rows
             .iter()
@@ -504,24 +417,8 @@ impl App {
             Vec2::new(FAMILY_WIDTH, 28.0),
         );
         let default_label = if row.monospace { "Geist Mono" } else { "Geist" };
-        // The prompt defaults to whatever the interface font resolves to.
-        let default_label = if row.family_key == "fontFamilyComposer" {
-            let sans = self
-                .type_setting("fontFamilySans")
-                .as_str()
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
-            if sans.is_empty() {
-                default_label.to_owned()
-            } else {
-                sans
-            }
-        } else {
-            default_label.to_owned()
-        };
         let label = if family.trim().is_empty() {
-            default_label.clone()
+            default_label.to_owned()
         } else {
             family.clone()
         };
@@ -546,7 +443,7 @@ impl App {
             &menu_id,
             row.monospace,
             &family,
-            &default_label,
+            default_label,
         ) {
             writes.push((row.family_key.into(), json!(choice)));
         }
@@ -717,20 +614,14 @@ impl App {
 
     fn preview_height(&self, ui: &Ui, row: &FontRow, width: f32) -> f32 {
         match row.preview {
-            Preview::None => 0.0,
             Preview::Prompt => prompt_preview_height(ui, width),
-            Preview::Code => code_preview_height(),
-            Preview::Terminal => 208.0,
             Preview::CodeAndTerminal => code_preview_height() + 8.0 + 208.0,
         }
     }
 
     fn paint_preview(&mut self, ui: &mut Ui, rect: Rect, row: &FontRow) {
         match row.preview {
-            Preview::None => {}
             Preview::Prompt => paint_prompt_preview(ui, rect),
-            Preview::Code => self.paint_code_preview(ui, rect),
-            Preview::Terminal => paint_terminal_preview(ui, rect),
             Preview::CodeAndTerminal => {
                 let code =
                     Rect::from_min_size(rect.min, Vec2::new(rect.width(), code_preview_height()));
@@ -1051,19 +942,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rows_follow_the_advanced_switch() {
-        let simple: Vec<&str> = font_rows(false).iter().map(|r| r.title).collect();
-        assert_eq!(simple, ["Interface font", "Monospace font"]);
-        let advanced: Vec<&str> = font_rows(true).iter().map(|r| r.title).collect();
-        assert_eq!(
-            advanced,
-            [
-                "Interface font",
-                "Prompt font",
-                "Code font",
-                "Terminal font"
-            ]
-        );
+    fn rows_are_the_interface_and_monospace_fonts() {
+        let titles: Vec<&str> = font_rows().iter().map(|r| r.title).collect();
+        assert_eq!(titles, ["Interface font", "Monospace font"]);
     }
 
     #[test]

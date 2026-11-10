@@ -103,9 +103,8 @@ silent server. Two short-lived threads make the HTTP calls: `t3-auth-session` an
   protocol and paints its screencast frames. `src/server_browser.rs` shows the server's own browser
   tabs, streamed as JPEG frames over a second WebSocket (`/api/preview-stream/ws`). The files of
   the same names in `src/ui/` are their views.
-- **Theme.** `src/theme.rs` holds the palette, set from the server's environment themes, with
-  Pluto's own as the fallback. Fonts and icons are in `assets/`; their licenses in
-  [`NOTICE.md`](../NOTICE.md).
+- **Theme.** `src/theme.rs` holds Pluto's own palette, set once at start-up. Fonts and icons are
+  in `assets/`; their licenses in [`NOTICE.md`](../NOTICE.md).
 - **Local files.** Settings, window size, drafts and the interface's state are JSON files in
   `$XDG_CONFIG_HOME/pluto/`. Nothing secret is stored there. Besides them: the notifications' icon
   in `$XDG_CACHE_HOME/pluto/`, the socket that receives `pluto://` links in `$XDG_RUNTIME_DIR`, and
