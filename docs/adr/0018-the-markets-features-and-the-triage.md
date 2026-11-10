@@ -5,7 +5,8 @@
   triggers, one configuration for every agent, side questions, dictation, cloud runs and computer
   use added), [0007](0007-several-servers-and-a-relay.md) (the phone's notifications decided now;
   Tailscale as one more path) and [0009](0009-secrets-privacy-and-the-sandbox.md) (computer use in
-  an isolated session; triggers run locked)
+  an isolated session; triggers run locked); amended by [0022](0022-the-triage-row-by-row.md)
+  (the terminal kept; family 1's direction)
 - Date: 2026-11-08
 
 ## Context

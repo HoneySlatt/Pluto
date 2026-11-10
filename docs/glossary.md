@@ -46,6 +46,36 @@ Terms this project uses in a sense of its own.
   built on iroh; it sees only encrypted traffic.
 - **The triage**: the owner's marking of every feature as keep, cut or rethink; its result is the
   specification.
+- **A row**: one feature of [`features.md`](features.md) that the owner marked on its own, numbered
+  by its family (`7.3`).
+- **The dashboard**: the client's home screen, a grid of thread cards with a strip of quotas,
+  machines and scheduled tasks ([ADR-0022](adr/0022-the-triage-row-by-row.md)).
+- **The live line**: the one line on which a running turn shows what its agent does, and for how
+  long.
+- **The turn's summary**: the head of a finished turn: its duration, files changed, commands run
+  and result, its details folded below.
+- **The artifacts panel**: the surface where agents' pages, MCP apps and designs open whole.
+- **The one configuration**: the MCP servers, skills and instructions declared once in Pluto and
+  given to each agent in its own format
+  ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)).
+- **A zone**: a part of the window (the thread, the composer, the review, the terminal…) whose keys
+  are bound together.
+- **First-rank agent**: an agent Pluto drives with every ability, native or supplied by Pluto
+  ([ADR-0003](adr/0003-what-pluto-is-to-become.md)).
+- **Settle**: to put a finished thread aside, out of the live ones; *auto-settle* does it after its
+  pull request merges or after some days. To *snooze* hides a thread until a time.
+- **A sweep**: pressing a thread's action and dragging along the list to apply it to every thread
+  passed over.
+- **A surface**: one kind of tab of the panel beside a thread: review, files, terminal, browser,
+  artifacts.
+- **The layers icon**: the mark beside a setting that says where its value comes from (default,
+  machine, project, thread) and resets it to inherit.
+- **The lineage card**: a thread's parent, forks, subagents, context transfers and a workflow's
+  phases, in its details.
+- **A side question**: a question asked beside a thread that neither turns its agent from its work
+  nor fills its context ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)).
+- **A living artifact**: a page, diagram, chart or small application an agent makes, run in the
+  conversation, isolated, with its versions ([ADR-0020](adr/0020-the-chat.md)).
 - **Thread**: one conversation with one agent, in a project, on one server.
 - **Chat space**: the project where chats live, apart from code projects, with its memory.
 - **Tier**: a class of machine the quality bar names: the high tier (the owner's desktop) and the

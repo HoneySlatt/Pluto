@@ -94,6 +94,9 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
   and live in the system's keyring, or in memory until it exists
   ([ADR-0009](docs/adr/0009-secrets-privacy-and-the-sandbox.md)).
 - Nothing leaves the machine of Pluto's own accord: no telemetry, no update check without consent.
+  One exception: an answer's images and link icons load by themselves when safe, from the hosts of
+  its cited sources or tool results, never through a third party
+  ([ADR-0022](docs/adr/0022-the-triage-row-by-row.md)).
 - Every format the server or client writes is versioned and migrated; writes are atomic; a
   migration backs up first ([ADR-0008](docs/adr/0008-storage-and-the-history-moved.md)).
 - Honour each provider's terms: drive their official CLIs, or a sign-in the provider offers to

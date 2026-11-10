@@ -3,7 +3,8 @@
 - Status: Accepted; amended by [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (uwui's applications as a right of the sandbox;
   actions kept for a person) and [0018](0018-the-markets-features-and-the-triage.md) (computer
   use in an isolated session; triggers run locked) and [0019](0019-a-code-editor-in-pluto.md) (the
-  sandbox on Windows decided when Stage 7 starts)
+  sandbox on Windows decided when Stage 7 starts) and [0022](0022-the-triage-row-by-row.md) (safe
+  images and icons of answers loaded)
 - Date: 2026-11-06
 
 ## Context

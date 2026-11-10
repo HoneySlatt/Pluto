@@ -2,7 +2,8 @@
 
 - Status: Accepted; amends [0015](0015-the-budgets-set-from-todays-figures.md) (budgets that
   rivals may tighten, never loosen) and [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)
-  (rivals measured from Stage 1, and the margin set now, not at Stage 6)
+  (rivals measured from Stage 1, and the margin set now, not at Stage 6); amended by
+  [0022](0022-the-triage-row-by-row.md) (safe images and icons of answers loaded)
 - Date: 2026-11-08
 
 ## Context

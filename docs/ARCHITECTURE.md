@@ -191,9 +191,10 @@ The desktop client re-exports most of these modules under its own name (`src/lib
 - The interface, the core's errors and the server's routes keep T3's names, and many comments cite
   the T3 file a piece was ported from: Pluto was a port until
   [ADR-0003](adr/0003-what-pluto-is-to-become.md).
-- The desktop fetches websites' favicons from Google's favicon service, and loads `https:` images
-  that messages show, of its own accord: against "nothing leaves the machine of Pluto's own accord".
-  Private and reserved hosts are never sent.
+- The desktop fetches websites' favicons from Google's favicon service, and loads every `https:`
+  image that messages show, of its own accord. Private and reserved hosts are never sent. The
+  triage keeps only safe images and icons loading by themselves, never through a third party
+  ([ADR-0022](adr/0022-the-triage-row-by-row.md)); M1.4 brings the client to it.
 - The desktop and `pluto-ffi` each draw their own presentation from the core: the desktop in
   `src/ui/`, the phone in `crates/pluto-ffi/src/views.rs` and Compose. Reconnecting is also written
   twice, with different policies.

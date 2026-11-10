@@ -9,28 +9,24 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 
 ## Current
 
-- DeepSeek Harness joined today's Pluto as a `deepseekHarness` provider of the fork, through its
-  official local Web protocol ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)). It
-  streams text, reasoning and tool activity, answers approvals and questions, supports Stop and
-  resume, and maps Pluto's four runtime modes onto Harness permission presets. Tests use fake
-  peers and a recorded 0.2.1-rc.3 wire capture. Since 2026-11-08 the owner's delegated tasks run
-  on it with real turns; they showed a delegated task reported its first message, fixed with
-  token usage (live and in the usage history) and provider errors' real causes in the server's
-  log (fork commits 17ce1c3c0e to 981056cf08). Limits, stated in the provider guide: no native
-  forks, rollback, plan mode or application text.
+- DeepSeek Harness joined today's Pluto as a provider of the fork, through its official local Web
+  protocol ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)); the owner's delegated tasks
+  run on it with real turns since 2026-11-08. Its limits are in the provider guide.
 - On 2026-11-06 Pluto came under the owner's method, and changed direction in a design session with
   the owner ([ADR-0003](adr/0003-what-pluto-is-to-become.md) to
   [ADR-0010](adr/0010-todays-features-triaged.md)), and on 2026-11-07 chose a harness of its own
   ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
-- Pluto is no longer a port of T3 Code. `docs/release-backlog.md` is abandoned, and
-  `docs/parity/` stays as an inventory.
-- Stage 1: [M1.1](#m11--under-the-method) and [M1.2](#m12--today-measured) are done, the HP's
-  figures to come by the owner's hand. Work happens on `main` since 2026-11-07.
+- Pluto is no longer a port of T3 Code. `docs/parity/` stays as an inventory.
+- Stage 1: [M1.1](#m11--under-the-method), [M1.2](#m12--today-measured) and
+  [M1.3](#m13--the-triage) are done, the HP's figures to come by the owner's hand. Work happens
+  on `main` since 2026-11-07.
 - On 2026-11-08 an interview with the owner set Pluto against the market, the market's features,
   the triage by family, a code editor in Pluto and the chat
   ([ADR-0017](adr/0017-pluto-measured-against-the-market.md) to [ADR-0020](adr/0020-the-chat.md)).
-  [M1.3](#m13--the-triage) is under way: the families are marked, their rows come next. Then
-  [M1.6](#m16--the-rivals-measured), beside M1.4 and M1.5.
+  On 2026-11-10 the owner marked every row of the rethought families
+  ([ADR-0022](adr/0022-the-triage-row-by-row.md)), and the
+  [specification](specification.md) followed. Next: [M1.4](#m14--the-cuts), M1.5 and
+  [M1.6](#m16--the-rivals-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -40,7 +36,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 |---|---|---|
 | [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
-| [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Under way: families marked, rows to come |
+| [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Planned |
 | [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
@@ -111,19 +107,24 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   specification.
 - **Measured.** Nothing.
 - **By hand.** The marks, by the owner, in several sittings if needed.
-- **Where it stands (2026-11-08).** The 31 families are listed and marked in
-  [`features.md`](features.md) ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)): 11
-  kept, 20 rethought with the phone, none cut. The features added by the interview are listed
-  there too. Next: the rows of each rethought family, each with its problem, the rival that does it
-  best, and core or optional; the owner's reasons for the families rethought against the
-  recommendation (2, 7, 15, 28) and the direction of design projects (25); Bitbucket and T3's
-  environment themes. Then `docs/specification.md`.
+- **Done (2026-11-10).** The 31 families were marked on 2026-11-08
+  ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)); on 2026-11-10 the owner marked the
+  358 rows of the 19 rethought families and of the right panel: 195 kept, 106 rethought, 32 cut,
+  25 added ([ADR-0022](adr/0022-the-triage-row-by-row.md)). Kept families have no rows: they go to
+  the specification whole. The terminal moved to Keep, a mark given by mistake. A script run during
+  the closing review found every row not cut named in [`specification.md`](specification.md), and
+  every cut row in its section 6. The owner accepted the specification
+  ([ADR-0023](adr/0023-the-specification-accepted.md)).
 
 ### M1.4 — The cuts
 
 - **Goal.** The egui client and the Android app no longer carry what the triage cut.
-- **Delivers.** The code, settings and documents of each cut feature removed, in one commit per
-  feature or group.
+- **Delivers.** The code, settings and documents of each row marked Cut in
+  [`features.md`](features.md) and listed in the [specification](specification.md#6-what-leaves),
+  where the egui client or the Android app has it, in one commit per feature or group. A cut whose
+  loss would break daily work before its replacement exists, such as the action editor, is put to
+  the owner first. Also: Google's favicon service, and the visual comparison with T3's web client
+  (`examples/snapshot.rs`, `scripts/reference/`).
 - **Done when.** The checks pass, the client runs on the fixture, and nothing cut remains reachable.
 - **How to test.** `scripts/check.sh`, the snapshot example, the Android build.
 - **Measured.** The client's memory, wake-ups and binary size, before and after.
@@ -179,13 +180,11 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 ## Known debt
 
 - The egui client stays at T3 v0.1.0 parity with the gaps listed in `docs/parity/`. Those gaps are
-  no longer debt: the triage decides what of them matters.
+  no longer debt: the triage decided what of them matters ([`features.md`](features.md)).
 - The Z Code driver has never run a real turn.
-- `docs/release-backlog.md` describes a plan that no longer exists. It stays for its record of what
-  was done, and is removed once the triage has used it.
-- Visual checks against the reference are manual (`examples/snapshot.rs`). M1.1 put it off: the
-  reference is T3's web client, whose parity is abandoned. M1.3 decides whether the comparison
-  stays; the uwui client's visual checks replace it.
+- Visual checks against the reference are manual (`examples/snapshot.rs`). The reference is T3's
+  web client, whose parity is abandoned: M1.4 removes the comparison, by the owner's decision of
+  2026-11-10; the uwui client's visual checks replace it.
 - `deny.toml` ignores six advisories of unmaintained crates with no maintained release their
   parents accept: bincode (syntect), ttf-parser and rustybuzz (resvg 0.45, which egui_extras
   requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5). Followed by the
@@ -211,9 +210,15 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 
   Followed by Stage 2 for the server, whose Rust server replaces the fork, and by Stage 6 for the
   client, which the uwui client replaces. The egui client is frozen and is not tuned meanwhile.
-- The desktop fetches favicons from Google's favicon service and loads messages' `https:` images
-  of its own accord, against "nothing leaves the machine of Pluto's own accord". By the owner's
-  decision of 2026-11-07, the triage (M1.3) decides it and the cuts (M1.4) apply it.
+- The fork claims Claude's banked resets by reading the OAuth token Claude Code stores
+  (`apps/server/src/provider/claudeResetCredits.ts`), against the rule on other programs'
+  credentials. The Rust server does not port it ([ADR-0022](adr/0022-the-triage-row-by-row.md));
+  the fork is frozen and changes only on the owner's word. Whether the fork's other quota probes
+  read stored credentials is not checked.
+- The desktop fetches favicons from Google's favicon service and loads every image of a message by
+  itself. The triage keeps only safe ones loading by themselves, never through a third party
+  ([ADR-0022](adr/0022-the-triage-row-by-row.md)); M1.4 removes Google's service and loads the
+  rest on a click.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 - `examples/tmp_shot.rs` calls itself throwaway but stays in the tree. Followed by M1.4.

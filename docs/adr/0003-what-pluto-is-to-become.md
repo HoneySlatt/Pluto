@@ -4,7 +4,9 @@
   [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (the look, the bar and macOS, after uwui's decisions),
   [0018](0018-the-markets-features-and-the-triage.md) (review in Pluto, the market's features
   added), [0019](0019-a-code-editor-in-pluto.md) (a code editor in Pluto; going public at Stage 8)
-  and [0020](0020-the-chat.md) (the chat replaces the vendors' applications)
+  and [0020](0020-the-chat.md) (the chat replaces the vendors' applications) and
+  [0022](0022-the-triage-row-by-row.md) (the dashboard as the home screen; glass not a setting;
+  safe images and icons of answers loaded)
 - Date: 2026-11-06
 
 ## Context

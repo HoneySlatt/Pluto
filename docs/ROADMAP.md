@@ -12,7 +12,8 @@ the other agents and local models side by side, as equals, for code and for chat
 editor of its own. It aims to be the best of its market, criterion by criterion, measured
 ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)). It is native and
 frugal: it starts at once, holds little memory, draws nothing at rest, and stays smooth on a modest
-laptop. It is private: nothing leaves the owner's machines but the agents' own traffic.
+laptop. It is private: nothing leaves the owner's machines but the agents' own traffic, with the
+one exception the promises below name.
 
 It is made for its owner first, who runs 5 to 15 threads on a busy day, and designed so it can go
 public later. It is one of the programs of reference of uwui, the owner's UI framework, which its
@@ -58,7 +59,7 @@ The rivals, named only to be measured:
 
 | Where | Rivals |
 |---|---|
-| Agents' applications | Claude Code's desktop application, Codex in ChatGPT's desktop application; Zed, Warp; T3 Code and today's fork, OpenCode Desktop, Emdash or Nimbalyst. On features only: Cursor, Copilot, Antigravity; Conductor on paper |
+| Agents' applications | Claude Code's desktop application, Codex in ChatGPT's desktop application; Zed, Warp; T3 Code and today's fork, OpenCode Desktop, Emdash or Nimbalyst. On features only: Cursor, Copilot, Antigravity; Conductor on paper, closing since 2026-11-04 ([ADR-0022](adr/0022-the-triage-row-by-row.md)) |
 | The editor | Zed, Neovim, Vim, Helix, Sublime Text, VS Code; Fresh for huge files; JetBrains for analysis ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)) |
 | The chat | ChatGPT's and Claude's desktop applications; T3 Chat, Open WebUI, LibreChat, Msty, TypingMind; LM Studio, Jan; Gemini and Le Chat on their features and voice ([ADR-0020](adr/0020-the-chat.md)) |
 | The phone | Claude's and ChatGPT's remote control, T3 Code's mobile application, Happy, Paseo; Conductor and Nimbalyst on paper ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)) |
@@ -118,7 +119,9 @@ Guarantees, each with its test ([ADR-0017](adr/0017-pluto-measured-against-the-m
 Promises:
 - instant: no common action on the desktop shows a loading state;
 - nothing is ever lost;
-- no account and no cloud for Pluto itself, on the local network and offline;
+- no account and no cloud for Pluto itself, on the local network and offline; only the agents' own
+  traffic leaves, and an answer's safe images and link icons
+  ([ADR-0022](adr/0022-the-triage-row-by-row.md));
 - Linux first-rank: Wayland, sharp fractional scales, the HP smooth, Linux checked first at each
   release.
 
@@ -149,6 +152,7 @@ Also held, without a figure:
 | Pluto's own agent | A minimal harness, measured on Pluto's bench, after Stage 3 ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)) |
 | Judged against the market | The best rival measured on each criterion sets the bar, beaten by a margin per family; the stricter of that and the budgets ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)) |
 | The market's features, the triage, the phone | Review in Pluto, triggers, one configuration for every agent, side questions, dictation, cloud runs, computer use in an isolated session; families marked; the phone's notifications through UnifiedPush, its own models ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)) |
+| The features kept | Today's features triaged row by row; the specification accepted ([ADR-0022](adr/0022-the-triage-row-by-row.md), [ADR-0023](adr/0023-the-specification-accepted.md), [`specification.md`](specification.md)) |
 | The editor | In Pluto, optional, on uwui's component, its core in the server, Stage 7 ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)) |
 | The chat | It replaces the vendors' applications; each vendor by its permitted path; one memory, local voice, one history ([ADR-0020](adr/0020-the-chat.md)) |
 | uwui's decisions of 2026-11-07 | Agents reach uwui's applications only where the sandbox allows it; what only a person may do is never offered to agents; uwui's rules for applications in the bar; macOS decided when Pluto goes public ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)) |
@@ -159,7 +163,6 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 
 | Topic | Candidates | Decide at |
 |---|---|---|
-| The features kept | the triage of today's features | [M1.3](PLAN.md#m13--the-triage) |
 | The protocol's wire format and transports | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 2, the protocol's milestone |
 | The storage's model | an event log, or plain tables | Stage 2, the storage's milestone |
 | A keyring without a graphical session | systemd's credentials; a file sealed by the session's keyring; another | Stage 2, the secrets' milestone |
