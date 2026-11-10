@@ -166,9 +166,11 @@ fn follow(
 }
 
 /// Whether an address is on the public internet: not loopback, private,
-/// link-local, shared (100.64/10), unspecified, broadcast or documentation;
-/// for IPv6, only global unicast (2000::/3), which also leaves out IPv4
-/// mapped into IPv6.
+/// link-local, shared (100.64/10), benchmarking (198.18/15, also some
+/// proxies' fake addresses), reserved (240/4), unspecified, broadcast or
+/// documentation. For IPv6, only global unicast (2000::/3), which leaves
+/// out IPv4 mapped into IPv6, less the ranges that embed an IPv4 address
+/// (Teredo 2001::/32, 6to4 2002::/16) and documentation (2001:db8::/32).
 pub fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -180,9 +182,16 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.is_documentation()
                 || first == 0
-                || first == 100 && (64..128).contains(&second))
+                || first >= 240
+                || first == 100 && (64..128).contains(&second)
+                || first == 198 && (18..20).contains(&second))
         }
-        IpAddr::V6(v6) => (v6.segments()[0] & 0xe000) == 0x2000,
+        IpAddr::V6(v6) => {
+            let [first, second, ..] = v6.segments();
+            (first & 0xe000) == 0x2000
+                && first != 0x2002
+                && !(first == 0x2001 && (second == 0 || second == 0xdb8))
+        }
     }
 }
 
@@ -286,7 +295,14 @@ mod tests {
 
     #[test]
     fn public_addresses_and_hosts() {
-        for public in ["93.184.215.14", "2606:4700::1111", "github.com", "docs.rs."] {
+        for public in [
+            "93.184.215.14",
+            "198.20.0.1",
+            "2606:4700::1111",
+            "2001:4860::8888",
+            "github.com",
+            "docs.rs.",
+        ] {
             assert!(is_public_host(public), "{public}");
         }
         for private in [
@@ -296,6 +312,9 @@ mod tests {
             "192.168.1.1",
             "169.254.169.254",
             "100.64.0.1",
+            "198.18.0.1",
+            "198.19.255.254",
+            "240.0.0.1",
             "0.0.0.0",
             "0.1.2.3",
             "255.255.255.255",
@@ -304,6 +323,9 @@ mod tests {
             "fe80::1",
             "fd00::1",
             "::ffff:127.0.0.1",
+            "2002:7f00:1::",
+            "2001:0:4136:e378::1",
+            "2001:db8::1",
             "localhost",
             "printer.local",
             "router.lan",
