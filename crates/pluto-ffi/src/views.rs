@@ -526,27 +526,43 @@ pub fn reset_answers() {
     answers().clear();
 }
 
-/// The hosts of the sources of a run's answer (ADR-0022): those the
-/// open thread's tool calls in that run carry.
-fn answer_sources(core: &Core, run_id: Option<&str>) -> std::collections::HashSet<String> {
+/// The source hosts of each run of the open thread, for the state revision
+/// and the thread they were read at.
+type RunSources = (
+    u64,
+    Option<String>,
+    std::collections::HashMap<String, Arc<std::collections::HashSet<String>>>,
+);
+
+/// The hosts of the sources of a run's answer (ADR-0022,
+/// `pluto_core::media::source_hosts`), read again for every run of the open
+/// thread in one pass when the state changes.
+fn answer_sources(core: &Core, run_id: Option<&str>) -> Arc<std::collections::HashSet<String>> {
+    static RUN_SOURCES: std::sync::OnceLock<std::sync::Mutex<RunSources>> =
+        std::sync::OnceLock::new();
     let Some(run_id) = run_id else {
-        return Default::default();
+        return Arc::default();
     };
     let app = core.hub.lock();
-    app.session
-        .state
-        .detail
-        .as_ref()
-        .map(|detail| {
-            pluto_core::media::source_hosts(
-                detail
-                    .turn_items
-                    .iter()
-                    .filter(|item| item.run_id.as_deref() == Some(run_id))
-                    .map(|item| item.as_ref()),
+    let state = &app.session.state;
+    let thread = state.detail.as_ref().map(|detail| detail.id().to_owned());
+    let mut cache = RUN_SOURCES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if (cache.0, &cache.1) != (state.revision, &thread) {
+        let runs = state.detail.as_ref().map_or_else(Default::default, |detail| {
+            pluto_core::media::source_hosts_by_run(
+                detail.turn_items.iter().map(|item| item.as_ref()),
             )
-        })
-        .unwrap_or_default()
+        });
+        let runs = runs
+            .into_iter()
+            .map(|(run, hosts)| (run, Arc::new(hosts)))
+            .collect();
+        *cache = (state.revision, thread, runs);
+    }
+    cache.2.get(run_id).cloned().unwrap_or_default()
 }
 
 /// Whether an answer's image loads without a tap: a workspace file or a
