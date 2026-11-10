@@ -3,7 +3,8 @@
 - Status: Accepted; amends [0003](0003-what-pluto-is-to-become.md) (the dashboard as the home
   screen; glass not a setting of Pluto's own), [0009](0009-secrets-privacy-and-the-sandbox.md) and
   [0017](0017-pluto-measured-against-the-market.md) (safe images and icons of answers loaded), and
-  [0018](0018-the-markets-features-and-the-triage.md) (the terminal kept; family 1's direction)
+  [0018](0018-the-markets-features-and-the-triage.md) (the terminal kept; family 1's direction); amended
+  by [0024](0024-cuts-kept-in-the-egui-client-until-uwui.md) (three cuts kept in the egui client)
 - Date: 2026-11-10
 
 ## Context

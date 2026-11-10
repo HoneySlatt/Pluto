@@ -30,8 +30,9 @@ New ADRs copy the template below and take the next free number.
 | [0019](0019-a-code-editor-in-pluto.md) | A code editor in Pluto | Accepted; amends 0003 and 0009 |
 | [0020](0020-the-chat.md) | The chat | Accepted; amends 0003 |
 | [0021](0021-deepseek-harness-in-todays-pluto.md) | DeepSeek Harness in today's Pluto | Accepted; amends 0006 and 0010 |
-| [0022](0022-the-triage-row-by-row.md) | The triage, row by row | Accepted; amends 0003, 0009, 0017 and 0018 |
+| [0022](0022-the-triage-row-by-row.md) | The triage, row by row | Accepted; amends 0003, 0009, 0017 and 0018; amended by 0024 |
 | [0023](0023-the-specification-accepted.md) | The specification accepted | Accepted |
+| [0024](0024-cuts-kept-in-the-egui-client-until-uwui.md) | Cuts kept in the egui client until uwui | Accepted; amends 0022 |
 
 ## Template
 

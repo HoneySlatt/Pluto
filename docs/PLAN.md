@@ -212,6 +212,11 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   credentials. The Rust server does not port it ([ADR-0022](adr/0022-the-triage-row-by-row.md));
   the fork is frozen and changes only on the owner's word. Whether the fork's other quota probes
   read stored credentials is not checked.
+- Three cuts of the triage stay in the egui client until the uwui client replaces them, by the
+  owner's decision of 2026-11-10 ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)):
+  the action editor (`src/ui/action_editor.rs`), the evaluation of the bindings' when-clauses
+  (`src/ui/shortcuts.rs`) and the custom model editor's option descriptors
+  (`src/ui/custom_model_editor.rs`).
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 
