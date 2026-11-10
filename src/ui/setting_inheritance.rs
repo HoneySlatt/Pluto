@@ -2,18 +2,17 @@
 //! and the `inheritance` summary of `settingsLayout.tsx`): the layers button
 //! beside a server row's title, its summary tooltip, and the popover showing
 //! where the value comes from, top-down (the project override at a project
-//! scope, the environment, the repository's t3.json for file-backed keys, the
-//! built-in default), with the effective layer checked. At the environment
-//! scope it lists the projects overriding the row and resets them.
+//! scope, the environment, the built-in default), with the effective layer
+//! checked. At the environment scope it lists the projects overriding the row
+//! and resets them.
 
 use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::Value;
 
 use crate::app::App;
 use crate::theme::{self, Weight, font};
-use crate::ui::project_file::file_backed;
 use crate::ui::settings::default_server_setting;
-use crate::ui::settings_scope::is_project_scoped;
+use crate::ui::settings_scope::{built_in_project_default, is_project_scoped};
 use crate::ui::widgets;
 
 const WIDTH: f32 = 320.0;
@@ -32,7 +31,6 @@ struct Layer {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Source {
     Project,
-    File,
     Environment,
 }
 
@@ -101,7 +99,7 @@ fn layers(
     let scoped = is_project_scoped(key);
     let source = if scoped { source } else { Source::Environment };
     let environment_set = *environment != default_server_setting(key);
-    let builtin = file_backed(key).map(|(_, builtin)| Value::from(builtin));
+    let builtin = built_in_project_default(key).map(Value::from);
     let own = |layer: Source| {
         if source == layer {
             format_value(key, value)
@@ -128,14 +126,6 @@ fn layers(
         effective: source == Source::Environment && environment_set,
         set: environment_set,
     });
-    if builtin.is_some() && project {
-        layers.push(Layer {
-            label: "t3.json",
-            value: own(Source::File),
-            effective: source == Source::File,
-            set: source == Source::File,
-        });
-    }
     layers.push(Layer {
         label: "Default",
         value: format_value(key, &builtin.unwrap_or_else(|| default_server_setting(key))),
@@ -195,8 +185,6 @@ impl App {
     fn setting_source(&self, key: &str) -> Source {
         if self.project_source(key) {
             Source::Project
-        } else if self.project_file_source(key) {
-            Source::File
         } else {
             Source::Environment
         }
@@ -258,8 +246,6 @@ impl App {
             .any(|k| settings[*k] != default_server_setting(k));
         let summary = if sources == [Source::Project] {
             "Overridden for this project".to_owned()
-        } else if sources == [Source::File] {
-            "Inherited from the repository's t3.json".to_owned()
         } else if sources == [Source::Environment] {
             format!("Inherited from {environment_label}")
         } else if customized {
@@ -505,22 +491,21 @@ mod tests {
         );
         assert_eq!(chain[0].value, "New worktree");
         assert!(chain[0].effective);
-        assert_eq!(chain[2].label, "t3.json");
-        assert_eq!(chain[3].value, "Current checkout");
-        // The repository's t3.json fills an unset project and environment.
+        assert_eq!(chain[2].label, "Default");
+        assert_eq!(chain[2].value, "Current checkout");
+        // Unset everywhere, a project reads the built-in value.
         let chain = layers(
             "worktreeSubmodules",
             true,
-            Source::File,
-            &json!("none"),
+            Source::Environment,
+            &Value::Null,
             &Value::Null,
         );
         assert_eq!(chain[0].value, "Inherits");
         assert_eq!(
             (chain[2].value.as_str(), chain[2].effective),
-            ("Skip", true)
+            ("Recursive", true)
         );
-        assert!(!chain[3].effective);
         // Environment-wide keys have no project layer.
         let chain = layers(
             "enableProviderUpdateChecks",

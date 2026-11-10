@@ -27,6 +27,11 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 - The Providers page's usage limit hubs, which could not be added, and its health check interval;
   the server keeps checking providers at the interval it has.
 - Cursor as a provider. "Open in Cursor" stays.
+- The right panel's Agents, Device and pull request surfaces, and the Device settings.
+- The keybindings' when-clause builder. Bindings keep the conditions they have.
+- Reading the repository's `t3.json`: its scripts are no longer offered for import, and a project
+  that does not set where threads start or how submodules are handled uses the defaults (local,
+  recursive). Project actions are still added and edited from the action editor.
 
 ### Fixed
 

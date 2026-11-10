@@ -351,7 +351,6 @@ pub struct App {
     pub(crate) egui_ctx: Option<egui::Context>,
     /// The bottom terminal drawer per thread.
     pub(crate) drawers: std::collections::HashMap<String, crate::ui::terminal_drawer::Drawer>,
-    pub(crate) agents: crate::ui::agents_panel::AgentsState,
     pub(crate) keybinding_edit: Option<crate::ui::keybindings::KeybindingEdit>,
     pub(crate) new_keybinding: Option<crate::ui::keybindings::KeybindingEdit>,
     /// The open keybinding search and whether it still needs focus.
@@ -430,8 +429,6 @@ pub struct App {
     pub(crate) usage_open: bool,
     /// `server.discoverSourceControl` for the Source Control settings.
     pub(crate) discovery: crate::ui::source_control::Discovery,
-    /// The latest `subscribeDeviceState` value (Integrations settings).
-    pub(crate) device_state: Option<Value>,
     /// The instance open in the Providers settings editor.
     pub(crate) providers_selected: Option<String>,
     /// A `server.refreshProviders` from the Providers page is in flight.
@@ -483,8 +480,6 @@ pub(crate) enum PanelTab {
     Files {
         file: Option<String>,
     },
-    /// The thread's subagents.
-    Agents,
     /// The thread's linked pull requests.
     PullRequests,
     /// A Browser tab and its page in the preview browser.
@@ -523,7 +518,6 @@ pub(crate) fn panels_to_json(
                     Some(match tab {
                         PanelTab::Diff => json!({"kind": "diff"}),
                         PanelTab::Files { file } => json!({"kind": "files", "file": file}),
-                        PanelTab::Agents => json!({"kind": "agents"}),
                         PanelTab::PullRequests => json!({"kind": "pull-requests"}),
                         PanelTab::Design => json!({"kind": "design"}),
                         PanelTab::Terminal { id, number, split, active, vertical } => json!({
@@ -563,17 +557,17 @@ pub(crate) fn panels_from_json(
         .into_iter()
         .flatten()
         .map(|(thread, panel)| {
-            let tabs: Vec<PanelTab> = panel["tabs"]
+            // A tab of a kind no longer known (an Agents tab) is dropped.
+            let parsed: Vec<Option<PanelTab>> = panel["tabs"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(|tab| {
+                .map(|tab| {
                     Some(match tab["kind"].as_str()? {
                         "diff" => PanelTab::Diff,
                         "files" => PanelTab::Files {
                             file: tab["file"].as_str().map(str::to_owned),
                         },
-                        "agents" => PanelTab::Agents,
                         "pull-requests" => PanelTab::PullRequests,
                         "design" => PanelTab::Design,
                         "terminal" => PanelTab::Terminal {
@@ -592,8 +586,14 @@ pub(crate) fn panels_from_json(
                     })
                 })
                 .collect();
-            let active =
-                (panel["active"].as_u64().unwrap_or(0) as usize).min(tabs.len().saturating_sub(1));
+            let saved_active = panel["active"].as_u64().unwrap_or(0) as usize;
+            let dropped_before = parsed
+                .iter()
+                .take(saved_active)
+                .filter(|tab| tab.is_none())
+                .count();
+            let tabs: Vec<PanelTab> = parsed.into_iter().flatten().collect();
+            let active = (saved_active - dropped_before).min(tabs.len().saturating_sub(1));
             (
                 thread.clone(),
                 Panel {
@@ -869,7 +869,6 @@ impl App {
             drawers: crate::ui::terminal_drawer::drawers_from_json(
                 &read_ui_state(options.client_settings_path.as_deref())["terminalDrawers"],
             ),
-            agents: Default::default(),
             keybinding_edit: None,
             new_keybinding: None,
             keybinding_search: None,
@@ -915,7 +914,6 @@ impl App {
             settings_picker: None,
             usage_open: false,
             discovery: Default::default(),
-            device_state: None,
             providers_selected: None,
             providers_refreshing: false,
             usage: Default::default(),
@@ -2601,11 +2599,6 @@ impl App {
             if let Ok(list) = result {
                 self.discovered_servers = list["servers"].as_array().cloned().unwrap_or_default();
             }
-        } else if key == "device-state" {
-            // A stream: keep the last good state if it later fails or expires.
-            if let Ok(state) = result {
-                self.device_state = Some(state);
-            }
         } else if key == "source-control-discovery" {
             self.discovery.pending = false;
             self.discovery.result = Some(result);
@@ -2920,5 +2913,23 @@ mod thread_retry_tests {
         app.forget_server();
         assert!(app.terminal_metadata.is_empty());
         assert_eq!(opened(app), 1);
+    }
+
+    #[test]
+    fn a_saved_agents_tab_is_dropped_and_the_rest_of_the_panel_loads() {
+        let saved = serde_json::json!({
+            "thread-1": {
+                "open": true,
+                "maximized": false,
+                "tabs": [{"kind": "agents"}, {"kind": "diff"}, {"kind": "pull-requests"}],
+                "active": 1,
+            }
+        });
+        let panels = panels_from_json(&saved);
+        let panel = &panels["thread-1"];
+        assert!(panel.tabs == [PanelTab::Diff, PanelTab::PullRequests]);
+        assert!(panel.open);
+        // The saved active tab, Diff, stays the active one.
+        assert_eq!(panel.active, 0);
     }
 }

@@ -107,7 +107,7 @@ pub(crate) fn default_server_setting(key: &str) -> Value {
         "newWorktreesStartFromOrigin" => json!(true),
         "addProjectBaseDirectory" => json!(""),
         "defaultRuntimeMode" => json!("full-access"),
-        "defaultAutoPull" | "enableAgentDeviceAccess" | "enableDeviceSupport" => json!(false),
+        "defaultAutoPull" => json!(false),
         "enableAgentBrowserAccess" => json!(true),
         "defaultProjectScripts" => json!([]),
         "backgroundActivity" => json!({"schemaVersion": 1, "profile": "balanced", "overrides": {}}),
@@ -299,13 +299,6 @@ pub(crate) enum Control {
         label: &'static str,
         icon: &'static str,
         icon_size: f32,
-    },
-    /// `DeviceToolVersions` (16px muted) before a device switch; `enabled`
-    /// is false when the switch is disabled.
-    Tool {
-        label: String,
-        on: bool,
-        enabled: bool,
     },
     /// `Button variant="outline" size="xs"` with a leading icon.
     OutlineXs {
@@ -554,8 +547,8 @@ impl App {
             .to_owned();
         let new_threads = Section {
             title: "New threads".into(),
-                project: None,
-                unavailable: None,
+            project: None,
+            unavailable: None,
             rows: vec![
                 Row {
                     id: "default-model".into(),
@@ -606,7 +599,7 @@ impl App {
                     description: if project_scope {
                         "Where new threads in this project start."
                     } else {
-                        "Where new threads start. Projects and their t3.json can override it."
+                        "Where new threads start. Projects can override it."
                     }
                     .into(),
                     status: None,
@@ -625,7 +618,7 @@ impl App {
                     description: if project_scope {
                         "How new worktrees in this project populate git submodules."
                     } else {
-                        "How new worktrees populate git submodules. Projects and their t3.json can override it."
+                        "How new worktrees populate git submodules. Projects can override it."
                     }
                     .into(),
                     status: None,
@@ -1358,82 +1351,68 @@ impl App {
     fn row_children(&mut self, ui: &mut Ui, rect: Rect, row: &Row, extra: f32) {
         let top = rect.bottom() - extra;
         let left = rect.left() + ROW_PAD_X;
-        match row.id.as_str() {
-            "browser-profiles" => {
-                // The default profile in its bordered list (disabled here).
-                let list = Rect::from_min_size(
-                    Pos2::new(left, top + 8.0 - 12.0),
-                    Vec2::new(rect.width() - 2.0 * ROW_PAD_X, 42.0),
-                );
-                ui.painter().rect(
-                    list,
-                    CornerRadius::same(10),
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.0, theme::overlay(0.036)),
-                    StrokeKind::Inside,
-                );
-                let name_font = font(14.0, Weight::Regular);
-                let fade = |c: Color32| {
-                    if ui.is_enabled() {
-                        c
-                    } else {
-                        theme::alpha(c, 0.64)
-                    }
-                };
-                widgets::text(
-                    ui,
-                    Pos2::new(list.left() + 13.0, list.top() + 11.0),
-                    "Default",
-                    name_font.clone(),
-                    fade(theme::foreground()),
-                    20.0,
-                );
-                let badge_x =
-                    list.left() + 13.0 + widgets::text_width(ui, "Default", name_font) + 8.0;
-                let badge_font = font(12.0, Weight::Medium);
-                let badge = Rect::from_min_size(
-                    Pos2::new(badge_x, list.top() + 12.0),
-                    Vec2::new(
-                        widgets::text_width(ui, "Default", badge_font.clone()) + 8.0,
-                        18.0,
-                    ),
-                );
-                ui.painter()
-                    .rect_filled(badge, CornerRadius::same(6), fade(theme::primary()));
-                widgets::text_in(
-                    ui,
-                    Rect::from_min_max(Pos2::new(badge.left() + 4.0, badge.top()), badge.max),
-                    "Default",
-                    badge_font,
-                    fade(Color32::WHITE),
-                );
-                theme::paint_icon(
-                    ui,
-                    "ellipsis-vertical",
-                    Rect::from_min_size(
-                        Pos2::new(list.right() - 37.0, list.top() + 9.0),
-                        Vec2::splat(24.0),
-                    ),
-                    14.0,
-                    fade(theme::muted_foreground()),
-                );
-            }
-            "device-hosts" => {
-                widgets::text(
-                    ui,
-                    Pos2::new(left, top + 12.0 - 12.0 + 8.0),
-                    "No device hosts.",
-                    font(14.0, Weight::Regular),
-                    theme::muted_foreground(),
-                    20.0,
-                );
-            }
-            _ => {}
+        if row.id == "browser-profiles" {
+            // The default profile in its bordered list (disabled here).
+            let list = Rect::from_min_size(
+                Pos2::new(left, top + 8.0 - 12.0),
+                Vec2::new(rect.width() - 2.0 * ROW_PAD_X, 42.0),
+            );
+            ui.painter().rect(
+                list,
+                CornerRadius::same(10),
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, theme::overlay(0.036)),
+                StrokeKind::Inside,
+            );
+            let name_font = font(14.0, Weight::Regular);
+            let fade = |c: Color32| {
+                if ui.is_enabled() {
+                    c
+                } else {
+                    theme::alpha(c, 0.64)
+                }
+            };
+            widgets::text(
+                ui,
+                Pos2::new(list.left() + 13.0, list.top() + 11.0),
+                "Default",
+                name_font.clone(),
+                fade(theme::foreground()),
+                20.0,
+            );
+            let badge_x = list.left() + 13.0 + widgets::text_width(ui, "Default", name_font) + 8.0;
+            let badge_font = font(12.0, Weight::Medium);
+            let badge = Rect::from_min_size(
+                Pos2::new(badge_x, list.top() + 12.0),
+                Vec2::new(
+                    widgets::text_width(ui, "Default", badge_font.clone()) + 8.0,
+                    18.0,
+                ),
+            );
+            ui.painter()
+                .rect_filled(badge, CornerRadius::same(6), fade(theme::primary()));
+            widgets::text_in(
+                ui,
+                Rect::from_min_max(Pos2::new(badge.left() + 4.0, badge.top()), badge.max),
+                "Default",
+                badge_font,
+                fade(Color32::WHITE),
+            );
+            theme::paint_icon(
+                ui,
+                "ellipsis-vertical",
+                Rect::from_min_size(
+                    Pos2::new(list.right() - 37.0, list.top() + 9.0),
+                    Vec2::splat(24.0),
+                ),
+                14.0,
+                fade(theme::muted_foreground()),
+            );
         }
     }
 
     /// `IntegrationsSettingsPanel` outside the desktop app: agent browser
-    /// access, the device-local browser defaults (unavailable), and devices.
+    /// access and the device-local browser defaults (unavailable).
     fn integrations_sections(&self) -> Vec<Section> {
         let row = |id: &str, title: &str, description: &str, layers: bool, control: Control| Row {
             id: id.into(),
@@ -1463,32 +1442,6 @@ impl App {
             Control::Switch(browser_access),
         );
         access_row.reset = !browser_access;
-        // `DeviceToolVersions` for the local host's hub and agent tools.
-        let tools = self
-            .device_state
-            .as_ref()
-            .and_then(|state| state["hosts"].as_array())
-            .and_then(|hosts| hosts.iter().find(|h| h["kind"] == "local"))
-            .map(|host| host["tools"].clone());
-        let tool_label = |kind: &str| -> String {
-            let Some(tool) = tools.as_ref().map(|t| &t[kind]).filter(|t| t.is_object()) else {
-                return "Version unknown".into();
-            };
-            let installed: Vec<&str> = tool["installedVersions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .collect();
-            let required = tool["requiredVersion"].as_str().unwrap_or_default();
-            let version = tool["runningVersion"]
-                .as_str()
-                .or_else(|| installed.contains(&required).then_some(required))
-                .or_else(|| installed.iter().max_by(|a, b| natural_cmp(a, b)).copied());
-            version.map_or_else(|| "Not installed".into(), |v| format!("v{v}"))
-        };
-        let hub = self.server_setting("enableDeviceSupport") == true;
-        let agent = self.server_setting("enableAgentDeviceAccess") == true;
         vec![
             Section {
                 title: "Browser".into(),
@@ -1564,49 +1517,9 @@ impl App {
                     row(
                         "browser-auto-show-floating-preview",
                         "Auto-show floating preview",
-                        "Show the floating preview when an agent opens a browser or device unless the agent says otherwise.",
+                        "Show the floating preview when an agent opens a browser unless the agent says otherwise.",
                         false,
                         Control::Switch(true),
-                    ),
-                ],
-            },
-            Section {
-                title: "Devices".into(),
-                project: None,
-                unavailable: None,
-                rows: vec![
-                    row(
-                        "device-hub",
-                        "Device hub",
-                        "Enable this environment to open simulators and emulators, whether they run here or on a remote device host.",
-                        true,
-                        Control::Tool {
-                            label: tool_label("hub"),
-                            on: hub,
-                            enabled: self.device_state.is_some(),
-                        },
-                    ),
-                    row(
-                        "agent-device-access",
-                        "Agent device access",
-                        "Allow new agent sessions in this environment to start and control local and remote devices, with required tools set up automatically.",
-                        true,
-                        Control::Tool {
-                            label: tool_label("agent"),
-                            on: agent,
-                            enabled: hub,
-                        },
-                    ),
-                    row(
-                        "device-hosts",
-                        "Device hosts",
-                        "Add remote machines with simulator or emulator runtimes installed, and the selected environments will connect over SSH and set up device tools automatically.",
-                        true,
-                        Control::OutlineIcon {
-                            label: "Add host",
-                            icon: "plus",
-                            icon_size: 14.0,
-                        },
                     ),
                 ],
             },
@@ -1621,17 +1534,8 @@ impl App {
             ("agent-browser-access", RowAction::Reset) => {
                 self.update_setting(Store::Server, "enableAgentBrowserAccess", json!(true))
             }
-            // Turning the hub on installs device tools on the server; not ported.
-            ("device-hub" | "agent-device-access" | "device-hosts", _) => self.notify(
-                crate::ui::toasts::Kind::Info,
-                "Device setup is not implemented yet",
-            ),
             _ => {}
         }
-    }
-
-    pub(crate) fn request_device_state(&mut self) {
-        self.send_request("device-state".into(), "subscribeDeviceState", json!({}));
     }
 
     /// `ConnectionsSettings`' Environments section with no saved remote
@@ -2292,10 +2196,6 @@ impl App {
         let Some(page) = self.settings_page else {
             return;
         };
-        // `useMemberProjectFiles`: a project scope reads the repository's t3.json.
-        if let Some(project) = self.settings_project() {
-            self.request_project_file(&project.workspace_root);
-        }
         // Popovers and the custom model field take Escape first (`preventDefault`).
         let overlay = self.open_menu.is_some()
             || self.archive_menu.is_some()
@@ -2410,9 +2310,6 @@ impl App {
         self.settings_page = Some(index);
         if index == ARCHIVE_PAGE {
             self.request_archived();
-        }
-        if index == INTEGRATIONS_PAGE {
-            self.request_device_state();
         }
         if index == SOURCE_CONTROL_PAGE && !self.discovery.pending {
             self.request_discovery();
@@ -3392,28 +3289,6 @@ impl App {
                 );
                 response.clicked().then_some(RowAction::Click)
             }
-            Control::Tool { label, on, enabled } => {
-                let label_font = font(16.0, Weight::Medium);
-                let width = widgets::text_width(ui, label, label_font.clone());
-                widgets::text(
-                    ui,
-                    Pos2::new(right - 38.0 - width, center_y - 12.0),
-                    label,
-                    label_font,
-                    theme::muted_foreground(),
-                    24.0,
-                );
-                let clicked = ui
-                    .scope(|ui| {
-                        if !enabled {
-                            ui.visuals_mut().disabled_alpha = 0.64;
-                            ui.disable();
-                        }
-                        switch(ui, right, center_y, *on, &row.id)
-                    })
-                    .inner;
-                (clicked && *enabled).then_some(RowAction::Toggle(!on))
-            }
             Control::ProjectIcon(project) => {
                 let mut x = right;
                 let mut chosen = None;
@@ -3669,9 +3544,6 @@ fn control_width(ui: &Ui, control: &Control) -> f32 {
         Control::OutlineIcon {
             label, icon_size, ..
         } => outline_icon_width(ui, label, *icon_size),
-        Control::Tool { label, .. } => {
-            38.0 + widgets::text_width(ui, label, font(16.0, Weight::Medium))
-        }
         Control::ProjectIcon(_) => {
             let button =
                 |label: &str| widgets::text_width(ui, label, font(14.0, Weight::Medium)) + 20.0;
@@ -3712,12 +3584,10 @@ pub(crate) fn row_height(ui: &Ui, row: &Row, card_width: f32) -> f32 {
     height + row_children_height(row) + 1.0
 }
 
-/// Content under a row's header: the browser profile list (`mt-2`, 42) or
-/// the device host list (`mt-3`, "No device hosts." with `py-2`).
+/// Content under a row's header: the browser profile list (`mt-2`, 42).
 fn row_children_height(row: &Row) -> f32 {
     match row.id.as_str() {
         "browser-profiles" => 8.0 + 42.0,
-        "device-hosts" => 12.0 + 36.0,
         _ => 0.0,
     }
 }
@@ -4030,7 +3900,7 @@ fn when_expression(node: &Value) -> String {
 
 impl App {
     /// `KeybindingsSettings`: the bindings, sorted by command, with their
-    /// when clause and keys; shortcuts edit in place (see `keybindings`).
+    /// keys; shortcuts edit in place (see `keybindings`).
     /// The JSON file action is not ported.
     fn keybindings_list(&mut self, ui: &mut Ui, left: f32, mut y: f32) -> f32 {
         let mut rows =
@@ -4063,7 +3933,6 @@ impl App {
                     row.command.to_lowercase().contains(&query)
                         || command_label(&row.command).to_lowercase().contains(&query)
                         || row.key.to_lowercase().contains(&query)
-                        || row.when.to_lowercase().contains(&query)
                         || source.contains(&query)
                 });
             }
@@ -4237,20 +4106,18 @@ impl App {
                 Stroke::NONE,
                 StrokeKind::Inside,
             );
-            let inner_top = row.top() + ROW_PAD_Y;
             let text_left = row.left() + ROW_PAD_X;
+            let center_y = row.top() + 36.0 - 0.5;
             widgets::text_in(
                 ui,
-                Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(300.0, 20.0)),
+                Rect::from_min_size(
+                    Pos2::new(text_left, center_y - 10.0),
+                    Vec2::new(300.0, 20.0),
+                ),
                 "New keybinding",
                 font(14.0, Weight::Medium),
                 theme::foreground(),
             );
-            if let Some(edit) = &self.new_keybinding {
-                let placeholder = edit.new_row();
-                self.keybinding_when(ui, &placeholder, text_left, inner_top + 24.0);
-            }
-            let center_y = row.top() + 36.0 - 0.5;
             self.new_keybinding_control(ui, &all_rows, row.right() - ROW_PAD_X, center_y);
         }
         let mut anchored = std::collections::HashSet::new();
@@ -4266,7 +4133,8 @@ impl App {
             if !ui.is_rect_visible(row) {
                 continue;
             }
-            let inner_top = row.top() + if index == 0 { 0.0 } else { 1.0 } + ROW_PAD_Y;
+            let center_y = row.top() + (if index == 0 { 0.0 } else { 1.0 }) + 36.0
+                - if index == 0 { 0.5 } else { 0.0 };
             if index > 0 {
                 ui.painter().rect_filled(
                     Rect::from_min_size(row.min, Vec2::new(row.width(), 1.0)),
@@ -4281,7 +4149,10 @@ impl App {
             let text_left = row.left() + ROW_PAD_X;
             let title_width = widgets::text_in(
                 ui,
-                Rect::from_min_size(Pos2::new(text_left, inner_top), Vec2::new(600.0, 20.0)),
+                Rect::from_min_size(
+                    Pos2::new(text_left, center_y - 10.0),
+                    Vec2::new(600.0, 20.0),
+                ),
                 &command_label(command),
                 font(14.0, Weight::Medium),
                 theme::foreground(),
@@ -4296,7 +4167,7 @@ impl App {
                 let width =
                     (widgets::text_width(ui, label, font(10.0, Weight::Medium)) + 8.0).ceil();
                 let badge = Rect::from_min_size(
-                    Pos2::new(text_left + title_width + 8.0, inner_top + 2.0),
+                    Pos2::new(text_left + title_width + 8.0, center_y - 8.0),
                     Vec2::new(width, 16.0),
                 );
                 ui.painter().rect(
@@ -4314,12 +4185,8 @@ impl App {
                     theme::foreground(),
                 );
             }
-            // "When" line (h-6): label, then the clause button.
-            self.keybinding_when(ui, kb, text_left, inner_top + 24.0);
             // Keys: `KbdGroup` chips inside a 28px ghost button.
             let right = row.right() - ROW_PAD_X;
-            let center_y = row.top() + (if index == 0 { 0.0 } else { 1.0 }) + 36.0
-                - if index == 0 { 0.5 } else { 0.0 };
             self.keybinding_control(ui, row, kb, right, center_y);
         }
         card.bottom()
@@ -4465,36 +4332,6 @@ mod tests {
     }
 }
 
-/// `localeCompare(…, { numeric: true })` for version strings: digit runs
-/// compare by value, everything else by character.
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let chunks = |s: &str| -> Vec<(bool, String)> {
-        let mut out: Vec<(bool, String)> = Vec::new();
-        for c in s.chars() {
-            let digit = c.is_ascii_digit();
-            match out.last_mut() {
-                Some((d, run)) if *d == digit => run.push(c),
-                _ => out.push((digit, c.to_string())),
-            }
-        }
-        out
-    };
-    for (x, y) in chunks(a).iter().zip(chunks(b).iter()) {
-        let order = match (x, y) {
-            ((true, x), (true, y)) => x
-                .trim_start_matches('0')
-                .len()
-                .cmp(&y.trim_start_matches('0').len())
-                .then_with(|| x.trim_start_matches('0').cmp(y.trim_start_matches('0'))),
-            ((_, x), (_, y)) => x.cmp(y),
-        };
-        if order.is_ne() {
-            return order;
-        }
-    }
-    chunks(a).len().cmp(&chunks(b).len())
-}
-
 /// `formatBytes`: binary units, two significant decimals below 10.
 fn format_bytes(value: f64) -> String {
     if value < 1024.0 {
@@ -4519,15 +4356,7 @@ fn format_bytes(value: f64) -> String {
 }
 
 #[cfg(test)]
-mod natural_tests {
-    #[test]
-    fn versions_compare_numerically() {
-        use std::cmp::Ordering::*;
-        assert_eq!(super::natural_cmp("0.12.0", "0.9.3"), Greater);
-        assert_eq!(super::natural_cmp("1.2", "1.2.1"), Less);
-        assert_eq!(super::natural_cmp("2.0", "2.0"), Equal);
-    }
-
+mod bytes_tests {
     #[test]
     fn bytes_read_in_binary_units() {
         assert_eq!(super::format_bytes(512.0), "512 B");

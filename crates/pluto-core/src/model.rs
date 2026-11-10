@@ -31,8 +31,8 @@ pub struct Project {
     pub project_icon: Option<Value>,
     pub favicon_path: Option<String>,
     pub default_model_selection: Option<Value>,
-    /// Where new threads start (`ThreadEnvMode`); `None` defers to t3.json,
-    /// then the global setting.
+    /// Where new threads start (`ThreadEnvMode`); `None` defers to the
+    /// global setting.
     pub default_thread_env_mode: Option<String>,
     pub auto_pull: Option<bool>,
     /// `RepositoryIdentity` (canonical key, root path, names), kept as sent.

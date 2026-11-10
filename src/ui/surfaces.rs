@@ -1,6 +1,5 @@
 //! Right-panel surfaces (`RightPanelTabs.tsx`): the "Open a surface" launcher
-//! an empty panel shows and the tab bar's "+" menu. Only the Diff surface is
-//! rendered here; the others report that they are not implemented.
+//! an empty panel shows and the tab bar's "+" menu.
 use eframe::egui::{CornerRadius, Key, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::app::App;
@@ -16,7 +15,7 @@ struct Surface {
     hint: &'static str,
 }
 
-const SURFACES: [Surface; 9] = [
+const SURFACES: [Surface; 6] = [
     Surface {
         label: "Browser",
         icon: "earth",
@@ -46,32 +45,11 @@ const SURFACES: [Surface; 9] = [
         hint: "Available for Git repositories.",
     },
     Surface {
-        label: "Pull request",
-        icon: "git-pull-request-arrow",
-        shortcut: "P",
-        key: Key::P,
-        hint: "No pull request on this branch yet.",
-    },
-    Surface {
         label: "Linked pull requests",
         icon: "link-2",
         shortcut: "L",
         key: Key::L,
         hint: "No linked pull requests available.",
-    },
-    Surface {
-        label: "Agents",
-        icon: "bot",
-        shortcut: "A",
-        key: Key::A,
-        hint: "Available from a thread.",
-    },
-    Surface {
-        label: "Device",
-        icon: "smartphone",
-        shortcut: "M",
-        key: Key::M,
-        hint: "Available from a thread.",
     },
     // Pluto: the thread's published pages (`crate::ui::design`).
     Surface {
@@ -90,14 +68,13 @@ const WIDTH: f32 = 320.0; // max-w-xs
 
 impl App {
     /// Which surfaces can open: the browser needs the desktop app, pull
-    /// request surfaces need a linked pull request, the diff a repository.
+    /// request surface needs a linked pull request, the diff a repository.
     fn surface_available(&self, surface: &Surface) -> bool {
         match surface.label {
             // The browser needs a Chromium-based browser to run headless.
             "Browser" => {
                 self.server_browser_enabled() || crate::preview::browser_binary().is_some()
             }
-            "Pull request" => false,
             // `pullRequestsSurfaceAvailable`.
             "Linked pull requests" => {
                 self.links_pull_requests() && self.linked_pull_request_count() > 0
@@ -150,27 +127,16 @@ impl App {
             if let Some(ctx) = self.egui_ctx.clone() {
                 self.open_browser_tab(&ctx, None);
             }
-        } else if label == "Agents" {
-            if let Some(panel) = self.panel_mut() {
-                panel.show(crate::app::PanelTab::Agents, |t| {
-                    *t == crate::app::PanelTab::Agents
-                });
-            }
         } else if label == "Linked pull requests" {
             self.show_linked_pull_requests();
         } else if label == "Design" {
             self.open_design(None);
-        } else if label == "Files" {
-            if let Some(panel) = self.panel_mut() {
-                panel.show(crate::app::PanelTab::Files { file: None }, |t| {
-                    matches!(t, crate::app::PanelTab::Files { .. })
-                });
-            }
-        } else {
-            self.notify(
-                crate::ui::toasts::Kind::Info,
-                format!("The {label} surface is not implemented yet"),
-            );
+        } else if label == "Files"
+            && let Some(panel) = self.panel_mut()
+        {
+            panel.show(crate::app::PanelTab::Files { file: None }, |t| {
+                matches!(t, crate::app::PanelTab::Files { .. })
+            });
         }
     }
 
@@ -331,7 +297,6 @@ impl App {
         for (index, tab) in panel.tabs.iter().enumerate() {
             let (label, icon, tint) = match tab {
                 crate::app::PanelTab::Diff => ("Diff".to_owned(), "file-diff", theme::foreground()),
-                crate::app::PanelTab::Agents => ("Agents".to_owned(), "bot", theme::foreground()),
                 crate::app::PanelTab::PullRequests => {
                     ("Pull requests".to_owned(), "link-2", theme::foreground())
                 }

@@ -17,10 +17,10 @@ use serde_json::{Map, Value, json};
 use crate::app::App;
 use crate::model::Project;
 use crate::theme::{self, Weight, font};
-use crate::ui::{project_file, project_icon, widgets};
+use crate::ui::{project_icon, widgets};
 
 /// `PROJECT_SCOPED_SERVER_SETTING_KEYS`.
-pub(crate) const PROJECT_SCOPED_KEYS: [&str; 18] = [
+pub(crate) const PROJECT_SCOPED_KEYS: [&str; 17] = [
     "worktreeCleanup",
     "defaultModelSelection",
     "defaultRuntimeMode",
@@ -30,7 +30,6 @@ pub(crate) const PROJECT_SCOPED_KEYS: [&str; 18] = [
     "defaultAutoPull",
     "defaultProjectScripts",
     "enableAgentBrowserAccess",
-    "enableAgentDeviceAccess",
     "textGenerationModelSelection",
     "sourceControlWriterModelSelection",
     "sourceControlWritingStyle",
@@ -51,6 +50,16 @@ const NULLABLE_OVERRIDES: [&str; 4] = [
 
 pub(crate) fn is_project_scoped(key: &str) -> bool {
     PROJECT_SCOPED_KEYS.contains(&key)
+}
+
+/// The value a project reads for a project-scoped setting that neither the
+/// project nor the environment sets.
+pub(crate) fn built_in_project_default(key: &str) -> Option<&'static str> {
+    match key {
+        "defaultThreadEnvMode" => Some("local"),
+        "worktreeSubmodules" => Some("recursive"),
+        _ => None,
+    }
 }
 
 /// The server keys behind a settings row (the rows' `settingKeys`), for
@@ -80,8 +89,6 @@ pub(crate) fn row_server_keys(id: &str) -> &'static [&'static str] {
         "source-control-writer-model" => &["sourceControlWriterModelSelection"],
         "project-actions" => &["defaultProjectScripts"],
         "agent-browser-access" => &["enableAgentBrowserAccess"],
-        "agent-device-access" => &["enableAgentDeviceAccess"],
-        "device-hub" => &["enableDeviceSupport"],
         // Storage's retention and worktree rules (`storageCleanup`); the
         // project-scope worktree mode of `StorageSettings` is not ported.
         "worktreeOnDelete"
@@ -121,8 +128,8 @@ impl App {
 
     /// `resolveProjectSettings`: the environment settings with the scoped
     /// project's overrides applied (a model on a disabled provider falls
-    /// back to the environment value); once the repository's t3.json is
-    /// read, file-backed keys left unset take its value, else the built-in.
+    /// back to the environment value); keys with a built-in value that are
+    /// left unset take it.
     pub(crate) fn scoped_settings(&self) -> Value {
         let settings = self.state.config["settings"].clone();
         let Some(project) = self.settings_project() else {
@@ -147,39 +154,14 @@ impl App {
             }
             effective[key] = value.clone();
         }
-        if let Some(file) = self.project_file(&project.workspace_root) {
-            for key in PROJECT_SCOPED_KEYS {
-                let Some((field, builtin)) = project_file::file_backed(key) else {
-                    continue;
-                };
-                if effective[key].is_null() {
-                    effective[key] = file
-                        .as_ref()
-                        .and_then(|f| f.get(field).cloned())
-                        .unwrap_or_else(|| Value::from(builtin));
-                }
+        for key in PROJECT_SCOPED_KEYS {
+            if effective[key].is_null()
+                && let Some(builtin) = built_in_project_default(key)
+            {
+                effective[key] = Value::from(builtin);
             }
         }
         effective
-    }
-
-    /// Whether `key`'s effective value comes from the repository's t3.json
-    /// (`resolveProjectFileBackedSetting`'s "t3.json" source).
-    pub(crate) fn project_file_source(&self, key: &str) -> bool {
-        let Some(project) = self.settings_project() else {
-            return false;
-        };
-        let Some((field, _)) = project_file::file_backed(key) else {
-            return false;
-        };
-        let settings = &self.state.config["settings"];
-        let set = |value: Option<&Value>| value.is_some_and(|v| !v.is_null());
-        !set(settings["projectSettingsOverrides"][&project.id].get(key))
-            && !set(settings.get(key))
-            && self
-                .project_file(&project.workspace_root)
-                .flatten()
-                .is_some_and(|file| file.get(field).is_some())
     }
 
     /// `resolveProjectSettings(settings, project.id, project).settings

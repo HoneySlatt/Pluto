@@ -3,8 +3,8 @@
 //! Save upserts it with `server.upsertKeybinding`, and custom bindings offer
 //! Reset to default and Remove (`server.removeKeybinding`).
 //!
-//! The when clause opens its builder (`when_builder`); the header adds
-//! bindings (`NewKeybindingSettingsRow`) and searches them.
+//! The header adds bindings (`NewKeybindingSettingsRow`) and searches them.
+//! A binding keeps the when clause it has; saving sends it back unchanged.
 //!
 //! Conflicts show their warning icon only.
 use eframe::egui::{
@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 use crate::app::App;
 use crate::theme::{self, Weight, font};
 use crate::ui::settings::command_label;
-use crate::ui::when_builder::{self, When, WhenDraft};
 use crate::ui::widgets;
 
 /// One resolved binding as the page lists it (`KeybindingRow`).
@@ -24,7 +23,6 @@ pub(crate) struct KbRow {
     pub command: String,
     pub key: String,
     pub when: String,
-    pub when_ast: Value,
     /// `Custom` (not a default); project script bindings count too.
     pub custom: bool,
     pub default_key: Option<String>,
@@ -35,13 +33,11 @@ pub(crate) struct KbRow {
 /// The id of the add-binding row.
 pub(crate) const NEW_ROW: &str = "new";
 
-/// The row whose shortcut or when clause is being edited, or the new binding.
+/// The row whose shortcut is being edited, or the new binding.
 pub struct KeybindingEdit {
     row: String,
     draft: String,
     recording: bool,
-    when: WhenDraft,
-    when_open: bool,
     /// The new binding's command.
     command: Option<String>,
     command_open: bool,
@@ -53,8 +49,6 @@ impl KeybindingEdit {
             row: row.id.clone(),
             draft: row.key.clone(),
             recording: false,
-            when: WhenDraft::new(When::from_value(&row.when_ast)),
-            when_open: false,
             command: None,
             command_open: false,
         }
@@ -66,8 +60,6 @@ impl KeybindingEdit {
             row: NEW_ROW.into(),
             draft: String::new(),
             recording: false,
-            when: WhenDraft::new(None),
-            when_open: false,
             command: None,
             command_open: false,
         }
@@ -80,7 +72,6 @@ impl KeybindingEdit {
             command: self.command.clone().unwrap_or_default(),
             key: String::new(),
             when: String::new(),
-            when_ast: Value::Null,
             custom: false,
             default_key: None,
             default_when: String::new(),
@@ -89,13 +80,8 @@ impl KeybindingEdit {
     }
 
     fn dirty(&self, row: &KbRow) -> bool {
-        self.draft != row.key || self.when.expression() != row.when
+        self.draft != row.key
     }
-}
-
-/// `DEFAULT_KEYBINDINGS` as (key, command, when).
-pub(crate) fn default_whens() -> &'static [(&'static str, &'static str, &'static str)] {
-    DEFAULTS
 }
 
 /// `shortcutToKeybindingInput`: `{modKey, shiftKey, key: "k"}` reads `mod+shift+k`.
@@ -183,7 +169,6 @@ pub(crate) fn build_rows(bindings: &Value, when_expression: fn(&Value) -> String
                 custom: command.starts_with("script.") || !is_default,
                 default_key: default.map(|(k, _, _)| (*k).to_owned()),
                 default_when: default.map(|(_, _, w)| (*w).to_owned()).unwrap_or_default(),
-                when_ast: binding["whenAst"].clone(),
                 command,
                 key,
                 when,
@@ -298,17 +283,10 @@ impl App {
             .keybinding_edit
             .as_ref()
             .filter(|edit| edit.row == row.id)
-            .map(|edit| {
-                (
-                    edit.draft.clone(),
-                    edit.recording,
-                    edit.dirty(row),
-                    edit.when.valid,
-                )
-            });
+            .map(|edit| (edit.draft.clone(), edit.recording, edit.dirty(row)));
         let mut x;
         match &editing {
-            Some((draft, recording, dirty, valid)) if *recording || *dirty => {
+            Some((draft, recording, dirty)) if *recording || *dirty => {
                 let input = Rect::from_min_size(
                     Pos2::new(right - 176.0, center_y - 14.0),
                     Vec2::new(176.0, 28.0),
@@ -341,19 +319,14 @@ impl App {
                         font(14.0, Weight::Medium),
                         egui::Color32::WHITE,
                     );
-                    let when = self
-                        .keybinding_edit
-                        .as_ref()
-                        .map(|edit| edit.when.expression())
-                        .unwrap_or_default();
-                    if response.clicked() && *valid && !draft.trim().is_empty() {
+                    if response.clicked() && !draft.trim().is_empty() {
                         let mut payload = json!({
                             "command": row.command,
                             "key": draft,
                             "replace": target(row),
                         });
-                        if !when.trim().is_empty() {
-                            payload["when"] = json!(when);
+                        if !row.when.trim().is_empty() {
+                            payload["when"] = json!(row.when);
                         }
                         self.send_request(
                             "keybinding-save".into(),
@@ -516,128 +489,6 @@ impl App {
         }
     }
 
-    /// `KeybindingRowWhen`: "When" and the clause button, which opens the
-    /// builder popover (`WhenClauseControl`).
-    pub(crate) fn keybinding_when(&mut self, ui: &mut Ui, row: &KbRow, left: f32, top: f32) {
-        widgets::text_in(
-            ui,
-            Rect::from_min_size(Pos2::new(left, top), Vec2::new(40.0, 24.0)),
-            "When",
-            font(12.0, Weight::Regular),
-            theme::alpha(theme::muted_foreground(), 0.7),
-        );
-        let editing = self
-            .edit_slot(&row.id)
-            .as_ref()
-            .filter(|edit| edit.row == row.id);
-        let expression = editing.map_or(row.when.clone(), |edit| edit.when.expression());
-        let open = editing.is_some_and(|edit| edit.when_open);
-        let label = if expression.is_empty() {
-            "Always"
-        } else {
-            expression.as_str()
-        };
-        let mono = egui::FontId::monospace(11.0);
-        let label_width = widgets::text_width(ui, label, mono.clone());
-        let clause = Rect::from_min_size(
-            Pos2::new(left + 38.0, top + 2.0),
-            Vec2::new(label_width + 6.0 + 4.0 + 14.0 + 6.0, 20.0),
-        );
-        let response = ui.interact(
-            clause,
-            ui.id().with(("keybinding-when", &row.id)),
-            Sense::click(),
-        );
-        if response.hovered() || open {
-            ui.painter()
-                .rect_filled(clause, CornerRadius::same(6), theme::accent());
-        }
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(clause.left() + 6.0, clause.top()), clause.max),
-            label,
-            mono,
-            if expression.is_empty() {
-                theme::muted_foreground()
-            } else {
-                theme::foreground()
-            },
-        );
-        theme::paint_icon(
-            ui,
-            "chevron-down",
-            Rect::from_min_size(
-                Pos2::new(clause.left() + 6.0 + label_width + 2.0, clause.top()),
-                Vec2::new(14.0, 20.0),
-            ),
-            14.0,
-            theme::muted_foreground(),
-        );
-        if response.clicked() {
-            let slot = self.edit_slot(&row.id);
-            if open {
-                if let Some(edit) = slot {
-                    edit.when_open = false;
-                }
-            } else {
-                let mut edit = match slot.take() {
-                    Some(edit) if edit.row == row.id => edit,
-                    _ => KeybindingEdit::new(row),
-                };
-                edit.when_open = true;
-                edit.recording = false;
-                *slot = Some(edit);
-            }
-        }
-        if open {
-            self.when_popover(ui, row, clause);
-        }
-    }
-
-    /// The builder in a popover under the clause button.
-    fn when_popover(&mut self, ui: &mut Ui, row: &KbRow, clause: Rect) {
-        let slot = self.edit_slot(&row.id);
-        let Some(edit) = slot.as_mut() else {
-            return;
-        };
-        let height = when_builder::builder_height(ui, &edit.when);
-        let popup = Rect::from_min_size(
-            Pos2::new(clause.left(), clause.bottom() + 6.0),
-            Vec2::new(when_builder::WIDTH, height),
-        );
-        let mut close = false;
-        egui::Area::new(ui.id().with(("when-popover", &row.id)))
-            .order(egui::Order::Foreground)
-            .fixed_pos(popup.min)
-            .show(ui.ctx(), |ui| {
-                ui.painter().rect(
-                    popup,
-                    CornerRadius::same(10),
-                    theme::popover(),
-                    Stroke::new(1.0, theme::alpha(theme::foreground(), 0.1)),
-                    StrokeKind::Inside,
-                );
-                let had_menu = edit.when.menu_open();
-                when_builder::builder(ui, popup, &mut edit.when);
-                let outside = ui
-                    .input(|i| i.pointer.any_click().then(|| i.pointer.interact_pos()))
-                    .flatten()
-                    .is_some_and(|pos| !popup.contains(pos) && !clause.contains(pos));
-                if outside && !had_menu {
-                    close = true;
-                }
-            });
-        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            close = true;
-        }
-        if close {
-            edit.when_open = false;
-            if row.id != NEW_ROW && !edit.dirty(row) {
-                *slot = None;
-            }
-        }
-    }
-
     /// The shortcut input (`Input font="mono"`): "Press shortcut" while
     /// recording, the draft otherwise; a click records, a click elsewhere stops.
     fn capture_input(
@@ -725,8 +576,7 @@ impl App {
             edit.command.clone(),
             edit.command_open,
         );
-        let when = edit.when.expression();
-        let can_save = command.is_some() && !draft.trim().is_empty() && edit.when.valid;
+        let can_save = command.is_some() && !draft.trim().is_empty();
 
         let cancel =
             Rect::from_min_size(Pos2::new(right - 28.0, center_y - 14.0), Vec2::splat(28.0));
@@ -783,10 +633,7 @@ impl App {
         if response.clicked()
             && let Some(command) = &command
         {
-            let mut payload = json!({"command": command, "key": draft});
-            if !when.trim().is_empty() {
-                payload["when"] = json!(when);
-            }
+            let payload = json!({"command": command, "key": draft});
             self.send_request("keybinding-save".into(), "server.upsertKeybinding", payload);
             self.new_keybinding = None;
             return;
@@ -797,7 +644,7 @@ impl App {
         );
         self.capture_input(ui, &row, input, &draft, recording);
         let mut x = input.left() - 8.0;
-        let conflicts = conflict_labels(rows, NEW_ROW, &draft, &when);
+        let conflicts = conflict_labels(rows, NEW_ROW, &draft, "");
         if !conflicts.is_empty() {
             let icon = Rect::from_min_size(Pos2::new(x - 20.0, center_y - 10.0), Vec2::splat(20.0));
             theme::paint_icon(

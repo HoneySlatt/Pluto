@@ -180,17 +180,6 @@ impl App {
                 control: Control::None,
             });
         }
-        if self.project_file_invalid(&project.workspace_root) {
-            rows.push(Row {
-                id: "t3-invalid".into(),
-                title: "t3.json is invalid".into(),
-                description: "A t3.json exists in this checkout but fails to parse, so every action and icon it declares is ignored. Check the JSON syntax and icon values.".into(),
-                status: None,
-                layers: false,
-                reset: false,
-                control: Control::None,
-            });
-        }
         y = self.project_card(ui, left, y, Some("Actions"), &rows, &mut actions) + 24.0;
 
         // Danger.
@@ -289,18 +278,6 @@ impl App {
             } else {
                 if let Some(action) = self.settings_row(ui, rect, row, index > 0) {
                     actions.push((row.id.clone(), action));
-                }
-                // "Import scripts" sits left of "Add action" (`gap-1.5`).
-                if row.id == "project-actions"
-                    && let Some(project) = self.settings_project()
-                {
-                    let importable = self.importable_scripts(&project.id);
-                    if !importable.is_empty() {
-                        let add = widgets::outline_button_width(ui, true, "Add action") - 2.0;
-                        let right = rect.right() - 16.0 - add - 6.0;
-                        let center_y = rect.top() + rect.height() / 2.0;
-                        self.import_scripts_control(ui, right, center_y, &project.id, &importable);
-                    }
                 }
             }
             row_top += height;

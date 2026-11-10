@@ -189,7 +189,7 @@ impl FilesState {
 }
 
 impl App {
-    pub(crate) fn files_request(&mut self, key: String, method: &'static str, payload: Value) {
+    fn files_request(&mut self, key: String, method: &'static str, payload: Value) {
         if self.files.requested.insert(key.clone()) {
             self.send_request(key, method, payload);
         }
