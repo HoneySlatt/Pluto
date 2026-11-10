@@ -52,7 +52,7 @@ cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixtur
 cargo build --release -j2     # the binary the owner's shortcut starts; more jobs get OOM-killed
 ```
 
-The README's *Development* section has the snapshot comparison and the rest.
+The README's *Development* section has the rest: the measurements and the icon generators.
 
 Never, on your own:
 - run a real provider turn: sending a message starts a session on the owner's accounts and spends

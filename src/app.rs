@@ -686,7 +686,7 @@ impl App {
             closed_views: Vec::new(),
             permission_notice_shown: Default::default(),
             clones_streaming: false,
-            // Only the app proper takes links (not tests and snapshots).
+            // Only the app proper takes links (not tests or the bench).
             link_inbox: options
                 .client_settings_path
                 .is_some()
@@ -2176,7 +2176,7 @@ impl eframe::App for App {
 }
 
 impl App {
-    /// Opens the first thread whose title starts with `prefix` (dev snapshots).
+    /// Opens the first thread whose title starts with `prefix` (tests and the bench).
     pub fn open_thread_titled(&mut self, prefix: &str) -> bool {
         let id = self
             .state

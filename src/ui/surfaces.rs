@@ -67,8 +67,8 @@ const ROW_GAP: f32 = 2.0; // gap-0.5
 const WIDTH: f32 = 320.0; // max-w-xs
 
 impl App {
-    /// Which surfaces can open: the browser needs the desktop app, pull
-    /// request surface needs a linked pull request, the diff a repository.
+    /// Which surfaces can open: the browser needs the desktop app, the
+    /// linked pull requests a linked pull request, the diff a repository.
     fn surface_available(&self, surface: &Surface) -> bool {
         match surface.label {
             // The browser needs a Chromium-based browser to run headless.

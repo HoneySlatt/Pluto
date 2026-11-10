@@ -3,8 +3,9 @@
 //! `fileLinkChip` / `MarkdownLinkFavicon` parts of `ChatMarkdown.tsx`):
 //! path-shaped inline code and file links become file chips labelled
 //! "basename · parent · L12"; external links lead with their site's icon
-//! (GitHub's mark, else the site favicon from Google's favicon service like
-//! upstream, else a globe). Windows paths and `file:` URLs are not handled.
+//! (GitHub's mark, else the site's own `/favicon.ico` when the site is among
+//! the answer's sources, ADR-0022, else a globe; upstream asks Google's
+//! favicon service, which Pluto never does). Windows paths and `file:` URLs are not handled.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
