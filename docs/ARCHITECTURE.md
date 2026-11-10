@@ -195,7 +195,8 @@ The desktop client re-exports most of these modules under its own name (`src/lib
   not a message, a command's output or a tool's arguments. The rule is `pluto_core::media` with
   `http::get_public`, shared by the desktop and the phone; any other image loads on a click.
   The egui client has no sandbox, so the rule's "under the thread's sandbox network rule" waits for
-  Pluto's own server.
+  Pluto's own server. Agents' pages and MCP apps are outside the rule: they load in the client's
+  Chromium, whose requests reach any host (see the [PLAN's debt](PLAN.md#known-debt)).
 - The desktop and `pluto-ffi` each draw their own presentation from the core: the desktop in
   `src/ui/`, the phone in `crates/pluto-ffi/src/views.rs` and Compose. Reconnecting is also written
   twice, with different policies.

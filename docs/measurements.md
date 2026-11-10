@@ -238,8 +238,9 @@ loses 0.76 MB, 1 %. The wake-ups differ within the noise of one run.
 The start is not compared. On the second run the machine was loaded by other builds, and the
 first useful frame came after 1.7 s in the median, against 150 ms before. Run in turn in the same
 sandbox, the client of `86a601b` and that of `d688416` both took 0.7 to 2.3 s, a start of the one
-as slow as a start of the other: the delay was the machine's and the fixture's, not the code's.
-The start is to be measured again on an idle machine.
+as slow as a start of the other. That shows the load dominated, not that the cuts left the start
+unchanged. The start is to be measured again on an idle machine. The binary's stripped size before
+the cuts was not taken.
 
 ## The budgets M1.2 set
 

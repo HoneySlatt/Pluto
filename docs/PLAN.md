@@ -240,6 +240,14 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   `pierre-light` code theme, `Palette.dark == false`, the non-custom palette branches) are
   unreachable code. They leave with the egui client; the uwui client is dark and light
   (row 20.5).
+- The fork checks the providers' CLIs every 5 minutes, even at rest, and the egui client can no
+  longer change the interval (row 19.10 cut its field). The owner chose on 2026-11-10 to keep the
+  checks, which show whether each CLI is installed and signed in, until Pluto's own server checks
+  on demand.
+- Agents' pages (`html_render`) and MCP apps load in the client's Chromium with no limit on the
+  network: a page's image or `fetch()` reaches any host, private ones included, without a click.
+  Only an MCP app's own host page is intercepted (`src/preview.rs`). Found by M1.4's review; it
+  predates M1.4. The thread's sandbox network rule of ADR-0022 waits for Pluto's own server.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 
