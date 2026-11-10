@@ -70,7 +70,8 @@ for its images), the server resolves steering and queueing
 What is not ported yet is listed in `docs/parity/`, an inventory made
 against v0.1.0's client sources, one report per area (chat and composer,
 settings, pull requests, surfaces, shell), each gap with its upstream files
-and its size; `docs/release-backlog.md` orders them for the first release.
+and its size. The triage decided which of them matter
+([`docs/features.md`](docs/features.md), [`docs/specification.md`](docs/specification.md)).
 Buttons for features not ported show a "not implemented" notice.
 
 The fixture (`scripts/fixture-server.sh`) seeds protocol 1 events through a
