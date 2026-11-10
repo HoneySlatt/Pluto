@@ -142,6 +142,13 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   at rest did not move; the binary lost 1 % ([`measurements.md`](measurements.md#the-cuts-of-m14)).
   The start could not be compared: the machine was loaded, and the client before the cuts was as
   slow as after; it is to be measured again on an idle machine.
+- **Closing review (2026-11-10).** It found that every URL in a turn's items named a source, so a
+  misled agent could make an image with a secret in its path load by itself: sources are now only
+  the pages completed web searches and fetches returned. It also found cuts left half done:
+  provider update checks still ran with their switch gone (the owner chose to turn them off: the
+  client sends "off" whenever the server's setting is on), other forges and Cursor still showed,
+  and the theme commands still had rows. An image the rule refused while loading now waits for a
+  click instead of failing. What it found outside M1.4 is in the debt below.
 
 ### M1.5 — Agents' sessions recorded
 
@@ -238,8 +245,12 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   one.
 - Pluto's look is the only one left in the egui client since M1.4, so its light paths (the
   `pierre-light` code theme, `Palette.dark == false`, the non-custom palette branches) are
-  unreachable code. They leave with the egui client; the uwui client is dark and light
+  unreachable code, though `pierre-light.json` is still loaded at every start
+  (`src/highlight.rs`). They leave with the egui client; the uwui client is dark and light
   (row 20.5).
+- A Cursor instance already configured on the fork is hidden from the Providers page since M1.4,
+  so it can no longer be turned off there, and the fork keeps checking it. It leaves with the
+  fork.
 - The fork checks the providers' CLIs every 5 minutes, even at rest, and the egui client can no
   longer change the interval (row 19.10 cut its field). The owner chose on 2026-11-10 to keep the
   checks, which show whether each CLI is installed and signed in, until Pluto's own server checks
