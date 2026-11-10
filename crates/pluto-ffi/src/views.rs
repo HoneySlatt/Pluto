@@ -555,12 +555,8 @@ fn image_loads_by_itself(src: &str, sources: &std::collections::HashSet<String>)
     use pluto_core::media::{ImageSource, classify};
     match classify(src, None) {
         ImageSource::Direct(url) if !url.starts_with("data:") => {
-            let url = if url.starts_with("//") {
-                format!("https:{url}")
-            } else {
-                url
-            };
-            url::Url::parse(&url).is_ok_and(|url| pluto_core::media::loads_by_itself(&url, sources))
+            pluto_core::media::remote_image_url(&url)
+                .is_some_and(|url| pluto_core::media::loads_by_itself(&url, sources))
         }
         _ => true,
     }
@@ -1237,7 +1233,7 @@ impl Core {
     /// of the open thread's workspace through the server, a URL fetched
     /// here, or a data URL; asked for on first use. A remote image loads by
     /// itself only as ADR-0022 allows for the answer under `answer` (its row
-    /// key), through `http::get_public`; otherwise only once `tapped`.
+    /// key), through `http::try_get_public`; otherwise only once `tapped`.
     pub fn markdown_image(&self, src: String, answer: String, tapped: bool) -> Option<Vec<u8>> {
         use pluto_core::media::{ImageSource, classify};
         let sources = (!tapped).then(|| {
@@ -1269,34 +1265,33 @@ impl Core {
                 crate::images::raster(&bytes)
             }
             ImageSource::Direct(url) => {
-                let url = if url.starts_with("//") {
-                    format!("https:{url}")
-                } else {
-                    url
-                };
-                let parsed = url::Url::parse(&url)
-                    .ok()
-                    .filter(|u| matches!(u.scheme(), "http" | "https"))?;
-                let key = format!("direct:{url}");
+                let parsed = pluto_core::media::remote_image_url(&url)?;
+                let key = format!("direct:{parsed}");
                 if let Some(bytes) = session.ready_asset(&key) {
                     return Some(bytes.to_vec());
                 }
-                if sources
-                    .as_ref()
-                    .is_some_and(|sources| !pluto_core::media::loads_by_itself(&parsed, sources))
-                {
-                    return None;
+                if let Some(sources) = &sources {
+                    // Not loaded by itself: waits for a tap, or, once the
+                    // rule refused it while loading, for the same tap.
+                    if !pluto_core::media::loads_by_itself(&parsed, sources)
+                        || session.refused_asset(&key)
+                    {
+                        return None;
+                    }
                 }
                 if session.start_asset(&key) {
                     let hub = std::sync::Arc::downgrade(&self.hub);
                     std::thread::spawn(move || {
                         let bytes = match &sources {
-                            Some(sources) => pluto_core::http::get_public(&parsed, |hop| {
+                            Some(sources) => pluto_core::http::try_get_public(&parsed, |hop| {
                                 pluto_core::media::loads_by_itself(hop, sources)
                             }),
-                            None => pluto_core::http::get(&parsed),
+                            None => pluto_core::http::get(&parsed)
+                                .ok_or(pluto_core::http::GetError::Failed),
                         };
-                        let image = bytes.and_then(|b| crate::images::raster(&b));
+                        let image = bytes.and_then(|b| {
+                            crate::images::raster(&b).ok_or(pluto_core::http::GetError::Failed)
+                        });
                         if let Some(hub) = hub.upgrade() {
                             hub.update(|app, _| app.session.finish_asset(key, image));
                         }
@@ -1306,6 +1301,19 @@ impl Core {
             }
             ImageSource::Blocked => None,
         }
+    }
+
+    /// Whether the rule for what loads without a tap refused the answer's
+    /// remote image `src` while loading it: it then waits for a tap, like
+    /// an image that never qualified.
+    pub fn markdown_image_refused(&self, src: String) -> bool {
+        use pluto_core::media::{ImageSource, classify, remote_image_url};
+        let ImageSource::Direct(url) = classify(&src, None) else {
+            return false;
+        };
+        remote_image_url(&url).is_some_and(|parsed| {
+            self.read(|app| app.session.refused_asset(&format!("direct:{parsed}")))
+        })
     }
 
     /// A message's image, asked for on first use.
@@ -1617,5 +1625,84 @@ mod tests {
             &sources
         ));
         assert!(image_loads_by_itself("/workspace/chart.png", &sources));
+    }
+
+    struct Silent;
+    impl crate::Listener for Silent {
+        fn changed(&self) {}
+    }
+
+    /// A server that answers one request with PNG bytes.
+    fn serve_png() -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/chart.png", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            let body = b"\x89PNG fake";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+        });
+        (url, server)
+    }
+
+    #[test]
+    fn an_image_the_rule_refused_waits_for_a_tap_then_loads() {
+        use pluto_core::http::GetError;
+        let core = Core::new(String::new(), true, Arc::new(Silent));
+        core.hub.lock().session.selected = Some("thread".to_owned());
+        let (src, server) = serve_png();
+        let key = format!("direct:{src}");
+
+        // The rule refused the automatic load: stored as waiting, not as a failure.
+        core.hub
+            .lock()
+            .session
+            .finish_asset(key.clone(), Err(GetError::Refused));
+        assert!(core.markdown_image_refused(src.clone()));
+        assert_eq!(
+            core.markdown_image(src.clone(), "answer".into(), false),
+            None
+        );
+        assert!(core.markdown_image_refused(src.clone()));
+        assert!(matches!(
+            core.hub.lock().session.assets.get(&key),
+            Some(crate::session::Asset::Refused)
+        ));
+
+        // A tap fetches it, with the plain GET.
+        assert_eq!(
+            core.markdown_image(src.clone(), "answer".into(), true),
+            None
+        );
+        let started = std::time::Instant::now();
+        let bytes = loop {
+            if let Some(bytes) = core.markdown_image(src.clone(), "answer".into(), true) {
+                break bytes;
+            }
+            assert!(started.elapsed().as_secs() < 5, "the tap never loaded it");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(bytes.starts_with(b"\x89PNG"));
+        assert!(!core.markdown_image_refused(src));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_failed_load_is_not_a_refusal() {
+        use pluto_core::http::GetError;
+        let core = Core::new(String::new(), true, Arc::new(Silent));
+        let src = "https://docs.rs/a.png".to_owned();
+        core.hub.lock().session.finish_asset(
+            "direct:https://docs.rs/a.png".to_owned(),
+            Err(GetError::Failed),
+        );
+        assert!(!core.markdown_image_refused(src));
     }
 }

@@ -172,4 +172,45 @@ mod tests {
         assert_eq!(icon(&item)["_tag"], "native-app");
         assert!(direct_url(icon(&item), false).is_none());
     }
+
+    #[test]
+    fn an_icon_outside_the_sources_keeps_the_tools_glyph() {
+        use crate::app::{App, Options};
+        let mut harness = egui_kittest::Harness::builder().build_eframe(|cc| {
+            App::new(
+                cc,
+                Options {
+                    server: None,
+                    token: None,
+                    client_settings_path: None,
+                    block_turn_starts: true,
+                },
+            )
+        });
+        let app = harness.state_mut();
+        let mut item = TurnItem {
+            run_id: Some("run".into()),
+            ..Default::default()
+        };
+        item.data.insert(
+            "toolIcon".into(),
+            json!({"_tag":"website", "pageUrl":"https://docs.rs/",
+                "faviconUrl":"https://cdn.example.com/icon.png"}),
+        );
+        let url = "https://cdn.example.com/icon.png";
+        let key = format!("tool-icon:{url}");
+        let ctx = egui::Context::default();
+        let mut painted = true;
+        let output = ctx.run_ui(Default::default(), |ui| {
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(16.0));
+            painted = app.tool_image_icon(ui, rect, &item, false);
+        });
+        output.drop_without_applying_deltas();
+        // No source names this host: the glyph stays, and nothing was asked for.
+        assert!(!painted);
+        assert!(attachments::media_state(&key).is_none());
+        // The same icon on a source host would load by itself.
+        let sources = std::collections::HashSet::from(["cdn.example.com".to_owned()]);
+        assert!(attachments::loads_by_itself(url, &sources));
+    }
 }

@@ -25,13 +25,16 @@ use eframe::egui::{self, CornerRadius, Rect, TextureHandle, Ui, Vec2};
 use serde_json::{Value, json};
 
 use crate::app::App;
-use crate::http::get as http_get;
+use crate::http::{GetError, get as http_get};
 use crate::ui::emoji::premultiply;
 
 #[derive(Clone)]
 enum Loaded {
     Pending,
     Missing,
+    /// The rule for what loads without a click said no (ADR-0022); a click
+    /// may still load it.
+    Refused,
     Image(Arc<image::RgbaImage>),
 }
 
@@ -59,6 +62,8 @@ fn origins() -> &'static Mutex<Origins> {
 pub(crate) enum MediaState {
     Loading,
     Failed,
+    /// Not loaded by itself: it waits for the owner's click.
+    Refused,
     Ready(Arc<image::RgbaImage>),
 }
 
@@ -66,6 +71,7 @@ pub(crate) fn media_state(key: &str) -> Option<MediaState> {
     cache().lock().ok()?.get(key).map(|loaded| match loaded {
         Loaded::Pending => MediaState::Loading,
         Loaded::Missing => MediaState::Failed,
+        Loaded::Refused => MediaState::Refused,
         Loaded::Image(image) => MediaState::Ready(image.clone()),
     })
 }
@@ -141,24 +147,13 @@ pub(crate) enum Fetch {
 /// image `pluto_core::media::loads_by_itself` allows.
 pub(crate) fn loads_by_itself(uri: &str, sources: &HashSet<String>) -> bool {
     uri.starts_with("data:")
-        || remote_url(uri).is_some_and(|url| pluto_core::media::loads_by_itself(&url, sources))
-}
-
-/// A remote image's URL (`//` is HTTPS).
-pub(crate) fn remote_url(uri: &str) -> Option<url::Url> {
-    let absolute = if uri.starts_with("//") {
-        format!("https:{uri}")
-    } else {
-        uri.to_owned()
-    };
-    url::Url::parse(&absolute)
-        .ok()
-        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        || pluto_core::media::remote_image_url(uri)
+            .is_some_and(|url| pluto_core::media::loads_by_itself(&url, sources))
 }
 
 /// Loads an image the client can reach itself (`https:`, `//`, `data:`)
 /// on a background thread; a remote one by itself only through
-/// `http::get_public` and the rule at every redirect.
+/// `http::try_get_public` and the rule at every redirect.
 pub(crate) fn load_direct(key: &str, uri: &str, fetch: Fetch, ctx: &egui::Context) {
     mark_loading(key);
     let (key, uri, ctx) = (key.to_owned(), uri.to_owned(), ctx.clone());
@@ -177,17 +172,24 @@ pub(crate) fn load_direct(key: &str, uri: &str, fetch: Fetch, ctx: &egui::Contex
                         })
                         .flatten()
                 })
+                .ok_or(GetError::Failed)
         } else {
-            remote_url(&uri).and_then(|url| match &fetch {
-                Fetch::BySelf(sources) => crate::http::get_public(&url, |hop| {
-                    pluto_core::media::loads_by_itself(hop, sources)
-                }),
-                Fetch::Clicked => http_get(&url),
-            })
+            pluto_core::media::remote_image_url(&uri)
+                .ok_or(GetError::Failed)
+                .and_then(|url| match &fetch {
+                    Fetch::BySelf(sources) => crate::http::try_get_public(&url, |hop| {
+                        pluto_core::media::loads_by_itself(hop, sources)
+                    }),
+                    Fetch::Clicked => http_get(&url).ok_or(GetError::Failed),
+                })
         };
-        let state = bytes
-            .and_then(|bytes| decode(&bytes))
-            .map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)));
+        let state = match bytes {
+            Ok(bytes) => {
+                decode(&bytes).map_or(Loaded::Missing, |image| Loaded::Image(Arc::new(image)))
+            }
+            Err(GetError::Refused) => Loaded::Refused,
+            Err(GetError::Failed) => Loaded::Missing,
+        };
         if let Ok(mut origins) = origins().lock() {
             origins.urls.insert(key.clone(), uri);
         }

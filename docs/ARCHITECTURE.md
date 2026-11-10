@@ -193,7 +193,10 @@ The desktop client re-exports most of these modules under its own name (`src/lib
   local or private address, checked on the address connected to and at every redirect
   ([ADR-0022](adr/0022-the-triage-row-by-row.md)). Nothing an agent writes counts as a source:
   not a message, a command's output or a tool's arguments. The rule is `pluto_core::media` with
-  `http::get_public`, shared by the desktop and the phone; any other image loads on a click.
+  `http::try_get_public`, shared by the desktop and the phone; any other image loads on a click.
+  An image the rule refuses while loading (a redirect the rule rejects, a name that
+  resolves to a private address) is not a failure: it waits behind the same click or tap. Only a
+  real failure shows "Image unavailable".
   The egui client has no sandbox, so the rule's "under the thread's sandbox network rule" waits for
   Pluto's own server. Agents' pages and MCP apps are outside the rule: they load in the client's
   Chromium, whose requests reach any host (see the [PLAN's debt](PLAN.md#known-debt)).

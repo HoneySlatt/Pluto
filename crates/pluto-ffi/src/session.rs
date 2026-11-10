@@ -79,6 +79,9 @@ pub enum Asset {
     Missing,
     /// Raster bytes (an SVG arrives rendered as PNG).
     Ready(Arc<Vec<u8>>),
+    /// A remote image the rule for what loads without a tap refused
+    /// (ADR-0022); a tap may still load it.
+    Refused,
     /// The last try failed then: the next one waits a little (the screens
     /// ask on every frame they show it).
     Failed(std::time::Instant),
@@ -721,11 +724,17 @@ impl Session {
         }
     }
 
+    /// Whether the rule for what loads without a tap refused `key`.
+    pub fn refused_asset(&self, key: &str) -> bool {
+        matches!(self.assets.get(key), Some(Asset::Refused))
+    }
+
     /// Marks `key` as on its way; false when it already is (or failed
-    /// moments ago).
+    /// moments ago). A refused image starts again: only a tap asks for it.
     pub fn start_asset(&mut self, key: &str) -> bool {
         match self.assets.get(key) {
             Some(Asset::Failed(at)) if at.elapsed() >= ASSET_RETRY => {}
+            Some(Asset::Refused) => {}
             Some(_) => return false,
             None => {}
         }
@@ -734,10 +743,15 @@ impl Session {
     }
 
     /// A download started with `start_asset` finished.
-    pub fn finish_asset(&mut self, key: String, image: Option<Vec<u8>>) {
+    pub fn finish_asset(
+        &mut self,
+        key: String,
+        image: Result<Vec<u8>, pluto_core::http::GetError>,
+    ) {
         let asset = match image {
-            Some(bytes) => Asset::Ready(Arc::new(bytes)),
-            None => Asset::Failed(std::time::Instant::now()),
+            Ok(bytes) => Asset::Ready(Arc::new(bytes)),
+            Err(pluto_core::http::GetError::Refused) => Asset::Refused,
+            Err(pluto_core::http::GetError::Failed) => Asset::Failed(std::time::Instant::now()),
         };
         self.assets.insert(key, asset);
     }

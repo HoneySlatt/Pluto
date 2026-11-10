@@ -17,10 +17,11 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 ### Changed
 
 - An answer's images, its links' icons and its tools' icons load by themselves only from a site
-  its web searches and fetches returned, over HTTPS, without a query string, and never from a local or private
-  address. Any other image shows a "Load image from …" chip and loads on a click, on the desktop
-  and the phone ([ADR-0022](docs/adr/0022-the-triage-row-by-row.md)). A link's icon comes from the
-  site itself: Google's favicon service is no longer used.
+  its web searches and fetches returned, over HTTPS, without a query string, and never from a
+  local or private address. Any other image shows a "Load image from …" chip and loads on a click,
+  on the desktop and the phone, and so does an image refused while it loaded, by a redirect or a
+  private address ([ADR-0022](docs/adr/0022-the-triage-row-by-row.md)). A link's icon comes from
+  the site itself: Google's favicon service is no longer used.
 
 ### Removed
 

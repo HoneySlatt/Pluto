@@ -177,10 +177,23 @@ fn normalize_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
+/// A remote image's URL from its markdown source: `//host/x.png` is HTTPS,
+/// `http(s):` URLs are kept. `None` for anything else (`data:`, a relative
+/// path, another scheme), which is not fetched over the network.
+pub fn remote_image_url(source: &str) -> Option<url::Url> {
+    let absolute = match source.strip_prefix("//") {
+        Some(rest) => format!("https://{rest}"),
+        None => source.to_owned(),
+    };
+    url::Url::parse(&absolute)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+}
+
 /// Whether a remote image or a link's icon loads without a click
 /// (ADR-0022): over HTTPS, without credentials or a query string, from a
 /// public host among the answer's `sources` (`source_hosts`). The fetch must
-/// still go through `http::get_public`, which checks the address it
+/// still go through `http::try_get_public` (or `get_public`), which checks the address it
 /// connects to and every redirect. Anything else loads on a click.
 pub fn loads_by_itself(url: &url::Url, sources: &HashSet<String>) -> bool {
     url.scheme() == "https"
@@ -299,6 +312,28 @@ mod tests {
         assert!(sources.is_empty(), "{sources:?}");
         let secret = url::Url::parse("https://evil.example.net/AKIAIOSFODNN7EXAMPLE.png").unwrap();
         assert!(!loads_by_itself(&secret, &sources));
+    }
+
+    #[test]
+    fn remote_image_urls_are_http_or_https_only() {
+        let url = |source: &str| remote_image_url(source).map(String::from);
+        assert_eq!(
+            url("//cdn.example.org/a.png").as_deref(),
+            Some("https://cdn.example.org/a.png")
+        );
+        assert_eq!(
+            url("https://docs.rs/a.png").as_deref(),
+            Some("https://docs.rs/a.png")
+        );
+        assert_eq!(
+            url("http://docs.rs/a.png").as_deref(),
+            Some("http://docs.rs/a.png")
+        );
+        assert_eq!(url("data:image/png;base64,AAAA"), None);
+        assert_eq!(url("images/a.png"), None);
+        assert_eq!(url("/workspace/a.png"), None);
+        assert_eq!(url("ftp://files.example.org/a.png"), None);
+        assert_eq!(url("//"), None);
     }
 
     #[test]

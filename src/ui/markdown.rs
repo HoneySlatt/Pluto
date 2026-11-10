@@ -2868,13 +2868,17 @@ impl<'a> Markdown<'a> {
                 return;
             }
         };
-        if attachments::media_state(&key).is_none() {
+        let loaded = attachments::media_state(&key);
+        if loaded.is_none() || matches!(loaded, Some(MediaState::Refused)) {
             match &classified {
-                ImageSource::Direct(uri) if attachments::loads_by_itself(uri, &self.sources) => {
+                ImageSource::Direct(uri)
+                    if loaded.is_none() && attachments::loads_by_itself(uri, &self.sources) =>
+                {
                     let fetch = attachments::Fetch::BySelf(self.sources.clone());
                     attachments::load_direct(&key, uri, fetch, ui.ctx());
                 }
-                // Any other remote image waits for the owner's click.
+                // Any other remote image waits for the owner's click, and so
+                // does one the rule refused while loading.
                 ImageSource::Direct(uri) => {
                     if self.image_click_chip(ui, alt, uri, id) {
                         attachments::load_direct(&key, uri, attachments::Fetch::Clicked, ui.ctx());
@@ -3009,7 +3013,7 @@ impl<'a> Markdown<'a> {
     /// A remote image outside the answer's sources (ADR-0022): a chip that
     /// names its host and loads it when clicked. True on the click.
     fn image_click_chip(&mut self, ui: &mut Ui, alt: &str, uri: &str, id: egui::Id) -> bool {
-        let host = crate::ui::attachments::remote_url(uri)
+        let host = pluto_core::media::remote_image_url(uri)
             .and_then(|url| url.host_str().map(str::to_owned))
             .unwrap_or_default();
         let label = match (alt.trim(), host.is_empty()) {
@@ -4104,6 +4108,121 @@ See[^n].
             let key = format!("md-direct:{uri}");
             assert!(crate::ui::attachments::media_state(&key).is_none(), "{uri}");
         }
+    }
+
+    /// The text of a local server that answers one request with a PNG.
+    fn serve_png_once() -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let uri = format!("http://{}/a.png", listener.local_addr().unwrap());
+        let mut png = Vec::new();
+        image::RgbaImage::new(1, 1)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                png.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(&png).unwrap();
+        });
+        uri
+    }
+
+    #[test]
+    fn an_image_the_rule_refused_while_loading_waits_for_a_click() {
+        use crate::ui::attachments::{self, Fetch, MediaState};
+        use egui_kittest::Harness;
+        let waiting = serve_png_once();
+        // Nothing is listening here: a real failure.
+        let dead = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}/a.png", listener.local_addr().unwrap())
+        };
+        let answer = format!("![chart]({waiting})\n\n![gone]({dead})");
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(720.0, 400.0))
+            .build_ui(move |ui| {
+                if ui.ctx().cumulative_frame_nr() == 0 {
+                    theme::install(ui.ctx());
+                    return;
+                }
+                let mut highlighter = crate::highlight::Highlighter::new(ui.ctx().clone());
+                let mut markdown = Markdown::new(&mut highlighter, egui::Id::new("images"));
+                markdown.show(ui, &answer, 680.0);
+            });
+        let wait_for = |harness: &mut Harness<'_>, key: &str, wanted: fn(&MediaState) -> bool| {
+            for _ in 0..500 {
+                harness.run_steps(1);
+                if attachments::media_state(key).is_some_and(|state| wanted(&state)) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("{key} never reached the state");
+        };
+        // The rule refuses the automatic load of the first (its host is no
+        // source); the second fails for real.
+        let none = Arc::new(HashSet::new());
+        attachments::load_direct(
+            &format!("md-direct:{waiting}"),
+            &waiting,
+            Fetch::BySelf(none),
+            &harness.ctx,
+        );
+        attachments::load_direct(
+            &format!("md-direct:{dead}"),
+            &dead,
+            Fetch::Clicked,
+            &harness.ctx,
+        );
+        wait_for(&mut harness, &format!("md-direct:{waiting}"), |s| {
+            matches!(s, MediaState::Refused)
+        });
+        wait_for(&mut harness, &format!("md-direct:{dead}"), |s| {
+            matches!(s, MediaState::Failed)
+        });
+        let shown = |harness: &Harness<'_>| -> Vec<(String, egui::Rect)> {
+            harness
+                .output()
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some((
+                        t.galley.text().to_owned(),
+                        t.galley.rect.translate(t.pos.to_vec2()),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+        harness.run_steps(2);
+        let texts = shown(&harness);
+        let chip = texts
+            .iter()
+            .find(|(t, _)| t == "Load image from 127.0.0.1 · chart")
+            .unwrap_or_else(|| panic!("{texts:?}"))
+            .1;
+        assert!(texts.iter().any(|(t, _)| t == "Image unavailable · gone"));
+        assert!(!texts.iter().any(|(t, _)| t == "Image unavailable · chart"));
+        // The click loads it with the plain GET.
+        harness.event(egui::Event::PointerMoved(chip.center()));
+        harness.run_steps(1);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: chip.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        wait_for(&mut harness, &format!("md-direct:{waiting}"), |s| {
+            matches!(s, MediaState::Ready(_))
+        });
     }
 
     #[test]

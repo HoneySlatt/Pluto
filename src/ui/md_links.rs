@@ -440,6 +440,14 @@ fn favicons() -> &'static Mutex<HashMap<String, Favicon>> {
     CACHE.get_or_init(Default::default)
 }
 
+/// The favicon a link to `host` may load by itself: only a site among the
+/// answer's `sources` (ADR-0022).
+fn favicon_url(host: &str, sources: &HashSet<String>) -> Option<url::Url> {
+    url::Url::parse(&format!("https://{host}/favicon.ico"))
+        .ok()
+        .filter(|url| pluto_core::media::loads_by_itself(url, sources))
+}
+
 /// `MarkdownLinkFavicon`: the icon for a link to `host`. GitHub has its
 /// mark; a site among the answer's `sources` has its own favicon, fetched
 /// from the site on a background thread once per host when the rule of
@@ -449,10 +457,7 @@ pub(crate) fn link_icon(host: &str, sources: &HashSet<String>, ctx: &egui::Conte
     if lower == "github.com" || lower.ends_with(".github.com") {
         return LinkIcon::Named("github-mark");
     }
-    let Some(url) = url::Url::parse(&format!("https://{host}/favicon.ico"))
-        .ok()
-        .filter(|url| pluto_core::media::loads_by_itself(url, sources))
-    else {
+    let Some(url) = favicon_url(host, sources) else {
         return LinkIcon::Named("globe");
     };
     let Ok(mut cache) = favicons().lock() else {
@@ -595,6 +600,24 @@ pub(crate) fn chip_colors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_links_icon_is_fetched_only_for_a_source_host() {
+        let sources = HashSet::from(["docs.rs".to_owned()]);
+        assert_eq!(
+            favicon_url("docs.rs", &sources)
+                .as_ref()
+                .map(url::Url::as_str),
+            Some("https://docs.rs/favicon.ico")
+        );
+        assert!(favicon_url("evil.example.net", &sources).is_none());
+        assert!(favicon_url("docs.rs", &HashSet::new()).is_none());
+        // `link_icon` starts no fetch for a host outside the sources: it
+        // keeps the globe and records nothing to load.
+        let icon = link_icon("evil.example.net", &sources, &egui::Context::default());
+        assert!(matches!(icon, LinkIcon::Named("globe")));
+        assert!(!favicons().lock().unwrap().contains_key("evil.example.net"));
+    }
 
     #[test]
     fn inline_code_needs_path_evidence() {

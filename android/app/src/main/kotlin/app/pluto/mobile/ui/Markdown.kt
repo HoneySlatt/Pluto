@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -292,14 +293,20 @@ private fun Cell(content: List<Span>, head: Boolean, bottom: Boolean) {
 // An answer's image (`![alt](src)`): as wide as the answer at its own
 // ratio once loaded, a tap opens it full screen; until then (or when it
 // cannot load) its alt text beside an image icon. A remote image outside the
-// answer's sources waits for a tap on that row (ADR-0022).
+// answer's sources waits for a tap on that row (ADR-0022), and so does one the
+// rule refused while loading it. The tap is kept (`rememberSaveable`) when the
+// row scrolls away and comes back.
 @Composable
 private fun MarkdownImage(src: String, alt: String, loadsByItself: Boolean, answer: String) {
     val model = LocalModel.current
     val name = alt.ifBlank { src.substringAfterLast('/') }
-    var tapped by remember(src) { mutableStateOf(false) }
+    var tapped by rememberSaveable(src) { mutableStateOf(false) }
+    // Keyed by the tap, so that a tap after a refusal starts the fetch at once
+    // rather than at the core's next change.
     val viewed = if (loadsByItself || tapped) {
-        rememberImage("markdown:$src", name) { model.core.markdownImage(src, answer, tapped) }
+        androidx.compose.runtime.key(tapped) {
+            rememberImage("markdown:$src", name) { model.core.markdownImage(src, answer, tapped) }
+        }
     } else {
         null
     }
@@ -316,7 +323,9 @@ private fun MarkdownImage(src: String, alt: String, loadsByItself: Boolean, answ
             Image(bitmap, name, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
         }
     } else {
-        val waiting = !loadsByItself && !tapped
+        val refused = loadsByItself && !tapped &&
+            remember(model.revision, src) { model.core.markdownImageRefused(src) }
+        val waiting = (!loadsByItself && !tapped) || refused
         val host = android.net.Uri.parse(if (src.startsWith("//")) "https:$src" else src).host
         val label = if (waiting && host != null) "Load image from $host · $name" else name
         Row(
