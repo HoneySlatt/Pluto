@@ -25,7 +25,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0017](adr/0017-pluto-measured-against-the-market.md) to [ADR-0020](adr/0020-the-chat.md)).
   On 2026-11-10 the owner marked every row of the rethought families
   ([ADR-0022](adr/0022-the-triage-row-by-row.md)), and the
-  [specification](specification.md) followed. Next: [M1.4](#m14--the-cuts), M1.5 and
+  [specification](specification.md) followed. On 2026-11-10 [M1.4](#m14--the-cuts) removed what it
+  cut from the egui client and the Android app, except three cuts kept until the uwui client
+  ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). Next: M1.5 and
   [M1.6](#m16--the-rivals-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
@@ -37,7 +39,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.1](#m11--under-the-method) | Every check in one command and in CI; the code's architecture written down | Done |
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
-| [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Planned |
+| [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Planned |
 | [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
 
@@ -128,6 +130,18 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - **Done when.** The checks pass, the client runs on the fixture, and nothing cut remains reachable.
 - **How to test.** `scripts/check.sh`, the client run on the fixture, the Android build.
 - **Measured.** The client's memory, wake-ups and binary size, before and after.
+- **Done (2026-11-10).** Every row of the specification's section 6 is gone from the egui client
+  and the Android app where they had it, one commit per group, except three the owner kept until
+  the uwui client: the action editor, the evaluation of when-clauses and the custom models' option
+  descriptors ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). The review guides
+  (11.16) and Claude's reset claims (18.17) had no client interface; their tool labels stay, to
+  name old threads' calls. Google's favicon service left, and an answer's images and icons load by
+  themselves only when safe, on the desktop and the phone (`pluto_core::media`). The visual
+  comparison with T3's web client and `examples/tmp_shot.rs` left. The client ran on the fixture
+  in a headless compositor; the checks pass, the Android build too. Memory, wake-ups and frames
+  at rest did not move; the binary lost 1 % ([`measurements.md`](measurements.md#the-cuts-of-m14)).
+  The start could not be compared: the machine was loaded, and the client before the cuts was as
+  slow as after; it is to be measured again on an idle machine.
 
 ### M1.5 — Agents' sessions recorded
 
@@ -217,6 +231,15 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   the action editor (`src/ui/action_editor.rs`), the evaluation of the bindings' when-clauses
   (`src/ui/shortcuts.rs`) and the custom model editor's option descriptors
   (`src/ui/custom_model_editor.rs`).
+- A manual connection to the same server does not ask again for the streams the client had open
+  (`connect_now` in `src/app.rs`): the sidebar's running-terminal badge, the scheduled tasks and
+  the others stay on the old connection. A dropped connection resumes them; a change of server
+  does too since M1.4. Found by M1.4's review; the egui client gets only fixes, so it waits for
+  one.
+- Pluto's look is the only one left in the egui client since M1.4, so its light paths (the
+  `pierre-light` code theme, `Palette.dark == false`, the non-custom palette branches) are
+  unreachable code. They leave with the egui client; the uwui client is dark and light
+  (row 20.5).
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 

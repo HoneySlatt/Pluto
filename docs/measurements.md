@@ -217,6 +217,30 @@ the history (3,670 are older). Those days wrote about 95 MiB of payloads and met
 MiB on the busiest. The whole file laid over them, indexes and projections included, is about 240
 MiB a day. The threads hold 17,053 messages; the longest thread 3,785.
 
+## The cuts of M1.4
+
+The client before and after [M1.4](PLAN.md#m14--the-cuts) removed what the triage cut, on the
+desktop, by `scripts/measure.sh` on the fixture, as above: before at `86a601b`, after at `d688416`,
+on 2026-11-10. The code loses about 7,500 lines of Rust net (9,089 removed, 1,628 added).
+
+| What | Before | After |
+|---|---|---|
+| Frames at rest | 4 in 60 s | 4 in 60 s |
+| Wake-ups at rest | 3.25 a second: `blocking-1` 2.03, the connection 1.10 | 3.28 a second: `blocking-1` 2.00, the connection 1.07 |
+| Resident at rest | 139.5 MB: 92.8 MB mapped files, 46.6 MB anonymous | 139.4 MB: 92.8 MB mapped files, 46.5 MB anonymous |
+| The heap at rest | 32.09 MiB | 32.19 MiB |
+| The binary | 74,669,104 bytes | 73,913,504 bytes, 58,967,912 stripped |
+
+The cuts leave memory and wake-ups where they were: what they removed was code never run at
+rest, and the heap is the fonts, syntax highlighting and the GPU driver's, as before. The binary
+loses 0.76 MB, 1 %. The wake-ups differ within the noise of one run.
+
+The start is not compared. On the second run the machine was loaded by other builds, and the
+first useful frame came after 1.7 s in the median, against 150 ms before. Run in turn in the same
+sandbox, the client of `86a601b` and that of `d688416` both took 0.7 to 2.3 s, a start of the one
+as slow as a start of the other: the delay was the machine's and the fixture's, not the code's.
+The start is to be measured again on an idle machine.
+
 ## The budgets M1.2 set
 
 Six budgets of the [quality bar](ROADMAP.md#quality-bar) had no figure; M1.2 set them, and the owner
@@ -225,7 +249,7 @@ validated them on 2026-11-07 ([ADR-0015](adr/0015-the-budgets-set-from-todays-fi
 | Budget | Today |
 |---|---|
 | Input to photon | not measured: the client does not ask for the compositor's presentation times |
-| The binary's size | the client, 74.5 MB, 59.5 MB stripped, its icons and fonts within |
+| The binary's size | the client, 73.9 MB, 59.0 MB stripped, its icons and fonts within ([M1.4](#the-cuts-of-m14)) |
 | An event's latency, server to client | not measured: the fixture runs no turn |
 | The history's import | 2.79 GiB, 596 threads, 508,717 events; the final states, which [ADR-0008](adr/0008-storage-and-the-history-moved.md) imports, are 927 MiB of it |
 | An idle agent's resume | not measured: it needs a real agent |

@@ -14,6 +14,14 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 - DeepSeek Harness reports its token usage: each turn's tokens and the context's fill in the
   thread, and its history on the usage page, under its own name and color.
 
+### Changed
+
+- An answer's images, its links' icons and its tools' icons load by themselves only from a site
+  its tool calls reached, over HTTPS, without a query string, and never from a local or private
+  address. Any other image shows a "Load image from …" chip and loads on a click, on the desktop
+  and the phone ([ADR-0022](docs/adr/0022-the-triage-row-by-row.md)). A link's icon comes from the
+  site itself: Google's favicon service is no longer used.
+
 ### Removed
 
 - The legacy sidebar, with its project trees, sorts, project menu, rename and grouping dialogs,
