@@ -126,7 +126,7 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   the owner first. Also: Google's favicon service, and the visual comparison with T3's web client
   (`examples/snapshot.rs`, `scripts/reference/`).
 - **Done when.** The checks pass, the client runs on the fixture, and nothing cut remains reachable.
-- **How to test.** `scripts/check.sh`, the snapshot example, the Android build.
+- **How to test.** `scripts/check.sh`, the client run on the fixture, the Android build.
 - **Measured.** The client's memory, wake-ups and binary size, before and after.
 
 ### M1.5 — Agents' sessions recorded
@@ -182,9 +182,6 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 - The egui client stays at T3 v0.1.0 parity with the gaps listed in `docs/parity/`. Those gaps are
   no longer debt: the triage decided what of them matters ([`features.md`](features.md)).
 - The Z Code driver has never run a real turn.
-- Visual checks against the reference are manual (`examples/snapshot.rs`). The reference is T3's
-  web client, whose parity is abandoned: M1.4 removes the comparison, by the owner's decision of
-  2026-11-10; the uwui client's visual checks replace it.
 - `deny.toml` ignores six advisories of unmaintained crates with no maintained release their
   parents accept: bincode (syntect), ttf-parser and rustybuzz (resvg 0.45, which egui_extras
   requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5). Followed by the
@@ -221,7 +218,6 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   rest on a click.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
-- `examples/tmp_shot.rs` calls itself throwaway but stays in the tree. Followed by M1.4.
 
 Finished stages move to `docs/history.md`, created when the first one ends, in a few lines
 each, so that this file holds the current stage only, under about 2,000 words.

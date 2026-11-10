@@ -36,7 +36,7 @@ vte = "0.15"
 alacritty_terminal = { version = "0.26", default-features = false }
 
 [dev-dependencies]
-egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot", "eframe"] }
+egui_kittest = { version = "0.36.2", features = ["wgpu", "eframe"] }
 
 [profile.dev]
 debug = 1

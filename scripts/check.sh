@@ -12,8 +12,7 @@
 #   anchors, offline (lychee).
 #
 # With --apk, in `nix develop .#mobile`, the Android app's Kotlin unit tests and its build too; CI
-# does not run them (docs/adr/0012-the-checks-and-ci.md). The visual comparison with the
-# reference stays manual (examples/snapshot.rs against scripts/reference/shot.sh, see README).
+# does not run them (docs/adr/0012-the-checks-and-ci.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

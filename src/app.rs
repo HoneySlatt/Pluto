@@ -2299,16 +2299,6 @@ impl App {
         self.open_file(path.to_owned());
     }
 
-    /// Overrides a server setting in this client only (snapshots).
-    pub fn override_server_setting(&mut self, key: &str, value: serde_json::Value) {
-        self.state.config["settings"][key] = value;
-    }
-
-    /// Overrides a client setting in memory (snapshots).
-    pub fn override_setting(&mut self, key: &str, value: serde_json::Value) {
-        self.client_settings[key] = value;
-    }
-
     /// Opens a workspace file with Markdown rendered (dev benches).
     pub fn show_rendered_file(&mut self, path: &str) {
         self.files.render_markdown = true;
@@ -2331,77 +2321,6 @@ impl App {
                 .selected
                 .as_ref()
                 .is_none_or(|id| self.state.detail.as_ref().is_some_and(|d| d.id() == id))
-    }
-
-    /// Expands every settled-run fold (dev snapshots).
-    pub fn expand_turns(&mut self) {
-        self.keep_scroll = true;
-        if let Some(detail) = self.current_detail() {
-            for run in &detail.runs {
-                self.expansion.turns.insert(run.id.clone());
-            }
-            // Responses imported without a run fold under their prompt.
-            for row in &detail.visible {
-                if row.item.kind == "user_message" && row.item.run_id.is_none() {
-                    self.expansion.turns.insert(format!(
-                        "runless:{}",
-                        row.item.str("messageId").unwrap_or_default()
-                    ));
-                }
-            }
-        }
-    }
-
-    /// Shows the open thread as running a turn, locally only (dev snapshots:
-    /// the fixture cannot run one without a provider).
-    pub fn simulate_running_turn(&mut self) {
-        let Some(id) = self.selected.clone() else {
-            return;
-        };
-        self.state.revision += 1;
-        if let Some(thread) = self.state.threads.iter_mut().find(|t| t.id == id) {
-            let thread = Arc::make_mut(thread);
-            let runtime = thread.runtime.get_or_insert_with(Default::default);
-            runtime.status = "running".into();
-            runtime.active_run_id = Some("snapshot-run".into());
-            thread.latest_run = Some(crate::model::RunSummary {
-                run_id: "snapshot-run".into(),
-                status: "running".into(),
-                ..Default::default()
-            });
-        }
-    }
-
-    /// Gives the open thread a context usage report and its provider quota
-    /// windows, for snapshots of the context window meter.
-    pub fn simulate_context_usage(&mut self) {
-        let instance = self.composer_model_selection(false).instance_id;
-        let resets =
-            |hours: i64| (chrono::Utc::now() + chrono::Duration::hours(hours)).to_rfc3339();
-        if let Some(providers) = self.state.config["providers"].as_array_mut() {
-            for provider in providers
-                .iter_mut()
-                .filter(|p| p["instanceId"] == instance.as_str())
-            {
-                provider["usageLimits"] = serde_json::json!({
-                    "checkedAt": resets(0),
-                    "windows": [
-                        {"id": "five_hour", "kind": "session", "label": "Session", "usedPercent": 3, "resetsAt": resets(3)},
-                        {"id": "seven_day", "kind": "weekly", "label": "Weekly", "usedPercent": 97, "resetsAt": resets(20)},
-                        {"id": "seven_day_fable", "kind": "weekly", "label": "Weekly · Fable", "usedPercent": 0, "resetsAt": resets(20)},
-                    ],
-                });
-            }
-        }
-        if let Some(detail) = self.state.detail.as_mut() {
-            let detail = Arc::make_mut(detail);
-            detail.thread["activeProviderThreadId"] = "snapshot-provider-thread".into();
-            detail.provider_threads.push(serde_json::json!({
-                "id": "snapshot-provider-thread",
-                "contextUsage": {"usedTokens": 712_500, "maxTokens": 1_000_000, "autoCompactThreshold": 962_500},
-            }));
-        }
-        self.state.revision += 1;
     }
 }
 

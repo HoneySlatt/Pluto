@@ -192,14 +192,8 @@ frame rates, latency and battery remain to be measured on a phone.
 nix develop --command scripts/check.sh   # every check CI runs; its head lists them
 ```
 
-Visual parity is checked on identical synthetic data (the snapshot example
-drops every `thread.turn.start`, so it never starts a provider turn):
-
-```sh
-scripts/fixture-server.sh                      # disposable server on :3999
-ELECTRON=/path/to/electron scripts/reference/shot.sh /tmp/ref.png /
-cargo run --example snapshot -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer /tmp/egui.png
-```
+`scripts/fixture-server.sh` starts a disposable server on :3999 with synthetic threads, for the
+bench and the measurements below.
 
 `cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer`
 measures the per-frame CPU cost (idle, hover, scrolling the fixture's long

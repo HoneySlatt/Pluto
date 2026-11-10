@@ -170,17 +170,15 @@ The desktop client re-exports most of these modules under its own name (`src/lib
   `scripts/check.sh --apk` runs.
 - `examples/bench.rs` measures the cost of each frame against a server, the 5,000-message thread
   and 15 replayed streams among its scenarios; `examples/live.rs` runs the client in a real window
-  for the start and the rest; `examples/snapshot.rs` renders the client to a PNG for comparison with
-  the reference; `examples/probe.rs` prints what a server sends at connection.
-  `examples/tmp_shot.rs` is a leftover of the snapshot work. The examples drive `App` through a few
+  for the start and the rest; `examples/probe.rs` prints what a server sends at connection. The
+  examples drive `App` through a few
   public methods marked for benches (`open_thread_titled`, `load_earlier_turns`,
   `load_offline_shell` and their kin, in `src/app.rs`); the client itself never calls them.
 - `scripts/measure.sh`, in `nix develop .#measure`, takes the figures of
   [`measurements.md`](measurements.md) ([ADR-0014](adr/0014-how-today-is-measured.md)).
 - `scripts/fixture-server.sh` starts a disposable server with synthetic threads
   (`scripts/seed-fixture.mjs`), seeded through T3 Code v0.0.45's server, the flake's `fixture-t3`;
-  `scripts/reference/` captures T3's web client for the visual comparison; `scripts/gen-*.mjs`
-  generate the icons' sources.
+  `scripts/gen-*.mjs` generate the icons' sources.
 
 ## Limits of the code as it is
 
