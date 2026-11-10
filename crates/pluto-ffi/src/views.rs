@@ -551,11 +551,14 @@ fn answer_sources(core: &Core, run_id: Option<&str>) -> Arc<std::collections::Ha
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     if (cache.0, &cache.1) != (state.revision, &thread) {
-        let runs = state.detail.as_ref().map_or_else(Default::default, |detail| {
-            pluto_core::media::source_hosts_by_run(
-                detail.turn_items.iter().map(|item| item.as_ref()),
-            )
-        });
+        let runs = state
+            .detail
+            .as_ref()
+            .map_or_else(Default::default, |detail| {
+                pluto_core::media::source_hosts_by_run(
+                    detail.turn_items.iter().map(|item| item.as_ref()),
+                )
+            });
         let runs = runs
             .into_iter()
             .map(|(run, hosts)| (run, Arc::new(hosts)))
