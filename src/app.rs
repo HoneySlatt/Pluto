@@ -180,10 +180,11 @@ pub struct App {
     /// by (message, text length, width).
     pub(crate) expanded_user_messages: std::collections::HashSet<String>,
     pub(crate) user_text_sizes: std::collections::HashMap<(String, usize, u32), eframe::egui::Vec2>,
-    /// The source hosts of each run's answer, for the state revision they
-    /// were read at (`answer_sources`).
+    /// The source hosts of each run's answer in the open thread, for the
+    /// state revision and the thread they were read at (`answer_sources`).
     pub(crate) answer_sources: (
         u64,
+        Option<String>,
         std::collections::HashMap<String, Arc<std::collections::HashSet<String>>>,
     ),
     pub(crate) tasks_open: bool,

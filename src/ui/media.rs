@@ -208,29 +208,32 @@ pub(crate) fn is_image_path(path: &str) -> bool {
 }
 
 impl App {
-    /// The hosts of the sources of a run's answer (ADR-0022): those its
-    /// tool calls carry (`pluto_core::media::source_hosts`), read again
-    /// when the state changes; empty for an answer outside a run.
+    /// The hosts of the sources of a run's answer (ADR-0022,
+    /// `pluto_core::media::source_hosts`), read again for every run in one
+    /// pass when the state changes; empty for an answer outside a run.
     pub(crate) fn answer_sources(&mut self, run_id: Option<&str>) -> Arc<HashSet<String>> {
-        let (Some(run_id), Some(detail)) = (run_id, self.current_detail()) else {
+        let Some(run_id) = run_id else {
             return Arc::default();
         };
-        if self.answer_sources.0 != self.state.revision {
-            self.answer_sources = (self.state.revision, HashMap::new());
+        let detail = self.current_detail();
+        let thread = detail.as_ref().map(|detail| detail.id().to_owned());
+        if (self.answer_sources.0, &self.answer_sources.1) != (self.state.revision, &thread) {
+            let runs = detail.map_or_else(HashMap::new, |detail| {
+                pluto_core::media::source_hosts_by_run(
+                    detail.turn_items.iter().map(|item| item.as_ref()),
+                )
+            });
+            let runs = runs
+                .into_iter()
+                .map(|(run, hosts)| (run, Arc::new(hosts)))
+                .collect();
+            self.answer_sources = (self.state.revision, thread, runs);
         }
         self.answer_sources
-            .1
-            .entry(run_id.to_owned())
-            .or_insert_with(|| {
-                Arc::new(pluto_core::media::source_hosts(
-                    detail
-                        .turn_items
-                        .iter()
-                        .filter(|item| item.run_id.as_deref() == Some(run_id))
-                        .map(|item| item.as_ref()),
-                ))
-            })
-            .clone()
+            .2
+            .get(run_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

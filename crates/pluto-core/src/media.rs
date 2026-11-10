@@ -2,7 +2,7 @@
 //! `classifyMarkdownImageSource`), and whether a remote image loads without
 //! a click (ADR-0022), shared by the desktop and the phone.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -132,18 +132,37 @@ pub fn segments(path: &str) -> Option<Vec<&str>> {
 /// a misled agent could name any host, then load an image from it with a
 /// secret in its path.
 pub fn source_hosts<'a>(items: impl IntoIterator<Item = &'a TurnItem>) -> HashSet<String> {
-    let mut hosts = HashSet::new();
-    for item in items.into_iter().filter(|item| item.status == "completed") {
-        let results = (item.kind == "web_search")
-            .then(|| item.get("results").as_array())
-            .flatten()
-            .into_iter()
-            .flatten()
-            .map(|result| &result["url"]);
-        let icon_page = std::iter::once(&item.get("toolIcon")["pageUrl"]);
-        hosts.extend(results.chain(icon_page).filter_map(web_host));
+    items.into_iter().flat_map(item_source_hosts).collect()
+}
+
+/// `source_hosts` for every run at once, in one pass over a thread's items:
+/// the runs without a source are left out.
+pub fn source_hosts_by_run<'a>(
+    items: impl IntoIterator<Item = &'a TurnItem>,
+) -> HashMap<String, HashSet<String>> {
+    let mut runs: HashMap<String, HashSet<String>> = HashMap::new();
+    for item in items {
+        let Some(run_id) = item.run_id.as_deref() else {
+            continue;
+        };
+        let mut hosts = item_source_hosts(item).peekable();
+        if hosts.peek().is_some() {
+            runs.entry(run_id.to_owned()).or_default().extend(hosts);
+        }
     }
-    hosts
+    runs
+}
+
+fn item_source_hosts(item: &TurnItem) -> impl Iterator<Item = String> + '_ {
+    let completed = item.status == "completed";
+    let results = (completed && item.kind == "web_search")
+        .then(|| item.get("results").as_array())
+        .flatten()
+        .into_iter()
+        .flatten()
+        .map(|result| &result["url"]);
+    let icon_page = completed.then(|| &item.get("toolIcon")["pageUrl"]);
+    results.chain(icon_page).filter_map(web_host)
 }
 
 /// The host of an http(s) URL given whole, normalized.
@@ -216,6 +235,28 @@ mod tests {
             ),
         ];
         assert_eq!(hosts(&items), ["blog.example.org", "docs.rs"]);
+    }
+
+    #[test]
+    fn sources_are_grouped_by_run_in_one_pass() {
+        let mut first = item(
+            "web_search",
+            "completed",
+            json!({"results": [{"url": "https://docs.rs/a"}]}),
+        );
+        first.run_id = Some("run-1".into());
+        let mut second = item(
+            "web_search",
+            "completed",
+            json!({"results": [{"url": "https://blog.example.org/b"}]}),
+        );
+        second.run_id = Some("run-2".into());
+        let mut quiet = item("command_execution", "completed", json!({"output": "ok"}));
+        quiet.run_id = Some("run-3".into());
+        let runs = source_hosts_by_run([&first, &second, &quiet]);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs["run-1"], source_hosts([&first]));
+        assert_eq!(runs["run-2"], source_hosts([&second]));
     }
 
     /// What an agent writes or reads never names a source: otherwise a
