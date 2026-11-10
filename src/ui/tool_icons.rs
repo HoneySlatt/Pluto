@@ -1,11 +1,17 @@
 //! `MessagesTimeline.tsx`'s `ToolActivityIconView` and shared `favicon.ts`:
 //! website favicons, theme-aware integration logos and signed native-app
-//! icons. Keep the normal tool glyph while the image loads or if it fails.
+//! icons. Keep the normal tool glyph while the image loads, if it fails, or
+//! when it may not load by itself (ADR-0022).
 
 use eframe::egui::{self, Rect, Ui, Vec2};
 use serde_json::{Value, json};
 
-use crate::{app::App, model::TurnItem, theme, ui::attachments};
+use crate::{
+    app::App,
+    model::TurnItem,
+    theme,
+    ui::attachments::{self, Fetch},
+};
 
 fn icon(item: &TurnItem) -> &Value {
     if item.get("toolIcon").is_object() {
@@ -100,7 +106,12 @@ impl App {
             Some(_) => false,
             None => {
                 if let Some(url) = direct {
-                    attachments::load_direct(&key, &url, ui.ctx());
+                    // An icon outside the answer's sources keeps the tool's
+                    // glyph (ADR-0022).
+                    let sources = self.answer_sources(item.run_id.as_deref());
+                    if attachments::loads_by_itself(&url, &sources) {
+                        attachments::load_direct(&key, &url, Fetch::BySelf(sources), ui.ctx());
+                    }
                 } else {
                     attachments::mark_loading(&key);
                     self.send_request(

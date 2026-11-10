@@ -18,7 +18,7 @@
 //! attachments the agent reads by path. Their chips are Pluto's own drawing;
 //! upstream's upload progress, retry and file viewer are not ported.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use eframe::egui::{self, CornerRadius, Rect, TextureHandle, Ui, Vec2};
@@ -130,9 +130,36 @@ pub(crate) fn local_file(key: &str) -> Option<std::path::PathBuf> {
     origins().lock().ok()?.files.get(key).cloned()
 }
 
+/// Who asks for a remote image: the client by itself, under ADR-0022's rule
+/// for the answer's source hosts, or the owner, by a click.
+pub(crate) enum Fetch {
+    BySelf(Arc<HashSet<String>>),
+    Clicked,
+}
+
+/// Whether the client may load `uri` by itself: a `data:` URL, or a remote
+/// image `pluto_core::media::loads_by_itself` allows.
+pub(crate) fn loads_by_itself(uri: &str, sources: &HashSet<String>) -> bool {
+    uri.starts_with("data:")
+        || remote_url(uri).is_some_and(|url| pluto_core::media::loads_by_itself(&url, sources))
+}
+
+/// A remote image's URL (`//` is HTTPS).
+pub(crate) fn remote_url(uri: &str) -> Option<url::Url> {
+    let absolute = if uri.starts_with("//") {
+        format!("https:{uri}")
+    } else {
+        uri.to_owned()
+    };
+    url::Url::parse(&absolute)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+}
+
 /// Loads an image the client can reach itself (`https:`, `//`, `data:`)
-/// on a background thread.
-pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
+/// on a background thread; a remote one by itself only through
+/// `http::get_public` and the rule at every redirect.
+pub(crate) fn load_direct(key: &str, uri: &str, fetch: Fetch, ctx: &egui::Context) {
     mark_loading(key);
     let (key, uri, ctx) = (key.to_owned(), uri.to_owned(), ctx.clone());
     std::thread::spawn(move || {
@@ -151,14 +178,12 @@ pub(crate) fn load_direct(key: &str, uri: &str, ctx: &egui::Context) {
                         .flatten()
                 })
         } else {
-            let absolute = if uri.starts_with("//") {
-                format!("https:{uri}")
-            } else {
-                uri.clone()
-            };
-            url::Url::parse(&absolute)
-                .ok()
-                .and_then(|url| http_get(&url))
+            remote_url(&uri).and_then(|url| match &fetch {
+                Fetch::BySelf(sources) => crate::http::get_public(&url, |hop| {
+                    pluto_core::media::loads_by_itself(hop, sources)
+                }),
+                Fetch::Clicked => http_get(&url),
+            })
         };
         let state = bytes
             .and_then(|bytes| decode(&bytes))

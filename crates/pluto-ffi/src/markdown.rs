@@ -30,10 +30,12 @@ pub enum BlockKind {
     },
     Rule,
     /// An image (`![alt](src)`), on its own row; the core loads it
-    /// (`Core::markdown_image`).
+    /// (`Core::markdown_image`), by itself only when `loads_by_itself`
+    /// (ADR-0022), otherwise on a tap.
     Image {
         src: String,
         alt: String,
+        loads_by_itself: bool,
     },
     Table {
         header: Vec<Vec<Span>>,
@@ -243,7 +245,11 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 TagEnd::Image => {
                     if let Some((src, alt)) = b.image.take() {
                         b.blocks.push(Block {
-                            kind: BlockKind::Image { src, alt },
+                            kind: BlockKind::Image {
+                                src,
+                                alt,
+                                loads_by_itself: true,
+                            },
                             spans: Vec::new(),
                             indent: b.lists.len().min(255) as u8,
                             marker: b.marker.take(),

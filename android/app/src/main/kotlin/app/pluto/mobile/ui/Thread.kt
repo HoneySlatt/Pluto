@@ -300,7 +300,7 @@ private fun TimelineItem(thread: String, item: Item, now: Long) {
         is Item.Answer -> Column {
             // Asked again only when the answer changed (it streams).
             val blocks = remember(item.key, item.hash) { model.core.answerBlocks(item.key) }
-            Markdown(blocks)
+            Markdown(blocks, item.key)
             item.changes?.let { ChangesCard(thread, it) }
         }
         is Item.Fold -> {

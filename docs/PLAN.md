@@ -212,10 +212,6 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   credentials. The Rust server does not port it ([ADR-0022](adr/0022-the-triage-row-by-row.md));
   the fork is frozen and changes only on the owner's word. Whether the fork's other quota probes
   read stored credentials is not checked.
-- The desktop fetches favicons from Google's favicon service and loads every image of a message by
-  itself. The triage keeps only safe ones loading by themselves, never through a third party
-  ([ADR-0022](adr/0022-the-triage-row-by-row.md)); M1.4 removes Google's service and loads the
-  rest on a click.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 

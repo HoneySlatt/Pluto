@@ -5,8 +5,9 @@
 //! file viewer, save it, copy it. Saving and copying run off the UI thread;
 //! copying puts a PNG on the clipboard with `wl-copy` (Wayland) or `xclip`
 //! (X11), as pasting reads it.
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use eframe::egui::{self, Pos2, Ui};
@@ -204,6 +205,33 @@ pub(crate) fn is_image_path(path: &str) -> bool {
     ]
     .iter()
     .any(|ext| lower.ends_with(ext))
+}
+
+impl App {
+    /// The hosts of the sources of a run's answer (ADR-0022): those its
+    /// tool calls carry (`pluto_core::media::source_hosts`), read again
+    /// when the state changes; empty for an answer outside a run.
+    pub(crate) fn answer_sources(&mut self, run_id: Option<&str>) -> Arc<HashSet<String>> {
+        let (Some(run_id), Some(detail)) = (run_id, self.current_detail()) else {
+            return Arc::default();
+        };
+        if self.answer_sources.0 != self.state.revision {
+            self.answer_sources = (self.state.revision, HashMap::new());
+        }
+        self.answer_sources
+            .1
+            .entry(run_id.to_owned())
+            .or_insert_with(|| {
+                Arc::new(pluto_core::media::source_hosts(
+                    detail
+                        .turn_items
+                        .iter()
+                        .filter(|item| item.run_id.as_deref() == Some(run_id))
+                        .map(|item| item.as_ref()),
+                ))
+            })
+            .clone()
+    }
 }
 
 impl App {

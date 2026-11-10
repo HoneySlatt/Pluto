@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 
 use crate::badge::{Badge, badge};
 use crate::compose::{self, Target};
-use crate::markdown::{self, Block};
+use crate::markdown::{self, Block, BlockKind};
 use crate::session::{Net, Session, last_activity};
 use crate::times::{chat_time, day_group, relative_time};
 use crate::{App, Core, catalog};
@@ -500,10 +500,18 @@ fn user_item(key: String, message: &timeline::Message) -> Item {
     }
 }
 
-/// The answers' markdown by row key: its hash, its text, and its blocks
-/// once asked for. A thread's view sends the hash alone; Compose asks for
-/// the blocks of an answer whose hash changed.
-type Answers = std::collections::HashMap<String, (u64, String, Option<Arc<Vec<Block>>>)>;
+/// An answer's markdown: its text's hash, its text, the run it answers
+/// (whose tool calls are its sources), and its blocks once asked for.
+struct Answer {
+    hash: u64,
+    text: String,
+    run_id: Option<String>,
+    blocks: Option<Arc<Vec<Block>>>,
+}
+
+/// The answers by row key. A thread's view sends the hash alone; Compose
+/// asks for the blocks of an answer whose hash changed.
+type Answers = std::collections::HashMap<String, Answer>;
 
 fn answers() -> std::sync::MutexGuard<'static, Answers> {
     static ANSWERS: std::sync::OnceLock<std::sync::Mutex<Answers>> = std::sync::OnceLock::new();
@@ -518,19 +526,65 @@ pub fn reset_answers() {
     answers().clear();
 }
 
-/// Records an answer's text under its row key; its hash.
-fn remember_answer(key: &str, text: &str) -> u64 {
+/// The hosts of the sources of a run's answer (ADR-0022): those the
+/// open thread's tool calls in that run carry.
+fn answer_sources(core: &Core, run_id: Option<&str>) -> std::collections::HashSet<String> {
+    let Some(run_id) = run_id else {
+        return Default::default();
+    };
+    let app = core.hub.lock();
+    app.session
+        .state
+        .detail
+        .as_ref()
+        .map(|detail| {
+            pluto_core::media::source_hosts(
+                detail
+                    .turn_items
+                    .iter()
+                    .filter(|item| item.run_id.as_deref() == Some(run_id))
+                    .map(|item| item.as_ref()),
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// Whether an answer's image loads without a tap: a workspace file or a
+/// `data:` URL, or a remote image ADR-0022's rule allows for its `sources`.
+fn image_loads_by_itself(src: &str, sources: &std::collections::HashSet<String>) -> bool {
+    use pluto_core::media::{ImageSource, classify};
+    match classify(src, None) {
+        ImageSource::Direct(url) if !url.starts_with("data:") => {
+            let url = if url.starts_with("//") {
+                format!("https:{url}")
+            } else {
+                url
+            };
+            url::Url::parse(&url).is_ok_and(|url| pluto_core::media::loads_by_itself(&url, sources))
+        }
+        _ => true,
+    }
+}
+
+/// Records an answer's text and run under its row key; its hash.
+fn remember_answer(key: &str, text: &str, run_id: Option<&str>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
     let hash = hasher.finish();
     let mut answers = answers();
-    if answers.get(key).is_none_or(|(known, ..)| *known != hash) {
+    if answers.get(key).is_none_or(|known| known.hash != hash) {
         // Many threads later, the cache starts over.
         if answers.len() > 4000 {
             answers.clear();
         }
-        answers.insert(key.to_owned(), (hash, text.to_owned(), None));
+        let answer = Answer {
+            hash,
+            text: text.to_owned(),
+            run_id: run_id.map(str::to_owned),
+            blocks: None,
+        };
+        answers.insert(key.to_owned(), answer);
     }
     hash
 }
@@ -557,7 +611,7 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
             Row::Assistant {
                 message, changes, ..
             } => Item::Answer {
-                hash: remember_answer(&key, &message.text),
+                hash: remember_answer(&key, &message.text, message.run_id.as_deref()),
                 changes: changes.map(|(run, files)| Changes {
                     run,
                     additions: files.iter().map(|f| f.additions).sum(),
@@ -574,7 +628,7 @@ fn items(rows: Vec<Row>) -> Vec<Item> {
                 key,
             },
             Row::Plan(plan) => Item::Answer {
-                hash: remember_answer(&key, &plan.plan_markdown),
+                hash: remember_answer(&key, &plan.plan_markdown, None),
                 key,
                 changes: None,
             },
@@ -1181,9 +1235,15 @@ impl Core {
 
     /// An answer's markdown image (`classifyMarkdownImageSource`): a file
     /// of the open thread's workspace through the server, a URL fetched
-    /// here, or a data URL; asked for on first use.
-    pub fn markdown_image(&self, src: String) -> Option<Vec<u8>> {
+    /// here, or a data URL; asked for on first use. A remote image loads by
+    /// itself only as ADR-0022 allows for the answer under `answer` (its row
+    /// key), through `http::get_public`; otherwise only once `tapped`.
+    pub fn markdown_image(&self, src: String, answer: String, tapped: bool) -> Option<Vec<u8>> {
         use pluto_core::media::{ImageSource, classify};
+        let sources = (!tapped).then(|| {
+            let run_id = answers().get(&answer).and_then(|a| a.run_id.clone());
+            answer_sources(self, run_id.as_deref())
+        });
         let mut app = self.hub.lock();
         let session = &mut app.session;
         let thread = session.selected.clone()?;
@@ -1221,11 +1281,22 @@ impl Core {
                 if let Some(bytes) = session.ready_asset(&key) {
                     return Some(bytes.to_vec());
                 }
+                if sources
+                    .as_ref()
+                    .is_some_and(|sources| !pluto_core::media::loads_by_itself(&parsed, sources))
+                {
+                    return None;
+                }
                 if session.start_asset(&key) {
                     let hub = std::sync::Arc::downgrade(&self.hub);
                     std::thread::spawn(move || {
-                        let image =
-                            pluto_core::http::get(&parsed).and_then(|b| crate::images::raster(&b));
+                        let bytes = match &sources {
+                            Some(sources) => pluto_core::http::get_public(&parsed, |hop| {
+                                pluto_core::media::loads_by_itself(hop, sources)
+                            }),
+                            None => pluto_core::http::get(&parsed),
+                        };
+                        let image = bytes.and_then(|b| crate::images::raster(&b));
                         if let Some(hub) = hub.upgrade() {
                             hub.update(|app, _| app.session.finish_asset(key, image));
                         }
@@ -1301,12 +1372,30 @@ impl Core {
 
     /// An answer's markdown blocks (`Item::Answer`).
     pub fn answer_blocks(&self, key: String) -> Vec<Block> {
+        let run_id = match answers().get(&key) {
+            Some(answer) if answer.blocks.is_none() => answer.run_id.clone(),
+            Some(answer) => return answer.blocks.as_deref().cloned().unwrap_or_default(),
+            None => return Vec::new(),
+        };
+        let sources = answer_sources(self, run_id.as_deref());
         let mut answers = answers();
-        let Some((_, text, blocks)) = answers.get_mut(&key) else {
+        let Some(answer) = answers.get_mut(&key) else {
             return Vec::new();
         };
-        blocks
-            .get_or_insert_with(|| Arc::new(markdown::blocks(text)))
+        let mut blocks = markdown::blocks(&answer.text);
+        for block in &mut blocks {
+            if let BlockKind::Image {
+                src,
+                loads_by_itself,
+                ..
+            } = &mut block.kind
+            {
+                *loads_by_itself = image_loads_by_itself(src, &sources);
+            }
+        }
+        answer
+            .blocks
+            .get_or_insert_with(|| Arc::new(blocks))
             .as_ref()
             .clone()
     }
@@ -1499,4 +1588,34 @@ pub fn intern(name: &str) -> &'static str {
     let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
     names.push(leaked);
     leaked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_images_load_by_themselves_only_from_the_sources() {
+        let sources = std::collections::HashSet::from(["docs.rs".to_owned()]);
+        assert!(image_loads_by_itself("https://docs.rs/logo.png", &sources));
+        assert!(image_loads_by_itself("//docs.rs/logo.png", &sources));
+        assert!(!image_loads_by_itself(
+            "https://docs.rs/logo.png?t=1",
+            &sources
+        ));
+        assert!(!image_loads_by_itself(
+            "https://cdn.example.net/a.png",
+            &sources
+        ));
+        assert!(!image_loads_by_itself(
+            "https://docs.rs/logo.png",
+            &Default::default()
+        ));
+        // Nothing leaves the phone for these.
+        assert!(image_loads_by_itself(
+            "data:image/png;base64,AAAA",
+            &sources
+        ));
+        assert!(image_loads_by_itself("/workspace/chart.png", &sources));
+    }
 }

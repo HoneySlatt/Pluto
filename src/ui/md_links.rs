@@ -421,42 +421,6 @@ pub(crate) fn external_host(href: &str) -> Option<String> {
         .filter(|h| !h.is_empty())
 }
 
-/// `isPublicFaviconHost`, without the special-purpose IPv6 ranges: private
-/// networks and reserved names never leave the machine.
-fn is_public_host(host: &str) -> bool {
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    if host.is_empty()
-        || host == "localhost"
-        || host.ends_with(".localhost")
-        || host.ends_with(".local")
-    {
-        return false;
-    }
-    if [
-        "alt", "example", "internal", "invalid", "onion", "test", "home", "lan",
-    ]
-    .iter()
-    .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
-    {
-        return false;
-    }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return match ip {
-            std::net::IpAddr::V4(v4) => {
-                !(v4.is_private()
-                    || v4.is_loopback()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_broadcast()
-                    || v4.is_documentation()
-                    || v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
-            }
-            std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xe000) == 0x2000,
-        };
-    }
-    host.contains('.')
-}
-
 /// What leads a link: the GitHub mark, a fetched favicon, or the globe.
 pub(crate) enum LinkIcon {
     Named(&'static str),
@@ -475,39 +439,39 @@ fn favicons() -> &'static Mutex<HashMap<String, Favicon>> {
     CACHE.get_or_init(Default::default)
 }
 
-/// `MarkdownLinkFavicon`: the icon for a link to `host`, fetching the site
-/// favicon (32px, from Google's service) on a background thread once per
-/// host; a failed fetch shows the globe for the session.
-pub(crate) fn link_icon(host: &str, ctx: &egui::Context) -> LinkIcon {
+/// `MarkdownLinkFavicon`: the icon for a link to `host`. GitHub has its
+/// mark; a site among the answer's `sources` has its own favicon, fetched
+/// from the site on a background thread once per host when the rule of
+/// ADR-0022 allows it; any other link, or a failed fetch, has the globe.
+pub(crate) fn link_icon(host: &str, sources: &HashSet<String>, ctx: &egui::Context) -> LinkIcon {
     let lower = host.to_ascii_lowercase();
     if lower == "github.com" || lower.ends_with(".github.com") {
         return LinkIcon::Named("github-mark");
     }
-    if !is_public_host(host) {
+    let Some(url) = url::Url::parse(&format!("https://{host}/favicon.ico"))
+        .ok()
+        .filter(|url| pluto_core::media::loads_by_itself(url, sources))
+    else {
         return LinkIcon::Named("globe");
-    }
+    };
     let Ok(mut cache) = favicons().lock() else {
         return LinkIcon::Named("globe");
     };
-    match cache.get(host).cloned() {
+    match cache.get(&lower).cloned() {
         Some(Favicon::Image(image)) => LinkIcon::Image(image),
         Some(_) => LinkIcon::Named("globe"),
         None => {
-            cache.insert(host.to_owned(), Favicon::Pending);
-            let host = host.to_owned();
+            cache.insert(lower.clone(), Favicon::Pending);
+            let sources = sources.clone();
             let ctx = ctx.clone();
             std::thread::spawn(move || {
-                let encoded: String =
-                    url::form_urlencoded::byte_serialize(host.as_bytes()).collect();
-                let state = url::Url::parse(&format!(
-                    "https://www.google.com/s2/favicons?domain={encoded}&sz=32"
-                ))
-                .ok()
-                .and_then(|url| crate::http::get(&url))
+                let state = crate::http::get_public(&url, |hop| {
+                    pluto_core::media::loads_by_itself(hop, &sources)
+                })
                 .and_then(|bytes| crate::ui::attachments::decode(&bytes))
                 .map_or(Favicon::Failed, |image| Favicon::Image(Arc::new(image)));
                 if let Ok(mut cache) = favicons().lock() {
-                    cache.insert(host, state);
+                    cache.insert(lower, state);
                 }
                 ctx.request_repaint();
             });
@@ -699,16 +663,12 @@ mod tests {
     }
 
     #[test]
-    fn hosts_stay_private_when_reserved() {
+    fn links_name_their_host() {
         assert_eq!(
             external_host("https://docs.gog.com/x").as_deref(),
             Some("docs.gog.com")
         );
         assert_eq!(external_host("mailto:a@b.c"), None);
-        assert!(is_public_host("docs.gog.com"));
-        assert!(!is_public_host("docs.example.test"));
-        assert!(!is_public_host("192.168.1.2"));
-        assert!(!is_public_host("localhost"));
     }
 
     #[test]

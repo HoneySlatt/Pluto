@@ -2015,10 +2015,12 @@ impl App {
             let marks = self.find_marks(&message.id);
             let word_wrap = self.client_setting("wordWrap") != false;
             let project = self.current_thread().map(|t| t.project_id.clone());
+            let sources = self.answer_sources(message.run_id.as_deref());
             let mut markdown = Markdown::new(
                 &mut self.highlighter,
                 ui.id().with(("markdown", &message.id)),
             );
+            markdown.sources = sources;
             markdown.highlight = highlight;
             markdown.find = marks;
             markdown.media_root = workspace;

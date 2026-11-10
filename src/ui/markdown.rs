@@ -6,7 +6,7 @@
 //! bare URLs follow remark-gfm and `markdownGithubAlerts.ts`; answers keep
 //! the sanitized HTML of `md_html` (`<details>` as a disclosure), user
 //! messages show HTML as typed.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -1207,6 +1207,15 @@ fn push_section(job: &mut LayoutJob, text: &str, leading_space: f32, format: egu
     });
 }
 
+/// What inline chips read from their message: the parent-folder suffixes of
+/// file chips sharing a basename, and the hosts links' icons may load from
+/// by themselves (`Markdown::sources`).
+#[derive(Clone, Copy)]
+struct Chips<'s> {
+    suffixes: &'s HashMap<String, String>,
+    sources: &'s HashSet<String>,
+}
+
 /// The job and its per-section metadata, with a line break inserted before
 /// the sections (by their index without the inserted breaks) in `breaks`.
 #[allow(clippy::too_many_arguments)]
@@ -1217,7 +1226,7 @@ fn build_inlines(
     line_height: f32,
     base_weight: Weight,
     color: Color32,
-    suffixes: &HashMap<String, String>,
+    context: Chips<'_>,
     breaks: &std::collections::HashSet<usize>,
 ) -> (LayoutJob, Inlines, Vec<Option<usize>>) {
     let mut job = LayoutJob::default();
@@ -1264,7 +1273,7 @@ fn build_inlines(
             && previous_link.as_ref() != Some(url)
             && let Some(host) = md_links::external_host(url)
         {
-            link_icon = Some(md_links::link_icon(&host, ui.ctx()));
+            link_icon = Some(md_links::link_icon(&host, context.sources, ui.ctx()));
         }
         previous_link = link;
         match inline {
@@ -1312,7 +1321,7 @@ fn build_inlines(
                 // padding, a 1.17em icon and a 0.33em gap; it never wraps.
                 let chip_size = size * 0.86;
                 let chip_font = font(chip_size, Weight::Medium);
-                let label = md_links::chip_label(file, suffixes).replace(' ', "\u{a0}");
+                let label = md_links::chip_label(file, context.suffixes).replace(' ', "\u{a0}");
                 let [_, _, text] = md_links::mention_colors(theme::border(), theme::foreground());
                 break_before(
                     &mut job,
@@ -1508,7 +1517,7 @@ fn layout_inlines(
     base_weight: Weight,
     color: Color32,
     wrap: f32,
-    suffixes: &HashMap<String, String>,
+    context: Chips<'_>,
 ) -> Inlines {
     let mut breaks = std::collections::HashSet::new();
     loop {
@@ -1519,7 +1528,7 @@ fn layout_inlines(
             line_height,
             base_weight,
             color,
-            suffixes,
+            context,
             &breaks,
         );
         job.wrap.max_width = wrap;
@@ -1565,7 +1574,7 @@ fn layout_line(
     weight: Weight,
     color: Color32,
     max_width: f32,
-    suffixes: &HashMap<String, String>,
+    context: Chips<'_>,
 ) -> Inlines {
     let (mut job, mut laid, _) = build_inlines(
         ui,
@@ -1574,7 +1583,7 @@ fn layout_line(
         line_height,
         weight,
         color,
-        suffixes,
+        context,
         &Default::default(),
     );
     job.wrap = egui::text::TextWrapping {
@@ -2192,6 +2201,10 @@ pub struct Markdown<'a> {
     pub(crate) image_base: Option<String>,
     /// Signed URLs to ask for: (cache key, `assets.createUrl` payload).
     pub(crate) asset_requests: Vec<(String, serde_json::Value)>,
+    /// The hosts of the answer's sources: its remote images and links'
+    /// icons from them load by themselves, the rest on a click (ADR-0022).
+    /// Empty outside an answer.
+    pub(crate) sources: Arc<HashSet<String>>,
     /// An image clicked (expanded preview) or right-clicked (its menu).
     pub(crate) opened_media: Option<(crate::ui::media::Source, Arc<image::RgbaImage>)>,
     pub(crate) media_menu: Option<(crate::ui::media::Source, Pos2)>,
@@ -2237,6 +2250,7 @@ impl<'a> Markdown<'a> {
             media_thread: None,
             image_base: None,
             asset_requests: Vec::new(),
+            sources: Arc::default(),
             opened_media: None,
             media_menu: None,
             opened_context: None,
@@ -2252,6 +2266,13 @@ impl<'a> Markdown<'a> {
             used_width: 0.0,
             origin_x: 0.0,
             small: false,
+        }
+    }
+
+    fn chips(&self) -> Chips<'_> {
+        Chips {
+            suffixes: &self.suffixes,
+            sources: &self.sources,
         }
     }
 
@@ -2401,7 +2422,7 @@ impl<'a> Markdown<'a> {
                     Weight::Regular,
                     paragraph_color,
                     width,
-                    &self.suffixes,
+                    self.chips(),
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
@@ -2438,7 +2459,7 @@ impl<'a> Markdown<'a> {
                     Weight::SemiBold,
                     color,
                     width,
-                    &self.suffixes,
+                    self.chips(),
                 );
                 let (rect, _) =
                     ui.allocate_exact_size(Vec2::new(width, laid.galley.size().y), Sense::hover());
@@ -2692,7 +2713,7 @@ impl<'a> Markdown<'a> {
             Weight::Medium,
             theme::foreground(),
             width - 24.0,
-            &self.suffixes,
+            self.chips(),
         );
         let height = laid.galley.size().y.max(20.0) + 16.0;
         let (row, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
@@ -2849,7 +2870,17 @@ impl<'a> Markdown<'a> {
         };
         if attachments::media_state(&key).is_none() {
             match &classified {
-                ImageSource::Direct(uri) => attachments::load_direct(&key, uri, ui.ctx()),
+                ImageSource::Direct(uri) if attachments::loads_by_itself(uri, &self.sources) => {
+                    let fetch = attachments::Fetch::BySelf(self.sources.clone());
+                    attachments::load_direct(&key, uri, fetch, ui.ctx());
+                }
+                // Any other remote image waits for the owner's click.
+                ImageSource::Direct(uri) => {
+                    if self.image_click_chip(ui, alt, uri, id) {
+                        attachments::load_direct(&key, uri, attachments::Fetch::Clicked, ui.ctx());
+                    }
+                    return;
+                }
                 ImageSource::File(path) => {
                     if let Some(thread) = &self.media_thread {
                         attachments::mark_loading(&key);
@@ -2972,41 +3003,70 @@ impl<'a> Markdown<'a> {
         } else {
             format!("Image unavailable · {alt}")
         };
-        let label_font = theme::font(12.0, theme::Weight::Regular);
-        let text_width = widgets::text_width(ui, &label, label_font.clone());
-        let (row, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
-        let chip = Rect::from_min_size(row.min, Vec2::new(text_width + 16.0 + 20.0, 26.0));
-        ui.painter().rect_filled(
-            chip,
-            CornerRadius::same(6),
-            theme::alpha(theme::muted(), 0.4),
-        );
-        ui.painter().rect_stroke(
-            chip,
-            CornerRadius::same(6),
-            egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.4)),
-            egui::StrokeKind::Inside,
-        );
-        theme::paint_icon(
-            ui,
-            "triangle-alert",
-            Rect::from_min_size(
-                Pos2::new(chip.left() + 8.0, chip.center().y - 7.0),
-                Vec2::splat(14.0),
-            ),
-            14.0,
-            theme::muted_foreground(),
-        );
-        widgets::text_in(
-            ui,
-            Rect::from_min_max(Pos2::new(chip.left() + 28.0, chip.top()), chip.max),
-            &label,
-            label_font,
-            theme::muted_foreground(),
-        );
+        image_chip(ui, "triangle-alert", &label);
     }
 
+    /// A remote image outside the answer's sources (ADR-0022): a chip that
+    /// names its host and loads it when clicked. True on the click.
+    fn image_click_chip(&mut self, ui: &mut Ui, alt: &str, uri: &str, id: egui::Id) -> bool {
+        let host = crate::ui::attachments::remote_url(uri)
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_default();
+        let label = match (alt.trim(), host.is_empty()) {
+            ("", true) => "Load image".to_owned(),
+            ("", false) => format!("Load image from {host}"),
+            (alt, true) => format!("Load image · {alt}"),
+            (alt, false) => format!("Load image from {host} · {alt}"),
+        };
+        let chip = image_chip(ui, "image", &label);
+        let response = ui
+            .interact(chip, id.with("load-image"), Sense::click())
+            .on_hover_text(uri);
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        response.clicked()
+    }
+}
+
+/// A one-line chip in place of an image, an icon and a label; its rect.
+fn image_chip(ui: &mut Ui, icon: &str, label: &str) -> Rect {
+    let label_font = theme::font(12.0, theme::Weight::Regular);
+    let text_width = widgets::text_width(ui, label, label_font.clone());
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
+    let chip = Rect::from_min_size(row.min, Vec2::new(text_width + 16.0 + 20.0, 26.0));
+    ui.painter().rect_filled(
+        chip,
+        CornerRadius::same(6),
+        theme::alpha(theme::muted(), 0.4),
+    );
+    ui.painter().rect_stroke(
+        chip,
+        CornerRadius::same(6),
+        egui::Stroke::new(1.0, theme::alpha(theme::border(), 0.4)),
+        egui::StrokeKind::Inside,
+    );
+    theme::paint_icon(
+        ui,
+        icon,
+        Rect::from_min_size(
+            Pos2::new(chip.left() + 8.0, chip.center().y - 7.0),
+            Vec2::splat(14.0),
+        ),
+        14.0,
+        theme::muted_foreground(),
+    );
+    widgets::text_in(
+        ui,
+        Rect::from_min_max(Pos2::new(chip.left() + 28.0, chip.top()), chip.max),
+        label,
+        label_font,
+        theme::muted_foreground(),
+    );
+    chip
+}
+
+impl Markdown<'_> {
     /// The diagram view: Show code and Copy over the diagram, scaled down
     /// to the column; "Rendering diagram" meanwhile. False when it cannot
     /// render (the code shows, under the error).
@@ -3326,6 +3386,7 @@ impl<'a> Markdown<'a> {
         }
         let cell_line = 19.5; // 12px × 1.625
         let suffixes = self.suffixes.clone();
+        let sources = self.sources.clone();
         let highlight = self.highlight.clone();
         let mut find = self.find.take();
         let mut opened = None;
@@ -3338,7 +3399,10 @@ impl<'a> Markdown<'a> {
                 weight,
                 color,
                 f32::INFINITY,
-                &suffixes,
+                Chips {
+                    suffixes: &suffixes,
+                    sources: &sources,
+                },
             )
             .galley
             .size()
@@ -3398,12 +3462,27 @@ impl<'a> Markdown<'a> {
                                 weight,
                                 color,
                                 widths[i] - 24.0,
-                                &suffixes,
+                                Chips {
+                                    suffixes: &suffixes,
+                                    sources: &sources,
+                                },
                             );
                         }
                         (false, true) => widths[i] - 24.0,
                     };
-                    layout_inlines(ui, cell, 12.0, cell_line, weight, color, wrap, &suffixes)
+                    layout_inlines(
+                        ui,
+                        cell,
+                        12.0,
+                        cell_line,
+                        weight,
+                        color,
+                        wrap,
+                        Chips {
+                            suffixes: &suffixes,
+                            sources: &sources,
+                        },
+                    )
                 })
                 .collect();
             // CSS line boxes are fractional; epaint rounds each row to whole pixels.
@@ -3855,7 +3934,10 @@ mod tests {
                 Weight::Regular,
                 Color32::WHITE,
                 600.0,
-                &HashMap::new(),
+                Chips {
+                    suffixes: &HashMap::new(),
+                    sources: &HashSet::new(),
+                },
             ));
         });
         output.textures_delta.clear();
@@ -3980,6 +4062,48 @@ See[^n].
             panic!()
         };
         assert!(texts(inlines).iter().any(|(t, _)| t == "<b>"));
+    }
+
+    #[test]
+    fn remote_images_outside_the_sources_wait_for_a_click() {
+        use egui_kittest::Harness;
+        let answer =
+            "![chart](https://cdn.example.org/chart.png)\n\n![](https://docs.rs/a.png?token=1)";
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(720.0, 400.0))
+            .build_ui(move |ui| {
+                if ui.ctx().cumulative_frame_nr() == 0 {
+                    theme::install(ui.ctx());
+                    return;
+                }
+                let mut highlighter = crate::highlight::Highlighter::new(ui.ctx().clone());
+                let mut markdown = Markdown::new(&mut highlighter, egui::Id::new("images"));
+                markdown.sources = Arc::new(HashSet::from(["docs.rs".to_owned()]));
+                markdown.show(ui, answer, 680.0);
+            });
+        harness.run_steps(2);
+        let texts: Vec<String> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "Load image from cdn.example.org · chart")
+        );
+        assert!(texts.iter().any(|t| t == "Load image from docs.rs"));
+        for uri in [
+            "https://cdn.example.org/chart.png",
+            "https://docs.rs/a.png?token=1",
+        ] {
+            let key = format!("md-direct:{uri}");
+            assert!(crate::ui::attachments::media_state(&key).is_none(), "{uri}");
+        }
     }
 
     #[test]

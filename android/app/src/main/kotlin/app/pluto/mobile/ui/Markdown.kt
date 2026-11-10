@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,7 +88,7 @@ private fun headingSize(level: Int) = when (level) {
 }
 
 @Composable
-fun Markdown(blocks: List<Block>, modifier: Modifier = Modifier) {
+fun Markdown(blocks: List<Block>, answer: String, modifier: Modifier = Modifier) {
     SelectionContainer(modifier) {
         Column(Modifier.fillMaxWidth()) {
             for ((index, block) in blocks.withIndex()) {
@@ -134,7 +135,7 @@ private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
                 is BlockKind.Code -> CodeBlock(kind.language, kind.text, kind.tokens)
                 is BlockKind.Rule -> Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(P.input))
                 is BlockKind.Table -> Table(kind.header, kind.rows)
-                is BlockKind.Image -> MarkdownImage(kind.src, kind.alt)
+                is BlockKind.Image -> MarkdownImage(kind.src, kind.alt, kind.loadsByItself, answer)
             }
         }
     }
@@ -290,12 +291,18 @@ private fun Cell(content: List<Span>, head: Boolean, bottom: Boolean) {
 
 // An answer's image (`![alt](src)`): as wide as the answer at its own
 // ratio once loaded, a tap opens it full screen; until then (or when it
-// cannot load) its alt text beside an image icon.
+// cannot load) its alt text beside an image icon. A remote image outside the
+// answer's sources waits for a tap on that row (ADR-0022).
 @Composable
-private fun MarkdownImage(src: String, alt: String) {
+private fun MarkdownImage(src: String, alt: String, loadsByItself: Boolean, answer: String) {
     val model = LocalModel.current
     val name = alt.ifBlank { src.substringAfterLast('/') }
-    val viewed = rememberImage("markdown:$src", name) { model.core.markdownImage(src) }
+    var tapped by remember(src) { mutableStateOf(false) }
+    val viewed = if (loadsByItself || tapped) {
+        rememberImage("markdown:$src", name) { model.core.markdownImage(src, answer, tapped) }
+    } else {
+        null
+    }
     val bitmap = viewed?.bitmap
     val shape = RoundedCornerShape(16.dp)
     if (bitmap != null) {
@@ -309,13 +316,20 @@ private fun MarkdownImage(src: String, alt: String) {
             Image(bitmap, name, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
         }
     } else {
+        val waiting = !loadsByItself && !tapped
+        val host = android.net.Uri.parse(if (src.startsWith("//")) "https:$src" else src).host
+        val label = if (waiting && host != null) "Load image from $host · $name" else name
         Row(
-            Modifier.heightIn(min = 40.dp).card(P.chip, shape).padding(horizontal = 14.dp, vertical = 10.dp),
+            Modifier
+                .heightIn(min = 40.dp)
+                .card(P.chip, shape)
+                .tap(enabled = waiting, label = "Load $name") { tapped = true }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon("image", P.muted, size = 16.dp)
-            T(name, 14f, P.muted2, lines = 2)
+            T(label, 14f, P.muted2, lines = 2)
         }
     }
 }

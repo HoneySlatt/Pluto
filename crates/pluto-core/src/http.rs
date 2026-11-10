@@ -1,12 +1,15 @@
 //! A small blocking HTTP/1.1 client for background threads: plain HTTP or
 //! TLS (rustls with the system's root certificates). GET follows up to five
 //! redirects and joins chunked bodies; it serves project favicons, image
-//! attachments and link favicons. POST sends file attachments to the
-//! server's signed upload URLs. An authorized GET reads the server's
-//! orchestration API (older thread history).
+//! attachments and the images an answer shows. `get_public` is the GET of
+//! what loads without a click (ADR-0022): every hop must pass the caller's
+//! rule, and it never connects to a loopback, private or reserved address.
+//! POST sends file attachments to the server's signed upload URLs. An
+//! authorized GET reads the server's orchestration API (older thread
+//! history).
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -35,6 +38,16 @@ fn tls_config() -> Option<Arc<rustls::ClientConfig>> {
 /// sends more is cut there.
 const MAX_RESPONSE: u64 = 256 * 1024 * 1024;
 
+/// Which addresses a request may connect to.
+#[derive(Clone, Copy, PartialEq)]
+enum Reach {
+    Any,
+    /// Public addresses only: checked on the address the name resolved to,
+    /// the one connected to, so a public name that resolves to a private
+    /// address is refused too.
+    PublicOnly,
+}
+
 /// One request: the status, the raw headers and the body. `upload` is a
 /// POST body with its content type; `headers` are extra header lines, each
 /// ending in CRLF.
@@ -42,6 +55,7 @@ fn request(
     url: &url::Url,
     upload: Option<(&str, &[u8])>,
     headers: &str,
+    reach: Reach,
 ) -> Option<(u16, String, Vec<u8>)> {
     let host = url.host_str()?.trim_matches(['[', ']']).to_owned();
     let port = url.port_or_known_default()?;
@@ -50,6 +64,7 @@ fn request(
     let stream = (host.as_str(), port)
         .to_socket_addrs()
         .ok()?
+        .filter(|address| reach == Reach::Any || is_public_ip(address.ip()))
         .find_map(|address| TcpStream::connect_timeout(&address, Duration::from_secs(5)).ok())?;
     stream
         .set_write_timeout(Some(Duration::from_secs(if upload.is_some() {
@@ -116,9 +131,29 @@ fn request(
 
 /// The body of a successful GET, after redirects.
 pub fn get(url: &url::Url) -> Option<Vec<u8>> {
+    follow(url, |_| true, |url| request(url, None, "", Reach::Any))
+}
+
+/// The body of a successful GET of what loads without a click: `allow`
+/// must accept the URL and every redirect's target, and only public
+/// addresses are connected to.
+pub fn get_public(url: &url::Url, allow: impl Fn(&url::Url) -> bool) -> Option<Vec<u8>> {
+    follow(url, allow, |url| request(url, None, "", Reach::PublicOnly))
+}
+
+/// Follows up to five redirects from `url`, each hop accepted by `allow`
+/// before it is fetched.
+fn follow(
+    url: &url::Url,
+    allow: impl Fn(&url::Url) -> bool,
+    mut fetch: impl FnMut(&url::Url) -> Option<(u16, String, Vec<u8>)>,
+) -> Option<Vec<u8>> {
     let mut url = url.clone();
     for _ in 0..5 {
-        let (status, head, body) = request(&url, None, "")?;
+        if !allow(&url) {
+            return None;
+        }
+        let (status, head, body) = fetch(&url)?;
         match status {
             200 => return Some(body),
             301 | 302 | 303 | 307 | 308 => {
@@ -130,10 +165,61 @@ pub fn get(url: &url::Url) -> Option<Vec<u8>> {
     None
 }
 
+/// Whether an address is on the public internet: not loopback, private,
+/// link-local, shared (100.64/10), unspecified, broadcast or documentation;
+/// for IPv6, only global unicast (2000::/3), which also leaves out IPv4
+/// mapped into IPv6.
+pub fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [first, second, ..] = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || first == 0
+                || first == 100 && (64..128).contains(&second))
+        }
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xe000) == 0x2000,
+    }
+}
+
+/// Whether a URL's host may be public: an address that is, or a dotted name
+/// outside the local and reserved ones (`localhost`, `.local`, `.internal`,
+/// `.test`…). A name is checked again on the address it resolves to.
+pub fn is_public_host(host: &str) -> bool {
+    let host = host
+        .trim_matches(['[', ']'])
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_public_ip(ip);
+    }
+    let reserved = [
+        "localhost",
+        "local",
+        "alt",
+        "example",
+        "internal",
+        "invalid",
+        "onion",
+        "test",
+        "home",
+        "lan",
+    ];
+    !host.is_empty()
+        && host.contains('.')
+        && !reserved
+            .iter()
+            .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
 /// POSTs `body` to `url`; Ok on a 2xx answer, else the server's reason.
 pub fn post(url: &url::Url, content_type: &str, body: &[u8]) -> Result<(), String> {
-    let (status, _, answer) =
-        request(url, Some((content_type, body)), "").ok_or("The server could not be reached.")?;
+    let (status, _, answer) = request(url, Some((content_type, body)), "", Reach::Any)
+        .ok_or("The server could not be reached.")?;
     if (200..300).contains(&status) {
         Ok(())
     } else {
@@ -150,7 +236,7 @@ pub fn post(url: &url::Url, content_type: &str, body: &[u8]) -> Result<(), Strin
 /// else why it failed.
 pub fn get_with_headers(url: &url::Url, headers: &str) -> Result<Vec<u8>, String> {
     let (status, _, body) =
-        request(url, None, headers).ok_or("The server could not be reached.")?;
+        request(url, None, headers, Reach::Any).ok_or("The server could not be reached.")?;
     if (200..300).contains(&status) {
         Ok(body)
     } else {
@@ -189,13 +275,88 @@ mod tests {
 
     #[test]
     fn headers_keep_their_casing() {
-        let head = "HTTP/1.1 301 Moved\r\nLocation: https://t1.gstatic.com/faviconV2?Url=A\r\nTransfer-Encoding: chunked";
+        let head = "HTTP/1.1 301 Moved\r\nLocation: https://cdn.example.org/icon?size=2\r\nTransfer-Encoding: chunked";
         assert_eq!(
             header(head, "location"),
-            Some("https://t1.gstatic.com/faviconV2?Url=A")
+            Some("https://cdn.example.org/icon?size=2")
         );
         assert_eq!(header(head, "TRANSFER-ENCODING"), Some("chunked"));
         assert_eq!(header(head, "content-type"), None);
+    }
+
+    #[test]
+    fn public_addresses_and_hosts() {
+        for public in ["93.184.215.14", "2606:4700::1111", "github.com", "docs.rs."] {
+            assert!(is_public_host(public), "{public}");
+        }
+        for private in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "0.1.2.3",
+            "255.255.255.255",
+            "[::1]",
+            "::",
+            "fe80::1",
+            "fd00::1",
+            "::ffff:127.0.0.1",
+            "localhost",
+            "printer.local",
+            "router.lan",
+            "intranet",
+            "app.internal",
+            "",
+        ] {
+            assert!(!is_public_host(private), "{private}");
+        }
+    }
+
+    #[test]
+    fn redirects_are_checked_at_every_hop() {
+        let allow = |url: &url::Url| url.host_str() == Some("a.example.org");
+        let start = url::Url::parse("https://a.example.org/image.png").unwrap();
+        let redirect = |to: &'static str| {
+            move |url: &url::Url| {
+                Some(if url.path() == "/image.png" {
+                    (
+                        302,
+                        format!("HTTP/1.1 302 Found\r\nLocation: {to}"),
+                        Vec::new(),
+                    )
+                } else {
+                    (200, "HTTP/1.1 200 OK".to_owned(), b"bytes".to_vec())
+                })
+            }
+        };
+        assert_eq!(
+            follow(&start, allow, redirect("/moved.png")),
+            Some(b"bytes".to_vec())
+        );
+        assert_eq!(
+            follow(&start, allow, redirect("https://b.example.org/x.png")),
+            None
+        );
+        let refused = url::Url::parse("https://b.example.org/image.png").unwrap();
+        let mut fetched = false;
+        let none = follow(&refused, allow, |_| {
+            fetched = true;
+            None
+        });
+        assert!(none.is_none() && !fetched);
+    }
+
+    #[test]
+    fn public_gets_never_reach_a_local_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = url::Url::parse(&format!("http://127.0.0.1:{port}/image.png")).unwrap();
+        assert_eq!(get_public(&url, |_| true), None);
+        assert!(listener.accept().is_err());
     }
 
     #[test]

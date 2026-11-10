@@ -180,6 +180,12 @@ pub struct App {
     /// by (message, text length, width).
     pub(crate) expanded_user_messages: std::collections::HashSet<String>,
     pub(crate) user_text_sizes: std::collections::HashMap<(String, usize, u32), eframe::egui::Vec2>,
+    /// The source hosts of each run's answer, for the state revision they
+    /// were read at (`answer_sources`).
+    pub(crate) answer_sources: (
+        u64,
+        std::collections::HashMap<String, Arc<std::collections::HashSet<String>>>,
+    ),
     pub(crate) tasks_open: bool,
     /// The queued messages' banner above the composer.
     pub(crate) queue: crate::ui::queue::QueueUi,
@@ -778,6 +784,7 @@ impl App {
             bubble_popover: None,
             expanded_user_messages: Default::default(),
             user_text_sizes: Default::default(),
+            answer_sources: Default::default(),
             tasks_open: false,
             queue: Default::default(),
             mcp_apps: Default::default(),

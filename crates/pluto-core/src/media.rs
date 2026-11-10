@@ -1,5 +1,12 @@
 //! Where a markdown image's bytes come from (`client-runtime/markdownImages.ts`
-//! `classifyMarkdownImageSource`), shared by the desktop and the phone.
+//! `classifyMarkdownImageSource`), and whether a remote image loads without
+//! a click (ADR-0022), shared by the desktop and the phone.
+
+use std::collections::HashSet;
+
+use serde_json::Value;
+
+use crate::model::TurnItem;
 
 /// Where an image's bytes must be loaded from.
 #[derive(Debug, PartialEq)]
@@ -114,4 +121,130 @@ pub fn segments(path: &str) -> Option<Vec<&str>> {
         }
     }
     Some(out)
+}
+
+/// The hosts of an answer's sources: those of the URLs its turn's tool calls
+/// carry as whole values (a fetched page, a search result, an opened link),
+/// in their input, output and page fields. Messages are not sources, nor a
+/// URL quoted inside a longer text (a page's content), nor an icon's own
+/// image URL: what an agent writes or reads cannot widen the set.
+pub fn source_hosts<'a>(items: impl IntoIterator<Item = &'a TurnItem>) -> HashSet<String> {
+    let mut hosts = HashSet::new();
+    for item in items {
+        if matches!(item.kind.as_str(), "user_message" | "assistant_message") {
+            continue;
+        }
+        for (key, value) in &item.data {
+            collect_hosts(key, value, &mut hosts);
+        }
+    }
+    hosts
+}
+
+fn collect_hosts(key: &str, value: &Value, hosts: &mut HashSet<String>) {
+    const IMAGE_KEYS: [&str; 4] = ["faviconUrl", "faviconUrlDark", "logoUrl", "logoUrlDark"];
+    match value {
+        Value::String(text) if !IMAGE_KEYS.contains(&key) => {
+            if let Some(host) = url::Url::parse(text.trim())
+                .ok()
+                .filter(|url| matches!(url.scheme(), "http" | "https"))
+                .and_then(|url| url.host_str().map(normalize_host))
+            {
+                hosts.insert(host);
+            }
+        }
+        Value::Array(values) => values.iter().for_each(|v| collect_hosts(key, v, hosts)),
+        Value::Object(map) => map.iter().for_each(|(k, v)| collect_hosts(k, v, hosts)),
+        _ => {}
+    }
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Whether a remote image or a link's icon loads without a click
+/// (ADR-0022): over HTTPS, without credentials or a query string, from a
+/// public host among the answer's `sources` (`source_hosts`). The fetch must
+/// still go through `http::get_public`, which checks the address it
+/// connects to and every redirect. Anything else loads on a click.
+pub fn loads_by_itself(url: &url::Url, sources: &HashSet<String>) -> bool {
+    url.scheme() == "https"
+        && url.query().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.host_str().is_some_and(|host| {
+            crate::http::is_public_host(host) && sources.contains(&normalize_host(host))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn item(kind: &str, data: Value) -> TurnItem {
+        let mut item: TurnItem = serde_json::from_value(data).unwrap();
+        item.kind = kind.to_owned();
+        item
+    }
+
+    fn hosts(items: &[TurnItem]) -> Vec<String> {
+        let mut hosts: Vec<String> = source_hosts(items).into_iter().collect();
+        hosts.sort();
+        hosts
+    }
+
+    #[test]
+    fn sources_are_the_urls_tool_calls_carry_whole() {
+        let items = [
+            item(
+                "dynamic_tool",
+                json!({"input": {"url": "https://Docs.RS/serde"}, "output": {"results": [
+                    {"title": "A", "url": "https://blog.example.org/a?ref=1"},
+                    "Visit https://quoted.example.net/x for more",
+                ]}}),
+            ),
+            item(
+                "web_search",
+                json!({"toolIcon": {"_tag": "website", "pageUrl": "https://news.example.com./",
+                    "faviconUrl": "https://cdn.example.com/icon.png"}}),
+            ),
+            item(
+                "assistant_message",
+                json!({"text": "https://answer.example.com/"}),
+            ),
+            item("user_message", json!({"text": "https://user.example.com/"})),
+            item(
+                "command_execution",
+                json!({"input": {"command": "ls ftp://files.example.com"}}),
+            ),
+        ];
+        assert_eq!(
+            hosts(&items),
+            ["blog.example.org", "docs.rs", "news.example.com"]
+        );
+    }
+
+    #[test]
+    fn only_safe_urls_load_by_themselves() {
+        let sources: HashSet<String> = ["docs.rs", "10.0.0.5", "intranet.local"]
+            .map(str::to_owned)
+            .into();
+        let loads = |raw: &str| loads_by_itself(&url::Url::parse(raw).unwrap(), &sources);
+        assert!(loads("https://docs.rs/logo.png"));
+        assert!(loads("https://DOCS.rs./logo.png"));
+        assert!(!loads("https://docs.rs/logo.png?secret=1"));
+        assert!(!loads("https://docs.rs/logo.png?"));
+        assert!(!loads("http://docs.rs/logo.png"));
+        assert!(!loads("https://user:pass@docs.rs/logo.png"));
+        assert!(!loads("https://evil.example.com/logo.png"));
+        assert!(!loads("https://sub.docs.rs/logo.png"));
+        assert!(!loads("https://10.0.0.5/logo.png"));
+        assert!(!loads("https://intranet.local/logo.png"));
+        assert!(!loads_by_itself(
+            &url::Url::parse("https://docs.rs/logo.png").unwrap(),
+            &HashSet::new()
+        ));
+    }
 }
