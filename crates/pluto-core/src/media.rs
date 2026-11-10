@@ -123,40 +123,35 @@ pub fn segments(path: &str) -> Option<Vec<&str>> {
     Some(out)
 }
 
-/// The hosts of an answer's sources: those of the URLs its turn's tool calls
-/// carry as whole values (a fetched page, a search result, an opened link),
-/// in their input, output and page fields. Messages are not sources, nor a
-/// URL quoted inside a longer text (a page's content), nor an icon's own
-/// image URL: what an agent writes or reads cannot widen the set.
+/// The hosts of an answer's sources (ADR-0022): the pages its turn's
+/// completed web searches and fetches returned (`results[].url` of a
+/// `web_search` item, the server's shape for both), and the website an
+/// MCP tool's icon names (`toolIcon.pageUrl`). Nothing an agent writes
+/// counts: not a message, its reasoning, a command or its output, a tool's
+/// arguments, a search's query or a fetch that did not complete. Otherwise
+/// a misled agent could name any host, then load an image from it with a
+/// secret in its path.
 pub fn source_hosts<'a>(items: impl IntoIterator<Item = &'a TurnItem>) -> HashSet<String> {
     let mut hosts = HashSet::new();
-    for item in items {
-        if matches!(item.kind.as_str(), "user_message" | "assistant_message") {
-            continue;
-        }
-        for (key, value) in &item.data {
-            collect_hosts(key, value, &mut hosts);
-        }
+    for item in items.into_iter().filter(|item| item.status == "completed") {
+        let results = (item.kind == "web_search")
+            .then(|| item.get("results").as_array())
+            .flatten()
+            .into_iter()
+            .flatten()
+            .map(|result| &result["url"]);
+        let icon_page = std::iter::once(&item.get("toolIcon")["pageUrl"]);
+        hosts.extend(results.chain(icon_page).filter_map(web_host));
     }
     hosts
 }
 
-fn collect_hosts(key: &str, value: &Value, hosts: &mut HashSet<String>) {
-    const IMAGE_KEYS: [&str; 4] = ["faviconUrl", "faviconUrlDark", "logoUrl", "logoUrlDark"];
-    match value {
-        Value::String(text) if !IMAGE_KEYS.contains(&key) => {
-            if let Some(host) = url::Url::parse(text.trim())
-                .ok()
-                .filter(|url| matches!(url.scheme(), "http" | "https"))
-                .and_then(|url| url.host_str().map(normalize_host))
-            {
-                hosts.insert(host);
-            }
-        }
-        Value::Array(values) => values.iter().for_each(|v| collect_hosts(key, v, hosts)),
-        Value::Object(map) => map.iter().for_each(|(k, v)| collect_hosts(k, v, hosts)),
-        _ => {}
-    }
+/// The host of an http(s) URL given whole, normalized.
+fn web_host(value: &Value) -> Option<String> {
+    url::Url::parse(value.as_str()?.trim())
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+        .and_then(|url| url.host_str().map(normalize_host))
 }
 
 fn normalize_host(host: &str) -> String {
@@ -183,9 +178,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn item(kind: &str, data: Value) -> TurnItem {
+    fn item(kind: &str, status: &str, data: Value) -> TurnItem {
         let mut item: TurnItem = serde_json::from_value(data).unwrap();
         item.kind = kind.to_owned();
+        item.status = status.to_owned();
         item
     }
 
@@ -196,34 +192,72 @@ mod tests {
     }
 
     #[test]
-    fn sources_are_the_urls_tool_calls_carry_whole() {
+    fn sources_are_the_pages_completed_searches_and_fetches_returned() {
         let items = [
             item(
+                "web_search",
+                "completed",
+                json!({"patterns": ["https://query.example.com/"], "results": [
+                    {"title": "A", "url": "https://Blog.Example.org./a?ref=1"},
+                    {"url": "ftp://files.example.com/"},
+                    {"snippet": "Visit https://quoted.example.net/x"},
+                ]}),
+            ),
+            item(
                 "dynamic_tool",
-                json!({"input": {"url": "https://Docs.RS/serde"}, "output": {"results": [
-                    {"title": "A", "url": "https://blog.example.org/a?ref=1"},
-                    "Visit https://quoted.example.net/x for more",
-                ]}}),
+                "completed",
+                json!({"toolName": "docs", "input": {}, "toolIcon": {"_tag": "website",
+                    "pageUrl": "https://docs.rs/", "faviconUrl": "https://cdn.example.com/i.png"}}),
             ),
             item(
                 "web_search",
-                json!({"toolIcon": {"_tag": "website", "pageUrl": "https://news.example.com./",
-                    "faviconUrl": "https://cdn.example.com/icon.png"}}),
-            ),
-            item(
-                "assistant_message",
-                json!({"text": "https://answer.example.com/"}),
-            ),
-            item("user_message", json!({"text": "https://user.example.com/"})),
-            item(
-                "command_execution",
-                json!({"input": {"command": "ls ftp://files.example.com"}}),
+                "failed",
+                json!({"results": [{"url": "https://failed.example.com/"}]}),
             ),
         ];
-        assert_eq!(
-            hosts(&items),
-            ["blog.example.org", "docs.rs", "news.example.com"]
-        );
+        assert_eq!(hosts(&items), ["blog.example.org", "docs.rs"]);
+    }
+
+    /// What an agent writes or reads never names a source: otherwise a
+    /// misled agent could load `https://evil.example.net/<secret>.png`.
+    #[test]
+    fn what_an_agent_writes_is_never_a_source() {
+        let evil = "https://evil.example.net/";
+        let items = [
+            item("assistant_message", "completed", json!({"text": evil})),
+            item("user_message", "completed", json!({"text": evil})),
+            item("reasoning", "completed", json!({"text": evil})),
+            item(
+                "todo_list",
+                "completed",
+                json!({"steps": [{"text": evil, "status": "pending"}]}),
+            ),
+            item(
+                "command_execution",
+                "completed",
+                json!({"input": format!("echo {evil}"), "output": evil}),
+            ),
+            item(
+                "dynamic_tool",
+                "completed",
+                json!({"toolName": "memory.save", "input": {"note": evil}, "output": evil}),
+            ),
+            item(
+                "dynamic_tool",
+                "declined",
+                json!({"toolName": "WebFetch", "input": {"url": evil}}),
+            ),
+            item(
+                "user_input_request",
+                "completed",
+                json!({"questions": [{"options": [{"label": evil}]}]}),
+            ),
+            item("web_search", "completed", json!({"patterns": [evil]})),
+        ];
+        let sources = source_hosts(&items);
+        assert!(sources.is_empty(), "{sources:?}");
+        let secret = url::Url::parse("https://evil.example.net/AKIAIOSFODNN7EXAMPLE.png").unwrap();
+        assert!(!loads_by_itself(&secret, &sources));
     }
 
     #[test]

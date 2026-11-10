@@ -188,9 +188,11 @@ The desktop client re-exports most of these modules under its own name (`src/lib
   the T3 file a piece was ported from: Pluto was a port until
   [ADR-0003](adr/0003-what-pluto-is-to-become.md).
 - An answer's remote images, its links' icons and its tools' icons load by themselves only from
-  the hosts its turn's tool calls reached, over HTTPS, without a query string, and never from a
+  the hosts of the pages its turn's completed web searches and fetches returned, or of an MCP
+  tool's website, over HTTPS, without a query string, and never from a
   local or private address, checked on the address connected to and at every redirect
-  ([ADR-0022](adr/0022-the-triage-row-by-row.md)). The rule is `pluto_core::media` with
+  ([ADR-0022](adr/0022-the-triage-row-by-row.md)). Nothing an agent writes counts as a source:
+  not a message, a command's output or a tool's arguments. The rule is `pluto_core::media` with
   `http::get_public`, shared by the desktop and the phone; any other image loads on a click.
   The egui client has no sandbox, so the rule's "under the thread's sandbox network rule" waits for
   Pluto's own server.
