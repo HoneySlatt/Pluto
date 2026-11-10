@@ -95,14 +95,14 @@ fun Markdown(blocks: List<Block>, answer: String, modifier: Modifier = Modifier)
                 val next = blocks.getOrNull(index + 1)
                 // A list's last item leaves the list's margin under it.
                 val listEnd = block.indent > 0u && (next == null || next.indent < block.indent)
-                MarkdownBlock(block, listEnd, last = next == null)
+                MarkdownBlock(block, answer, listEnd, last = next == null)
             }
         }
     }
 }
 
 @Composable
-private fun MarkdownBlock(block: Block, listEnd: Boolean, last: Boolean) {
+private fun MarkdownBlock(block: Block, answer: String, listEnd: Boolean, last: Boolean) {
     val indent = block.indent.toInt()
     val inList = indent > 0
     val bottom = when {
