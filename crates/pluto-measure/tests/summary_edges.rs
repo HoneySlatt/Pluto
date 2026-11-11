@@ -1,5 +1,5 @@
-//! Findings of the review that concern the summary: which processes are the agents', whether a
-//! sample read memory, the figures that say what is missing, and counters of reused ids.
+//! Edge cases of the summary: which processes are the agents', whether a sample read memory, the
+//! figures that say what is missing, and counters of reused ids.
 
 use pluto_measure::proc::{CpuStat, DrmClient, Memory};
 use pluto_measure::sample::{ProcessSample, Sample, ThreadSample};
@@ -167,6 +167,7 @@ fn a_reused_thread_id_never_merges_two_threads() {
         tid: 11,
         start_time,
         switches,
+        name: String::new(),
     };
     let mut first = sample(0, true, vec![process(10, 1, "zed", "zed")]);
     first.threads = vec![thread(1, 500)];

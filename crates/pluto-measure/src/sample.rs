@@ -52,6 +52,8 @@ pub struct ThreadSample {
     pub start_time: u64,
     /// Context switches since the thread began, voluntary and not.
     pub switches: u64,
+    /// The thread's name, from its `stat`; empty if unreadable.
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,10 +230,13 @@ fn read_threads(dir: &Path, pid: u32) -> Option<Vec<ThreadSample>> {
             let thread_dir = task_dir.join(tid.to_string());
             // `stat` first: a thread that ends between the two reads is then left out, rather
             // than kept under a start time of 0, which would count its switches a second time.
-            let start_time = match read_text(&thread_dir.join("stat")) {
-                Read::Text(text) => proc::start_time(&text).unwrap_or(0),
+            let (start_time, name) = match read_text(&thread_dir.join("stat")) {
+                Read::Text(text) => (
+                    proc::start_time(&text).unwrap_or(0),
+                    proc::command_name(&text).unwrap_or_default().to_string(),
+                ),
                 Read::Gone => return None,
-                Read::Refused => 0,
+                Read::Refused => (0, String::new()),
             };
             let Read::Text(status) = read_text(&thread_dir.join("status")) else {
                 return None;
@@ -241,6 +246,7 @@ fn read_threads(dir: &Path, pid: u32) -> Option<Vec<ThreadSample>> {
                 tid,
                 start_time,
                 switches: proc::context_switches(&status)?,
+                name,
             })
         })
         .collect();

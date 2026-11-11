@@ -45,7 +45,23 @@ pub struct MemoryFigures {
     pub gpu: u64,
     pub pss: u64,
     pub rss: u64,
+    /// How long the GPU's graphics engine has run for the share's DRM clients since they began,
+    /// in nanoseconds: above 0, the share renders on the GPU, not in software.
+    pub gpu_engine_ns: u64,
 }
+
+/// A thread's wake-ups, with those of every other thread of the same name in processes of the
+/// same name (Chromium's processes repeat their threads' names).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BusyThread {
+    pub process: String,
+    pub thread: String,
+    pub agent: bool,
+    pub wakeups_per_second: f64,
+}
+
+/// How many of the busiest threads the figures name.
+pub const BUSIEST_THREADS: usize = 12;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Share {
@@ -71,6 +87,9 @@ pub struct Figures {
     /// The agents' processes and their descendants.
     pub agents: Share,
     pub threads_seen: usize,
+    /// The threads that woke most, by process and thread name, busiest first: what the wake-ups
+    /// are, as `pidstat -w -t` showed them for M1.2.
+    pub busiest_threads: Vec<BusyThread>,
     /// Processor time of the cgroup that no process seen accounts for: see the module's text.
     pub unattributed_cpu_seconds: f64,
     /// Processes of the last memory sample whose memory could not be read.
@@ -89,6 +108,7 @@ pub fn summarize(samples: &[Sample], agents: &[String]) -> Figures {
     let elapsed_ms = last.at_ms.saturating_sub(first.at_ms);
 
     let mut switches: HashMap<(u32, u32, u64), Counter> = HashMap::new();
+    let mut thread_names: HashMap<(u32, u32, u64), (String, String)> = HashMap::new();
     let mut ticks: HashMap<(u32, u64), Counter> = HashMap::new();
     let mut last_memory_sample = None;
     let mut memory = ByShare::<MemoryFigures>::default();
@@ -111,8 +131,19 @@ pub fn summarize(samples: &[Sample], agents: &[String]) -> Figures {
                 *count = count.saturating_add(1);
             }
         }
+        let process_names: HashMap<u32, &str> = sample
+            .processes
+            .iter()
+            .map(|process| (process.pid, process.name.as_str()))
+            .collect();
         for thread in &sample.threads {
             let agent = agent_pids.contains(&thread.pid);
+            thread_names
+                .entry((thread.pid, thread.tid, thread.start_time))
+                .or_insert_with(|| {
+                    let process = process_names.get(&thread.pid).copied().unwrap_or_default();
+                    (process.to_string(), thread.name.clone())
+                });
             observe(
                 &mut switches,
                 (thread.pid, thread.tid, thread.start_time),
@@ -166,6 +197,7 @@ pub fn summarize(samples: &[Sample], agents: &[String]) -> Figures {
             processes: processes.agents,
         },
         threads_seen: switches.len(),
+        busiest_threads: busiest_threads(&switches, &thread_names, elapsed_ms),
         unattributed_cpu_seconds: (cpu_seconds - app_cpu_seconds - agents_cpu_seconds).max(0.0),
         processes_without_memory: last_memory_sample.map_or(0, |sample| {
             sample
@@ -176,6 +208,40 @@ pub fn summarize(samples: &[Sample], agents: &[String]) -> Figures {
         }),
         ended_early_at_ms: None,
     }
+}
+
+/// The [`BUSIEST_THREADS`] threads that woke most, summed by process name, thread name and share.
+fn busiest_threads(
+    switches: &HashMap<(u32, u32, u64), Counter>,
+    names: &HashMap<(u32, u32, u64), (String, String)>,
+    elapsed_ms: u64,
+) -> Vec<BusyThread> {
+    let mut by_name: HashMap<(&str, &str, bool), u64> = HashMap::new();
+    for (key, counter) in switches {
+        let (process, thread) = names.get(key).map_or(("", ""), |(process, thread)| {
+            (process.as_str(), thread.as_str())
+        });
+        let sum = by_name.entry((process, thread, counter.agent)).or_default();
+        *sum = sum.saturating_add(counter.delta());
+    }
+    let mut busiest: Vec<BusyThread> = by_name
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|((process, thread, agent), count)| BusyThread {
+            process: process.to_string(),
+            thread: thread.to_string(),
+            agent,
+            wakeups_per_second: per_second(count, elapsed_ms),
+        })
+        .collect();
+    // Busiest first; equal rates by name, so that the list is the same from run to run.
+    busiest.sort_by(|a, b| {
+        b.wakeups_per_second
+            .total_cmp(&a.wakeups_per_second)
+            .then_with(|| (&a.process, &a.thread).cmp(&(&b.process, &b.thread)))
+    });
+    busiest.truncate(BUSIEST_THREADS);
+    busiest
 }
 
 /// A process name as compared with the agents' names: without a leading `.` and a trailing
@@ -323,6 +389,7 @@ fn memory_of(sample: &Sample, agent_pids: &HashSet<u32>) -> ByShare<MemoryFigure
             .gpu
             .saturating_add(client.vram)
             .saturating_add(client.gtt);
+        share.gpu_engine_ns = share.gpu_engine_ns.saturating_add(client.gfx_ns);
     }
     for share in [&mut figures.app, &mut figures.agents] {
         share.headline = share

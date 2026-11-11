@@ -1,4 +1,4 @@
-//! Findings of the review that concern reading one sample from a tree of files.
+//! Edge cases of reading one sample from a tree of files: names, vanished threads, descriptors.
 
 use pluto_measure::sample::Reader;
 use std::fs;
@@ -25,7 +25,7 @@ fn stat(pid: u32, name: &str, start_time: u64) -> String {
 }
 
 fn tree(name: &str) -> Tree {
-    let root = std::env::temp_dir().join(format!("pluto-review-{name}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("pluto-test-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     let proc = root.join("proc");
     write(&proc.join("100/stat"), &stat(100, "python3", 4242));
@@ -102,7 +102,7 @@ fn only_descriptors_on_a_render_node_are_read() {
 
 #[test]
 fn a_thread_gone_between_its_two_reads_is_left_out() {
-    let root = std::env::temp_dir().join(format!("pluto-review-gone-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("pluto-test-gone-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     let _tree = Tree(root.clone());
     let proc = root.join("proc");

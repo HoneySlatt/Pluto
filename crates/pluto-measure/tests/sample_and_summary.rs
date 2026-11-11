@@ -133,19 +133,22 @@ fn a_sample_reads_every_process_below_the_cgroup() {
                 pid: 100,
                 tid: 100,
                 start_time: 0,
-                switches: 11
+                switches: 11,
+                name: "t".into(),
             },
             ThreadSample {
                 pid: 100,
                 tid: 101,
                 start_time: 0,
-                switches: 5
+                switches: 5,
+                name: "t".into(),
             },
             ThreadSample {
                 pid: 200,
                 tid: 200,
                 start_time: 0,
-                switches: 4
+                switches: 4,
+                name: "t".into(),
             },
         ]
     );
@@ -220,12 +223,16 @@ fn figures_over_a_series() {
                 tid: 100,
                 start_time: 0,
                 switches: 1000,
+
+                name: String::new(),
             },
             ThreadSample {
                 pid: 200,
                 tid: 200,
                 start_time: 0,
                 switches: 50,
+
+                name: String::new(),
             },
         ],
         cpu: CpuStat {
@@ -254,18 +261,24 @@ fn figures_over_a_series() {
             tid: 100,
             start_time: 0,
             switches: 1100,
+
+            name: String::new(),
         },
         ThreadSample {
             pid: 200,
             tid: 200,
             start_time: 0,
             switches: 80,
+
+            name: String::new(),
         },
         ThreadSample {
             pid: 201,
             tid: 201,
             start_time: 0,
             switches: 20,
+
+            name: String::new(),
         },
     ];
     let mut middle = middle;
@@ -328,4 +341,87 @@ fn plain_names() {
     assert_eq!(plain_name("codex"), "codex");
     assert_eq!(plain_name(".opencode"), "opencode");
     assert_eq!(plain_name("x-wrapped-wrapped"), "x-wrapped");
+}
+
+#[test]
+fn the_busiest_threads_are_named_and_summed_by_name() {
+    let thread = |pid, tid, switches: u64, name: &str| ThreadSample {
+        pid,
+        tid,
+        start_time: 0,
+        switches,
+        name: name.into(),
+    };
+    let processes = vec![
+        process(1, 0, "electron", 0, 10, vec![]),
+        process(2, 1, "electron", 0, 10, vec![]),
+        process(3, 1, ".claude-wrapped", 0, 10, vec![]),
+    ];
+    let mut first = Sample {
+        at_ms: 0,
+        processes: processes.clone(),
+        threads: vec![
+            thread(1, 1, 0, "Compositor"),
+            thread(2, 20, 0, "Compositor"),
+            thread(3, 30, 0, "claude"),
+        ],
+        cpu: CpuStat::default(),
+        read_memory: true,
+    };
+    let mut last = first.clone();
+    last.at_ms = 10_000;
+    last.threads = vec![
+        thread(1, 1, 100, "Compositor"),
+        thread(2, 20, 50, "Compositor"),
+        thread(3, 30, 200, "claude"),
+    ];
+    first.threads.push(thread(1, 2, 0, "idle"));
+    let figures = summarize(&[first, last], &["claude".to_string()]);
+    let names: Vec<(&str, &str, bool, f64)> = figures
+        .busiest_threads
+        .iter()
+        .map(|t| {
+            (
+                t.process.as_str(),
+                t.thread.as_str(),
+                t.agent,
+                t.wakeups_per_second,
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            (".claude-wrapped", "claude", true, 20.0),
+            ("electron", "Compositor", false, 15.0),
+        ],
+        "summed across the processes of one name; a thread that never woke is left out"
+    );
+}
+
+#[test]
+fn the_gpu_engines_time_shows_rendering_on_the_gpu() {
+    let mut client = DrmClient {
+        device: "gpu".into(),
+        client_id: 1,
+        vram: 0,
+        gtt: 0,
+        gfx_ns: 5_000,
+    };
+    let held = |client: DrmClient| Sample {
+        at_ms: 0,
+        processes: vec![process(1, 0, "zed", 0, 10, vec![client.clone(), client])],
+        threads: vec![],
+        cpu: CpuStat::default(),
+        read_memory: true,
+    };
+    assert_eq!(
+        summarize(&[held(client.clone())], &[])
+            .app
+            .memory
+            .gpu_engine_ns,
+        5_000
+    );
+    client.gfx_ns = 0;
+    assert_eq!(summarize(&[held(client)], &[]).app.memory.gpu_engine_ns, 0);
 }

@@ -1,5 +1,4 @@
-//! Findings of the review that concern a run: a subject that ends before the end, `--out`, and
-//! the command line.
+//! A run: a subject that ends before the end, `--out`, and the command line.
 
 use pluto_measure::sample::Reader;
 use pluto_measure::series::{Schedule, take_series};
@@ -11,7 +10,25 @@ use std::time::{Duration, Instant};
 const BIN: &str = env!("CARGO_BIN_EXE_pluto-measure");
 
 fn temp(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("pluto-review-{name}-{}", std::process::id()))
+    std::env::temp_dir().join(format!("pluto-test-{name}-{}", std::process::id()))
+}
+
+/// One process of pid 7, with one thread, in a fake `/proc`, and a cgroup that holds it.
+fn tree_with_a_process(root: &std::path::Path) -> PathBuf {
+    let proc = root.join("proc/7");
+    fs::create_dir_all(proc.join("task/7")).unwrap();
+    let stat = "7 (app) S 1 7 7 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 100 0 0";
+    fs::write(proc.join("stat"), stat).unwrap();
+    fs::write(proc.join("comm"), "app\n").unwrap();
+    fs::write(proc.join("smaps_rollup"), "Rss: 4 kB\n").unwrap();
+    fs::write(proc.join("task/7/stat"), stat).unwrap();
+    let status = "voluntary_ctxt_switches:\t1\nnonvoluntary_ctxt_switches:\t0\n";
+    fs::write(proc.join("task/7/status"), status).unwrap();
+    let cgroup = root.join("cgroup");
+    fs::create_dir_all(&cgroup).unwrap();
+    fs::write(cgroup.join("cgroup.procs"), "7\n").unwrap();
+    fs::write(cgroup.join("cpu.stat"), "usage_usec 1\n").unwrap();
+    cgroup
 }
 
 fn json(text: &str) -> serde_json::Value {
@@ -22,11 +39,7 @@ fn json(text: &str) -> serde_json::Value {
 fn a_cgroup_removed_mid_series_ends_it_with_what_was_taken() {
     let root = temp("early");
     let _ = fs::remove_dir_all(&root);
-    let cgroup = root.join("cgroup");
-    fs::create_dir_all(&cgroup).unwrap();
-    fs::create_dir_all(root.join("proc")).unwrap();
-    fs::write(cgroup.join("cgroup.procs"), "").unwrap();
-    fs::write(cgroup.join("cpu.stat"), "usage_usec 1\n").unwrap();
+    let cgroup = tree_with_a_process(&root);
     let to_remove = cgroup.clone();
     let remover = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(350));
@@ -52,6 +65,39 @@ fn a_cgroup_removed_mid_series_ends_it_with_what_was_taken() {
 }
 
 #[test]
+fn a_cgroup_left_empty_ends_the_series() {
+    // A cgroup outlives its last process: the subject has died, though the cgroup is still read.
+    let root = temp("emptied");
+    let _ = fs::remove_dir_all(&root);
+    let cgroup = tree_with_a_process(&root);
+    let procs = cgroup.join("cgroup.procs");
+    let emptier = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(350));
+        fs::write(procs, "").unwrap();
+    });
+    let reader = Reader::new(&root.join("proc"), &cgroup);
+    let schedule = Schedule {
+        seconds: 2,
+        interval_ms: 100,
+        memory_every: 5,
+    };
+    let series = take_series(&reader, &schedule).unwrap();
+    emptier.join().unwrap();
+    let _ = fs::remove_dir_all(&root);
+    assert!(
+        series.ended_early_at_ms.is_some(),
+        "the empty cgroup ended it"
+    );
+    assert!(
+        series
+            .samples
+            .iter()
+            .all(|sample| !sample.processes.is_empty())
+    );
+    assert!(series.ended_early_because.unwrap().contains("no process"));
+}
+
+#[test]
 fn a_cgroup_that_cannot_be_read_at_first_is_an_error() {
     let root = temp("never");
     let reader = Reader::new(&root.join("proc"), &root.join("nowhere"));
@@ -67,11 +113,7 @@ fn a_cgroup_that_cannot_be_read_at_first_is_an_error() {
 fn a_full_series_does_not_end_early() {
     let root = temp("full");
     let _ = fs::remove_dir_all(&root);
-    let cgroup = root.join("cgroup");
-    fs::create_dir_all(&cgroup).unwrap();
-    fs::create_dir_all(root.join("proc")).unwrap();
-    fs::write(cgroup.join("cgroup.procs"), "").unwrap();
-    fs::write(cgroup.join("cpu.stat"), "usage_usec 1\n").unwrap();
+    let cgroup = tree_with_a_process(&root);
     let reader = Reader::new(&root.join("proc"), &cgroup);
     let schedule = Schedule {
         seconds: 1,

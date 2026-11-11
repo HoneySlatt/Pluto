@@ -49,6 +49,14 @@ pub fn context_switches(text: &str) -> Option<u64> {
 
 /// `/proc/<pid>/stat`: the parent's pid, the fourth field. The second field, the command's name in
 /// parentheses, may itself hold spaces and parentheses: fields are counted after its last `)`.
+/// `/proc/<pid>/stat` or a thread's: the command's name, between the first `(` and the last `)`
+/// (the name itself may hold parentheses).
+pub fn command_name(text: &str) -> Option<&str> {
+    let open = text.find('(')?;
+    let close = text.rfind(')')?;
+    text.get(open + 1..close)
+}
+
 pub fn parent_pid(text: &str) -> Option<u32> {
     fields_after_name(text)?.nth(1)?.parse().ok()
 }

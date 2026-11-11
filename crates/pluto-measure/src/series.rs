@@ -36,7 +36,8 @@ pub struct Series {
 }
 
 /// Takes the samples of the schedule, from `seconds × 1000 / interval_ms + 1` of them. An error
-/// only if the first sample fails: the cgroup is not there to measure.
+/// only if the first sample fails: the cgroup is not there to measure, or holds no process. A
+/// later sample that fails, or finds the cgroup empty, ends the series early.
 pub fn take_series(reader: &Reader, schedule: &Schedule) -> io::Result<Series> {
     let last_index = schedule.seconds.saturating_mul(1000) / schedule.interval_ms;
     let start = Instant::now();
@@ -46,7 +47,15 @@ pub fn take_series(reader: &Reader, schedule: &Schedule) -> io::Result<Series> {
         std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
         let at_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         let with_memory = index % schedule.memory_every == 0 || index == last_index;
-        match reader.sample(at_ms, with_memory) {
+        let read = reader.sample(at_ms, with_memory).and_then(|sample| {
+            // A cgroup outlives its last process: an empty one is a subject that has ended.
+            if sample.processes.is_empty() {
+                Err(io::Error::other("no process is left in the cgroup"))
+            } else {
+                Ok(sample)
+            }
+        });
+        match read {
             Ok(sample) => samples.push(sample),
             Err(error) if samples.is_empty() => return Err(error),
             Err(error) => {
