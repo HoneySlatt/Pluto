@@ -67,7 +67,15 @@ first option, or interrupts by itself, at a fixed point.
 4. Commit `crates/pluto-recording/recordings/`, or ask an agent to.
 
 When a recording's scan finds something, the script refuses it. Record it again; if it persists,
-an agent extends the masking (`src/mask.rs`), with a test.
+an agent extends the masking (`src/mask.rs`), with a test. A rule added later reaches the
+recordings already made with `pluto-record remask FILE...`, which changes only what the new rule
+covers; their replay through the fork then writes the stamp again.
+
+A scenario that fails says so and stops the series. Its recording, the adapter's events and the
+error stay in the run's folder, which the harness names (under the system's temporary folder), and
+never in the staging folder. Each scenario works in a fixed project folder,
+`/tmp/pluto-recording/<agent>-<scenario>`: a path the agent streams in pieces cannot become
+`<workspace>`, and a random folder name in it would make the scan refuse the recording.
 
 Anyone can check the procedure without a real agent: with `PLUTO_RECORDING_DRY_RUN=1`, `claude`
 and `grok` record stand-ins that play the synthetic recordings, in a throwaway home, and

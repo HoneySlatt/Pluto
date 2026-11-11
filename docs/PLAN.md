@@ -185,12 +185,19 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   runs it and writes the stamp; CI checks the stamp. The procedure is in the
   [crate's README](../crates/pluto-recording/README.md): `scripts/record-session.sh login`, then
   `claude all`, `grok all`, `accept`.
-- **Where it stands.** No real session is recorded yet: the owner runs them. The procedure ran
-  whole as a dry run, stand-ins playing the synthetic recordings (`PLUTO_RECORDING_DRY_RUN=1`),
-  and its eleven recordings replayed through the fork; `login` and the real CLIs never ran. Until
-  the owner records, the synthetic recordings prove the chain, not what the real CLIs send. The milestone is done when
-  the owner's eleven recordings replay into the fork and give their references; their sizes then
-  set the budget.
+- **Where it stands.** On 2026-11-11 the owner recorded the first sessions. Claude's `turn` and
+  Grok's `turn` are in `recordings/` and replay through the fork; they were masked again
+  (`pluto-record remask`) once the review of them showed the account's plugins and agents
+  (Claude's `initialize` answer) and the subscription's tier (Grok's settings), which the
+  stripping now removes. Claude's `approval` was refused by the scan: the random name of the
+  project's folder, streamed in pieces, could not be masked; the project's folder is now fixed.
+  Grok's `approval` failed for a reason the run did not keep; a failed run now keeps its
+  recording, events and error. The other scenarios did not run, since a failure stops the series.
+  Next: the owner records the nine scenarios left, one by one, then `accept`. The procedure
+  also ran whole as a dry run, stand-ins playing the synthetic recordings
+  (`PLUTO_RECORDING_DRY_RUN=1`), and its eleven recordings replayed through the fork. The
+  milestone is done when the owner's eleven recordings replay into the fork and give their
+  references; their sizes then set the budget.
 
 ### M1.6 — The rivals measured
 
