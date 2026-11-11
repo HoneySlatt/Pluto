@@ -321,7 +321,6 @@ impl App {
         crate::ui::pixel_logo::paint(
             ui,
             Rect::from_center_size(Pos2::new(left + 26.0, 26.0), Vec2::new(24.0, 20.0)),
-            0.0,
         );
         // Pluto's wordmark (in place of T3's mark and "Code"), its baseline
         // where T3's wordmark sat.

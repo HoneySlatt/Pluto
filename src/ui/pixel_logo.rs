@@ -1,7 +1,9 @@
 //! Pluto's pixel logo in the active theme's colors (`theme::logo_colors`):
 //! the planet's SVG with the colors filled in, rasterized at the exact pixel
-//! size it is shown at and cached per context, and the moon painted over it
-//! so the draft hero can move it without rasterizing again.
+//! size it is shown at and cached per context, and the moon painted over it.
+//! The logo never moves: an animated moon drew six frames every 1.25 s at
+//! rest (egui shortens each delayed repaint by a predicted frame), against the
+//! rule that nothing redraws while there is nothing to do.
 use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, Pos2, Rect, TextureHandle, TextureOptions, Ui, Vec2};
@@ -19,9 +21,6 @@ const MOON: Rect = Rect {
 };
 /// Width over height.
 pub const ASPECT: f32 = 384.0 / 320.0;
-/// One step of the moon, in SVG units (half a cell).
-const MOON_STEP: f32 = 12.0;
-
 /// `assets/pluto.svg` without the moon, its colors left to fill in.
 const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="72 72 384 320" width="384" height="320">
 <path d="M88 256v-24h24v-24h48v-24h48v-24h80v24h48v24h48v24h24v48h-24v24h-48v24h-48v24h-80v-24h-48v-24h-48v-24H88v-48Z" fill="none" stroke="{ring}" stroke-width="18"/>
@@ -81,9 +80,8 @@ fn texture(ctx: &egui::Context, colors: LogoColors, size: [u32; 2]) -> Option<Te
 }
 
 /// Paints the logo centered in `rect` at the largest size that fits, its box
-/// snapped to physical pixels so the cells stay sharp, the moon moved
-/// `moon` steps down (negative: up).
-pub fn paint(ui: &Ui, rect: Rect, moon: f32) {
+/// snapped to physical pixels so the cells stay sharp.
+pub fn paint(ui: &Ui, rect: Rect) {
     let size = if rect.width() / rect.height() > ASPECT {
         Vec2::new(rect.height() * ASPECT, rect.height())
     } else {
@@ -111,28 +109,29 @@ pub fn paint(ui: &Ui, rect: Rect, moon: f32) {
     }
     let scale = logo.width() / VIEW.width();
     let to_screen = |p: Pos2| logo.min + (p - VIEW.min) * scale;
-    let moon_rect = Rect::from_min_max(to_screen(MOON.min), to_screen(MOON.max))
-        .translate(Vec2::new(0.0, moon * MOON_STEP * scale));
+    let moon_rect = Rect::from_min_max(to_screen(MOON.min), to_screen(MOON.max));
     ui.painter().rect_filled(moon_rect, 0.0, colors.moon);
-}
-
-/// The draft hero's moon: up, rest, down, rest, a step every 1.25 s, with a
-/// repaint asked for the next step only.
-pub fn moon_phase(ui: &Ui) -> f32 {
-    const STEP: f64 = 1.25;
-    let time = ui.input(|i| i.time);
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_secs_f64(STEP - time % STEP));
-    match (time / STEP) as u64 % 4 {
-        1 => -1.0,
-        3 => 1.0,
-        _ => 0.0,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The draft hero shows the logo while the client rests: once egui's first
+    /// passes have settled, drawing it must ask for no further frame.
+    #[test]
+    fn the_logo_asks_for_no_repaint() {
+        let ctx = egui::Context::default();
+        let mut delay = std::time::Duration::ZERO;
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                paint(ui, Rect::from_min_size(Pos2::ZERO, Vec2::new(72.0, 60.0)));
+            });
+            output.textures_delta.clear();
+            delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        }
+        assert_eq!(delay, std::time::Duration::MAX);
+    }
 
     #[test]
     fn the_template_fills_every_color() {

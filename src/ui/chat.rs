@@ -486,16 +486,14 @@ impl App {
         }
     }
 
-    /// Pluto: the pixel logo 22px above the hero's headline at `top`, its
-    /// moon stepping.
+    /// Pluto: the pixel logo 22px above the hero's headline at `top`.
     fn hero_logo(&self, ui: &Ui, left: f32, width: f32, top: f32) {
         let size = Vec2::new(72.0, 60.0);
         let rect = Rect::from_min_size(
             Pos2::new(left + (width - size.x) / 2.0, top - 22.0 - size.y),
             size,
         );
-        let moon = crate::ui::pixel_logo::moon_phase(ui);
-        crate::ui::pixel_logo::paint(ui, rect, moon);
+        crate::ui::pixel_logo::paint(ui, rect);
     }
 
     fn draft_hero(
@@ -1983,7 +1981,6 @@ impl App {
                     Pos2::new(row.left() + 4.0, row.top() + 1.5),
                     Vec2::new(18.0, 15.0),
                 ),
-                0.0,
             );
             widgets::text_in(
                 ui,
@@ -3323,11 +3320,7 @@ impl App {
 /// A work icon: Pluto's mark for `t3-code`, else the lucide icon.
 pub(crate) fn paint_work_icon(ui: &Ui, icon: &str, rect: Rect, size: f32, color: egui::Color32) {
     if icon == "t3-code" {
-        crate::ui::pixel_logo::paint(
-            ui,
-            Rect::from_center_size(rect.center(), Vec2::splat(size)),
-            0.0,
-        );
+        crate::ui::pixel_logo::paint(ui, Rect::from_center_size(rect.center(), Vec2::splat(size)));
     } else {
         theme::paint_icon(ui, icon, rect, size, color);
     }
