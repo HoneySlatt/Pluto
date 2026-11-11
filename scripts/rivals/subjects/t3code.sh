@@ -79,8 +79,21 @@ launch() {
     # The frozen profile already holds the command: its server must be listening too.
     wait_for 120 listening 3773 || { echo "T3 Code's server never listened"; return 1; }
     t3 auth session issue --base-dir "$HOME/.t3" --ttl 1d --label bench --token-only > "$HOME/token" || return 1
-    "$repo/target/release/examples/drive" http://127.0.0.1:3773 "$HOME/token" claudeAgent \
-        claude-sonnet-5-5 "$threads" "$@"
+    # Under a heavy load, T3 Code's server has three times sent nothing for a minute to a client
+    # that had just connected, before drive launched any thread; the cause is not known. drive may
+    # then try once more, only if no thread reached the fake model, so that none is doubled.
+    local attempt
+    for attempt in 1 2; do
+        if "$repo/target/release/examples/drive" http://127.0.0.1:3773 "$HOME/token" claudeAgent \
+            claude-sonnet-5-5 "$threads" "$@" 2> "$run_dir/drive-$attempt.log"; then
+            return 0
+        fi
+        cat "$run_dir/drive-$attempt.log"
+        grep -q "the server stopped answering" "$run_dir/drive-$attempt.log" || return 1
+        [ "$(grep -c '"kind":"main"' "$run_dir/fake.jsonl" 2>/dev/null || true)" = 0 ] || return 1
+        echo "drive: no answer from T3 Code's server (attempt $attempt)"
+    done
+    return 1
 }
 
 # The first start: the welcome page dismissed, the t3 command installed, the project added.

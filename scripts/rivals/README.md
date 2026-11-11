@@ -127,6 +127,8 @@ retry.
 
 - The headless compositor's frame clock is not a display's: frames are counted, never judged on
   time ([ADR-0026](../../docs/adr/0026-the-rivals-measured-how.md)).
+- Under a heavy load, T3 Code's server has sent nothing for a minute to `drive` just connected,
+  cause not known; its driver then tries once more, if no thread reached the fake model.
 - `pluto-measure` misses processes that start and end between two samples; their processor time
   is in `unattributed_cpu_seconds`.
 - Energy is not measured yet: it waits for the root sampler of M1.6c.
