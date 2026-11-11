@@ -3,12 +3,14 @@
 # run.sh starts it in a systemd scope of its own with Delegate=yes; it never runs alone.
 #
 # Three steps, each re-entering this script:
-#   netns   in a new user and network namespace: the loopback up, and a pair of virtual interfaces
-#           with no address and no route, so that Chromium counts the machine online
-#           (address_tracker_linux.cc) while nothing can leave it; then bubblewrap, back to the
-#           owner's uid, sees the Nix store, the GPU and the run's folder, not /home.
-#   inside  in bubblewrap: the cgroups of the run's parts, a session bus, a headless sway on the
-#           GPU, the fake model, then the subject and its driver.
+#   netns     in the run's scope: the cgroups of its parts, then a new user and network namespace;
+#   in-netns  there: the loopback up, and a pair of virtual interfaces with no address and no
+#             route, so that Chromium counts the machine online (address_tracker_linux.cc) while
+#             nothing can leave it; then bubblewrap, back to the owner's uid, in a process
+#             namespace of its own, with a cleared environment, seeing the Nix store, the GPU, the
+#             run's folder and the bench's files, not /home;
+#   inside    in bubblewrap: a session bus, a headless sway on the GPU, the fake model, then the
+#             subject and its driver, each in its cgroup.
 #
 # usage: sandbox.sh netns <run-dir> <subject> <scenario>
 # The run's folder holds, on the way out: fake.jsonl (the fake model's journal), compositor.log,
@@ -48,26 +50,44 @@ in-netns)
     ip link add pluto0 type veth peer name pluto1
     ip link set pluto0 up
     ip link set pluto1 up
+    # What the subject sees: the system's read-only parts, the GPU, its cgroups, its run's folder,
+    # and of the repository only the bench, the three programs it runs and the vendors' packages.
     binds=(--ro-bind /nix /nix --ro-bind /etc /etc --ro-bind /usr /usr --ro-bind /bin /bin
         --ro-bind /run/current-system /run/current-system --ro-bind /run/opengl-driver /run/opengl-driver
         --dev /dev --dev-bind /dev/dri /dev/dri --proc /proc --ro-bind /sys /sys --bind "$cg" "$cg"
-        --tmpfs /home --tmpfs /tmp --ro-bind "$repo" "$repo" --bind "$run_dir" "$run_dir")
-    # Read-only extras a subject needs (its package outside the store, the client's build), from
-    # its file's `subject_binds`.
+        --tmpfs /home --tmpfs /tmp --bind "$run_dir" "$run_dir" --ro-bind "$here" "$here"
+        --ro-bind "$repo/crates/pluto-fake-model/scripts" "$repo/crates/pluto-fake-model/scripts"
+        --ro-bind-try "$repo/target/release/pluto" "$repo/target/release/pluto"
+        --ro-bind-try "$repo/target/release/pluto-fake-model" "$repo/target/release/pluto-fake-model"
+        --ro-bind-try "$repo/target/release/examples/drive" "$repo/target/release/examples/drive"
+        --ro-bind-try "$repo/target/rivals/packages" "$repo/target/rivals/packages")
+    # Read-only extras a subject needs (its package outside the store), from its file's
+    # `subject_binds`.
     # shellcheck source=/dev/null
     source "$here/subjects/$subject.sh"
     while read -r path; do
         [ -n "$path" ] && binds+=(--ro-bind "$path" "$path")
     done < <(subject_binds)
-    exec bwrap --unshare-user --uid "$uid" --gid "$gid" "${binds[@]}" \
-        --dir /home/subject --setenv HOME /home/subject \
-        --dir /tmp/run --chmod 0700 /tmp/run --setenv XDG_RUNTIME_DIR /tmp/run \
-        --setenv XDG_CONFIG_HOME /home/subject/.config --setenv XDG_CACHE_HOME /home/subject/.cache \
-        --setenv XDG_DATA_HOME /home/subject/.local/share --setenv XDG_STATE_HOME /home/subject/.local/state \
-        --setenv XDG_SESSION_TYPE wayland --setenv NIXOS_OZONE_WL 1 \
-        --unsetenv WAYLAND_DISPLAY --unsetenv DISPLAY --unsetenv DBUS_SESSION_BUS_ADDRESS \
-        --unsetenv AT_SPI_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK --unsetenv GNUPGHOME \
-        --setenv DBUS_SYSTEM_BUS_ADDRESS unix:path=/tmp/run/no-system-bus \
+    # A cleared environment, then only what a run needs: the owner's variables (tokens, sockets,
+    # paths) never reach the subject.
+    # LD_LIBRARY_PATH is the measure shell's: the libraries eframe loads at runtime (Wayland, Vulkan).
+    env=(--setenv PATH "$PATH" --setenv LD_LIBRARY_PATH "${LD_LIBRARY_PATH:-}" --setenv LANG "${LANG:-C.UTF-8}"
+        --setenv LOCALE_ARCHIVE "${LOCALE_ARCHIVE:-}" --setenv XDG_DATA_DIRS "${XDG_DATA_DIRS:-}"
+        --setenv HOME /home/subject --setenv XDG_RUNTIME_DIR /tmp/run
+        --setenv XDG_CONFIG_HOME /home/subject/.config --setenv XDG_CACHE_HOME /home/subject/.cache
+        --setenv XDG_DATA_HOME /home/subject/.local/share --setenv XDG_STATE_HOME /home/subject/.local/state
+        --setenv XDG_SESSION_TYPE wayland --setenv NIXOS_OZONE_WL 1 --setenv BROWSER false
+        --setenv DBUS_SYSTEM_BUS_ADDRESS unix:path=/tmp/run/no-system-bus
+        --setenv PLUTO_FAKE_MODEL "$PLUTO_FAKE_MODEL" --setenv PLUTO_FAKE_SCRIPT "$PLUTO_FAKE_SCRIPT")
+    for name in FAKE_SPEED FRAMES PROBE_WAIT PROBE_KEYS PROBE_CLICK BENCH_MAX_WAIT; do
+        [ -n "${!name:-}" ] && env+=(--setenv "$name" "${!name}")
+    done
+    # Its own process namespace: /proc shows the run's processes only, and its first process
+    # ending stops every other one, the bus and the compositor among them. A new session: no
+    # input injected into the caller's terminal.
+    exec bwrap --unshare-user --uid "$uid" --gid "$gid" --unshare-pid --unshare-ipc --new-session \
+        --clearenv "${env[@]}" "${binds[@]}" \
+        --dir /home/subject --dir /tmp/run --chmod 0700 /tmp/run \
         --die-with-parent -- "$0" inside "$run_dir" "$subject" "$scenario" "$cg"
     ;;
 inside)

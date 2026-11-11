@@ -1,7 +1,6 @@
 # shellcheck shell=bash
-# What a run does inside its sandbox, sourced by sandbox.sh after the subject's file. The subject's
-# file defines (scripts/rivals/subjects/README.md): subject_binds, subject_agents, subject_setup,
-# subject_start, subject_open, subject_stream and subject_stop.
+# What a run does inside its sandbox, sourced by sandbox.sh after the subject's file, whose
+# functions the README's "A subject's file" lists.
 
 # The fake model's address inside the sandbox: its own loopback, which no other program shares.
 FAKE_PORT=11435
@@ -51,13 +50,16 @@ start_bus() {
 }
 
 # The headless sway every subject draws into: 3840 × 2160 at 240 Hz on the GPU, one output,
-# no input device. With WAYLAND_DEBUG=server it logs every client request, which counts the
-# subject's frames; the log costs the compositor, never the subject's cgroup.
+# no input device. With FRAMES=1 it logs every client request (WAYLAND_DEBUG=server), which counts
+# the subject's frames; the log slows the compositor, so runs that count frames are apart from
+# those whose resources are kept (ADR-0026).
 start_compositor() {
     printf 'output HEADLESS-1 mode 3840x2160@240Hz\ndefault_border none\n' > /tmp/run/sway.conf
+    local debug=
+    [ "${FRAMES:-0}" = 1 ] && debug=server
     (
         in_part compositor
-        WAYLAND_DEBUG=server WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=gles2 \
+        WAYLAND_DEBUG=$debug WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=gles2 \
             exec sway -c /tmp/run/sway.conf
     ) > "$run_dir/compositor.log" 2>&1 &
     wait_for 10 test -S /tmp/run/wayland-1 || { echo "sway did not start" >&2; return 1; }
@@ -83,18 +85,27 @@ mark_ready() {
     mv "$run_dir/ready.tmp" "$run_dir/ready"
 }
 
+# No browser may start in the sandbox: a link a subject opens goes nowhere, and is noted.
+block_browsers() {
+    mkdir -p /tmp/run/bin
+    printf '#!/bin/sh\necho "a browser was asked for: $*" >> %q\n' "$run_dir/browser.log" \
+        > /tmp/run/bin/xdg-open
+    chmod +x /tmp/run/bin/xdg-open
+    export PATH=/tmp/run/bin:$PATH
+}
+
 bench_inside() {
     run_dir=$1
     local scenario=$3
     in_part bench
+    block_browsers
     start_bus
     start_compositor
     start_fake
     subject_setup
     (
         in_part subject
-        exec_subject_start() { subject_start; }
-        exec_subject_start
+        subject_start
     ) > "$run_dir/subject.log" 2>&1 &
     echo $! > "$run_dir/subject.pid"
     (
@@ -123,6 +134,8 @@ bench_inside() {
         *) echo "unknown scenario $scenario" >&2; exit 2 ;;
         esac
     ) > "$run_dir/driver.log" 2>&1 || { echo "the driver failed; see driver.log" >&2; subject_stop; return 1; }
+    # What the window shows while it is measured, kept with the run's figures.
+    grim -s 0.25 "$run_dir/measured.png" 2>/dev/null || true
     mark_ready
     wait_for "${BENCH_MAX_WAIT:-7200}" test -e "$run_dir/done" || true
     stat -c %s "$run_dir/compositor.log" > "$run_dir/done.offset"

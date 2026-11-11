@@ -50,11 +50,13 @@ subject_start() {
 }
 
 # The first start shows a welcome page: its Start button is the second element from the end
-# (the last is the privacy policy's link).
+# (the last is the privacy policy's link). A new virtual keyboard may lose its first keys, so the
+# keys wait a little; then the page must be gone: T3 Code keeps the date it was dismissed.
 dismiss_welcome() {
     sleep 20
-    wtype -M shift -k Tab -k Tab -m shift -k Return
-    sleep 3
+    wtype -s 300 -M shift -k Tab -s 100 -k Tab -m shift -s 100 -k Return -s 300
+    wait_for 15 grep -rqa --include='*settings.json' onboardingCompletedAt "$HOME" ||
+        { echo "the welcome page was not dismissed"; return 1; }
 }
 
 # T3 Code's command line, installed at first start; it runs the AppImage's Electron as Node, so it
@@ -74,8 +76,7 @@ launch() {
     local threads=$1
     shift
     wait_for 60 test -x "$HOME/.local/bin/t3" || { echo "the t3 command was not installed"; return 1; }
-    dismiss_welcome
-    grim -s 0.25 "$run_dir/after-welcome.png"
+    dismiss_welcome || { grim -s 0.25 "$run_dir/after-welcome.png"; return 1; }
     t3 project add "$HOME/project" --base-dir "$HOME/.t3" || return 1
     t3 auth session issue --base-dir "$HOME/.t3" --ttl 1d --label bench --token-only > "$HOME/token" || return 1
     "$repo/target/release/examples/drive" http://127.0.0.1:3773 "$HOME/token" claudeAgent \
