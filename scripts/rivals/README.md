@@ -10,7 +10,7 @@ Measures Pluto and its rivals from outside, on one workload, each in its own san
 run:
 
 1. waits until the machine is calm: the rest of it uses less than `BUSY_LIMIT` of a core (0.30)
-   over 5 seconds, for up to five minutes, or the run is marked noisy;
+   over 5 seconds, for up to `CALM_WAIT` minutes (5), or the run is marked noisy;
 2. starts `sandbox.sh` in a systemd scope of its own, with a cgroup per part: `bench`,
    `compositor`, `fake`, `driver` and `subject`;
 3. in the sandbox: a network namespace with the loopback and a pair of virtual interfaces without

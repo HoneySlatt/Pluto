@@ -11,6 +11,7 @@
 #             probe: for writing a subject's file (the README).
 # env:       MEASURE_SECONDS (rest: 600, stream: 45), OUT (/tmp/pluto-rivals), BUSY_LIMIT (0.30 of
 #            a core used by the rest of the machine, above which a run waits, then is marked noisy),
+#            CALM_WAIT (5: the minutes a run waits for the machine to be calm),
 #            FRAMES=1 to count the subject's frames (those runs' resources are not to be kept)
 #
 # Each run's folder, OUT/<date>-<time>/<subject>/<scenario>-<n>/, holds figures.json
@@ -33,6 +34,7 @@ probe | prepare) seconds=${MEASURE_SECONDS:-5} ;;
 esac
 out=${OUT:-/tmp/pluto-rivals}/$(date +%Y-%m-%d-%H%M%S)
 busy_limit=${BUSY_LIMIT:-0.30}
+calm_wait=${CALM_WAIT:-5}
 
 export PLUTO_FAKE_MODEL=$repo/target/release/pluto-fake-model
 export PLUTO_FAKE_SCRIPT=$repo/crates/pluto-fake-model/scripts/workload.json
@@ -68,9 +70,9 @@ scope_busy() {
     awk '/^usage_usec/ { print $2 / 1e6 }' "$1/cpu.stat"
 }
 
-# Waits up to five minutes for the machine to be calm: less than busy_limit of a core over 5 s.
+# Waits up to CALM_WAIT minutes for the machine to be calm: less than busy_limit of a core over 5 s.
 wait_calm() {
-    local tries=60 before after
+    local tries=$((calm_wait * 12)) before after
     while [ "$tries" -gt 0 ]; do
         before=$(machine_busy)
         sleep 5
