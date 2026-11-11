@@ -114,10 +114,14 @@ subject_stream() {
     wait_for 120 finished "$1" 0 3 && sleep 3
 }
 
-# The newest thread opened in the window while it streams: T3 Code's default binding `mod+1`
-# (`thread.jump.1`), through the keyboard as for Pluto.
+# The newest thread opened in the window while it streams, through the keyboard: its sidebar
+# lists none of the threads launched through its server, so `mod+1` finds nothing; its command
+# palette (`mod+k`) finds one by its title, the fake model's side answer (crates/pluto-fake-model/scripts/workload.json).
 subject_show() {
-    wtype -s 300 -M ctrl -k 1 -m ctrl -s 300
+    wtype -s 300 -M ctrl -k k -m ctrl -s 300
+    sleep 2
+    # The search, the choice and Enter in one wtype: a new virtual keyboard may lose its first keys.
+    wtype -s 300 "Looking at the project" -s 1500 -k Down -s 300 -k Return -s 300
     sleep 3
 }
 
