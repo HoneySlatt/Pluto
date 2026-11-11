@@ -109,14 +109,16 @@ one_run() {
     for name in "${names[@]}"; do agents+=(--agent "$name"); done
     local before after
     before=$(machine_busy)
-    local part parts=()
+    local part parts=() part_measures=()
     read -r -a parts < <(bash -c "repo=$repo; source $here/subjects/$subject.sh; subject_parts")
     for part in "${parts[@]}"; do
         "$measure" --cgroup "$cgroup/$part" --seconds "$seconds" "${agents[@]}" \
             --out "$dir/figures-$part.json" 2> "$dir/measure-$part.log" &
+        part_measures+=($!)
     done
     "$measure" --cgroup "$cgroup" --seconds "$seconds" "${agents[@]}" --out "$dir/figures.json" 2> "$dir/measure.log"
-    wait
+    # Only the parts' measures: a bare `wait` would also wait for the sandbox, which waits for `done`.
+    for part in "${part_measures[@]}"; do wait "$part" || true; done
     after=$(machine_busy)
     touch "$dir/done"
     wait "$sandbox" || true
