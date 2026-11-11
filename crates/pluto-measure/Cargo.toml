@@ -1,0 +1,11 @@
+[package]
+name = "pluto-measure"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Measures a program from outside, over every process of its cgroup: memory (private, swap and GPU), processor time and wake-ups, so that Pluto and its rivals are counted alike."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
