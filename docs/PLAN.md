@@ -235,8 +235,16 @@ measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences wer
   each run a turn with a tool through it, in the bench. Pluto's figures in the bench agree with
   M1.2's within their noise. Pluto, T3 Code and Zed have their figures, with versions and dates,
   in `measurements.md`.
-- **How to test.** `cargo test -p pluto-fake-model`; the bench's runs, on the desktop.
+- **How to test.** `cargo test -p pluto-fake-model -p pluto-measure`; the bench's runs, on the
+  desktop ([`scripts/rivals/README.md`](../scripts/rivals/README.md)).
 - **Measured.** Everything above; nothing of the bar changes yet.
+- **Where it stands (2026-11-11).** The fake model (`crates/pluto-fake-model`) and `pluto-measure`
+  are built, reviewed and fixed, with their tests. Claude Code 2.1.311, Codex 0.164 and OpenCode
+  2.1.4 each ran a whole turn through the fake model, offline, without an account. The bench
+  (`scripts/rivals/`) runs its sandbox, a headless sway on the GPU, the fake model and a subject:
+  Pluto (the fork and the egui client, Claude Code on the fake model) and T3 Code 0.1.8 run their
+  15 threads to the end; Zed 1.27.0 is driven by the keyboard. The vendors' packages of T3 Code
+  and Zed are downloaded with the owner's go. No figure is taken yet: the machine was in use.
 
 #### M1.6b — The open rivals and the chats
 

@@ -13,8 +13,10 @@ Terms this project uses in a sense of its own.
 - **A rival**: a program of the market that Pluto is measured against, named only to be measured,
   with its version and date ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 - **The fake model service**: a scripted service that streams the same workload to Pluto and its
-  rivals as a model would, so that they compare with no quota spent; it counts the tokens it
-  receives ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+  rivals as a model would, so that they compare with no quota spent; it counts the bytes it
+  receives, by part, which stand for tokens until Stage 2 brings a tokenizer;
+  `crates/pluto-fake-model` ([ADR-0017](adr/0017-pluto-measured-against-the-market.md),
+  [ADR-0026](adr/0026-the-rivals-measured-how.md)).
 - **The margin**: how much better than the best rival Pluto must be on a family of criteria, such
   as twice on resources ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 - **A recording**: an agent's raw stdio traffic during one scripted scenario, masked, in
@@ -25,6 +27,12 @@ Terms this project uses in a sense of its own.
 - **The stamp**: the hashes of what a replay reads, written in `recordings/` when the owner's
   machine replays the recordings into the fork; CI compares them to show nothing it covers
   changed without that replay.
+- **The rivals' bench**: `scripts/rivals/`, which runs Pluto or a rival in a sandbox of its own on
+  the fake model's workload and measures it from outside with `pluto-measure`
+  ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
+- **A subject**: what one run of the rivals' bench measures: Pluto, or a rival.
+- **The headline memory**: a program's private memory, swap and GPU memory, summed over all its
+  processes; the quality bar's memory figure since [ADR-0026](adr/0026-the-rivals-measured-how.md).
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
   against a server; not to be confused with the bench above.
 - **uwui's agent bench**: the fixed tasks that uwui gives the same agents with uwui and with its
