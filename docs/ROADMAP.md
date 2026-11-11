@@ -65,7 +65,7 @@ The rivals, named only to be measured:
 | The chat | ChatGPT's and Claude's desktop applications; T3 Chat, Open WebUI, LibreChat, Msty, TypingMind; LM Studio, Jan; Gemini and Le Chat on their features and voice ([ADR-0020](adr/0020-the-chat.md)) |
 | The phone | Claude's and ChatGPT's remote control, T3 Code's mobile application, Happy, Paseo; Conductor and Nimbalyst on paper ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)) |
 
-None is measured yet. A survey of 2026-11-08, mostly users' reports, found every agents' application
+None has a figure kept yet: M1.6a's first runs were sent back by its review. A survey of 2026-11-08, mostly users' reports, found every agents' application
 but Zed and Warp built on Electron, the vendors' applications growing to gigabytes, and no vendor
 publishing budgets.
 
@@ -88,7 +88,7 @@ today's figures are beside them, and each gap is known debt.
 
 | Budget | Target | Today | Measured by | Checked in |
 |---|---|---|---|---|
-| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB with 15 threads open, counted as private, swap and GPU memory ([ADR-0026](adr/0026-the-rivals-measured-how.md)) | 0.05 frames and 3.2 wake-ups a second; 143 MB ([measured](measurements.md#the-client-at-rest)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
+| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB with 15 threads open, counted as private, swap and GPU memory ([ADR-0026](adr/0026-the-rivals-measured-how.md)) | 0.05 frames and 3.2 wake-ups a second; 143 MB resident, not yet counted as ADR-0026 counts memory ([measured](measurements.md#the-client-at-rest)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
 | Server at rest | at most 80 MB, counted as for the client, agents' processes and Chromium excluded; 0 wake-ups of its own | the fork: 394 to 892 MB, 4 to 30 wake-ups a second ([measured](measurements.md#the-fork)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | CI |
 | Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | 125 ms warm, 195 ms cold, to its painting ([measured](measurements.md#the-start)) | `examples/live.rs`, `hyperfine` | by hand at each milestone |
 | Frames | 99.9 % of frames on time at the display's rate, none over 1.5 times the frame, in every scenario: a long thread of 5,000 messages, 15 threads streaming, scrolling, opening a thread, the editor; the HP at 60 Hz | the long thread: p99 8.5 ms, UI pass only, at 1440 × 900; 15 streams: p99 3.6 ms on replayed streams ([measured](measurements.md#a-long-thread-and-streams)) | `examples/bench.rs`, on recorded streams from M1.5 | by hand at each milestone |

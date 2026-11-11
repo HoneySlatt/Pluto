@@ -37,6 +37,9 @@ Each run's folder, `OUT/<date>/<subject>/<scenario>-<n>/` (`OUT` is `/tmp/pluto-
 measured, from sway's protocol log), `fingerprint.txt` (versions, the machine, the script's hash,
 the rest of the machine's load, `noisy`), the fake model's journal `fake.jsonl`, and every log.
 
+`summary.sh <OUT/date> <scenario>` gives each subject's medians and ranges as a Markdown table, for
+[`docs/measurements.md`](../../docs/measurements.md).
+
 ## Before running
 
 In `nix develop .#measure`, which holds the sandbox's tools, sway, wtype, grim, appimage-run and
