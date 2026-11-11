@@ -432,12 +432,16 @@ fn a_request_is_main_only_if_it_offers_a_shell_or_a_read_tool() {
         "/v1/messages",
         &anthropic_body(false, json!([structured_output])),
     );
-    assert_eq!(
-        reply.json()["content"],
-        json!([{"type": "text", "text": "A short title"}])
-    );
+    // A side request: it calls the structured-output tool with the side answer (tests/structured.rs).
+    let content = &reply.json()["content"];
+    assert_eq!(content[0]["type"], "tool_use");
+    assert_eq!(content[0]["name"], "StructuredOutput");
+    assert_eq!(content[0]["input"], json!({"title": "A short title"}));
     let entry = last(&handle);
-    assert_eq!((entry.kind, entry.tool.as_deref()), (Kind::Side, None));
+    assert_eq!(
+        (entry.kind, entry.tool.as_deref()),
+        (Kind::Side, Some("StructuredOutput"))
+    );
     assert_eq!(
         journal_json(&entry)["tools_offered"],
         json!(["StructuredOutput"])

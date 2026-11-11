@@ -19,7 +19,8 @@
 //! A turn is a list of segments. Each segment's text is streamed; a segment with a tool ends with
 //! that tool's call, and the next segment answers once the client sends the tool's result back.
 //! The last segment of a turn has no tool, so that every turn ends. A request that is not a turn's
-//! (a client's title or summary request) gets `side_answer`.
+//! (a client's title or summary request) gets `side_answer`, shaped as the JSON it asks for when it
+//! asks for structured output (the routes in [`crate::server`]).
 
 use serde::Deserialize;
 use std::fmt;

@@ -11,6 +11,7 @@
 //!
 //! - [`script`]: the script's file, versioned, and where a request stands in it.
 //! - [`conversation`]: what a request carries, read the same way for each API.
+//! - [`structured`]: JSON that fits a schema, for the side requests that ask for it.
 //! - [`tools`]: the script's tool calls mapped to the tools a client offers.
 //! - [`wire`]: the answer encoded for each API, streamed or whole.
 //! - [`http`]: the little HTTP/1.1 the service needs, on `httparse`.
@@ -23,5 +24,6 @@ pub mod http;
 mod json;
 pub mod script;
 pub mod server;
+pub mod structured;
 pub mod tools;
 pub mod wire;

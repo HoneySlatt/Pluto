@@ -26,8 +26,16 @@
 //!   `POST /chat/completions`, `POST /api/chat`: a model's answer in that API, streamed if asked.
 //!   Kind `main` if the request offers at least one tool whose name is in [`tools::SHELL_NAMES`]
 //!   or [`tools::READ_NAMES`], `side` otherwise (a title request that offers only a
-//!   structured-output tool is a side request); a side request gets the script's `side_answer`
-//!   and no tool.
+//!   structured-output tool is a side request). A side request gets the script's `side_answer`
+//!   and no tool, unless it asks for structured output ([`Conversation::output_schema`]):
+//!   - on Anthropic's API, through a `StructuredOutput` tool, it gets a call of that tool, whose
+//!     arguments fit the tool's schema and hold the `side_answer` in every string, with an empty
+//!     text; its id is `toolu_fake_side_<request>`. Once the request carries a tool result after
+//!     its prompt, the call is answered and the turn ends: the plain `side_answer`, no tool;
+//!   - on the other APIs it gets, as its text, the compact JSON that fits the schema, the
+//!     `side_answer` being every string ([`crate::structured`]).
+//!
+//!   A main request is never shaped by a format it asks for.
 //! - Anything else: 404, `{"error": {"type": "not_found", "message"}}`. Kind `unknown`.
 //!
 //! A request that cannot be read (malformed: 400; too large: 413; a `Content-Encoding`: 415), or a
@@ -57,7 +65,8 @@ use crate::conversation::{self, Api, Conversation, Parts};
 use crate::http::{self, ReadError, Request, Unreadable};
 use crate::json;
 use crate::script::Script;
-use crate::tools;
+use crate::structured;
+use crate::tools::{self, MappedTool};
 use crate::wire::{self, Reply, WireEvent, anthropic, chat_completions, ollama, responses};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -632,7 +641,7 @@ fn model_answer(shared: &Shared, api: Api, request: &Request, entry: &mut Journa
     let script = &shared.config.script;
     let (text, tool) = if !tools::offers_a_callable_tool(&conversation.tools) {
         entry.kind = Kind::Side;
-        (script.side_answer.clone(), None)
+        side_answer(api, &conversation, &script.side_answer, entry.request)
     } else {
         entry.kind = Kind::Main;
         let position = conversation.position;
@@ -659,6 +668,33 @@ fn model_answer(shared: &Shared, api: Api, request: &Request, entry: &mut Journa
         chunk_bytes: script.pace.chunk_bytes,
     };
     encode(api, &reply, &conversation)
+}
+
+/// A side request's text and tool: the plain answer, or, if it asks for structured output, the
+/// answer in the schema's shape.
+fn side_answer(
+    api: Api,
+    conversation: &Conversation,
+    answer: &str,
+    request: u64,
+) -> (String, Option<MappedTool>) {
+    let Some(schema) = &conversation.output_schema else {
+        return (answer.to_owned(), None);
+    };
+    let example = structured::example(schema, answer);
+    if api != Api::Anthropic {
+        return (json::compact(&example), None);
+    }
+    if !conversation.tool_results.is_empty() {
+        // The call was answered: the SDK's turn ends on a plain reply.
+        return (answer.to_owned(), None);
+    }
+    let call = MappedTool {
+        call_id: format!("{}_side_{request}", call_id_prefix(api)),
+        name: conversation::STRUCTURED_OUTPUT_TOOL.to_owned(),
+        arguments: example,
+    };
+    (String::new(), Some(call))
 }
 
 fn encode(api: Api, reply: &Reply, conversation: &Conversation) -> Answer {
@@ -691,12 +727,15 @@ fn encode(api: Api, reply: &Reply, conversation: &Conversation) -> Answer {
 
 /// The id of the call a segment makes, which the client sends back with the call's result.
 fn call_id(api: Api, turn: usize, segment: usize) -> String {
-    let prefix = if api == Api::Anthropic {
-        "toolu"
+    format!("{}_{turn}_{segment}", call_id_prefix(api))
+}
+
+fn call_id_prefix(api: Api) -> &'static str {
+    if api == Api::Anthropic {
+        "toolu_fake"
     } else {
-        "call"
-    };
-    format!("{prefix}_fake_{turn}_{segment}")
+        "call_fake"
+    }
 }
 
 /// From a turn's second segment on: whether the last result answers the previous segment's call.

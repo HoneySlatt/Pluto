@@ -6,6 +6,19 @@
 //! Messages a client adds on its own (an environment's description, reminders) carry no marker, so
 //! they move nothing.
 //!
+//! The schema a request asks its answer to fit, if any, is read once, into
+//! [`Conversation::output_schema`]:
+//! - Responses: `text.format.schema`, when `text.format.type` is `json_schema`;
+//! - Chat Completions: `response_format.json_schema.schema`, when `response_format.type` is
+//!   `json_schema`;
+//! - Ollama: `format`, when it is an object (the string `"json"` names no schema);
+//! - Anthropic: the `input_schema` of an offered tool named `StructuredOutput`, which Claude's
+//!   Agent SDK adds to ask for structured output; the model answers by calling it.
+//!
+//! A JSON format without a schema (`json_object`, Ollama's `"json"`) and Anthropic's other forms
+//! (a tool forced by `tool_choice`, `output_config.format`) are not read: those requests get the
+//! plain side answer. No subject of the bench sends them today.
+//!
 //! Bytes are counted on each part's compact JSON (`serde_json::to_string`), so that they compare
 //! between clients whatever their own formatting:
 //! - instructions: Anthropic's `system`; Responses' `instructions`; Ollama's messages of role
@@ -71,8 +84,13 @@ pub struct Conversation {
     /// The tool results after the turn's prompt, in order.
     pub tool_results: Vec<ToolResult>,
     pub tools: Vec<ToolSpec>,
+    /// The JSON Schema the answer is asked to fit; see the module's documentation.
+    pub output_schema: Option<Value>,
     pub parts: Parts,
 }
+
+/// The name of the tool through which Claude's Agent SDK asks for structured output.
+pub const STRUCTURED_OUTPUT_TOOL: &str = "StructuredOutput";
 
 /// One message (Anthropic, Ollama, Chat Completions) or input item (Responses), as the four APIs
 /// have in common.
@@ -157,8 +175,31 @@ pub fn read(api: Api, body: &Value, body_len: usize) -> Result<Conversation, Str
         },
         tool_results,
         tools,
+        output_schema: output_schema(api, body),
         parts,
     })
+}
+
+/// The schema a request asks its answer to fit, from the place its API puts it.
+fn output_schema(api: Api, body: &Value) -> Option<Value> {
+    let schema = match api {
+        Api::Responses => {
+            let format = &body["text"]["format"];
+            (format["type"] == "json_schema").then(|| &format["schema"])
+        }
+        Api::ChatCompletions => {
+            let format = &body["response_format"];
+            (format["type"] == "json_schema").then(|| &format["json_schema"]["schema"])
+        }
+        Api::Ollama => body.get("format").filter(|format| format.is_object()),
+        Api::Anthropic => body
+            .get("tools")
+            .and_then(Value::as_array)?
+            .iter()
+            .find(|tool| tool["name"] == STRUCTURED_OUTPUT_TOOL)
+            .map(|tool| &tool["input_schema"]),
+    };
+    schema.filter(|schema| !schema.is_null()).cloned()
 }
 
 /// The turn number in a text holding `[turn N]`, the first such marker.

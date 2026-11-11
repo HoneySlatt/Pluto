@@ -18,6 +18,7 @@
 
 use crate::conversation::ToolSpec;
 use crate::script::ToolCall;
+use crate::structured::type_name;
 use serde_json::{Map, Value, json};
 
 /// The properties that hold a shell command, in order of preference.
@@ -158,17 +159,5 @@ fn placeholder(property: Option<&Value>) -> Value {
         Some("array") => json!([]),
         Some("object") => json!({}),
         _ => json!("fake"),
-    }
-}
-
-/// A property's JSON Schema type; for a list of types, the first that is not `null`.
-fn type_name(property: &Value) -> Option<&str> {
-    match &property["type"] {
-        Value::String(name) => Some(name),
-        Value::Array(names) => names
-            .iter()
-            .filter_map(Value::as_str)
-            .find(|name| *name != "null"),
-        _ => None,
     }
 }
