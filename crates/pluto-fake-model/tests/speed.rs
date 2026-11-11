@@ -1,6 +1,6 @@
 //! The command line's `--speed`: which values start the server, which are refused.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_pluto-fake-model");
@@ -22,15 +22,18 @@ fn exit_code(speed: &str) -> Option<i32> {
         .spawn()
         .unwrap();
     // The first line on stderr is either the address it listens on, or the error it exits with.
+    // The pipe stays open until the server has ended: closed early, a refusal's usage line, written
+    // after its error, would make the server panic on a broken pipe and exit 101.
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let mut line = String::new();
-    BufReader::new(child.stderr.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
+    stderr.read_line(&mut line).unwrap();
     if line.starts_with("pluto-fake-model: listening on") {
         child.kill().unwrap();
         child.wait().unwrap();
         return None;
     }
+    let mut rest = String::new();
+    stderr.read_to_string(&mut rest).unwrap();
     child.wait().unwrap().code()
 }
 
