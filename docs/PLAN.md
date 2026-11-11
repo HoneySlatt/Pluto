@@ -37,8 +37,8 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   took first figures of Pluto, T3 Code and Zed at rest before the owner stopped it. The owner
   set the rivals' measures aside until a go of theirs
   ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), then gave it the same day: Pluto, T3
-  Code and Zed now have their figures at rest and streaming. Next: the rest of
-  [M1.6b](#m16b--the-open-rivals-and-the-chats).
+  Code and Zed now have their figures at rest and streaming. On 2026-11-11 the owner split M1.6b
+  in three; next: [M1.6b1](#m16b1--the-bench-finished-on-three-subjects).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -52,7 +52,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
 | [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | Done; stopped by the owner after two runs at rest, the rest moved to M1.6b |
-| [M1.6b](#m16b--the-open-rivals-and-the-chats) | The open rivals and the chats measured | In progress: Pluto, T3 Code and Zed done at rest and streaming |
+| [M1.6b1](#m16b1--the-bench-finished-on-three-subjects) | The bench finished on Pluto, T3 Code and Zed; Chat Completions in the fake model | In progress |
+| [M1.6b2](#m16b2--the-open-rivals-and-the-chats) | The open rivals and the chats measured at rest and streaming | Planned |
+| [M1.6b3](#m16b3--the-long-thread-and-real-days) | The long thread in each application, and real days side by side | Planned |
 | [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Planned |
 
 ## Stage 1 — The ground measured and triaged
@@ -263,25 +265,44 @@ measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences wer
 The owner set M1.6b and M1.6c aside on 2026-11-11 until a go of theirs
 ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), and gave it the same day.
 
-#### M1.6b — The open rivals and the chats
+The owner split M1.6b in three on 2026-11-11: it held more than ten hours of campaigns and no
+verifiable step before its end.
 
-- **Goal.** Every open rival and chat that takes an endpoint has its figures.
-- **Delivers.** Chat Completions in the fake model. OpenCode Desktop, Emdash, Nimbalyst, Jan, Open
-  WebUI and LibreChat measured. From M1.6a: Pluto, T3 Code and Zed streaming, and at rest up to
-  five runs each; the frames' own runs; the start to the first frame and the profile's growth in
-  the bench; frozen profiles; Codex's and OpenCode's turns in it; a streaming thread open in every
-  subject's window during the stream scenario; the cause of Pluto's client's frames at rest. The long thread of 5,000 messages, seeded in each application's own
-  format where it has one. Real days of 15 threads, several subjects side by side.
-- **Done when.** Each has its figures, or a written reason.
+#### M1.6b1 — The bench finished on three subjects
+
+- **Goal.** The bench takes every figure ADR-0026 names on Pluto, T3 Code and Zed, and the fake
+  model speaks the four APIs.
+- **Delivers.** Chat Completions in the fake model. The start to the first frame and the profile's
+  growth in the bench; frozen profiles; Codex's and OpenCode's turns in the bench, as Pluto's
+  agents; a streaming thread open in every subject's window during the stream scenario; Zed's
+  keyboard driver checked prompt by prompt; the cause of Pluto's client's frames at rest. Then
+  Pluto, T3 Code and Zed measured again where these change their figures, three runs a figure.
+- **Done when.** The fake model's Chat Completions tests pass in `scripts/check.sh`; each new
+  figure has three calm runs per subject in `measurements.md`, or a written reason.
+- **How to test.** `cargo test -p pluto-fake-model -p pluto-measure`; the bench's runs, on the
+  desktop.
 - **Where it stands (2026-11-11).** Pluto, T3 Code and Zed have their figures at rest and
   streaming, and their frames counted in runs of their own
   ([`measurements.md`](measurements.md#the-rivals-bench-m16a)). The owner chose three runs a
   figure, resting 5 minutes, rather than ADR-0026's five and 10: the first runs varied by less
-  than 1 %. The noise check now leaves out the run's own compositor and fake model. Left from
-  M1.6a: the start to the first frame, the profile's growth, frozen profiles, Codex's and
-  OpenCode's turns in the bench, a streaming thread open in every window, and the cause of
-  Pluto's client's frames at rest. Zed's driver lost 2 of 15 typed prompts in one stream run of
-  three. Then the new subjects and Chat Completions.
+  than 1 %. The noise check now leaves out the run's own compositor and fake model. Zed's driver
+  lost 2 of 15 typed prompts in one stream run of three.
+
+#### M1.6b2 — The open rivals and the chats
+
+- **Goal.** Every open rival and chat that takes an endpoint has its figures.
+- **Delivers.** OpenCode Desktop, Emdash, Nimbalyst, Jan, Open WebUI and LibreChat measured at rest
+  and streaming, three runs a figure, or a written reason. Open WebUI and LibreChat are web
+  applications: which browser serves them in the bench, and how it is counted, is put to the owner
+  first.
+- **Done when.** Each has its figures, or a written reason.
+
+#### M1.6b3 — The long thread and real days
+
+- **Delivers.** The long thread of 5,000 messages, seeded in each application's own format where it
+  has one, opened and scrolled in each subject. Real days of 15 threads, several subjects side by
+  side, each in its sandbox.
+- **Done when.** Each subject has its long-thread figures and a real day's, or a written reason.
 
 #### M1.6c — The vendors' applications, energy, frames, and the bar
 
