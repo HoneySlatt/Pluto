@@ -30,8 +30,10 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). On 2026-11-11
   [M1.5](#m15--agents-sessions-recorded) built the recorder and the replay into the fork
   ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)); two of its eleven real
-  recordings are made, and the owner set the nine left aside on 2026-11-11. Next:
-  [M1.6](#m16--the-rivals-measured).
+  recordings are made, and the owner set the nine left aside on 2026-11-11. On 2026-11-11 a
+  design session split [M1.6](#m16--the-rivals-measured) in three and decided how the rivals are
+  measured ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Now:
+  [M1.6a](#m16a--the-fake-model-and-the-rivals-bench).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -44,7 +46,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
-| [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
+| [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | In progress |
+| [M1.6b](#m16b--the-open-rivals-and-the-chats) | The open rivals and the chats measured | Planned |
+| [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Planned |
 
 ## Stage 1 — The ground measured and triaged
 
@@ -203,27 +207,56 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 
 ### M1.6 — The rivals measured
 
-- **Goal.** The quality bar holds the rivals' figures, so that Stage 2's server starts from them
-  ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+The quality bar holds the rivals' figures, so that Stage 2's server starts from them
+([ADR-0017](adr/0017-pluto-measured-against-the-market.md)). A design session on 2026-11-11 split it
+in three and decided how ([ADR-0026](adr/0026-the-rivals-measured-how.md)). The editor's rivals are
+measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences were read on
+2026-11-11: none forbids publishing benchmarks; each is read again before its figures are published.
+
+#### M1.6a — The fake model and the rivals' bench
+
+- **Goal.** One bench measures any desktop application from outside on one workload, calibrated on
+  Pluto, T3 Code and Zed.
 - **Delivers.**
-  - A scripted fake model service that streams one workload, a long thread and 15 threads, to any
-    application that takes a custom endpoint, Pluto included; it counts the tokens it receives.
-  - A disposable, isolated profile for each rival, its network cut unless the measure needs it.
-  - The agents' applications and the chats of the quality bar measured on the desktop and the HP:
-    memory and processor at rest, wake-ups, start, frames, energy, the whole system over a day of
-    15 threads. Each with its version and date in `measurements.md`. ChatGPT's desktop application
-    runs in the owner's Windows machine. The applications that take no custom endpoint, Claude's
-    and ChatGPT's, are measured at rest and over a session the owner runs by hand, with the owner's
-    go per account. The editor's rivals are measured when Stage 7 starts, the phone's with Stage 5.
-  - The bar's figures tightened where a rival's figure and its margin are stricter.
+  - `crates/pluto-fake-model`: Anthropic's Messages, OpenAI's Responses and Ollama's API, with the
+    calls clients make at start (model lists, versions); one versioned script of turns (text, a
+    tool call mapped to each client's own tool, a Markdown answer), paced; the side requests
+    clients make (titles) answered; a journal of each request's bytes by part, and of the prefix it
+    repeats from the one before; a check that each tool's result came back.
+  - The bench, `scripts/rivals/`: one run of one subject in bubblewrap with a frozen profile, the
+    fake model and a headless sway on the GPU; a cgroup per part. Its figures: private, swap and
+    GPU memory (PSS and RSS beside), processor time, wake-ups of every thread, start to the first
+    frame, frames at rest, the package's size, the profile's growth; a fingerprint per run; the
+    median of at least 5 runs.
+  - Profiles for Pluto (today's fork and egui client, real Claude Code, Codex and OpenCode CLIs on
+    the fake model), T3 Code and Zed, at the vendors' versions of the day.
+  - The workload: 15 threads opened then at rest for 10 minutes; 15 threads streaming.
+- **Done when.** The fake model's tests pass in `scripts/check.sh`. Claude Code, Codex and OpenCode
+  each run a turn with a tool through it, in the bench. Pluto's figures in the bench agree with
+  M1.2's within their noise. Pluto, T3 Code and Zed have their figures, with versions and dates,
+  in `measurements.md`.
+- **How to test.** `cargo test -p pluto-fake-model`; the bench's runs, on the desktop.
+- **Measured.** Everything above; nothing of the bar changes yet.
+
+#### M1.6b — The open rivals and the chats
+
+- **Goal.** Every open rival and chat that takes an endpoint has its figures.
+- **Delivers.** Chat Completions in the fake model. OpenCode Desktop, Emdash, Nimbalyst, Jan, Open
+  WebUI and LibreChat measured. The long thread of 5,000 messages, seeded in each application's own
+  format where it has one. Real days of 15 threads, several subjects side by side.
+- **Done when.** Each has its figures, or a written reason.
+
+#### M1.6c — The vendors' applications, energy, frames, and the bar
+
+- **Goal.** The bar holds the stricter of its budgets and the best rivals' figures.
+- **Delivers.** Claude's desktop application in its 3P mode and ChatGPT's through Codex, on the fake
+  model, labelled so; ChatGPT's chat, Msty Studio, Warp and LM Studio at rest or with a written
+  reason. The energy sampler for the owner's NixOS, which the owner builds; energy at rest and over
+  15 streams. Each frame's production time and the frames at rest. The HP's command, which the
+  owner runs. The ROADMAP's budgets tightened, in an ADR.
 - **Done when.** Every agents' application and chat of the bar has its figures, or a written
   reason; the ROADMAP's budgets are the stricter of the two.
-- **How to test.** The fake model's own tests, in `scripts/check.sh`; the measures by
-  `scripts/measure.sh`.
-- **Measured.** Everything above.
-- **By hand.** The owner's one go for downloading the list of rivals outside Nix, and a go per
-  account for the Claude and ChatGPT applications. Each rival's licence checked before any figure
-  is published.
+- **By hand.** The owner builds the energy sampler and runs the HP's command.
 
 ## Ideas
 

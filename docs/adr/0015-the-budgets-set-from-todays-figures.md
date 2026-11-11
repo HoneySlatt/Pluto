@@ -1,7 +1,8 @@
 # 0015. The budgets set from today's figures
 
 - Status: Accepted; amended by [0017](0017-pluto-measured-against-the-market.md) (rivals may
-  tighten each budget, never loosen it; frames at 99.9 %; input timed to the photon)
+  tighten each budget, never loosen it; frames at 99.9 %; input timed to the photon) and [0026](0026-the-rivals-measured-how.md) (memory counted as private,
+  swap and GPU memory)
 - Date: 2026-11-07
 
 ## Context

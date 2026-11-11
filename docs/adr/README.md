@@ -22,10 +22,10 @@ New ADRs copy the template below and take the next free number.
 | [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Accepted |
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted; amended by 0025 |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
-| [0014](0014-how-today-is-measured.md) | How today is measured | Accepted |
-| [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted; amended by 0017 |
+| [0014](0014-how-today-is-measured.md) | How today is measured | Accepted; amended by 0026 |
+| [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted; amended by 0017 and 0026 |
 | [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) | uwui's decisions of 2026-11-07, taken by Pluto | Accepted; amends 0001, 0003 and 0009; amended by 0017 |
-| [0017](0017-pluto-measured-against-the-market.md) | Pluto measured against the market | Accepted; amends 0015 and 0016; amended by 0022 |
+| [0017](0017-pluto-measured-against-the-market.md) | Pluto measured against the market | Accepted; amends 0015 and 0016; amended by 0022 and 0026 |
 | [0018](0018-the-markets-features-and-the-triage.md) | The market's features, and the triage by family | Accepted; amends 0002, 0003, 0007 and 0009; amended by 0022 |
 | [0019](0019-a-code-editor-in-pluto.md) | A code editor in Pluto | Accepted; amends 0003 and 0009 |
 | [0020](0020-the-chat.md) | The chat | Accepted; amends 0003 |
@@ -34,6 +34,7 @@ New ADRs copy the template below and take the next free number.
 | [0023](0023-the-specification-accepted.md) | The specification accepted | Accepted |
 | [0024](0024-cuts-kept-in-the-egui-client-until-uwui.md) | Cuts kept in the egui client until uwui | Accepted; amends 0022 |
 | [0025](0025-agents-sessions-recorded-and-replayed.md) | Agents' sessions recorded and replayed | Accepted; amends 0012 |
+| [0026](0026-the-rivals-measured-how.md) | How the rivals are measured | Accepted; amends 0014, 0015 and 0017 |
 
 ## Template
 

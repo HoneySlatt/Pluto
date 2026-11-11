@@ -1,6 +1,7 @@
 # 0014. How today is measured
 
-- Status: Accepted
+- Status: Accepted; amended by [0026](0026-the-rivals-measured-how.md) (the rivals' bench beside
+  `scripts/measure.sh`)
 - Date: 2026-11-07
 
 ## Context

@@ -43,7 +43,8 @@ Pluto is judged against the market criterion by criterion
   excluded; and the whole system over a day of 15 threads, agents included.
 - Every rival is measured on one workload from a scripted fake model service, in a disposable,
   isolated profile; an account of the owner's only with the owner's go, account by account. The
-  rivals are measured first in [M1.6](PLAN.md#m16--the-rivals-measured), then again at each stage's
+  rivals are measured first in [M1.6](PLAN.md#m16--the-rivals-measured)
+  ([ADR-0026](adr/0026-the-rivals-measured-how.md)), then again at each stage's
   end, each figure with its rival's version and date in [`measurements.md`](measurements.md).
 
 The margins, by family:
@@ -87,8 +88,8 @@ today's figures are beside them, and each gap is known debt.
 
 | Budget | Target | Today | Measured by | Checked in |
 |---|---|---|---|---|
-| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB resident with 15 threads open | 0.05 frames and 3.2 wake-ups a second; 143 MB ([measured](measurements.md#the-client-at-rest)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
-| Server at rest | at most 80 MB resident, agents' processes and Chromium excluded; 0 wake-ups of its own | the fork: 394 to 892 MB, 4 to 30 wake-ups a second ([measured](measurements.md#the-fork)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | CI |
+| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB with 15 threads open, counted as private, swap and GPU memory ([ADR-0026](adr/0026-the-rivals-measured-how.md)) | 0.05 frames and 3.2 wake-ups a second; 143 MB ([measured](measurements.md#the-client-at-rest)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | by hand at each milestone; CI once a headless run exists |
+| Server at rest | at most 80 MB, counted as for the client, agents' processes and Chromium excluded; 0 wake-ups of its own | the fork: 394 to 892 MB, 4 to 30 wake-ups a second ([measured](measurements.md#the-fork)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | CI |
 | Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | 125 ms warm, 195 ms cold, to its painting ([measured](measurements.md#the-start)) | `examples/live.rs`, `hyperfine` | by hand at each milestone |
 | Frames | 99.9 % of frames on time at the display's rate, none over 1.5 times the frame, in every scenario: a long thread of 5,000 messages, 15 threads streaming, scrolling, opening a thread, the editor; the HP at 60 Hz | the long thread: p99 8.5 ms, UI pass only, at 1440 × 900; 15 streams: p99 3.6 ms on replayed streams ([measured](measurements.md#a-long-thread-and-streams)) | `examples/bench.rs`, on recorded streams from M1.5 | by hand at each milestone |
 | Input to photon | at most one frame at p99 | not measured: needs the light sensor | the light sensor bought for SlimeEngine; the compositor's presentation times for Pluto's own traces | from Stage 6, on uwui |
