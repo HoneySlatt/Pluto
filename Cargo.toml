@@ -6,7 +6,7 @@ license = "MIT"
 publish = false
 
 [workspace]
-members = [".", "crates/pluto-core", "crates/pluto-ffi", "crates/uniffi-bindgen"]
+members = [".", "crates/pluto-core", "crates/pluto-ffi", "crates/pluto-recording", "crates/uniffi-bindgen"]
 
 [dependencies]
 pluto-core = { path = "crates/pluto-core" }

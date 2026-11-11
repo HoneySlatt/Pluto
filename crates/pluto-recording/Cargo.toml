@@ -1,0 +1,12 @@
+[package]
+name = "pluto-recording"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Records an agent CLI's raw protocol traffic to a masked, versioned file, and plays it back in the CLI's place, so that drivers are tested without a real turn."
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -3494,6 +3494,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pluto-recording"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"

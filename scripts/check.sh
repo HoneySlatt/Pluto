@@ -9,14 +9,40 @@
 # - the dependencies: their licenses, the advisories against them and where they come from
 #   (cargo deny, policy in deny.toml; it fetches the advisory database, so it needs the network);
 # - the links between the Markdown files that git tracks or has been told to add, and their
-#   anchors, offline (lychee).
+#   anchors, offline (lychee);
+# - the recordings of agents' sessions: their stamp still matches what a replay reads
+#   (scripts/fork-replay.sh --check-stamp, whose head lists it); the crate's own tests read, scan
+#   and replay each recording.
 #
 # With --apk, in `nix develop .#mobile`, the Android app's Kotlin unit tests and its build too; CI
 # does not run them (docs/adr/0012-the-checks-and-ci.md).
+#
+# With --fork, on the owner's machine only, first every recording replayed through the fork's own
+# adapters, which writes the stamp (scripts/fork-replay.sh; PLUTO_FORK names the fork, by default
+# ~/Projects/pluto-server); CI cannot reach the fork
+# (docs/adr/0025-agents-sessions-recorded-and-replayed.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+apk=false
+fork=false
+for option in "$@"; do
+  case "$option" in
+    --apk) apk=true ;;
+    --fork) fork=true ;;
+    *)
+      echo "usage: scripts/check.sh [--apk] [--fork]" >&2
+      exit 2
+      ;;
+  esac
+done
+
 step() { printf '\n== %s\n' "$1"; }
+
+if $fork; then
+  step "Recordings replayed through the fork"
+  scripts/fork-replay.sh --fork "${PLUTO_FORK:-$HOME/Projects/pluto-server}"
+fi
 
 step "Formatting"
 cargo fmt --all --check
@@ -34,7 +60,10 @@ step "Links between documents"
 mapfile -d '' markdown < <(git ls-files -z --cached -- '*.md')
 lychee --offline --include-fragments --no-progress "${markdown[@]}"
 
-if [ "${1:-}" = "--apk" ]; then
+step "Recordings' stamp"
+scripts/fork-replay.sh --check-stamp
+
+if $apk; then
   step "Android unit tests"
   (cd android && gradle --no-daemon --quiet testDebugUnitTest)
 
