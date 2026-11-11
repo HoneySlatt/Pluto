@@ -29,8 +29,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   cut from the egui client and the Android app, except three cuts kept until the uwui client
   ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). On 2026-11-11
   [M1.5](#m15--agents-sessions-recorded) built the recorder and the replay into the fork
-  ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)); the owner's real recordings
-  close it. Next: [M1.6](#m16--the-rivals-measured).
+  ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)); two of its eleven real
+  recordings are made, and the owner set the nine left aside on 2026-11-11. Next:
+  [M1.6](#m16--the-rivals-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -42,7 +43,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
-| [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; the owner's recordings to come |
+| [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
 | [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
 
 ## Stage 1 — The ground measured and triaged
@@ -193,7 +194,8 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   project's folder, streamed in pieces, could not be masked; the project's folder is now fixed.
   Grok's `approval` failed for a reason the run did not keep; a failed run now keeps its
   recording, events and error. The other scenarios did not run, since a failure stops the series.
-  Next: the owner records the nine scenarios left, one by one, then `accept`. The procedure
+  The owner set the nine scenarios left aside on 2026-11-11, to move to M1.6; they are recorded
+  one by one, then `accept`, whenever the owner resumes them. The procedure
   also ran whole as a dry run, stand-ins playing the synthetic recordings
   (`PLUTO_RECORDING_DRY_RUN=1`), and its eleven recordings replayed through the fork. The
   milestone is done when the owner's eleven recordings replay into the fork and give their
