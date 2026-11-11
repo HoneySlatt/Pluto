@@ -8,7 +8,8 @@
 # Memory is in MiB: the headline figure (private + swap + GPU) of the program and of its agents,
 # and the program's proportional figure (PSS) beside it; wake-ups a second; processor in cores
 # (1.0 is one core busy throughout). Only calm runs count: a noisy run, one whose subject did not
-# render on the GPU, asked for a browser or ended early, is counted apart and left out.
+# render on the GPU, asked for a browser or ended early, is counted apart and left out. With
+# KEEP_NOISY=1 noisy runs count too, for runs whose noise flag is known to be wrong (the README).
 set -euo pipefail
 
 folder=$1
@@ -33,7 +34,8 @@ figure() {
 # Whether a run's figures may be kept.
 is_calm() {
     local fingerprint=$1/fingerprint.txt
-    grep -q '^noisy: no' "$fingerprint" && grep -q '^gpu: used' "$fingerprint" &&
+    { [ "${KEEP_NOISY:-0}" = 1 ] || grep -q '^noisy: no' "$fingerprint"; } &&
+        grep -q '^gpu: used' "$fingerprint" &&
         ! grep -q -E '^(browser|ended_early_at_ms):' "$fingerprint"
 }
 

@@ -244,13 +244,14 @@ the cuts was not taken.
 
 ## The rivals' bench, M1.6a
 
-Pluto and two rivals measured at rest in the rivals' bench on 2026-11-11, on the desktop, by
+Pluto and two rivals measured in the rivals' bench on 2026-11-11, on the desktop, by
 `scripts/rivals/run.sh` at `5448eb6` ([its README](../scripts/rivals/README.md),
 [ADR-0026](adr/0026-the-rivals-measured-how.md)): each run in a sandbox of its own, a headless sway
 at 3840 × 2160 on the GPU, the fake model's workload (`workload.json`), `pluto-measure` sampling
-the subject from outside once a second. The owner stopped the campaign after two runs of each
-subject at rest (one of Zed): fewer than ADR-0026's five, so these are first figures, not the
-bar's. The stream scenario was not run.
+the subject from outside once a second. By the owner's choice of 2026-11-11, three runs a figure
+rather than ADR-0026's five, the later ones resting 5 minutes rather than 10: the first runs'
+figures varied by less than 1 %. The median, then the range in brackets; a run left out is
+counted beside the runs kept.
 
 | Subject | Version | What runs |
 |---|---|---|
@@ -261,23 +262,26 @@ bar's. The stream scenario was not run.
 The machine: kernel 7.3.1, Mesa 26.2.6, governor `powersave` with `balance_performance`. Every
 subject's defaults are kept, except: telemetry off where a documented switch exists (T3 Code, the
 fork, Claude Code, Zed), Zed's tools allowed without asking and its worktrees trusted, and two
-shortcuts of the bench's own in Zed's keymap. No run was noisy (the rest of the machine under
-0.6 of a core); every one rendered on the GPU.
+shortcuts of the bench's own in Zed's keymap. Every run kept rendered on the GPU. The runs'
+folders are kept on the desktop, under `/tmp/pluto-rivals/`, gathered in `m16a-final/`.
 
 ### At rest
 
 15 threads each ran a short turn of the script (a command, a file read, a Markdown answer of
-about 1 KB), then the subject rested 10 minutes. Each run's `measured.png` shows its window:
-Pluto, its new-thread view with the composer focused and the 15 threads in its sidebar; T3 Code,
-its "What should we work on?" view; Zed, its agent panel with the last thread. Memory is the
-headline figure: private memory, swap and GPU memory, summed over every process
-([ADR-0026](adr/0026-the-rivals-measured-how.md)); PSS beside it. The median, then the range.
+about 1 KB), then the subject rested, 10 minutes in the first two runs, 5 in the third. Each
+run's `measured.png` shows its window: Pluto, its new-thread view with the composer focused and
+the 15 threads in its sidebar; T3 Code, its "What should we work on?" view; Zed, its agent panel
+with the last thread. Memory is the headline figure: private memory, swap and GPU memory, summed
+over every process ([ADR-0026](adr/0026-the-rivals-measured-how.md)); PSS beside it. A run is left
+out when the rest of the machine used more than 0.6 of a core meanwhile.
 
-| Subject | Runs | Its memory, MiB | Its PSS, MiB | Its wake-ups a second | Its processor, cores | The agents' memory, MiB | The agents' wake-ups a second |
-|---|---|---|---|---|---|---|---|
-| Pluto | 2 | 703 (703–704) | 397 (397–398) | 36.5 (36.4–36.5) | 0.0086 | 1,450 | 323 (323–324) |
-| T3 Code | 2 | 798 (796–800) | 677 (676–679) | 34.3 (34.2–34.5) | 0.0026 | 1,452 (1,451–1,453) | 328 (327–329) |
-| Zed | 1 | 516 | 233 | 182 | 0.0017 | none apart | none apart |
+| Subject | Runs kept (left out) | Its memory, MiB | Its PSS, MiB | Its wake-ups a second | Its processor, cores | The agents' memory, MiB | The agents' wake-ups a second | Frames a second |
+|---|---|---|---|---|---|---|---|---|
+| Pluto | 2 (1) | 703 (703–704) | 397 (397–398) | 36.5 (36.4–36.5) | 0.0086 | 1,450 | 323 (323–324) | 4.85 |
+| T3 Code | 3 (0) | 800 (796–802) | 676 (663–679) | 34.5 (34.2–35.8) | 0.0026 | 1,453 (1,451–1,531) | 327 (306–329) | 0 |
+| Zed | 2 (1) | 514 (512–516) | 222 (212–233) | 181 (180–182) | 0.0017 | none apart | none apart | 0 |
+
+Frames are counted in runs of their own (`FRAMES=1`, 120 s), one a subject.
 
 Read beside it:
 
@@ -287,13 +291,36 @@ Read beside it:
   rest](#the-client-at-rest)); the fork's is below M1.2's 394 to 892 MB ([the fork](#the-fork)),
   which served the fixture's larger history. They do not calibrate the bench against M1.2: the
   states differ, M1.2's client having no text field focused and a fixture of 5,000 messages.
-- The client's wake-ups are its main thread, 14.8 a second, and its clipboard thread
-  (`smithay-clipboard`), 12.8; then AccessKit's 2.0 and the connection's 1.1, as in M1.2. Its
-  frames at rest, counted in the first campaign at 6 every 1.25 s, are not explained yet.
+- The client is the only subject that draws at rest, about 5 frames a second, cause not found.
+  Its wake-ups are its main thread, 14.8 a second, and its clipboard thread (`smithay-clipboard`),
+  12.8; then AccessKit's 2.0 and the connection's 1.1, as in M1.2.
 - GPU memory weighs most: Pluto's client 337 MiB, T3 Code 287, Zed 325.
 - Every Claude Code session stays alive at rest, in Pluto as in T3 Code: 15 sessions, about
   1.45 GiB and 325 wake-ups a second, most of them a thread named `HeapHelper`.
 - Zed's own wake-ups are its main thread, about 102 a second, and a thread named `Timer`, 28.
+
+### 15 threads streaming
+
+15 threads started the script's long turn (about three minutes of Markdown at 60 tokens a second,
+after a command); once the fifteenth had started, the subject was measured for 45 seconds while
+all of them streamed, which every run's journal confirms. Pluto and T3 Code launched their threads
+through their server, so their windows showed no streaming thread; Zed's showed its last thread
+streaming, about 24.5 frames a second. Zed's second run failed: two of its fifteen typed prompts
+were lost, so its driver stopped it. The noise check of these runs counted the bench's own
+compositor and fake model as the rest of the machine, so it marked them noisy wrongly; they are
+kept (`KEEP_NOISY=1`), and the check is fixed for later runs.
+
+| Subject | Runs | Its memory, MiB | Its PSS, MiB | Its wake-ups a second | Its processor, cores | The agents' memory, MiB | The agents' wake-ups a second | Frames a second |
+|---|---|---|---|---|---|---|---|---|
+| Pluto | 3 | 790 (779–842) | 486 (480–543) | 277 (271–278) | 0.034 (0.032–0.042) | 1,817 (1,811–1,818) | 3,025 (2,980–3,122) | 5.8 |
+| T3 Code | 3 | 799 (798–802) | 653 (647–686) | 275 (275–276) | 0.018 (0.017–0.020) | 1,814 (1,812–1,817) | 3,101 (3,013–3,102) | 0 |
+| Zed | 2 | 547 (541–552) | 258 (246–271) | 6,821 (6,719–6,923) | 0.577 (0.540–0.613) | none apart | none apart | 24.5 |
+
+Pluto's share splits into the client, about 375 MiB, 35 wake-ups a second and 0.01 of a core,
+and the fork, about 410 MiB private, 240 wake-ups a second and 0.025 of a core, while it relays
+15 streams. Zed parses the 15 streams in its own process, its `Timer` thread waking about 1,100
+times a second, the main thread 870 and its tokio workers about 680; in Pluto and T3 Code, the
+agents' processes parse them.
 
 ### What each request carries
 
@@ -323,8 +350,6 @@ three a thread; and 90 of Claude Code's own, about 10 KB each, two a thread, whi
 
 ### What is not measured yet
 
-- 15 threads streaming, and three more runs at rest for each subject: the owner stopped the
-  campaign.
 - The start to the first frame and the profile's growth: the bench does not take them yet.
 - Frames on time: the headless compositor's clock is no display's
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)); frames are counted only.

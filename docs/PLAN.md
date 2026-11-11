@@ -36,8 +36,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) built the fake model and the bench, and
   took first figures of Pluto, T3 Code and Zed at rest before the owner stopped it. The owner
   set the rivals' measures aside until a go of theirs
-  ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)): M1.6b and M1.6c wait. Next: Stage 1's
-  audit, then Stage 2's design session, on the owner's go.
+  ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), then gave it the same day: Pluto, T3
+  Code and Zed now have their figures at rest and streaming. Next: the rest of
+  [M1.6b](#m16b--the-open-rivals-and-the-chats).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -51,8 +52,8 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
 | [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | Done; stopped by the owner after two runs at rest, the rest moved to M1.6b |
-| [M1.6b](#m16b--the-open-rivals-and-the-chats) | The open rivals and the chats measured | Set aside until the owner's go |
-| [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Set aside until the owner's go |
+| [M1.6b](#m16b--the-open-rivals-and-the-chats) | The open rivals and the chats measured | In progress: Pluto, T3 Code and Zed done at rest and streaming |
+| [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Planned |
 
 ## Stage 1 — The ground measured and triaged
 
@@ -259,8 +260,8 @@ measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences wer
   Pluto is not calibrated against M1.2: the states differ, and the client's frames at rest are not
   explained. The fixes made after the closing review were not reviewed again.
 
-M1.6b and M1.6c are set aside until the owner's go
-([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)); no session starts them without it.
+The owner set M1.6b and M1.6c aside on 2026-11-11 until a go of theirs
+([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), and gave it the same day.
 
 #### M1.6b — The open rivals and the chats
 
@@ -272,6 +273,15 @@ M1.6b and M1.6c are set aside until the owner's go
   subject's window during the stream scenario; the cause of Pluto's client's frames at rest. The long thread of 5,000 messages, seeded in each application's own
   format where it has one. Real days of 15 threads, several subjects side by side.
 - **Done when.** Each has its figures, or a written reason.
+- **Where it stands (2026-11-11).** Pluto, T3 Code and Zed have their figures at rest and
+  streaming, and their frames counted in runs of their own
+  ([`measurements.md`](measurements.md#the-rivals-bench-m16a)). The owner chose three runs a
+  figure, resting 5 minutes, rather than ADR-0026's five and 10: the first runs varied by less
+  than 1 %. The noise check now leaves out the run's own compositor and fake model. Left from
+  M1.6a: the start to the first frame, the profile's growth, frozen profiles, Codex's and
+  OpenCode's turns in the bench, a streaming thread open in every window, and the cause of
+  Pluto's client's frames at rest. Zed's driver lost 2 of 15 typed prompts in one stream run of
+  three. Then the new subjects and Chat Completions.
 
 #### M1.6c — The vendors' applications, energy, frames, and the bar
 

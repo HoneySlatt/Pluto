@@ -42,6 +42,11 @@ machine_busy() {
     awk '/^cpu / { print ($2 + $3 + $4 + $7 + $8) / 100 }' /proc/stat
 }
 
+# Processor time a cgroup and everything below it spent, in seconds.
+scope_busy() {
+    awk '/^usage_usec/ { print $2 / 1e6 }' "$1/cpu.stat"
+}
+
 # Waits up to five minutes for the machine to be calm: less than busy_limit of a core over 5 s.
 wait_calm() {
     local tries=60 before after
@@ -120,8 +125,11 @@ one_run() {
     local agents=()
     read -r -a names < <(bash -c "repo=$repo; source $here/subjects/$subject.sh; subject_agents")
     for name in "${names[@]}"; do agents+=(--agent "$name"); done
-    local before after
+    # The whole run's scope: the subject and what serves it (the compositor, the fake model).
+    local scope=${cgroup%/subject}
+    local before after scope_before scope_after
     before=$(machine_busy)
+    scope_before=$(scope_busy "$scope")
     local part parts=() part_measures=()
     read -r -a parts < <(bash -c "repo=$repo; source $here/subjects/$subject.sh; subject_parts")
     for part in "${parts[@]}"; do
@@ -133,15 +141,16 @@ one_run() {
     # Only the parts' measures: a bare `wait` would also wait for the sandbox, which waits for `done`.
     for part in "${part_measures[@]}"; do wait "$part" || true; done
     after=$(machine_busy)
+    scope_after=$(scope_busy "$scope")
     touch "$dir/done"
     wait "$sandbox" || true
     stop_scope "$unit"
-    local subject_cpu
-    subject_cpu=$(jq '.cpu_seconds' "$dir/figures.json")
-    # What the rest of the machine did meanwhile: the bench's compositor and fake model count here,
-    # since they serve the subject; a figure above the limit marks the run noisy.
-    awk -v b="$before" -v a="$after" -v s="$subject_cpu" -v t="$seconds" -v l="$busy_limit" \
-        'BEGIN { other = (a - b - s) / t; printf "other_cores: %.3f\n", other; exit !(other < l) }' \
+    # What the rest of the machine did meanwhile, the run's whole scope left out: the compositor
+    # and the fake model serve the subject, and are no noise; a figure above the limit marks the
+    # run noisy.
+    awk -v b="$before" -v a="$after" -v sb="$scope_before" -v sa="$scope_after" -v t="$seconds" \
+        -v l="$busy_limit" \
+        'BEGIN { other = (a - b - (sa - sb)) / t; printf "other_cores: %.3f\n", other; exit !(other < l) }' \
         >> "$dir/fingerprint.txt" || noisy=yes
     echo "noisy: $noisy" >> "$dir/fingerprint.txt"
     # A subject that died while it was measured leaves figures that look whole: say it.
