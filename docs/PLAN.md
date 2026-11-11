@@ -33,9 +33,9 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   recordings are made, and the owner set the nine left aside on 2026-11-11. On 2026-11-11 a
   design session split [M1.6](#m16--the-rivals-measured) in three and decided how the rivals are
   measured ([ADR-0026](adr/0026-the-rivals-measured-how.md));
-  [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) built the fake model and the bench; its
-  closing review sent the runs back, to be made again after the sandbox's and the scenarios'
-  fixes.
+  [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) built the fake model and the bench, and
+  took first figures of Pluto, T3 Code and Zed at rest before the owner stopped it. Next:
+  [M1.6b](#m16b--the-open-rivals-and-the-chats).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -48,7 +48,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
-| [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | Built; its closing review sent the runs back |
+| [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | Done; stopped by the owner after two runs at rest, the rest moved to M1.6b |
 | [M1.6b](#m16b--the-open-rivals-and-the-chats) | The open rivals and the chats measured | Planned |
 | [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Planned |
 
@@ -240,37 +240,31 @@ measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences wer
 - **How to test.** `cargo test -p pluto-fake-model -p pluto-measure`; the bench's runs, on the
   desktop ([`scripts/rivals/README.md`](../scripts/rivals/README.md)).
 - **Measured.** Everything above; nothing of the bar changes yet.
-- **Where it stands (2026-11-11).** Built, not done. The fake model
-  (`crates/pluto-fake-model`) and `pluto-measure` are built, reviewed twice and fixed, with their
-  tests in `scripts/check.sh`. Claude Code 2.1.311, Codex 0.164 and OpenCode 2.1.4 each ran a
-  whole turn with its tools through the fake model, offline and without an account, outside the
-  bench (no journal of those runs is kept); in the bench, Claude Code ran Pluto's and T3 Code's
-  turns, Codex Pluto's titles. The bench (`scripts/rivals/`) ran Pluto, T3 Code 0.1.8 and Zed
-  1.27.0, five runs at rest and five streaming, with the vendors' packages downloaded on the
-  owner's go. The closing review kept only what each request carries and the packages' sizes
-  ([`measurements.md`](measurements.md#the-rivals-bench-m16a)), and found what must change before
-  the runs are made again:
-  - the sandbox must isolate as ADR-0026 says: its own process namespace (today `/proc` reaches
-    the owner's processes, their files and session bus), a cleared environment, a new session,
-    and only the bench's files of the repository;
-  - T3 Code's welcome page must be dismissed and checked, and no browser may start in the sandbox;
-  - the stream scenario must measure while all 15 threads stream, in every subject;
-  - Pluto must be measured once in M1.2's state, to calibrate, and the client's frames at rest
-    (6 every 1.25 s) explained, which needs wake-ups per thread in `pluto-measure`;
-  - a subject that dies must end its run, an interrupted run must stop its scope, each run must
-    check the subject renders on the GPU, and the fingerprint must name the noise limit used,
-    the client's hash and a clean bench version.
-- **Next.** Those fixes, then the runs again; then the review's notes. Moved to M1.6b, which builds
-  what they need: the start to the first frame, the profile's growth, and Codex's and OpenCode's
-  turns inside the bench.
+- **Done (2026-11-11), stopped by the owner before its five runs.** The fake model
+  (`crates/pluto-fake-model`) and `pluto-measure` are built, reviewed and fixed, with their tests
+  in `scripts/check.sh`. Claude Code 2.1.311, Codex 0.164 and OpenCode 2.1.4 each ran a whole turn
+  with its tools through the fake model, offline and without an account, outside the bench (no
+  journal of those runs is kept); in the bench, Claude Code ran Pluto's and T3 Code's turns, Codex
+  Pluto's titles. A first campaign's resource figures were sent back by the closing review (a
+  browser counted in T3 Code's, a sandbox that shared the host's process namespace, unequal
+  streams); the bench was then fixed: its own process namespace, a cleared environment, only its
+  own files, no browser, a GPU check, named busiest threads, a stream measured while all 15
+  threads stream. The second campaign measured two calm runs at rest of Pluto and T3 Code 0.1.8,
+  one of Zed 1.27.0, when the owner stopped it to move on
+  ([`measurements.md`](measurements.md#the-rivals-bench-m16a)). Not done, moved to M1.6b: the
+  stream scenario's runs, three more runs at rest of each subject, the frames' own runs, the start
+  to the first frame and the profile's growth, and Codex's and OpenCode's turns inside the bench.
+  Pluto is not calibrated against M1.2: the states differ, and the client's frames at rest are not
+  explained. The fixes made after the closing review were not reviewed again.
 
 #### M1.6b — The open rivals and the chats
 
 - **Goal.** Every open rival and chat that takes an endpoint has its figures.
 - **Delivers.** Chat Completions in the fake model. OpenCode Desktop, Emdash, Nimbalyst, Jan, Open
-  WebUI and LibreChat measured. From M1.6a: the start to the first frame and the profile's growth
-  in the bench, frozen profiles, Codex's and OpenCode's turns in it, and a streaming thread open
-  in every subject's window during the stream scenario. The long thread of 5,000 messages, seeded in each application's own
+  WebUI and LibreChat measured. From M1.6a: Pluto, T3 Code and Zed streaming, and at rest up to
+  five runs each; the frames' own runs; the start to the first frame and the profile's growth in
+  the bench; frozen profiles; Codex's and OpenCode's turns in it; a streaming thread open in every
+  subject's window during the stream scenario; the cause of Pluto's client's frames at rest. The long thread of 5,000 messages, seeded in each application's own
   format where it has one. Real days of 15 threads, several subjects side by side.
 - **Done when.** Each has its figures, or a written reason.
 
@@ -375,11 +369,12 @@ measured when Stage 7 starts, the phone's with Stage 5. The rivals' licences wer
 - Before M1.5's harness kept its caches outside the fork, two test runs of 2026-11-10 updated the
   fork's own `node_modules/.vite/vitest/<hash>/results.json` and `.vite-temp`, which git ignores.
   Left as they are: they are caches, and the owner's own runs write them too.
-- The rivals' bench's first runs showed, in today's Pluto at rest after 15 threads, to confirm when
-  they are made again: the egui client draws 6 frames every 1.25 s, its cause not found; every
-  Claude Code session the fork started stays alive, about 1.4 GiB and 330 wake-ups a second for
-  15; the fork's titles go through Codex, about 54 KB sent per title request
-  ([`measurements.md`](measurements.md#what-each-request-carries)). The fork leaves in Stage 2.
+- The rivals' bench found in today's Pluto at rest after 15 threads
+  ([`measurements.md`](measurements.md#the-rivals-bench-m16a)): the egui client wakes 31 times a
+  second (its main thread and its clipboard thread), and drew 6 frames every 1.25 s in the first
+  campaign, its cause not found; every Claude Code session the fork started stays alive, about
+  1.45 GiB and 325 wake-ups a second for 15; the fork's titles go through Codex, about 54 KB sent
+  per title request. The fork leaves in Stage 2; the client is frozen except fixes.
 - The rivals' bench counts frames but cannot judge them on time, and has no energy yet
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Its scripts are not linted: `shellcheck` is
   not in the Nix shell, as for M1.5's.
