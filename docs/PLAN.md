@@ -281,12 +281,28 @@ verifiable step before its end.
   figure has three calm runs per subject in `measurements.md`, or a written reason.
 - **How to test.** `cargo test -p pluto-fake-model -p pluto-measure`; the bench's runs, on the
   desktop.
-- **Where it stands (2026-11-11).** Pluto, T3 Code and Zed have their figures at rest and
-  streaming, and their frames counted in runs of their own
-  ([`measurements.md`](measurements.md#the-rivals-bench-m16a)). The owner chose three runs a
-  figure, resting 5 minutes, rather than ADR-0026's five and 10: the first runs varied by less
-  than 1 %. The noise check now leaves out the run's own compositor and fake model. Zed's driver
-  lost 2 of 15 typed prompts in one stream run of three.
+- **Where it stands (2026-11-11).** Built and committed:
+  - Chat Completions in the fake model, its usage streamed only when asked, as OpenAI documents.
+  - Structured side answers: a title request that asks for JSON gets JSON fitting its schema
+    (Responses' `text.format`, Chat Completions' `response_format`, Ollama's `format`, Claude's
+    `StructuredOutput` tool). Before, every structured title failed on the fake model, and Pluto's
+    server retried it on Codex three times, then on Claude, then on OpenCode, which played the
+    whole turn again: M1.6a's request counts for Pluto and T3 Code were inflated by it.
+  - Frozen profiles (`run.sh prepare`), the start to the first window and the profile's growth in
+    every run; a streaming thread opened in Pluto's and T3 Code's windows by `mod+1` (a pointer's
+    click is lost: each `wlrctl` call is a new virtual pointer); Zed's driver waits for each prompt
+    to reach the fake model and types a lost one again.
+  - Pluto with Codex (`pluto-codex`) and with OpenCode (`pluto-opencode`, over Chat Completions)
+    as its agent: both ran their 15 turns with their tools in the bench.
+  - The cause of the client's frames at rest: the logo's moon, stepping every 1.25 s, which egui
+    turned into six frames a step. By the owner's choice of 2026-11-11 the moon is still: 2 frames
+    a minute at rest instead of 290, 3.2 wake-ups a second instead of 31 (measured by the
+    reader in the bench; the campaign measures it again).
+
+  The campaign (`pluto`, `pluto-codex`, `pluto-opencode`, `t3code`, `zed`, three runs at rest and
+  three streaming, then the frames' own runs) started on 2026-11-11 at 19:15 as the user service
+  `pluto-rivals-campaign`, its results under `/tmp/pluto-rivals/`. Left: its figures in
+  `measurements.md`, the correction of M1.6a's request counts there, and the closing review.
 
 #### M1.6b2 — The open rivals and the chats
 
@@ -407,10 +423,14 @@ verifiable step before its end.
   Left as they are: they are caches, and the owner's own runs write them too.
 - The rivals' bench found in today's Pluto at rest after 15 threads
   ([`measurements.md`](measurements.md#the-rivals-bench-m16a)): the egui client wakes 31 times a
-  second (its main thread and its clipboard thread), and drew 6 frames every 1.25 s in the first
-  campaign, its cause not found; every Claude Code session the fork started stays alive, about
+  second (its main thread and its clipboard thread), most of it following the frames the logo's
+  moon drew, still since M1.6b1; every Claude Code session the fork started stays alive, about
   1.45 GiB and 325 wake-ups a second for 15; the fork's titles go through Codex, about 54 KB sent
   per title request. The fork leaves in Stage 2; the client is frozen except fixes.
+- The egui client still draws 2 frames a minute at rest: its 30-second tick of relative times
+  (`src/app.rs`). And egui shortens every delayed repaint by a predicted frame, so a countdown
+  that asks again on each frame (a tooltip's delay, a draft's save) ends in a burst of a few
+  frames rather than one. Neither runs at rest for long; followed by the uwui client.
 - The rivals' bench counts frames but cannot judge them on time, and has no energy yet
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Its scripts are not linted: `shellcheck` is
   not in the Nix shell, as for M1.5's.
