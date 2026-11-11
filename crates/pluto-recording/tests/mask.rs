@@ -336,3 +336,40 @@ fn a_clean_frame_is_untouched() {
     assert!(!claude().frame(Side::Agent, &mut frame));
     assert_eq!(frame, original);
 }
+
+#[test]
+fn claude_account_commands_and_agents_are_emptied() {
+    let mut answer = json!({"type": "control_response", "response": {"subtype": "success",
+        "request_id": "r1", "response": {"commands": [{"name": "obsidian-vault",
+        "description": "(Desktop Commander) Organize Obsidian vaults"}],
+        "agents": [{"name": "statusline-setup"}], "models": [{"value": "claude-haiku-5-5"}]}}});
+    assert!(claude().frame(Side::Agent, &mut answer));
+    assert_eq!(answer["response"]["response"]["commands"], json!([]));
+    assert_eq!(answer["response"]["response"]["agents"], json!([]));
+    assert_eq!(
+        answer["response"]["response"]["models"][0]["value"],
+        "claude-haiku-5-5"
+    );
+    let mut changed = json!({"type": "system", "subtype": "commands_changed",
+        "commands": [{"name": "obsidian-vault"}]});
+    assert!(claude().frame(Side::Agent, &mut changed));
+    assert_eq!(changed["commands"], json!([]));
+    let mut init =
+        json!({"type": "system", "subtype": "init", "terminal_slash_commands": ["mine"]});
+    assert!(claude().frame(Side::Agent, &mut init));
+    assert_eq!(init["terminal_slash_commands"], json!([]));
+}
+
+#[test]
+fn account_keys_are_replaced_anywhere_in_either_agent() {
+    let mut result = json!({"type": "result", "subtype": "success",
+        "credential_expires_at": "2026-12-08T09:11:31.872Z", "usage": {"input_tokens": 3}});
+    assert!(claude().frame(Side::Agent, &mut result));
+    assert_eq!(result["credential_expires_at"], "<account>");
+    assert_eq!(result["usage"]["input_tokens"], 3);
+    let mut settings = json!({"jsonrpc": "2.0", "method": "_x.ai/settings/update", "params": {
+        "subscription_tier_display": "SuperGrok", "tips": ["Press Ctrl+B"]}});
+    assert!(grok().frame(Side::Agent, &mut settings));
+    assert_eq!(settings["params"]["subscription_tier_display"], "<account>");
+    assert_eq!(settings["params"]["tips"][0], "Press Ctrl+B");
+}

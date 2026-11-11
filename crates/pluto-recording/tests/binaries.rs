@@ -440,3 +440,50 @@ fn the_real_home_is_masked_even_when_home_is_the_disposable_one() {
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["text"], "<home>/notes and <home>/x");
 }
+
+#[test]
+fn remask_changes_only_what_a_new_rule_covers() {
+    let dir = scratch("remask");
+    let synthetic = Path::new(env!("CARGO_MANIFEST_DIR")).join("fork-harness/synthetic");
+    let mut copies = Vec::new();
+    for agent in ["claude", "grok"] {
+        for entry in std::fs::read_dir(synthetic.join(agent)).unwrap() {
+            let path = entry.unwrap().path();
+            let copy = dir.join(format!(
+                "{agent}-{}",
+                path.file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::copy(&path, &copy).unwrap();
+            copies.push((path, copy));
+        }
+    }
+    let header = r#"{"format":"pluto-agent-recording","version":1,"agent":"claude","protocol":"claude-stream-json","recorded_on":"2026-11-12","scenario":"turn","meta":{}}"#;
+    let older = dir.join("older.jsonl");
+    std::fs::write(
+        &older,
+        format!(
+            "{header}\n{}\n",
+            r#"{"kind":"frame","process":0,"t_ms":1,"from":"agent","json":{"type":"system","subtype":"commands_changed","commands":[{"name":"obsidian-vault"}]}}"#
+        ),
+    )
+    .unwrap();
+    let status = Command::new(RECORD)
+        .arg("remask")
+        .args(copies.iter().map(|(_, copy)| copy))
+        .arg(&older)
+        .stdout(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for (original, copy) in &copies {
+        assert_eq!(
+            std::fs::read_to_string(original).unwrap(),
+            std::fs::read_to_string(copy).unwrap(),
+            "{}: masking a masked recording again changes nothing",
+            original.display()
+        );
+    }
+    let remasked = std::fs::read_to_string(&older).unwrap();
+    assert!(!remasked.contains("obsidian-vault"), "{remasked}");
+    assert!(remasked.contains(r#""masked":true"#), "{remasked}");
+}

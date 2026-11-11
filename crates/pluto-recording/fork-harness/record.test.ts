@@ -22,6 +22,7 @@ import * as NodePath from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 
 import {
@@ -92,11 +93,19 @@ const record = (agent: Agent, name: string) => {
   }
   refuseRealHome(home);
   const realAgent = requiredEnv("PLUTO_AGENT_BIN");
-  const removeStaged = (why: string) =>
+  /**
+   * A failed recording leaves the staging folder, so that it is never accepted, for the run's kept
+   * folder, beside the adapter's events and the error, to find why it failed.
+   */
+  const unstage = (kept: string, error: string) =>
     Effect.sync(() => {
-      NodeFS.rmSync(recording, { force: true });
-      NodeFS.rmSync(reference, { force: true });
-      console.log(`fork-harness record: removed the staged recording and reference: ${why}`);
+      for (const file of [recording, reference]) {
+        if (NodeFS.existsSync(file)) {
+          NodeFS.renameSync(file, NodePath.join(kept, NodePath.basename(file)));
+        }
+      }
+      NodeFS.writeFileSync(NodePath.join(kept, "error.txt"), `${error}\n`);
+      console.log(`fork-harness record: the recording failed; it, its events and the error are in ${kept}`);
     });
   return withScratch(
     `${agent}-${name}-record`,
@@ -138,10 +147,13 @@ const record = (agent: Agent, name: string) => {
         console.log(`fork-harness record: wrote ${recording} and its reference`);
       }).pipe(
         Effect.onExit((exit) =>
-          Exit.isSuccess(exit) ? Effect.void : removeStaged("the live run or its replay failed"),
+          Exit.isSuccess(exit) ? Effect.void : unstage(live.root, Cause.pretty(exit.cause)),
         ),
       ),
     home,
+    // A fixed project folder: its path, streamed in pieces, cannot become `<workspace>`, and a
+    // random name in it would make the scan refuse the recording.
+    NodePath.join("/tmp/pluto-recording", `${agent}-${name}`),
   );
 };
 

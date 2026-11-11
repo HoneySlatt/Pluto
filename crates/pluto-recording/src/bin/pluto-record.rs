@@ -50,6 +50,7 @@ const USAGE: &str =
                      [--meta K=V]... [--keep-env NAME]... -- PROGRAM ARGS...
        pluto-record check FILE...
        pluto-record review FILE
+       pluto-record remask FILE...
        pluto-record mask-document --workspace W --home H [--home H]...";
 
 const EXIT_FOUND: i32 = 1;
@@ -62,6 +63,7 @@ fn main() {
         Some("record") => record(args),
         Some("check") => check(args),
         Some("review") => review(args),
+        Some("remask") => remask(args),
         Some("mask-document") => mask_document(args),
         _ => Err(Failure::Usage("a command is needed".to_owned())),
     };
@@ -1110,6 +1112,76 @@ fn listed_value(values: &mut ValuesByPlace, kind: &str, path: &str, text: &str) 
         .entry((kind.to_owned(), path.to_owned()))
         .or_default()
         .insert(shown);
+}
+
+// --- remask ------------------------------------------------------------------------------------
+
+/// Masks recordings again with today's rules, so that a rule added after a recording reaches it
+/// without recording again. Masking an already masked recording changes only what a new rule
+/// covers: placeholders, masked values and stripped fields stay as they are. Each file is
+/// replaced through a temporary file and a rename.
+fn remask(args: impl IntoIterator<Item = OsString>) -> Result<i32, Failure> {
+    let files: Vec<OsString> = args.into_iter().collect();
+    if files.is_empty() {
+        return Err(usage("remask takes one file or more".to_owned()));
+    }
+    // Read before any work: the owner's places a recording may name.
+    let places = Places {
+        workspace: None,
+        homes: owner_homes(),
+        user: login_name(),
+        host: host_name(),
+    };
+    for file in &files {
+        let file = Path::new(file);
+        let failed = |message: String| Failure::CannotRun(format!("{}: {message}", file.display()));
+        let text = fs::read_to_string(file).map_err(|error| failed(error.to_string()))?;
+        let mut recording = format::read(&text).map_err(|error| failed(error.to_string()))?;
+        let changed = remask_records(&mut recording, &places);
+        let mut out = format::header_line(&recording.header);
+        out.push('\n');
+        for record in &recording.records {
+            out.push_str(&format::record_line(record));
+            out.push('\n');
+        }
+        let temporary = file.with_extension("jsonl.remask");
+        fs::write(&temporary, out).map_err(|error| failed(error.to_string()))?;
+        fs::rename(&temporary, file).map_err(|error| failed(error.to_string()))?;
+        println!("{}: {changed} records masked further", file.display());
+    }
+    Ok(0)
+}
+
+/// Runs every record through a masker of its process again; returns how many changed.
+fn remask_records(recording: &mut Recording, places: &Places) -> usize {
+    let agent = recording.header.agent;
+    let mut maskers: BTreeMap<u32, Masker> = BTreeMap::new();
+    let mut changed = 0;
+    for record in &mut recording.records {
+        let Some(process) = record.process() else {
+            continue;
+        };
+        let masker = maskers
+            .entry(process)
+            .or_insert_with(|| Masker::new(agent, places.clone()));
+        let before = format::record_line(record);
+        match record {
+            Record::Spawn { argv, .. } => *argv = masker.argv(argv).0,
+            Record::Frame {
+                from, json, masked, ..
+            } => *masked |= masker.frame(*from, json),
+            Record::Line { text, masked, .. } => {
+                let (remasked, was_masked) = masker.line(text);
+                *text = remasked;
+                *masked |= was_masked;
+            }
+            Record::Action { .. } | Record::StdinClosed { .. } | Record::Exit { .. } => {}
+        }
+        if format::record_line(record) != before {
+            changed += 1;
+        }
+    }
+    changed
 }
 
 fn mask_document(args: impl IntoIterator<Item = OsString>) -> Result<i32, Failure> {

@@ -4,10 +4,16 @@
 //! Three layers, in this order, on decoded JSON values rather than raw text:
 //!
 //! 1. **Stripping**, frame type by frame type, of what is personal without looking secret:
+//!    - Both: the string value of a key naming the account, anywhere in a frame (the keys of
+//!      `ACCOUNT_KEYS`, such as `organization`, `subscription_tier_display` or
+//!      `credential_expires_at`), becomes `<account>`, or `recorder@example.invalid` for an
+//!      e-mail.
 //!    - Claude: the `initialize` answer's `account` (e-mail, organisation, subscription) becomes
-//!      fixed placeholders; `system/init`'s `agents`, `skills`, `slash_commands`, `plugins` and
-//!      `mcp_servers` become empty lists; `system/memory_recall`'s memories are emptied; a
-//!      `rate_limit_event` keeps only its `status`.
+//!      fixed placeholders, and its `commands` and `agents`, which list the plugins and agents of
+//!      the owner's account, become empty lists; `system/init`'s `agents`, `skills`,
+//!      `slash_commands`, `terminal_slash_commands`, `plugins` and `mcp_servers`, and
+//!      `system/commands_changed`'s `commands`, become empty lists; `system/memory_recall`'s
+//!      memories are emptied; a `rate_limit_event` keeps only its `status`.
 //!    - Grok (ACP): the `initialize` result's `_meta.agentId` and `_meta.agentInstanceId` become
 //!      the nil-shaped id `00000000-0000-4000-8000-000000000000`, `_meta.hostname` becomes
 //!      `<host>`, and commands whose `_meta.scope` is `"user"` leave every `availableCommands`
@@ -541,29 +547,78 @@ impl Folder {
 /// Removes the strings Claude and Grok write that are personal without looking secret. Each
 /// string it replaces by a fixed one goes to `replaced`, to be learned.
 fn strip(agent: Agent, frame: &mut Value, replaced: &mut Vec<String>) -> bool {
-    match agent {
+    let stripped = match agent {
         Agent::Claude => strip_claude(frame, replaced),
         Agent::Grok => strip_grok(frame, replaced),
-    }
+    };
+    stripped | replace_account_keys(frame, replaced)
+}
+
+/// Keys whose string value describes the owner's account, matched exactly and without case.
+const ACCOUNT_KEYS: [&str; 12] = [
+    "email",
+    "emailAddress",
+    "organization",
+    "organization_name",
+    "organizationName",
+    "organization_uuid",
+    "account_uuid",
+    "subscriptionType",
+    "subscription_type",
+    "subscription_tier",
+    "subscription_tier_display",
+    "credential_expires_at",
+];
+
+/// Replaces the string value of every key of `ACCOUNT_KEYS`, wherever it is in a frame.
+fn replace_account_keys(frame: &mut Value, replaced: &mut Vec<String>) -> bool {
+    let mut changed = false;
+    for_each_string(frame, None, &mut |key, text| {
+        let Some(key) = key.filter(|key| {
+            ACCOUNT_KEYS
+                .iter()
+                .any(|account_key| account_key.eq_ignore_ascii_case(key))
+        }) else {
+            return;
+        };
+        let fixed = if key.to_ascii_lowercase().contains("email") {
+            ACCOUNT_EMAIL
+        } else {
+            ACCOUNT_FIELD
+        };
+        if text != fixed {
+            replaced.push(std::mem::replace(text, fixed.to_owned()));
+            changed = true;
+        }
+    });
+    changed
 }
 
 fn strip_claude(frame: &mut Value, replaced: &mut Vec<String>) -> bool {
     let frame_type = string_field(frame, "type");
     let subtype = string_field(frame, "subtype");
     match (frame_type.as_str(), subtype.as_str()) {
-        ("control_response", _) => frame
-            .pointer_mut("/response/response/account")
-            .is_some_and(|account| replace_account_fields(account, replaced)),
+        ("control_response", _) => {
+            let account = frame
+                .pointer_mut("/response/response/account")
+                .is_some_and(|account| replace_account_fields(account, replaced));
+            let lists = frame
+                .pointer_mut("/response/response")
+                .is_some_and(|answer| empty_lists(answer, &["commands", "agents"]));
+            account | lists
+        }
         ("system", "init") => empty_lists(
             frame,
             &[
                 "agents",
                 "skills",
                 "slash_commands",
+                "terminal_slash_commands",
                 "plugins",
                 "mcp_servers",
             ],
         ),
+        ("system", "commands_changed") => empty_lists(frame, &["commands"]),
         ("system", "memory_recall") => empty_lists(frame, &["memories"]),
         ("rate_limit_event", _) => frame
             .get_mut("rate_limit_info")

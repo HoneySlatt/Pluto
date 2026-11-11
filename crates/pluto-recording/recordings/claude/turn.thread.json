@@ -1,0 +1,29 @@
+{
+  "format": "pluto-thread-reference",
+  "version": 1,
+  "thread": {
+    "agent": "claude",
+    "scenario": "turn",
+    "sessions": [
+      {
+        "session": 1,
+        "resumed": false,
+        "nativeThread": "thread-1",
+        "turns": [
+          {
+            "turn": 1,
+            "from": "user",
+            "prompt": "Reply with exactly: pluto turn ok",
+            "outcome": "completed",
+            "items": [
+              {
+                "kind": "assistant",
+                "text": "pluto turn ok"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

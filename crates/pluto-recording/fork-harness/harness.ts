@@ -223,13 +223,16 @@ const PROJECT_README =
   "# Synthetic project\n\nA disposable project for Pluto's recorded agent sessions. It holds no secret.\n";
 
 /** Makes the folders of one run under the system's temporary folder, outside the fork. */
-function makeScratch(name: string, home?: string): Scratch {
+function makeScratch(name: string, home?: string, workspace?: string): Scratch {
   const root = NodeFS.realpathSync(
     NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), `pluto-fork-harness-${name}-`)),
   );
+  if (workspace !== undefined) {
+    NodeFS.rmSync(workspace, { recursive: true, force: true });
+  }
   const scratch = {
     root,
-    workspace: NodePath.join(root, "project"),
+    workspace: workspace ?? NodePath.join(root, "project"),
     home: home ?? NodePath.join(root, "home"),
     bin: NodePath.join(root, "bin"),
     state: NodePath.join(root, "state"),
@@ -243,20 +246,25 @@ function makeScratch(name: string, home?: string): Scratch {
 
 /**
  * Runs `use` with fresh folders, removed after a success. After a failure they stay, to be read,
- * and so they do after a success when `PLUTO_HARNESS_KEEP=1`; the harness says where.
+ * and so they do after a success when `PLUTO_HARNESS_KEEP=1`; the harness says where. A
+ * `workspace` given is used, emptied first, instead of one inside the scratch folder.
  */
 export function withScratch<A, E, R>(
   name: string,
   use: (scratch: Scratch) => Effect.Effect<A, E, R>,
   home?: string,
+  workspace?: string,
 ): Effect.Effect<A, E, R> {
   return Effect.suspend(() => {
-    const scratch = makeScratch(name, home);
+    const scratch = makeScratch(name, home, workspace);
     return use(scratch).pipe(
       Effect.onExit((exit) =>
         Effect.sync(() => {
           if (Exit.isSuccess(exit) && process.env.PLUTO_HARNESS_KEEP !== "1") {
             NodeFS.rmSync(scratch.root, { recursive: true, force: true });
+            if (workspace !== undefined) {
+              NodeFS.rmSync(workspace, { recursive: true, force: true });
+            }
           } else {
             console.log(`fork-harness: kept ${scratch.root}`);
           }
@@ -442,10 +450,17 @@ class EventLog {
   private readonly watchers = new Set<() => boolean>();
   private failure: string | undefined;
 
-  constructor(readonly entries: Array<LoggedEvent>) {}
+  /** `file`, when given, receives each event as it comes: a failed run is read there. */
+  constructor(
+    readonly entries: Array<LoggedEvent>,
+    private readonly file?: string,
+  ) {}
 
   push(entry: LoggedEvent): void {
     this.entries.push(entry);
+    if (this.file !== undefined) {
+      NodeFS.appendFileSync(this.file, `${JSON.stringify(entry)}\n`);
+    }
     this.notify();
   }
 
@@ -546,6 +561,7 @@ export const runScenario = (
   scenario: Scenario,
   harness: HarnessAdapter,
   recordingPath?: string,
+  eventsFile?: string,
 ): Effect.Effect<ScenarioRun, HarnessError> =>
   Effect.gen(function* () {
     const run: ScenarioRun = {
@@ -559,7 +575,7 @@ export const runScenario = (
     const claimed = new Set<string>();
     /** The answers the adapter took and, when recording, that reached the CLI, in order. */
     const sent: Array<AnswerableRequest> = [];
-    const log = new EventLog(run.events);
+    const log = new EventLog(run.events, eventsFile);
     const modelSelection = MODEL_SELECTIONS[agent];
     const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
       runtimeMode: "approval-required",
@@ -1027,14 +1043,10 @@ export const driveScenario = (
   inHarnessRuntime(
     Effect.gen(function* () {
       const harness = yield* buildAdapter(agent, executable, scratch.workspace, scratch.home);
-      const run = yield* runScenario(agent, scenario, harness, recordingPath);
-      if (process.env.PLUTO_HARNESS_KEEP === "1") {
-        // The adapter's own events, to read when a view is not what was expected.
-        NodeFS.writeFileSync(
-          NodePath.join(scratch.root, "events.jsonl"),
-          run.events.map((entry) => `${JSON.stringify(entry)}\n`).join(""),
-        );
-      }
+      // The adapter's own events, kept with the scratch folder after a failure or with
+      // PLUTO_HARNESS_KEEP=1, to read when a run or a view is not what was expected.
+      const events = NodePath.join(scratch.root, "events.jsonl");
+      const run = yield* runScenario(agent, scenario, harness, recordingPath, events);
       return threadView(run, scratch);
     }),
     scratch.home,
