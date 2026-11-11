@@ -9,10 +9,10 @@
 //! Bytes are counted on each part's compact JSON (`serde_json::to_string`), so that they compare
 //! between clients whatever their own formatting:
 //! - instructions: Anthropic's `system`; Responses' `instructions`; Ollama's messages of role
-//!   `system`;
+//!   `system`; Chat Completions' messages of role `system` or `developer`;
 //! - tools: the `tools` array;
-//! - new message: the last message (Anthropic, Ollama) or input item (Responses), if it is the
-//!   user's or a tool's result;
+//! - new message: the last message (Anthropic, Ollama, Chat Completions) or input item
+//!   (Responses), if it is the user's or a tool's result;
 //! - history: every other message or input item.
 
 use crate::json;
@@ -28,6 +28,9 @@ pub enum Api {
     Anthropic,
     /// `POST /v1/responses`.
     Responses,
+    /// `POST /v1/chat/completions`.
+    #[serde(rename = "chat_completions")]
+    ChatCompletions,
     /// `POST /api/chat`.
     Ollama,
 }
@@ -61,6 +64,9 @@ pub struct Conversation {
     pub model: String,
     /// Whether the client asked for a stream (`stream: true`; Ollama streams unless told not to).
     pub stream: bool,
+    /// Whether a Chat Completions stream must end with its usage
+    /// (`stream_options.include_usage`); false for the other APIs.
+    pub include_usage: bool,
     pub position: Position,
     /// The tool results after the turn's prompt, in order.
     pub tool_results: Vec<ToolResult>,
@@ -68,7 +74,8 @@ pub struct Conversation {
     pub parts: Parts,
 }
 
-/// One message (Anthropic, Ollama) or input item (Responses), as the three APIs have in common.
+/// One message (Anthropic, Ollama, Chat Completions) or input item (Responses), as the four APIs
+/// have in common.
 struct Item<'a> {
     value: &'a Value,
     /// The prompt's text, if the user wrote it; empty for every other item.
@@ -91,7 +98,9 @@ pub fn read(api: Api, body: &Value, body_len: usize) -> Result<Conversation, Str
     let items = match api {
         Api::Anthropic => anthropic_items(body)?,
         Api::Responses => responses_items(body)?,
-        Api::Ollama => ollama_items(body)?,
+        // Ollama's results carry no id of their own; a client may add one, or the tool's name.
+        Api::Ollama => message_items(api, body, &["tool_call_id", "tool_name"])?,
+        Api::ChatCompletions => message_items(api, body, &["tool_call_id"])?,
     };
 
     // The last prompt with a marker decides the turn; only what follows it moves the segment.
@@ -135,9 +144,13 @@ pub fn read(api: Api, body: &Value, body_len: usize) -> Result<Conversation, Str
         .map(|tools| tools.iter().filter_map(tool_spec).collect())
         .unwrap_or_default();
 
+    let include_usage = api == Api::ChatCompletions
+        && body["stream_options"]["include_usage"].as_bool() == Some(true);
+
     Ok(Conversation {
         model,
         stream,
+        include_usage,
         position: Position {
             turn,
             segment: tool_results.len(),
@@ -172,12 +185,12 @@ fn instructions_bytes(api: Api, body: &Value) -> usize {
     match api {
         Api::Anthropic => body.get("system").map_or(0, compact_len),
         Api::Responses => body.get("instructions").map_or(0, compact_len),
-        Api::Ollama => body
+        Api::Ollama | Api::ChatCompletions => body
             .get("messages")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter(|message| message["role"] == "system")
+            .filter(|message| is_instruction(api, message))
             .map(compact_len)
             .sum(),
     }
@@ -276,20 +289,21 @@ fn responses_items(body: &Value) -> Result<Vec<Item<'_>>, String> {
     }
 }
 
-/// Ollama's `system` messages are the instructions, so they are not items.
-fn ollama_items(body: &Value) -> Result<Vec<Item<'_>>, String> {
+/// Ollama's and Chat Completions' messages: their instructions (role `system`, and Chat
+/// Completions' `developer`) are not items; a `tool` message is a result, whose id is its first
+/// key of `id_keys` present.
+fn message_items<'a>(api: Api, body: &'a Value, id_keys: &[&str]) -> Result<Vec<Item<'a>>, String> {
     let messages = body
         .get("messages")
         .and_then(Value::as_array)
         .ok_or("`messages` is missing or not an array")?;
     Ok(messages
         .iter()
-        .filter(|message| message["role"] != "system")
+        .filter(|message| !is_instruction(api, message))
         .map(|message| {
             let from_user = message["role"] == "user";
             let from_tool = message["role"] == "tool";
-            // Ollama's results carry no id of their own; a client may add one, or the tool's name.
-            let call_id = ["tool_call_id", "tool_name"]
+            let call_id = id_keys
                 .iter()
                 .find_map(|key| message[*key].as_str())
                 .unwrap_or_default();
@@ -309,4 +323,10 @@ fn ollama_items(body: &Value) -> Result<Vec<Item<'_>>, String> {
             }
         })
         .collect())
+}
+
+/// Whether a message is an instruction: role `system`, or, for Chat Completions, `developer`,
+/// which OpenAI's newer models take in its place.
+fn is_instruction(api: Api, message: &Value) -> bool {
+    message["role"] == "system" || (api == Api::ChatCompletions && message["role"] == "developer")
 }

@@ -22,7 +22,7 @@ the Harness process themselves.
 | Android bindings | `crates/pluto-ffi` | The core wrapped for Kotlin with UniFFI, and the phone's screen data | 9,200 lines |
 | Bindings generator | `crates/uniffi-bindgen` | UniFFI's command line, which Gradle runs to write the Kotlin bindings | 3 lines |
 | Android app | `android/` | Kotlin and Compose over `pluto-ffi` ([ADR-0002](adr/0002-the-android-app-until-uwui.md)) | 8,100 lines of Kotlin |
-| Fake model | `crates/pluto-fake-model` | A scripted model service over Anthropic's, OpenAI's Responses and Ollama's APIs, for the rivals' bench ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Used by no client | 2,500 lines |
+| Fake model | `crates/pluto-fake-model` | A scripted model service over Anthropic's Messages, OpenAI's Responses and Chat Completions, and Ollama's APIs, for the rivals' bench ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Used by no client | 2,700 lines |
 | Measuring from outside | `crates/pluto-measure` | Samples a cgroup's processes and threads: memory, processor, wake-ups, for the rivals' bench. Used by no client | 1,100 lines |
 | Recordings | `crates/pluto-recording` | Agents' sessions recorded and replayed, for the drivers' tests; with a harness that replays them into the fork ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)). No UI, used by no client | 5,100 lines of Rust, 2,000 of TypeScript in `fork-harness/` |
 

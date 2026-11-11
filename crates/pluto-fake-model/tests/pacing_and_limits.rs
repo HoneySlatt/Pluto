@@ -134,12 +134,14 @@ fn ollama_body(stream: bool) -> Value {
         "tools": [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]})
 }
 
-/// The three APIs' requests for the script's first segment, each with a tool it can call.
-fn requests(stream: bool) -> [(&'static str, Value); 3] {
+/// The four APIs' requests for the script's first segment, each with a tool it can call. Chat
+/// Completions takes Ollama's body: its messages and tools have the same form.
+fn requests(stream: bool) -> [(&'static str, Value); 4] {
     [
         ("/v1/messages", anthropic_body(stream, json!([bash_tool()]))),
         ("/v1/responses", responses_body(stream)),
         ("/api/chat", ollama_body(stream)),
+        ("/v1/chat/completions", ollama_body(stream)),
     ]
 }
 

@@ -9,6 +9,7 @@
 //! `input_tokens` (from the request's bytes) and the reply's own bytes divided the same way.
 
 pub mod anthropic;
+pub mod chat_completions;
 pub mod ollama;
 pub mod responses;
 
@@ -85,7 +86,8 @@ fn arguments_json(tool: &MappedTool) -> String {
     json::compact(&tool.arguments)
 }
 
-/// An SSE event whose JSON `type` is also its `event:` name, as Anthropic's and OpenAI's are.
+/// An SSE event whose JSON `type` is also its `event:` name, as Anthropic's and OpenAI's
+/// Responses' are.
 fn sse(data: &Value, text_bytes: usize) -> WireEvent {
     let kind = data["type"].as_str().unwrap_or_default();
     WireEvent {

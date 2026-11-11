@@ -22,11 +22,12 @@
 //!   `id`, `object: "model"`, `type: "model"`, `display_name`, `created`, `created_at` and
 //!   `owned_by`. Kind `listing`.
 //! - `POST /v1/messages/count_tokens`: `{"input_tokens"}` from the body's bytes. Kind `listing`.
-//! - `POST /v1/messages`, `POST /v1/responses`, `POST /responses`, `POST /api/chat`: a model's
-//!   answer in that API, streamed if asked. Kind `main` if the request offers at least one tool
-//!   whose name is in [`tools::SHELL_NAMES`] or [`tools::READ_NAMES`], `side` otherwise (a title
-//!   request that offers only a structured-output tool is a side request); a side request gets the
-//!   script's `side_answer` and no tool.
+//! - `POST /v1/messages`, `POST /v1/responses`, `POST /responses`, `POST /v1/chat/completions`,
+//!   `POST /chat/completions`, `POST /api/chat`: a model's answer in that API, streamed if asked.
+//!   Kind `main` if the request offers at least one tool whose name is in [`tools::SHELL_NAMES`]
+//!   or [`tools::READ_NAMES`], `side` otherwise (a title request that offers only a
+//!   structured-output tool is a side request); a side request gets the script's `side_answer`
+//!   and no tool.
 //! - Anything else: 404, `{"error": {"type": "not_found", "message"}}`. Kind `unknown`.
 //!
 //! A request that cannot be read (malformed: 400; too large: 413; a `Content-Encoding`: 415), or a
@@ -57,7 +58,7 @@ use crate::http::{self, ReadError, Request, Unreadable};
 use crate::json;
 use crate::script::Script;
 use crate::tools;
-use crate::wire::{self, Reply, WireEvent, anthropic, ollama, responses};
+use crate::wire::{self, Reply, WireEvent, anthropic, chat_completions, ollama, responses};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
@@ -521,6 +522,9 @@ fn answer(shared: &Shared, request: &Request, entry: &mut JournalEntry) -> Answe
         ("POST", "/v1/responses" | "/responses") => {
             model_answer(shared, Api::Responses, request, entry)
         }
+        ("POST", "/v1/chat/completions" | "/chat/completions") => {
+            model_answer(shared, Api::ChatCompletions, request, entry)
+        }
         ("POST", "/api/chat") => model_answer(shared, Api::Ollama, request, entry),
         _ => {
             entry.kind = Kind::Unknown;
@@ -654,12 +658,12 @@ fn model_answer(shared: &Shared, api: Api, request: &Request, entry: &mut Journa
         input_tokens: wire::tokens(request.body.len()),
         chunk_bytes: script.pace.chunk_bytes,
     };
-    encode(api, &reply, conversation.stream)
+    encode(api, &reply, &conversation)
 }
 
-fn encode(api: Api, reply: &Reply, stream: bool) -> Answer {
+fn encode(api: Api, reply: &Reply, conversation: &Conversation) -> Answer {
     let paced_bytes = wire::paced_bytes(reply);
-    match (api, stream) {
+    match (api, conversation.stream) {
         (Api::Anthropic, true) => Answer::Stream {
             content_type: "text/event-stream",
             events: anthropic::events(reply),
@@ -670,6 +674,13 @@ fn encode(api: Api, reply: &Reply, stream: bool) -> Answer {
             events: responses::events(reply),
         },
         (Api::Responses, false) => Answer::paced_json(&responses::response(reply), paced_bytes),
+        (Api::ChatCompletions, true) => Answer::Stream {
+            content_type: "text/event-stream",
+            events: chat_completions::events(reply, conversation.include_usage),
+        },
+        (Api::ChatCompletions, false) => {
+            Answer::paced_json(&chat_completions::completion(reply), paced_bytes)
+        }
         (Api::Ollama, true) => Answer::Stream {
             content_type: "application/x-ndjson",
             events: ollama::lines(reply),

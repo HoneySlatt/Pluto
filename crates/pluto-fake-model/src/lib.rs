@@ -1,9 +1,9 @@
 //! A scripted fake model service ([ADR-0026]).
 //!
-//! It answers like a model over three APIs: Anthropic's Messages, OpenAI's Responses and Ollama's
-//! chat. Every application that takes a custom endpoint, Pluto included, receives the same answer
-//! bytes from one script, paced like a model, so that they are measured on one workload with no
-//! quota spent. It counts what each request carries, by bytes and by part.
+//! It answers like a model over four APIs: Anthropic's Messages, OpenAI's Responses and Chat
+//! Completions, and Ollama's chat. Every application that takes a custom endpoint, Pluto included,
+//! receives the same answer bytes from one script, paced like a model, so that they are measured
+//! on one workload with no quota spent. It counts what each request carries, by bytes and by part.
 //!
 //! It keeps no conversation state: where a request stands in the script is read from the request
 //! itself. The prompt that starts a turn carries a marker, `[turn N]`; each tool result sent back
