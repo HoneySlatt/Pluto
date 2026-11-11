@@ -1,5 +1,5 @@
-//! Tests added by the review: the script's lookup, the tool mapping, the Responses events and the
-//! HTTP framing of a response without a body.
+//! Edge cases: the script's lookup, the tool mapping, the Responses events and the HTTP framing
+//! of a response without a body.
 
 use pluto_fake_model::conversation::ToolSpec;
 use pluto_fake_model::http::write_full;

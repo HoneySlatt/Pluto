@@ -1,4 +1,4 @@
-//! Tests added by the review: the command line's `--speed`.
+//! The command line's `--speed`: which values start the server, which are refused.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};

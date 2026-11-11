@@ -1,4 +1,4 @@
-//! Tests added by the review of the server: pacing, the journal, refusals and the routes.
+//! The server's pacing, its journal, its refusals and limits, and the routes clients call.
 
 use pluto_fake_model::http::MAX_BODY;
 use pluto_fake_model::script::Script;
