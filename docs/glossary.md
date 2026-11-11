@@ -17,6 +17,14 @@ Terms this project uses in a sense of its own.
   receives ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 - **The margin**: how much better than the best rival Pluto must be on a family of criteria, such
   as twice on resources ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
+- **A recording**: an agent's raw stdio traffic during one scripted scenario, masked, in
+  `crates/pluto-recording/recordings/` ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)).
+- **A scenario's reference**: the thread a person would see, taken from a recording's live run;
+  every replay must give it exactly.
+- **The fake agent**: `pluto-replay-agent`, which plays a recording in an agent CLI's place.
+- **The stamp**: the hashes of what a replay reads, written in `recordings/` when the owner's
+  machine replays the recordings into the fork; CI compares them to show nothing it covers
+  changed without that replay.
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
   against a server; not to be confused with the bench above.
 - **uwui's agent bench**: the fixed tasks that uwui gives the same agents with uwui and with its

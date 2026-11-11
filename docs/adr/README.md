@@ -20,7 +20,7 @@ New ADRs copy the template below and take the next free number.
 | [0009](0009-secrets-privacy-and-the-sandbox.md) | Secrets, privacy and the agents' sandbox | Accepted; amended by 0016, 0018, 0019 and 0022 |
 | [0010](0010-todays-features-triaged.md) | Today's features triaged, and the egui client frozen | Accepted; amended by 0021 |
 | [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Accepted |
-| [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted |
+| [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted; amended by 0025 |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
 | [0014](0014-how-today-is-measured.md) | How today is measured | Accepted |
 | [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted; amended by 0017 |
@@ -33,6 +33,7 @@ New ADRs copy the template below and take the next free number.
 | [0022](0022-the-triage-row-by-row.md) | The triage, row by row | Accepted; amends 0003, 0009, 0017 and 0018; amended by 0024 |
 | [0023](0023-the-specification-accepted.md) | The specification accepted | Accepted |
 | [0024](0024-cuts-kept-in-the-egui-client-until-uwui.md) | Cuts kept in the egui client until uwui | Accepted; amends 0022 |
+| [0025](0025-agents-sessions-recorded-and-replayed.md) | Agents' sessions recorded and replayed | Accepted; amends 0012 |
 
 ## Template
 

@@ -1,6 +1,6 @@
 # 0012. The checks in one script, run by CI in the Nix shell
 
-- Status: Accepted
+- Status: Accepted; amended by [0025](0025-agents-sessions-recorded-and-replayed.md) (a check that runs only on the owner's machine, held in CI by a stamp)
 - Date: 2026-11-07
 
 ## Context

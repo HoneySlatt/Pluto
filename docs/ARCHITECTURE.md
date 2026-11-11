@@ -22,6 +22,7 @@ the Harness process themselves.
 | Android bindings | `crates/pluto-ffi` | The core wrapped for Kotlin with UniFFI, and the phone's screen data | 9,200 lines |
 | Bindings generator | `crates/uniffi-bindgen` | UniFFI's command line, which Gradle runs to write the Kotlin bindings | 3 lines |
 | Android app | `android/` | Kotlin and Compose over `pluto-ffi` ([ADR-0002](adr/0002-the-android-app-until-uwui.md)) | 8,100 lines of Kotlin |
+| Recordings | `crates/pluto-recording` | Agents' sessions recorded and replayed, for the drivers' tests; with a harness that replays them into the fork ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)). No UI, used by no client | 5,100 lines of Rust, 2,000 of TypeScript in `fork-harness/` |
 
 What depends on what:
 
@@ -159,6 +160,27 @@ The desktop client re-exports most of these modules under its own name (`src/lib
 - **Building.** `scripts/android-apk.sh` builds the APK in `nix develop .#mobile`; the
   [README](../README.md#android-app-android) has the details.
 
+## Agents' sessions recorded
+
+`crates/pluto-recording` keeps real agents' traffic so that drivers are tested without a real
+turn ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)). It is used by no client.
+
+```text
+recording:  fork's adapter ──stdio──> pluto-record ──stdio──> claude / grok
+                                          └──> recordings/<agent>/<scenario>.jsonl (masked)
+replay:     fork's adapter ──stdio──> pluto-replay-agent <── the recording
+```
+
+- **Recording.** A scenario's script drives the fork's real adapter. The agent's executable is a
+  small wrapper that starts `pluto-record`, which starts the real CLI. Each line is masked
+  (`src/mask.rs`), written, then forwarded. The live run's thread, as a person would see it,
+  becomes the scenario's reference (`<scenario>.thread.json`).
+- **Replay.** The same script drives the same adapter, with `pluto-replay-agent` in the CLI's
+  place (`src/replay.rs`). The thread must equal the reference.
+- **Checks.** CI reads every recording, scans it (`src/scan.rs`) and replays it with a client of
+  its own. The replay into the fork runs only on the owner's machine (`scripts/check.sh --fork`)
+  and leaves a stamp that CI compares.
+
 ## Checks, tests, examples and scripts
 
 - `scripts/check.sh` runs every automated check; CI runs it
@@ -174,6 +196,9 @@ The desktop client re-exports most of these modules under its own name (`src/lib
   `load_offline_shell` and their kin, in `src/app.rs`); the client itself never calls them.
 - `scripts/measure.sh`, in `nix develop .#measure`, takes the figures of
   [`measurements.md`](measurements.md) ([ADR-0014](adr/0014-how-today-is-measured.md)).
+- `scripts/fork-replay.sh` replays the recordings through the fork and writes their stamp
+  (`scripts/check.sh --fork`); `scripts/record-session.sh` is the owner's recording of real
+  sessions ([the crate's README](../crates/pluto-recording/README.md)).
 - `scripts/fixture-server.sh` starts a disposable server with synthetic threads
   (`scripts/seed-fixture.mjs`), seeded through T3 Code v0.0.45's server, the flake's `fixture-t3`;
   `scripts/gen-*.mjs` generate the icons' sources.

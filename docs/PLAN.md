@@ -27,8 +27,10 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   ([ADR-0022](adr/0022-the-triage-row-by-row.md)), and the
   [specification](specification.md) followed. On 2026-11-10 [M1.4](#m14--the-cuts) removed what it
   cut from the egui client and the Android app, except three cuts kept until the uwui client
-  ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). Next: M1.5 and
-  [M1.6](#m16--the-rivals-measured).
+  ([ADR-0024](adr/0024-cuts-kept-in-the-egui-client-until-uwui.md)). On 2026-11-11
+  [M1.5](#m15--agents-sessions-recorded) built the recorder and the replay into the fork
+  ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)); the owner's real recordings
+  close it. Next: [M1.6](#m16--the-rivals-measured).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -40,7 +42,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.2](#m12--today-measured) | Today's client, server and HP measured; the fork's database understood | Done; the HP's figures to come |
 | [M1.3](#m13--the-triage) | The owner has triaged every feature; the specification exists | Done |
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
-| [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Planned |
+| [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; the owner's recordings to come |
 | [M1.6](#m16--the-rivals-measured) | The rivals measured on one workload; the bar set from them | Planned |
 
 ## Stage 1 — The ground measured and triaged
@@ -153,17 +155,42 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 ### M1.5 — Agents' sessions recorded
 
 - **Goal.** The drivers of Stage 2 can be tested without a real turn.
+- **Decided (2026-11-11).** [ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md): scripted
+  sessions the owner runs; a Rust crate `crates/pluto-recording`; JSON Lines, versioned; Grok as the
+  ACP agent; a TypeScript harness kept in Pluto that the fork's test runner runs, guarded in CI by
+  a stamp; a disposable home where the owner signs in once.
 - **Delivers.**
-  - A recorder that saves an agent's raw protocol traffic to a file: Claude's `stream-json`, and
-    one ACP agent's JSON-RPC.
-  - A first set of sessions recorded by the owner, by hand, on a disposable project: a turn, an
-    approval, a question, an interruption, a resume.
-  - Secrets are masked before a file is saved.
-- **Done when.** Each recorded file replays into the current server's event mapping without a
-  difference.
-- **How to test.** The replay tests, in `scripts/check.sh`.
-- **Measured.** Nothing.
+  - `pluto-record`, which sits between a server and an agent's CLI and writes its raw traffic,
+    masked, to a recording: Claude's `stream-json` and Grok's ACP JSON-RPC. `pluto-replay-agent`,
+    which plays a recording in the CLI's place.
+  - Masking in three layers (a disposable home, stripping by frame type, shapes), and a scan of
+    every committed file with detectors of its own, tested.
+  - A harness that drives the fork's real adapter: it records, with the real CLI behind
+    `pluto-record`, or replays, with `pluto-replay-agent`. Each scenario has hand-written
+    assertions, and a reference taken from the live run.
+  - The scenarios, for Claude and Grok: a turn, an approval, a question, an interruption, a resume;
+    and Grok's background wake.
+  - A command per scenario that the owner runs, and the procedure to follow.
+  - `scripts/check.sh --fork`, which replays every recording into the fork and writes a stamp;
+    CI checks the stamp, scans every recording, and replays each with a client of its own.
+- **Done when.** Each recorded file replays into the current server's event mapping and gives its
+  live run's reference exactly.
+- **How to test.** `scripts/check.sh --fork` on the owner's machine; `scripts/check.sh` in CI.
+- **Measured.** Each recording's size, against a budget set from the first ones.
 - **By hand.** The real sessions, which only the owner starts: they spend the owner's quota.
+- **Built (2026-11-11).** `crates/pluto-recording` holds the recorder, the fake agent, the
+  masking and the scan, with 91 tests. Its `fork-harness/` drives the fork's real Claude adapter
+  (with the real Claude Agent SDK 0.3.276) and Grok adapter; the self-test records and replays its
+  11 synthetic scenarios through them, writing nothing in the fork. `scripts/check.sh --fork`
+  runs it and writes the stamp; CI checks the stamp. The procedure is in the
+  [crate's README](../crates/pluto-recording/README.md): `scripts/record-session.sh login`, then
+  `claude all`, `grok all`, `accept`.
+- **Where it stands.** No real session is recorded yet: the owner runs them. The procedure ran
+  whole as a dry run, stand-ins playing the synthetic recordings (`PLUTO_RECORDING_DRY_RUN=1`),
+  and its eleven recordings replayed through the fork; `login` and the real CLIs never ran. Until
+  the owner records, the synthetic recordings prove the chain, not what the real CLIs send. The milestone is done when
+  the owner's eleven recordings replay into the fork and give their references; their sizes then
+  set the budget.
 
 ### M1.6 — The rivals measured
 
@@ -191,6 +218,8 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
 
 ## Ideas
 
+- The fork exists on one disk only: its branch `pluto` is pushed nowhere. A private copy would
+  protect it; the owner's call.
 - Two weeks of local, private counts of which features the owner uses, to inform the triage. Kept
   on the machine, never sent; ask before building.
 - From the 2026-10-27/28 backlog, set aside by the owner:
@@ -259,6 +288,23 @@ server's scope comes from the triage ([ADR-0010](adr/0010-todays-features-triage
   network: a page's image or `fetch()` reaches any host, private ones included, without a click.
   Only an MCP app's own host page is intercepted (`src/preview.rs`). Found by M1.4's review; it
   predates M1.4. The thread's sandbox network rule of ADR-0022 waits for Pluto's own server.
+- The replay into the fork runs only on the owner's machine, held in CI by a stamp
+  ([ADR-0025](adr/0025-agents-sessions-recorded-and-replayed.md)). The scenarios' scripted order
+  (approve, then interrupt once the tool runs) and Grok's wake are checked only on synthetic
+  recordings until the owner's real ones exist. The agents' CLIs are not pinned in the Nix shell,
+  against [ADR-0006](adr/0006-agents-drivers.md): recordings use the CLIs on the owner's PATH, and
+  their versions are read from the frames. `shellcheck` is not in the Nix shell, so the scripts
+  are not linted. The roadmap's grid of tests on recorded sessions also wants steering, the plan
+  and usage, which no scenario records yet. A Grok recording's prompt is compared whole, the
+  fork's instructions included. The scan misses an opaque token longer than 200 characters under
+  an ordinary key, and a `password=` split across streamed deltas. Followed by Stage 2's first
+  driver milestone.
+- Pluto's interface shows a native subagent's effort as the parent thread's, not the effort its
+  definition sets, which its requests to the model carry. It is the fork's; the fork changes only
+  on the owner's word.
+- Before M1.5's harness kept its caches outside the fork, two test runs of 2026-11-10 updated the
+  fork's own `node_modules/.vite/vitest/<hash>/results.json` and `.vite-temp`, which git ignores.
+  Left as they are: they are caches, and the owner's own runs write them too.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 

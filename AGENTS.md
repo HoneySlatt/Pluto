@@ -46,13 +46,15 @@ You remember nothing from earlier sessions. What is not written in these files i
 
 ```sh
 nix develop                   # the toolchain, the checks' tools, eframe's libraries; `.#mobile` for Android
-scripts/check.sh              # every check CI runs (its head lists them); `--apk` builds Android too
+scripts/check.sh              # every check CI runs (its head lists them); `--apk` builds Android too;
+                              # `--fork` replays the recordings through the fork, on the owner's machine
 scripts/fixture-server.sh     # a disposable server on :3999 with synthetic threads
 cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer
 cargo build --release -j2     # the binary the owner's shortcut starts; more jobs get OOM-killed
 ```
 
-The README's *Development* section has the rest: the measurements and the icon generators.
+The README's *Development* section has the rest: the measurements, the icon generators, and the
+agents' recordings (`scripts/record-session.sh`, the owner's alone: it runs real agents).
 
 Never, on your own:
 - run a real provider turn: sending a message starts a session on the owner's accounts and spends

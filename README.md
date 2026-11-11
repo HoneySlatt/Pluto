@@ -187,6 +187,11 @@ nix develop --command scripts/check.sh   # every check CI runs; its head lists t
 `scripts/fixture-server.sh` starts a disposable server on :3999 with synthetic threads, for the
 bench and the measurements below.
 
+`scripts/check.sh --fork`, on the owner's machine, also replays the agents' recorded sessions
+through the fork's adapters and writes the stamp CI checks. `scripts/record-session.sh` records
+those sessions with real agents, so only the owner runs it; its procedure is in
+[`crates/pluto-recording/README.md`](crates/pluto-recording/README.md).
+
 `cargo run --release --example bench -- http://127.0.0.1:3999 /tmp/t3-egui-fixture/bearer`
 measures the per-frame CPU cost (idle, hover, scrolling the fixture's long
 thread, switching threads, opening settings, the 5,000-message thread, 15
