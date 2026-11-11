@@ -65,7 +65,7 @@ The rivals, named only to be measured:
 | The chat | ChatGPT's and Claude's desktop applications; T3 Chat, Open WebUI, LibreChat, Msty, TypingMind; LM Studio, Jan; Gemini and Le Chat on their features and voice ([ADR-0020](adr/0020-the-chat.md)) |
 | The phone | Claude's and ChatGPT's remote control, T3 Code's mobile application, Happy, Paseo; Conductor and Nimbalyst on paper ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)) |
 
-Only first figures exist: T3 Code and Zed at rest, two runs and one, in [`measurements.md`](measurements.md#the-rivals-bench-m16a); the bar is tightened from them in M1.6c. A survey of 2026-11-08, mostly users' reports, found every agents' application
+Only first figures exist: T3 Code and Zed at rest, two runs and one, in [`measurements.md`](measurements.md#the-rivals-bench-m16a); the rest waits for the owner's go ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), and the bar is tightened once they are measured. A survey of 2026-11-08, mostly users' reports, found every agents' application
 but Zed and Warp built on Electron, the vendors' applications growing to gigabytes, and no vendor
 publishing budgets.
 
@@ -194,7 +194,8 @@ features triaged with the owner.
   ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 
 **Exit.** The triage is recorded as the specification. Today's figures are in
-`docs/measurements.md`, the rivals' beside them. The checks run in CI. The cuts are in daily use.
+`docs/measurements.md`. The checks run in CI. The cuts are in daily use. The rivals' figures wait
+for the owner's go ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)).
 
 ### Stage 2 — Pluto's server, its first agents
 
