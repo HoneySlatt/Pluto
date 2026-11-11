@@ -59,11 +59,29 @@ subject_start() {
 
 # One thread: a new thread in the agent panel, the prompt typed, sent. One wtype for all of it,
 # with pauses: each wtype is a new virtual keyboard, whose first keys Zed may drop while it loads
-# the keyboard's keymap.
+# the keyboard's keymap. A prompt can still be lost (2 of 15 in one run of M1.6a): the driver waits
+# until the turn's first request reaches the fake model, and types it once more, in a new thread,
+# if it does not within 30 seconds.
 zed_thread() {
-    wtype -s 300 -M ctrl -M alt -k n -m alt -m ctrl -s 1000 \
-        "[turn $1] Look at this project and tell me what you find." -s 500 -k Return -s 300
-    sleep 2
+    local turn=$1 before attempt
+    before=$(journaled "$turn" 0)
+    for attempt in 1 2; do
+        wtype -s 300 -M ctrl -M alt -k n -m alt -m ctrl -s 1000 \
+            "[turn $turn] Look at this project and tell me what you find." -s 500 -k Return -s 300
+        if wait_for 30 more_than "$before" journaled "$turn" 0; then
+            return 0
+        fi
+        echo "turn $turn: the prompt did not reach the model (attempt $attempt)"
+        grim -s 0.25 "$run_dir/lost-turn-$turn-$attempt.png"
+    done
+    return 1
+}
+
+# Whether a count, given by the command that follows, is above `before`.
+more_than() {
+    local before=$1
+    shift
+    [ "$("$@")" -gt "$before" ]
 }
 
 launch() {
@@ -75,7 +93,7 @@ launch() {
     wtype -s 300 -M ctrl -M alt -k a -m alt -m ctrl -s 300
     sleep 2
     for n in $(seq 0 $((threads - 1))); do
-        zed_thread "${turns[$((n % ${#turns[@]}))]}"
+        zed_thread "${turns[$((n % ${#turns[@]}))]}" || return 1
     done
     grim -s 0.25 "$run_dir/after-launch.png"
 }

@@ -5,14 +5,18 @@
 #
 # usage: scripts/rivals/run.sh <scenario> <runs> <subject>...
 #   scenario  rest: 15 threads run their turn, then the subject rests while it is measured;
-#             stream: 15 threads stream a long answer at once, measured while they stream.
+#             stream: 15 threads stream a long answer at once, measured while they stream;
+#             prepare: the subject's first start, after which its home is frozen into its profile,
+#             target/rivals/profiles/<subject>/ (the other scenarios start from it);
+#             probe: for writing a subject's file (the README).
 # env:       MEASURE_SECONDS (rest: 600, stream: 45), OUT (/tmp/pluto-rivals), BUSY_LIMIT (0.30 of
 #            a core used by the rest of the machine, above which a run waits, then is marked noisy),
 #            FRAMES=1 to count the subject's frames (those runs' resources are not to be kept)
 #
 # Each run's folder, OUT/<date>-<time>/<subject>/<scenario>-<n>/, holds figures.json
-# (pluto-measure's), frames.txt, fingerprint.txt, the fake model's journal and every log; a new
-# call of run.sh never overwrites an earlier one's.
+# (pluto-measure's), frames.txt, start.txt (the start to the first window), profile.txt (the
+# profile's growth), fingerprint.txt, the fake model's journal and every log; a new call of run.sh
+# never overwrites an earlier one's.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -24,7 +28,7 @@ subjects=("$@")
 case "$scenario" in
 rest) seconds=${MEASURE_SECONDS:-600} ;;
 stream) seconds=${MEASURE_SECONDS:-45} ;;
-probe) seconds=${MEASURE_SECONDS:-5} ;;
+probe | prepare) seconds=${MEASURE_SECONDS:-5} ;;
 *) echo "unknown scenario $scenario" >&2; exit 2 ;;
 esac
 out=${OUT:-/tmp/pluto-rivals}/$(date +%Y-%m-%d-%H%M%S)
@@ -36,6 +40,23 @@ measure=$repo/target/release/pluto-measure
 for binary in "$PLUTO_FAKE_MODEL" "$measure" "$repo/target/release/pluto" "$repo/target/release/examples/drive"; do
     [ -x "$binary" ] || { echo "build $binary first (scripts/rivals/README.md)" >&2; exit 1; }
 done
+
+profiles=$repo/target/rivals/profiles
+
+# A subject's version as its file prints it, which its frozen profile must match.
+subject_version_of() {
+    bash -c "repo=$repo; source $here/subjects/$1.sh; subject_version"
+}
+
+# Every subject measured starts from a frozen profile of its current version.
+if [ "$scenario" = rest ] || [ "$scenario" = stream ]; then
+    for subject in "${subjects[@]}"; do
+        if [ "$(cat "$profiles/$subject/version.txt" 2>/dev/null)" != "$(subject_version_of "$subject")" ]; then
+            echo "$subject has no frozen profile of its version: run.sh prepare 1 $subject" >&2
+            exit 1
+        fi
+    done
+fi
 
 # Processor time the whole machine spent, in seconds, from /proc/stat (USER_HZ ticks).
 machine_busy() {
@@ -73,7 +94,8 @@ fingerprint() {
     {
         echo "date: $(date -Iseconds)"
         echo "subject: $subject"
-        echo "version: $(bash -c "repo=$repo; source $here/subjects/$subject.sh; subject_version")"
+        echo "version: $(subject_version_of "$subject")"
+        echo "profile: $(cut -c1-16 "$profiles/$subject/SHA256" 2>/dev/null || echo none)"
         echo "kernel: $(uname -r)"
         echo "mesa: $(readlink -f /run/opengl-driver/lib/dri/radeonsi_dri.so | cut -d/ -f4 | cut -d- -f2-)"
         echo "governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null) $(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)"
@@ -81,7 +103,7 @@ fingerprint() {
         echo "script: $(sha256sum "$PLUTO_FAKE_SCRIPT" | cut -c1-16)"
         echo "bench: $(git -C "$repo" rev-parse --short HEAD)$(git -C "$repo" diff --quiet HEAD -- scripts/rivals crates || echo -dirty)"
         echo "client: sha256 $(sha256sum "$repo/target/release/pluto" | cut -c1-16)"
-        echo "agents: $(store_name claude); $(store_name codex)"
+        echo "agents: $(store_name claude); $(store_name codex); $(store_name opencode)"
         echo "busy_limit: $busy_limit"
         echo "frames_counted: ${FRAMES:-0}"
     }
@@ -97,6 +119,46 @@ frames() {
 # script, and the scope with them.
 stop_scope() {
     systemctl --user stop "$1.scope" 2>/dev/null || true
+}
+
+# The start to the first window and the profile's growth, from the files the sandbox left.
+start_and_profile() {
+    local dir=$1 started first
+    started=$(cat "$dir/started_ms" 2>/dev/null || true)
+    first=$(jq -s '[.[] | select(.change == "new")][0].at_ms // empty' "$dir/windows.jsonl" 2>/dev/null || true)
+    if [ -n "$started" ] && [ -n "$first" ]; then
+        echo "first_window_ms: $((first - started))" > "$dir/start.txt"
+    else
+        echo "first_window_ms: none" > "$dir/start.txt"
+    fi
+    local before after
+    before=$(cat "$dir/profile-before" 2>/dev/null || true)
+    after=$(cat "$dir/profile-after" 2>/dev/null || true)
+    if [ -n "$before" ] && [ -n "$after" ]; then
+        printf 'profile_before_bytes: %s\nprofile_after_bytes: %s\nprofile_growth_bytes: %s\n' \
+            "$before" "$after" "$((after - before))" > "$dir/profile.txt"
+    else
+        echo "profile_growth_bytes: none" > "$dir/profile.txt"
+    fi
+}
+
+# The prepare scenario: the subject's first start in its sandbox, then its home frozen as its
+# profile, with its version and hash. Nothing is measured.
+prepare_one() {
+    local subject=$1 unit=pluto-rivals-$$-$1-prepare
+    local dir=$out/$subject/prepare
+    trap 'stop_scope "$unit"; exit 130' INT TERM
+    mkdir -p "$dir"
+    systemd-run --user --scope --quiet --collect -p Delegate=yes -p RuntimeMaxSec=1800 --unit="$unit" -- \
+        "$here/sandbox.sh" netns "$dir" "$subject" prepare > "$dir/sandbox.log" 2>&1 || true
+    stop_scope "$unit"
+    [ -s "$dir/home.tar" ] || { echo "$subject: no profile prepared; see $dir" >&2; return 1; }
+    mkdir -p "$profiles/$subject"
+    cp "$dir/home.tar" "$profiles/$subject/home.tar.tmp"
+    mv "$profiles/$subject/home.tar.tmp" "$profiles/$subject/home.tar"
+    sha256sum "$profiles/$subject/home.tar" | cut -d' ' -f1 > "$profiles/$subject/SHA256"
+    subject_version_of "$subject" > "$profiles/$subject/version.txt"
+    echo "$subject: profile frozen, $(stat -c %s "$profiles/$subject/home.tar") bytes; see $dir/measured.png"
 }
 
 one_run() {
@@ -171,13 +233,19 @@ one_run() {
         echo "browser: asked" >> "$dir/fingerprint.txt"
         echo "$subject run $n: the subject asked for a browser; see $dir/browser.log" >&2
     fi
+    start_and_profile "$dir"
     if [ "${FRAMES:-0}" = 1 ]; then
         echo "frames: $(frames "$dir/compositor.log" "$(cat "$dir/ready")" "$(cat "$dir/done.offset")") in $seconds s" > "$dir/frames.txt"
     else
         echo "frames: not counted" > "$dir/frames.txt"
     fi
-    echo "$subject $scenario $n: $(cat "$dir/measure.log"); $(cat "$dir/frames.txt"); noisy $noisy"
+    echo "$subject $scenario $n: $(cat "$dir/measure.log"); $(cat "$dir/frames.txt"); $(cat "$dir/start.txt"); $(grep growth "$dir/profile.txt"); noisy $noisy"
 }
+
+if [ "$scenario" = prepare ]; then
+    for subject in "${subjects[@]}"; do prepare_one "$subject" || true; done
+    exit 0
+fi
 
 for n in $(seq "$runs"); do
     for subject in "${subjects[@]}"; do

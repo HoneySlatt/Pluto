@@ -76,11 +76,19 @@ launch() {
     local threads=$1
     shift
     wait_for 60 test -x "$HOME/.local/bin/t3" || { echo "the t3 command was not installed"; return 1; }
-    dismiss_welcome || { grim -s 0.25 "$run_dir/after-welcome.png"; return 1; }
-    t3 project add "$HOME/project" --base-dir "$HOME/.t3" || return 1
+    # The frozen profile already holds the command: its server must be listening too.
+    wait_for 120 listening 3773 || { echo "T3 Code's server never listened"; return 1; }
     t3 auth session issue --base-dir "$HOME/.t3" --ttl 1d --label bench --token-only > "$HOME/token" || return 1
     "$repo/target/release/examples/drive" http://127.0.0.1:3773 "$HOME/token" claudeAgent \
         claude-sonnet-5-5 "$threads" "$@"
+}
+
+# The first start: the welcome page dismissed, the t3 command installed, the project added.
+subject_prepare() {
+    wait_for 60 test -x "$HOME/.local/bin/t3" || { echo "the t3 command was not installed"; return 1; }
+    dismiss_welcome || { grim -s 0.25 "$run_dir/after-welcome.png"; return 1; }
+    t3 project add "$HOME/project" --base-dir "$HOME/.t3" || return 1
+    sleep 5
 }
 
 subject_open() {
@@ -91,6 +99,13 @@ subject_open() {
 subject_stream() {
     launch "$1" 3 || return 1
     wait_for 120 finished "$1" 0 3 && sleep 3
+}
+
+# The newest thread opened in the window while it streams: T3 Code's default binding `mod+1`
+# (`thread.jump.1`), through the keyboard as for Pluto.
+subject_show() {
+    wtype -s 300 -M ctrl -k 1 -m ctrl -s 300
+    sleep 3
 }
 
 subject_stop() {

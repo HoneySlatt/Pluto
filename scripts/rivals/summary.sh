@@ -7,7 +7,8 @@
 #
 # Memory is in MiB: the headline figure (private + swap + GPU) of the program and of its agents,
 # and the program's proportional figure (PSS) beside it; wake-ups a second; processor in cores
-# (1.0 is one core busy throughout). Only calm runs count: a noisy run, one whose subject did not
+# (1.0 is one core busy throughout). A second table gives the start to the first window, in
+# milliseconds, and the profile's growth over the run, in KiB. Only calm runs count: a noisy run, one whose subject did not
 # render on the GPU, asked for a browser or ended early, is counted apart and left out. With
 # KEEP_NOISY=1 noisy runs count too, for runs whose noise flag is known to be wrong (the README).
 set -euo pipefail
@@ -29,6 +30,14 @@ figure() {
     local query=$1 run
     shift
     for run in "$@"; do jq -r "$query" "$run/figures.json"; done | median_range
+}
+
+# One value of every run given, from a `key: value` line of one of its files, as its median and
+# range; a run without it is skipped.
+value() {
+    local file=$1 key=$2 run
+    shift 2
+    for run in "$@"; do sed -n "s/^$key: \([-0-9.]*\)$/\1/p" "$run/$file" 2>/dev/null; done | median_range
 }
 
 # Whether a run's figures may be kept.
@@ -57,4 +66,19 @@ for subject_dir in "$folder"/*/; do
         "$(figure '.app.cpu_seconds / .seconds' "${runs[@]}")" \
         "$(figure '.agents.memory.headline / 1048576' "${runs[@]}")" \
         "$(figure '.agents.wakeups_per_second' "${runs[@]}")"
+done
+
+echo
+echo "| Subject | Calm runs | Start to its first window, ms | Profile's growth, KiB |"
+echo "|---|---|---|---|"
+for subject_dir in "$folder"/*/; do
+    subject=$(basename "$subject_dir")
+    runs=()
+    for run in "$subject_dir$scenario"-*; do
+        [ -f "$run/figures.json" ] && is_calm "$run" && runs+=("$run")
+    done
+    [ "${#runs[@]}" -gt 0 ] || continue
+    printf '| %s | %d | %s | %s |\n' "$subject" "${#runs[@]}" \
+        "$(value start.txt first_window_ms "${runs[@]}")" \
+        "$(for run in "${runs[@]}"; do sed -n 's/^profile_growth_bytes: \([-0-9]*\)$/\1/p' "$run/profile.txt" 2>/dev/null | awk '{ print $1 / 1024 }'; done | median_range)"
 done

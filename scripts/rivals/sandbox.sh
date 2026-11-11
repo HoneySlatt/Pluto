@@ -51,7 +51,8 @@ in-netns)
     ip link set pluto0 up
     ip link set pluto1 up
     # What the subject sees: the system's read-only parts, the GPU, its cgroups, its run's folder,
-    # and of the repository only the bench, the three programs it runs and the vendors' packages.
+    # and of the repository only the bench, the three programs it runs, the vendors' packages and the
+    # subjects' frozen profiles.
     binds=(--ro-bind /nix /nix --ro-bind /etc /etc --ro-bind /usr /usr --ro-bind /bin /bin
         --ro-bind /run/current-system /run/current-system --ro-bind /run/opengl-driver /run/opengl-driver
         --dev /dev --dev-bind /dev/dri /dev/dri --proc /proc --ro-bind /sys /sys --bind "$cg" "$cg"
@@ -60,7 +61,8 @@ in-netns)
         --ro-bind-try "$repo/target/release/pluto" "$repo/target/release/pluto"
         --ro-bind-try "$repo/target/release/pluto-fake-model" "$repo/target/release/pluto-fake-model"
         --ro-bind-try "$repo/target/release/examples/drive" "$repo/target/release/examples/drive"
-        --ro-bind-try "$repo/target/rivals/packages" "$repo/target/rivals/packages")
+        --ro-bind-try "$repo/target/rivals/packages" "$repo/target/rivals/packages"
+        --ro-bind-try "$repo/target/rivals/profiles" "$repo/target/rivals/profiles")
     # Read-only extras a subject needs (its package outside the store), from its file's
     # `subject_binds`.
     # shellcheck source=/dev/null
