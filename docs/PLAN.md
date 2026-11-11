@@ -300,9 +300,21 @@ verifiable step before its end.
     reader in the bench; the campaign measures it again).
 
   The campaign (`pluto`, `pluto-codex`, `pluto-opencode`, `t3code`, `zed`, three runs at rest and
-  three streaming, then the frames' own runs) started on 2026-11-11 at 19:15 as the user service
-  `pluto-rivals-campaign`, its results under `/tmp/pluto-rivals/`. Left: its figures in
-  `measurements.md`, the correction of M1.6a's request counts there, and the closing review.
+  three streaming, then the frames' own runs) ran on 2026-11-11 from 19:15 to 22:12, its results
+  under `/tmp/pluto-rivals/` (the campaign folders from `2026-11-11-191458` on). Other sessions
+  loaded the machine throughout: most runs are noisy. Calm runs so far, of three wanted: at rest,
+  Pluto 1, the others 0; streaming, Pluto 2, Pluto with Codex 2, with OpenCode 1, Zed 1, T3 Code 0.
+  T3 Code's campaign stream runs showed no thread (its sidebar lists none of the threads its
+  server launched); they are set aside as `no-thread-shown-stream-*`, and its driver now opens
+  one through its command palette. The frames' runs are done for every subject but T3 Code
+  streaming. A run to complete them stopped at the owner's word on 2026-11-11 at 23:30, until the
+  machine rests.
+
+  Next, on a resting machine: run each subject and scenario again, one run at a time
+  (`BUSY_LIMIT=0.6 CALM_WAIT=120 scripts/rivals/run.sh rest 1 <subject>`, `MEASURE_SECONDS=300`;
+  `stream` likewise), until each has three calm runs, and `FRAMES=1 scripts/rivals/run.sh stream 1
+  t3code`; then the figures in `measurements.md` (summary.sh over the calm runs gathered in one
+  folder), the correction of M1.6a's request counts there, and the closing review.
 
 #### M1.6b2 — The open rivals and the chats
 
