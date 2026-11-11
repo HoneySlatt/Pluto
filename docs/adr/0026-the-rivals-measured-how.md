@@ -3,7 +3,8 @@
 - Status: Accepted; amends [0014](0014-how-today-is-measured.md) (the rivals' bench beside
   `scripts/measure.sh`), [0015](0015-the-budgets-set-from-todays-figures.md) (memory counted as
   private, swap and GPU memory) and [0017](0017-pluto-measured-against-the-market.md) (the vendors'
-  applications without the owner's accounts; energy by a root sampler)
+  applications without the owner's accounts; energy by a root sampler); amended by
+  [0028](0028-the-open-rivals-and-the-web-chats-measured.md)
 - Date: 2026-11-11
 
 ## Context

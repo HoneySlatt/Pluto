@@ -31,6 +31,12 @@ Terms this project uses in a sense of its own.
   the fake model's workload and measures it from outside with `pluto-measure`
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
 - **A subject**: what one run of the rivals' bench measures: Pluto, or a rival.
+- **A control subject**: a subject that measures no application, only what a rival runs on: the
+  same Chromium on an empty page, beside the web rivals
+  ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
+- **Chat mode**: the fake model's mode for chat applications, which send no tool: a prompt that
+  begins with `[turn N]` gets that turn's texts, without its tool calls
+  ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 - **The headline memory**: a program's private memory, swap and GPU memory, summed over all its
   processes; the quality bar's memory figure since [ADR-0026](adr/0026-the-rivals-measured-how.md).
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client
