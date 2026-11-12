@@ -26,6 +26,7 @@ fn start_with(script: &str, speed: f64, journal: Option<std::path::PathBuf>) -> 
         journal_path: journal,
         models: vec!["fake-model".into()],
         connection_timeout: CONNECTION_TIMEOUT,
+        chat: false,
     };
     spawn(config, &["127.0.0.1:0".parse().unwrap()]).unwrap()
 }
@@ -456,6 +457,7 @@ fn listens_on_several_addresses() {
         journal_path: None,
         models: vec!["a".into(), "b".into()],
         connection_timeout: CONNECTION_TIMEOUT,
+        chat: false,
     };
     let handle = spawn(
         config,

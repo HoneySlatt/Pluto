@@ -36,6 +36,12 @@
 //!     `side_answer` being every string ([`crate::structured`]).
 //!
 //!   A main request is never shaped by a format it asks for.
+//!
+//!   In chat mode ([`Config::chat`], the binary's `--chat`), main and side are told apart otherwise,
+//!   whatever tools a request offers: a request whose last item is a message of the user's that
+//!   begins with `[turn N]` ([`Conversation::chat_turn`]) is a main request, a chat turn; anything
+//!   else is a side request. A chat turn is answered with the turn's texts joined
+//!   ([`Script::chat_text`]), no tool, at segment 0.
 //! - Anything else: 404, `{"error": {"type": "not_found", "message"}}`. Kind `unknown`.
 //!
 //! A request that cannot be read (malformed: 400; too large: 413; a `Content-Encoding`: 415), or a
@@ -58,13 +64,16 @@
 //! model's, not a listing) is written after the same total time. An infinite speed waits for
 //! nothing; a time too long to count waits as long as can be.
 //!
-//! The journal has one entry per request, kept in memory and, if a path is given, appended to a
-//! JSON Lines file, one line per request, flushed at once.
+//! The journal has one entry per request, written when its response ends, with `ended_ms`. A main
+//! request also has a [`Begin`] line, written as soon as it is read, so that a long answer is seen
+//! from its start. Both are kept in memory and, if a path is given, appended to a JSON Lines file,
+//! a line each, flushed at once. An entry's line starts with `{"request":`, a begin line's with
+//! `{"begin":`.
 
 use crate::conversation::{self, Api, Conversation, Parts};
 use crate::http::{self, ReadError, Request, Unreadable};
 use crate::json;
-use crate::script::Script;
+use crate::script::{Position, Script};
 use crate::structured;
 use crate::tools::{self, MappedTool};
 use crate::wire::{self, Reply, WireEvent, anthropic, chat_completions, ollama, responses};
@@ -122,6 +131,8 @@ pub struct Config {
     /// is not enough for the second: a write that moved a few bytes before it ran out succeeds, and
     /// `write_all` goes on, so that it could wait many times over (see [`TimedWriter`]).
     pub connection_timeout: Duration,
+    /// Chat mode: main requests are chat turns, told by their last item (see the module's routes).
+    pub chat: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -167,6 +178,21 @@ pub struct JournalEntry {
     /// Why a request was refused. A request that cannot be read has no method and no path, except
     /// one refused for its body (too large, encoded), which keeps the request line's.
     pub error: Option<String>,
+    /// Milliseconds since the server started, when the response ended or the client left.
+    pub ended_ms: u64,
+}
+
+/// The journal's line for a main request that begins: written when the request is read, before
+/// its answer, so that the bench sees which answers are in flight.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Begin {
+    /// The request's number, its entry's `request`.
+    pub begin: u64,
+    /// Milliseconds since the server started, when the request was read.
+    pub at_ms: u64,
+    pub api: Api,
+    pub turn: usize,
+    pub segment: usize,
 }
 
 /// A running server.
@@ -181,6 +207,11 @@ impl Handle {
     /// The journal so far.
     pub fn journal(&self) -> Vec<JournalEntry> {
         self.shared.lock_journal().entries.clone()
+    }
+
+    /// The main requests begun so far, in the order they were read.
+    pub fn begins(&self) -> Vec<Begin> {
+        self.shared.lock_journal().begins.clone()
     }
 
     /// Stops accepting and returns once every listener's thread has ended. Connections already
@@ -231,6 +262,7 @@ pub fn spawn(config: Config, addrs: &[SocketAddr]) -> io::Result<Handle> {
         stopping: AtomicBool::new(false),
         journal: Mutex::new(Journal {
             entries: Vec::new(),
+            begins: Vec::new(),
             file: journal_file,
             recent_bodies: VecDeque::new(),
         }),
@@ -268,6 +300,7 @@ struct Shared {
 
 struct Journal {
     entries: Vec<JournalEntry>,
+    begins: Vec<Begin>,
     file: Option<File>,
     /// The bodies of recent model requests, oldest first, at most [`PREFIX_WINDOW`] for each API.
     recent_bodies: VecDeque<(Api, Vec<u8>)>,
@@ -279,11 +312,16 @@ impl Shared {
         self.journal.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Milliseconds since the server started.
+    fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
     /// Numbers a request that was just read, and starts its entry.
     fn begin(&self, method: &str, path: &str) -> JournalEntry {
         JournalEntry {
             request: self.next_request.fetch_add(1, Ordering::SeqCst),
-            at_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            at_ms: self.elapsed_ms(),
             method: method.to_owned(),
             path: path.to_owned(),
             api: None,
@@ -299,24 +337,39 @@ impl Shared {
             repeated_prefix: 0,
             response_bytes: 0,
             error: None,
+            ended_ms: 0,
         }
     }
 
-    /// Adds a finished request to the journal, and to its file. Entries are added when the
-    /// response ends, so that requests whose streams overlap can be out of order of their numbers.
-    fn record(&self, entry: JournalEntry) {
+    /// Adds a finished request to the journal, and to its file, its end time set. Entries are
+    /// added when the response ends, so that requests whose streams overlap can be out of order of
+    /// their numbers.
+    fn record(&self, mut entry: JournalEntry) {
+        entry.ended_ms = self.elapsed_ms();
         let mut journal = self.lock_journal();
-        if let Some(file) = &mut journal.file {
-            let line = format!("{}\n", json::compact(&entry));
-            if let Err(error) = file.write_all(line.as_bytes()).and_then(|()| file.flush()) {
-                eprintln!("pluto-fake-model: cannot write the journal: {error}");
-            }
-        }
+        journal.write_line(&entry);
         journal.entries.push(entry);
+    }
+
+    /// Adds a main request that begins to the journal, and to its file.
+    fn record_begin(&self, begin: Begin) {
+        let mut journal = self.lock_journal();
+        journal.write_line(&begin);
+        journal.begins.push(begin);
     }
 }
 
 impl Journal {
+    /// Appends a line to the journal's file, if it has one.
+    fn write_line(&mut self, line: &impl Serialize) {
+        if let Some(file) = &mut self.file {
+            let line = format!("{}\n", json::compact(line));
+            if let Err(error) = file.write_all(line.as_bytes()).and_then(|()| file.flush()) {
+                eprintln!("pluto-fake-model: cannot write the journal: {error}");
+            }
+        }
+    }
+
     /// The longest prefix a model request's body shares with the recent ones of its API; the body
     /// is then kept for the next requests to be measured against.
     fn measure_and_remember(&mut self, api: Api, body: &[u8]) -> usize {
@@ -639,23 +692,36 @@ fn model_answer(shared: &Shared, api: Api, request: &Request, entry: &mut Journa
         .measure_and_remember(api, &request.body);
 
     let script = &shared.config.script;
-    let (text, tool) = if !tools::offers_a_callable_tool(&conversation.tools) {
-        entry.kind = Kind::Side;
-        side_answer(api, &conversation, &script.side_answer, entry.request)
-    } else {
-        entry.kind = Kind::Main;
-        let position = conversation.position;
-        entry.turn = Some(position.turn);
-        entry.segment = Some(position.segment);
-        entry.tool_result_ok = tool_result_ok(api, &conversation);
-        let segment = script.segment(position);
-        let call_id = call_id(api, position.turn, position.segment);
-        let tool = segment
-            .tool
-            .as_ref()
-            .and_then(|call| tools::map(call, &conversation.tools, call_id));
-        entry.tool_missing = segment.tool.is_some() && tool.is_none();
-        (segment.text.clone(), tool)
+    let (text, tool) = match main_position(&shared.config, &conversation) {
+        None => {
+            entry.kind = Kind::Side;
+            side_answer(api, &conversation, &script.side_answer, entry.request)
+        }
+        Some(position) => {
+            entry.kind = Kind::Main;
+            entry.turn = Some(position.turn);
+            entry.segment = Some(position.segment);
+            shared.record_begin(Begin {
+                begin: entry.request,
+                at_ms: entry.at_ms,
+                api,
+                turn: position.turn,
+                segment: position.segment,
+            });
+            if shared.config.chat {
+                (script.chat_text(position.turn), None)
+            } else {
+                entry.tool_result_ok = tool_result_ok(api, &conversation);
+                let segment = script.segment(position);
+                let call_id = call_id(api, position.turn, position.segment);
+                let tool = segment
+                    .tool
+                    .as_ref()
+                    .and_then(|call| tools::map(call, &conversation.tools, call_id));
+                entry.tool_missing = segment.tool.is_some() && tool.is_none();
+                (segment.text.clone(), tool)
+            }
+        }
     };
     entry.tool = tool.as_ref().map(|tool| tool.name.clone());
 
@@ -668,6 +734,16 @@ fn model_answer(shared: &Shared, api: Api, request: &Request, entry: &mut Journa
         chunk_bytes: script.pace.chunk_bytes,
     };
     encode(api, &reply, &conversation)
+}
+
+/// Where a main request stands in the script, or `None` for a side request. Outside chat mode, a
+/// main request offers a tool the script can call; in chat mode, it is a chat turn, at segment 0.
+fn main_position(config: &Config, conversation: &Conversation) -> Option<Position> {
+    if config.chat {
+        let turn = conversation.chat_turn?;
+        return Some(Position { turn, segment: 0 });
+    }
+    tools::offers_a_callable_tool(&conversation.tools).then_some(conversation.position)
 }
 
 /// A side request's text and tool: the plain answer, or, if it asks for structured output, the

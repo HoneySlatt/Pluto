@@ -67,3 +67,44 @@ fn bad_command_lines_and_scripts() {
     assert_eq!(status(&["--script", bad.to_str().unwrap()]), Some(1));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn chat_mode_answers_a_bare_prompt_with_its_turn() {
+    let mut child = Command::new(BIN)
+        .args([
+            "--script",
+            WORKLOAD,
+            "--listen",
+            "127.0.0.1:0",
+            "--speed",
+            "max",
+            "--chat",
+        ])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut line = String::new();
+    stderr.read_line(&mut line).unwrap();
+    let addr = line
+        .trim()
+        .strip_prefix("pluto-fake-model: listening on http://")
+        .expect(&line)
+        .to_string();
+    let body =
+        r#"{"model":"m","stream":false,"messages":[{"role":"user","content":"[turn 0] hi"}]}"#;
+    let mut stream = TcpStream::connect(&addr).unwrap();
+    write!(
+        stream,
+        "POST /api/chat HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(raw.starts_with("HTTP/1.1 200 OK"), "{raw}");
+    assert!(raw.contains("I'll start by looking"), "{raw}");
+    assert!(!raw.contains("tool_calls"), "{raw}");
+}

@@ -6,6 +6,11 @@
 //! Messages a client adds on its own (an environment's description, reminders) carry no marker, so
 //! they move nothing.
 //!
+//! A chat turn, which the server plays only in its chat mode, is read more strictly: the request's
+//! last item must be a message of the user's whose text begins with the marker
+//! ([`Conversation::chat_turn`]). A client's own side requests wrap the prompt in their template, or
+//! end with something else, so they are never taken for one.
+//!
 //! The schema a request asks its answer to fit, if any, is read once, into
 //! [`Conversation::output_schema`]:
 //! - Responses: `text.format.schema`, when `text.format.type` is `json_schema`;
@@ -83,6 +88,9 @@ pub struct Conversation {
     pub position: Position,
     /// The tool results after the turn's prompt, in order.
     pub tool_results: Vec<ToolResult>,
+    /// The turn whose marker begins the request's last item, if that item is a message of the
+    /// user's (not a tool's result): what makes a chat turn.
+    pub chat_turn: Option<usize>,
     pub tools: Vec<ToolSpec>,
     /// The JSON Schema the answer is asked to fit; see the module's documentation.
     pub output_schema: Option<Value>,
@@ -139,6 +147,11 @@ pub fn read(api: Api, body: &Value, body_len: usize) -> Result<Conversation, Str
         })
         .collect();
 
+    let chat_turn = items
+        .last()
+        .filter(|item| item.from_user_or_tool && item.tool_results.is_empty())
+        .and_then(|item| leading_turn_marker(&item.text));
+
     let (history, new_message) = match items.split_last() {
         Some((last, earlier)) if last.from_user_or_tool => (earlier, Some(last)),
         _ => (&items[..], None),
@@ -174,6 +187,7 @@ pub fn read(api: Api, body: &Value, body_len: usize) -> Result<Conversation, Str
             segment: tool_results.len(),
         },
         tool_results,
+        chat_turn,
         tools,
         output_schema: output_schema(api, body),
         parts,
@@ -216,6 +230,15 @@ pub fn turn_marker(text: &str) -> Option<usize> {
             None
         }
     })
+}
+
+/// The turn number of a text that begins with `[turn N]`; a marker further on does not count.
+pub fn leading_turn_marker(text: &str) -> Option<usize> {
+    if !text.starts_with("[turn ") {
+        return None;
+    }
+    let end = text.find(']')?;
+    turn_marker(&text[..=end])
 }
 
 fn compact_len(value: &Value) -> usize {

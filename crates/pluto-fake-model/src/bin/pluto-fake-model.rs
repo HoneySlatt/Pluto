@@ -2,12 +2,14 @@
 //!
 //! ```text
 //! pluto-fake-model --script FILE [--listen ADDR]... [--journal FILE] [--speed N|max]
-//!                  [--model NAME]...
+//!                  [--model NAME]... [--chat]
 //! ```
 //!
 //! `--listen` defaults to `127.0.0.1:11435`; give it twice for IPv4 and IPv6 (`[::1]:11435`).
 //! `--speed` defaults to 1: a finite number above zero, or `max`, which waits for nothing.
-//! `--model` defaults to `fake-model`. It prints `pluto-fake-model: listening on http://ADDR` on
+//! `--model` defaults to `fake-model`. `--chat` starts the chat mode, for chat applications, which
+//! send no tool: a request whose last message is the user's and begins with `[turn N]` gets that
+//! turn's texts joined, without its tool calls; any other is a side request. It prints `pluto-fake-model: listening on http://ADDR` on
 //! stderr for each address, then serves until killed. Exit codes: 2 for a bad command line, 1 for a script or a listener that fails.
 
 use pluto_fake_model::script::Script;
@@ -27,6 +29,7 @@ struct Options {
     journal: Option<PathBuf>,
     speed: f64,
     models: Vec<String>,
+    chat: bool,
 }
 
 impl Options {
@@ -37,6 +40,7 @@ impl Options {
         let mut journal = None;
         let mut speed = 1.0;
         let mut models = Vec::new();
+        let mut chat = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             let name = arg.to_str().ok_or("an option name is not valid Unicode")?;
@@ -47,6 +51,7 @@ impl Options {
                 "--journal" => journal = Some(PathBuf::from(value()?)),
                 "--speed" => speed = parse_speed(&text(value()?, name)?)?,
                 "--model" => models.push(text(value()?, name)?),
+                "--chat" => chat = true,
                 _ => return Err(format!("unknown option {name}")),
             }
         }
@@ -62,6 +67,7 @@ impl Options {
             journal,
             speed,
             models,
+            chat,
         })
     }
 }
@@ -102,6 +108,7 @@ fn start(options: Options) -> Result<server::Handle, String> {
         journal_path: options.journal,
         models: options.models,
         connection_timeout: server::CONNECTION_TIMEOUT,
+        chat: options.chat,
     };
     server::spawn(config, &options.listen).map_err(|error| format!("cannot listen: {error}"))
 }
@@ -112,7 +119,7 @@ fn main() -> ExitCode {
         Err(message) => {
             eprintln!("pluto-fake-model: {message}");
             eprintln!(
-                "usage: pluto-fake-model --script FILE [--listen ADDR]... [--journal FILE] [--speed N|max] [--model NAME]..."
+                "usage: pluto-fake-model --script FILE [--listen ADDR]... [--journal FILE] [--speed N|max] [--model NAME]... [--chat]"
             );
             return ExitCode::from(2);
         }

@@ -39,6 +39,7 @@ fn start_timed(
         journal_path: journal,
         models: vec!["fake-model".into()],
         connection_timeout,
+        chat: false,
     };
     spawn(config, &["127.0.0.1:0".parse().unwrap()]).unwrap()
 }

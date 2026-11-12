@@ -353,6 +353,7 @@ fn start() -> Handle {
         journal_path: None,
         models: vec!["fake-model".into()],
         connection_timeout: CONNECTION_TIMEOUT,
+        chat: false,
     };
     spawn(config, &["127.0.0.1:0".parse().unwrap()]).unwrap()
 }
