@@ -112,8 +112,8 @@ subject_stream() {
     wait_for 60 listening "$PLUTO_PORT" || return 1
     "$repo/target/release/examples/drive" "$PLUTO_URL" "$HOME/token" "$PLUTO_INSTANCE" "$PLUTO_MODEL" \
         "$threads" 3 || return 1
-    # The journal writes a request once its answer ends: segment 0's end is segment 1's start.
-    wait_for 120 finished "$threads" 0 3 && sleep 3
+    # Every long answer has begun: they all stream.
+    wait_for 120 started "$threads" 3 1
 }
 
 # The newest thread, first in the sidebar, opened in the window while it streams: its default

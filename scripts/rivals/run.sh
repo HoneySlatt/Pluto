@@ -51,15 +51,26 @@ done
 
 profiles=$repo/target/rivals/profiles
 
+# shellcheck source=validity.sh
+source "$here/validity.sh"
+
 # A subject's version as its file prints it, which its frozen profile must match.
 subject_version_of() {
     bash -c "repo=$repo; source $here/subjects/$1.sh; subject_version"
 }
 
-# The days a subject's sign-in lasts, which its frozen profile holds, if its file says
-# (`subject_session_days`); nothing for a subject without one.
-session_days_of() {
-    bash -c "repo=$repo; source $here/subjects/$1.sh; ! declare -F subject_session_days > /dev/null || subject_session_days"
+# What a subject's file says of itself, by a function it may define, or `default`.
+subject_says() {
+    local said
+    said=$(bash -c "repo=$repo; source $here/subjects/$1.sh; ! declare -F $2 > /dev/null || $2")
+    echo "${said:-$3}"
+}
+
+# Whether a frozen profile has expired: its sign-in lasts until `prepared.txt`'s `expires:`.
+expired() {
+    local expires
+    expires=$(sed -n 's/^expires: //p' "$profiles/$1/prepared.txt" 2>/dev/null || true)
+    [ -n "$expires" ] && [ "$expires" != never ] && [ "$(date +%s)" -ge "$(date -d "$expires" +%s)" ]
 }
 
 # Every subject measured starts from a frozen profile of its current version, whose sign-in has not
@@ -70,12 +81,13 @@ if [ "$scenario" = rest ] || [ "$scenario" = stream ]; then
             echo "$subject has no frozen profile of its version: run.sh prepare 1 $subject" >&2
             exit 1
         fi
-        expires=$(sed -n 's/^expires: //p' "$profiles/$subject/prepared.txt" 2>/dev/null || true)
-        if [ -n "$expires" ] && [ "$expires" != never ] && [ "$(date +%s)" -ge "$(date -d "$expires" +%s)" ]; then
-            echo "$subject's frozen profile signed in until $expires: run.sh prepare 1 $subject" >&2
+        if expired "$subject"; then
+            echo "$subject's frozen profile has expired: run.sh prepare 1 $subject" >&2
             exit 1
         fi
     done
+    # A measured run is offline, whatever the caller's environment says (ADR-0028).
+    unset ROUTE_OUT
 fi
 
 # Processor time the whole machine spent, in seconds, from /proc/stat (USER_HZ ticks).
@@ -128,6 +140,7 @@ fingerprint() {
         echo "agents: $(store_name claude); $(store_name codex); $(store_name opencode)"
         echo "busy_limit: $busy_limit"
         echo "frames_counted: ${FRAMES:-0}"
+        if [ "${ROUTE_OUT:-0}" = 1 ]; then echo "network: pasta"; else echo "network: none"; fi
     }
 }
 
@@ -174,11 +187,16 @@ prepare_one() {
     mkdir -p "$dir"
     local prepared_at days
     prepared_at=$(date -Iseconds)
-    days=$(session_days_of "$subject")
+    days=$(subject_says "$subject" subject_session_days "")
     ROUTE_OUT=1 systemd-run --user --scope --quiet --collect -p Delegate=yes -p RuntimeMaxSec=1800 --unit="$unit" -- \
         "$here/sandbox.sh" netns "$dir" "$subject" prepare > "$dir/sandbox.log" 2>&1 || true
     stop_scope "$unit"
     [ -s "$dir/home.tar" ] || { echo "$subject: no profile prepared; see $dir" >&2; return 1; }
+    # A frozen profile holds no running program's lock (ADR-0029), which would name another machine.
+    if tar -tf "$dir/home.tar" | grep -q '/Singleton[A-Za-z]*$'; then
+        echo "$subject: its home still holds a profile lock; nothing frozen; see $dir" >&2
+        return 1
+    fi
     mkdir -p "$profiles/$subject"
     cp "$dir/home.tar" "$profiles/$subject/home.tar.tmp"
     mv "$profiles/$subject/home.tar.tmp" "$profiles/$subject/home.tar"
@@ -196,39 +214,6 @@ prepare_one() {
     echo "$subject: profile frozen, $(stat -c %s "$profiles/$subject/home.tar") bytes; see $dir/measured.png"
 }
 
-# The fake model's journal as it stood at one end of the measure (`ready` or `done`).
-journal_at() {
-    head -c "$(cat "$1/journal-$2.offset" 2>/dev/null || echo 0)" "$1/fake.jsonl" 2>/dev/null
-}
-
-# Main requests begun, and ended, by one end of the measure.
-main_begun() { journal_at "$1" "$2" | grep -c '^{"begin":' || true; }
-main_ended() { journal_at "$1" "$2" | grep -c '"kind":"main"' || true; }
-
-# Whether a run's workload was the one measured (ADR-0028), as fingerprint lines: the subject
-# showed exactly one window when it was ready and when the measure ended; in the stream scenario,
-# THREADS answers were in flight at both ends and none ended between them, so that they all
-# streamed for the whole measure. A run that fails is left out, as a noisy one.
-validity() {
-    local dir=$1 subject=$2 valid=yes at_ready at_end
-    at_ready=$(cat "$dir/windows-ready.txt" 2>/dev/null || echo unknown)
-    at_end=$(cat "$dir/windows-done.txt" 2>/dev/null || echo unknown)
-    echo "windows: $at_ready at ready, $at_end at the end"
-    { [ "$at_ready" = 1 ] && [ "$at_end" = 1 ]; } || valid=no
-    if [ "$scenario" = stream ]; then
-        local ended expected
-        # THREADS, or what the subject's file says it streams (a control, none).
-        expected=$(bash -c "repo=$repo; source $here/subjects/$subject.sh; ! declare -F subject_threads > /dev/null || subject_threads")
-        expected=${expected:-$THREADS}
-        at_ready=$(($(main_begun "$dir" ready) - $(main_ended "$dir" ready)))
-        at_end=$(($(main_begun "$dir" "done") - $(main_ended "$dir" "done")))
-        ended=$(($(main_ended "$dir" "done") - $(main_ended "$dir" ready)))
-        echo "streams_in_flight: $at_ready at ready, $at_end at the end, $ended ended between"
-        { [ "$at_ready" = "$expected" ] && [ "$at_end" = "$expected" ] && [ "$ended" = 0 ]; } || valid=no
-    fi
-    echo "valid: $valid"
-}
-
 one_run() {
     local unit=pluto-rivals-$$-$1-$2
     # An interrupted run stops its scope, rather than leave the subject running for hours.
@@ -239,6 +224,11 @@ one_run() {
     mkdir -p "$dir"
     local noisy=no
     wait_calm || noisy=yes
+    # A campaign may outlast a sign-in: each run checks it again.
+    if [ "$scenario" != probe ] && expired "$subject"; then
+        echo "$subject run $n: its frozen profile has expired; run.sh prepare 1 $subject" >&2
+        return 1
+    fi
     fingerprint "$subject" > "$dir/fingerprint.txt"
     systemd-run --user --scope --quiet --collect -p Delegate=yes -p RuntimeMaxSec=7200 --unit="$unit" -- \
         "$here/sandbox.sh" netns "$dir" "$subject" "$scenario" > "$dir/sandbox.log" 2>&1 &
@@ -307,11 +297,11 @@ one_run() {
         echo "browser: asked" >> "$dir/fingerprint.txt"
         echo "$subject run $n: the subject asked for a browser; see $dir/browser.log" >&2
     fi
-    validity "$dir" "$subject" >> "$dir/fingerprint.txt"
+    validity "$dir" "$scenario" "$(subject_says "$subject" subject_threads "$THREADS")" >> "$dir/fingerprint.txt"
     if grep -q '^valid: no' "$dir/fingerprint.txt"; then
         echo "$subject run $n: its workload was not the one measured; see $dir/fingerprint.txt" >&2
     fi
-    [ -s "$dir/chromium-command.txt" ] && echo "chromium_command: $(cat "$dir/chromium-command.txt")" >> "$dir/fingerprint.txt"
+    [ -s "$dir/command.txt" ] && echo "command: $(cat "$dir/command.txt")" >> "$dir/fingerprint.txt"
     start_and_profile "$dir"
     if [ "${FRAMES:-0}" = 1 ]; then
         echo "frames: $(frames "$dir/compositor.log" "$(cat "$dir/ready")" "$(cat "$dir/done.offset")") in $seconds s" > "$dir/frames.txt"

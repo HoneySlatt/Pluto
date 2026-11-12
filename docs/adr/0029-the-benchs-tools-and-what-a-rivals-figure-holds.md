@@ -26,12 +26,20 @@ rivals in M1.6b2a, on 2026-11-11 and 12, found:
 The owner's decisions of 2026-11-11 and 2026-11-12.
 
 **The keyring is gnome-keyring**, the one most Linux desktops run: its login keyring, in the
-throwaway home, unlocked by an empty password at each run, in the bench's part, not the subject's.
+throwaway home, made at the first start and unlocked by a test password at each run, in the bench's
+part, not the subject's. With an empty password gnome-keyring makes no login keyring, and the
+subjects fall back to files of their own; a run whose keyring has no unlocked default stops.
 
 **The route out is pasta** (passt), the user-mode network that podman uses by default, during
-`prepare` only. It forwards no port in either direction and maps no address to the machine's
-loopback or its own address, so a subject never meets the owner's services; names resolve through
-its forwarder.
+`prepare` only; a measured run is always offline. It forwards no port in either direction and maps
+no address to the machine's loopback or its own address; the namespace refuses private and shared
+addresses (the home network, the router), so a subject reaches only the Internet, never the owner's
+services. Names resolve through pasta's forwarder.
+
+**The sandbox is a machine of its own**: its host name (`bench`, in a namespace of its own) and its
+machine id are the bench's, never the owner's, which an application calling home at its first start
+could send. Nix's daemon is hidden from it. The Nix store stays visible, read-only, as the programs
+need it; what the owner's own configuration put there is readable, as on the machine.
 
 **`appimage-run` gains `libgpg-error`** in the measure shell (`extraPkgs`), as a distribution
 provides it. Every AppImage subject sees it; their runs stayed valid with it.
@@ -41,12 +49,14 @@ moves it into the subject's cgroup, as a part of its own (`xwayland`): in the wh
 too, as a web rival's server and browser are. It is what a user of Jan on Wayland pays.
 
 **A frozen profile holds no running program's locks.** `prepare` removes the `Singleton*` links
-before it freezes a home, as it removes a pending update.
+before it freezes a home, as it removes a pending update, and refuses a home that still holds one.
 
 ## Alternatives considered
 
 - **oo7-daemon** for the keyring: light, in Rust, but young, its use by Electron's and Tauri's
   libsecret not proven. **KeePassXC**: an application, with a window of its own.
+- **An empty password for the keyring**: the first choice, which left the subjects without a
+  keyring.
 - **slirp4netns**: the same role as pasta, slower, giving way to it. **The machine's own network**:
   no tool, but a driver would reach the owner's own server on 3773.
 - **Jan from nixpkgs**: the same AppImage wrapped, but 0.8.7 in the flake's nixpkgs where the vendor

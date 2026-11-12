@@ -69,7 +69,8 @@ fetch_image() {
     local work
     mkdir -p "$images"
     work=$(mktemp -d "$images/.fetch-$name.XXXXXX")
-    skopeo copy --override-os linux --override-arch amd64 "$reference" "oci:$work/oci:image"
+    # The digest kept is the registry's: a manifest skopeo would have to convert fails instead.
+    skopeo copy --preserve-digests --override-os linux --override-arch amd64 "$reference" "oci:$work/oci:image"
     local got
     got=$(jq -r '.manifests[0].digest' "$work/oci/index.json")
     if [ "$digest" != - ] && [ "$got" != "$digest" ]; then

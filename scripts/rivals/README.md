@@ -23,7 +23,9 @@ run:
      not `/home`; its own `/etc/passwd`, where the subject's login shell is `/bin/sh` in its own
      home, never the owner's;
    - a throwaway home, unpacked from the subject's frozen profile;
-   - a session bus, and a Secret Service on it (gnome-keyring, its login keyring unlocked);
+   - a session bus, and a Secret Service on it (gnome-keyring, its login keyring unlocked by a
+     test password);
+   - a host name (`bench`) and a machine id of its own; Nix's daemon hidden;
    - a headless sway at 3840 × 2160 and 240 Hz on the GPU, with no input device of its own;
    - the input tool (`crates/pluto-input`): one virtual keyboard (a US layout) and one virtual
      pointer for the whole run, made before the subject starts; drivers send it commands through
@@ -40,10 +42,13 @@ run:
    profile's growth is what the run added to it, the project the agents work in left out;
 7. the scope stops, with everything in it; an interrupted run stops it too.
 
-A run counts only if it is calm and valid. Valid: the subject rendered on the GPU, asked for no
-browser, did not end early, showed exactly one window when it was ready and when the measure
-ended, and, streaming, had its 15 answers in flight at both ends of the measure with none ended
-between them, read from the fake model's journal. Its fingerprint says which check failed.
+A run counts only if it is calm and valid. Calm: the machine was quiet, the subject rendered on the
+GPU, asked for no browser, did not end early. Valid ([`validity.sh`](validity.sh), tested by
+`test-validity.sh` in `scripts/check.sh`): the subject showed exactly one window when it was ready
+and when the measure ended; each of its parts held a process; at rest, exactly 15 threads had
+begun; streaming, its 15 answers were in flight at both ends of the measure with none ended between
+them, read from the fake model's journal, and at least 1 % of the screen changed between both ends,
+as a thread shown streaming changes it. Its fingerprint says which check failed.
 
 Scenarios:
 
@@ -53,8 +58,8 @@ Scenarios:
 - `stream`: 15 threads start the script's long turn (about three minutes); once the fifteenth has
   started, one of them is opened in the window where the subject can show one
   (`subject_show`), and the subject is measured for 45 seconds while all of them stream.
-- `prepare`: the subject's first start, with a route out (pasta, which forwards nothing in and
-  hides the machine's own services), and what it needs then (`subject_prepare`: a welcome page
+- `prepare`: the subject's first start, with a route out (pasta, which forwards nothing in, and
+  reaches neither the machine's own services nor the home network: only the Internet), and what it needs then (`subject_prepare`: a welcome page
   dismissed, a project added, a provider set, a user signed in); then it is stopped, its pending
   updates and its programs' profile locks removed, and its home frozen into
   `target/rivals/profiles/<subject>/home.tar`, with its `SHA256`, the subject's version in
@@ -67,7 +72,8 @@ Scenarios:
   go to `processes.tsv`. With `PROBE_CONSOLE=1` the subject keeps running, and each line written
   into the run's `console` pipe runs in the driver (`shot NAME`, `click X Y`, `input ...`,
   `process_tree`, a call to its API), its output in `console.log`, until `quit`; `READY_WAIT=7200`
-  gives it the time. With `ROUTE_OUT=1` it has the route out, as `prepare`.
+  gives it the time. With `ROUTE_OUT=1` it has the route out, as `prepare`; `rest` and `stream`
+  are always offline, whatever the environment says, and their fingerprint says `network: none`.
 
 With `FRAMES=1`, sway logs every client request and the subject's `wl_surface` commits are counted;
 the log slows the compositor, so those runs' resources are not kept.
@@ -78,9 +84,9 @@ threads named), `figures-<part>.json` for a subject split in parts, `frames.txt`
 (`first_window_ms`), `profile.txt` (the profile's bytes before and after, and its growth) with
 `profile-after.txt` (where its bytes are), `windows.jsonl` (the compositor's window events),
 `measured.png`, `fingerprint.txt` (versions and hashes, the frozen profile's hash, the input
-tool's and Chromium's, the machine, the script's hash, the noise limit and the rest of the
-machine's load, the validity checks, Chromium's command line for a web subject), the fake model's
-journal `fake.jsonl`, and every log.
+tool's and Chromium's, the machine, the network, the script's hash, the noise limit and the rest of
+the machine's load, the validity checks, the subject's command line as its program received it),
+`screen-ready.ppm` and `screen-done.ppm`, the fake model's journal `fake.jsonl`, and every log.
 
 `summary.sh <campaign-folder> <scenario>` gives each subject's medians and ranges as Markdown
 tables, its resources, then its start and its profile's growth, for
@@ -183,8 +189,11 @@ its probe: a new version that moves them is probed again.
 - `pluto-measure` misses processes that start and end between two samples; their processor time
   is in `unattributed_cpu_seconds`.
 - Energy is not measured yet: it waits for the root sampler of M1.6c.
-- The pointer's places are the windows' layout of each version; a moved button makes a driver's
-  prompt check fail, which stops the run rather than measure it wrong.
+- The pointer's places are the windows' layout of each version. A moved button makes a typed
+  prompt's check fail, which stops the run; a moved button of `subject_show` leaves the screen
+  still, which the screen check rejects.
+- The Nix store is visible to the subjects, read-only, the owner's own configuration's files in it
+  included, as on the machine ([ADR-0029](../../docs/adr/0029-the-benchs-tools-and-what-a-rivals-figure-holds.md)).
 - Preparing a profile online sends the owner's address to the vendors whose applications call home
   at their first start ([ADR-0028](../../docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 

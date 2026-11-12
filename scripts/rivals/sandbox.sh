@@ -4,7 +4,8 @@
 #
 # Three steps, each re-entering this script:
 #   netns     in the run's scope: the cgroups of its parts, then a new user and network namespace,
-#             with a route out through pasta when ROUTE_OUT=1 (`prepare` only), none otherwise;
+#             with a route out through pasta when ROUTE_OUT=1 (`prepare`, and a probe that asks for
+#             it; run.sh refuses it to a measured run), none otherwise;
 #   in-netns  there: the loopback up, and a pair of virtual interfaces with no address and no
 #             route, so that Chromium counts the machine online (address_tracker_linux.cc) while
 #             nothing can leave it; then bubblewrap, back to the owner's uid, in a process
@@ -64,6 +65,14 @@ netns)
 in-netns)
     uid=$5 gid=$6 cg=$7
     ip link set lo up
+    # With a route out, the Internet only: no private or shared address, where the home network's
+    # machines and the router answer.
+    if [ "${ROUTE_OUT:-0}" = 1 ]; then
+        for range in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10; do
+            ip rule add to "$range" prohibit
+        done
+        ip -6 rule add to fc00::/7 prohibit
+    fi
     ip link add pluto0 type veth peer name pluto1
     ip link set pluto0 up
     ip link set pluto1 up
@@ -89,6 +98,11 @@ in-netns)
         "$uid" "$gid" > "$run_dir/passwd"
     printf 'root:x:0:\nsubject:x:%s:\nnogroup:x:65534:\n' "$gid" > "$run_dir/group"
     binds+=(--ro-bind "$run_dir/passwd" /etc/passwd --ro-bind "$run_dir/group" /etc/group)
+    # A machine of its own: its host name (bubblewrap's own namespace's, below) and its machine id,
+    # never the owner's, which an application calling home at its first start could send. Nix's
+    # daemon is hidden: through it the sandbox could build and add to the store as the owner.
+    printf '0123456789abcdef0123456789abcdef\n' > "$run_dir/machine-id"
+    binds+=(--ro-bind "$run_dir/machine-id" /etc/machine-id --tmpfs /nix/var/nix/daemon-socket)
     # With a route out, names are resolved through pasta's forwarder; offline, a name resolves to
     # nothing at once, as for a user without a network.
     if [ "${ROUTE_OUT:-0}" = 1 ]; then
@@ -115,13 +129,14 @@ in-netns)
         --setenv DBUS_SYSTEM_BUS_ADDRESS unix:path=/tmp/run/no-system-bus
         --setenv PLUTO_FAKE_MODEL "$PLUTO_FAKE_MODEL" --setenv PLUTO_FAKE_SCRIPT "$PLUTO_FAKE_SCRIPT"
         --setenv PLUTO_INPUT "$PLUTO_INPUT")
-    for name in THREADS FAKE_SPEED FRAMES PROBE_WAIT PROBE_INPUT PROBE_CLICK PROBE_CONSOLE BENCH_MAX_WAIT ROUTE_OUT; do
+    for name in THREADS FAKE_SPEED FRAMES PROBE_WAIT PROBE_INPUT PROBE_CLICK PROBE_CONSOLE BENCH_MAX_WAIT; do
         [ -n "${!name:-}" ] && env+=(--setenv "$name" "${!name}")
     done
     # Its own process namespace: /proc shows the run's processes only, and its first process
     # ending stops every other one, the bus and the compositor among them. A new session: no
     # input injected into the caller's terminal.
-    exec bwrap --unshare-user --uid "$uid" --gid "$gid" --unshare-pid --unshare-ipc --new-session \
+    exec bwrap --unshare-user --uid "$uid" --gid "$gid" --unshare-pid --unshare-ipc --unshare-uts \
+        --hostname bench --new-session \
         --clearenv "${env[@]}" "${binds[@]}" \
         --dir /home/subject --dir /tmp/run --chmod 0700 /tmp/run \
         --die-with-parent -- "$0" inside "$run_dir" "$subject" "$scenario" "$cg"

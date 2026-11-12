@@ -40,8 +40,15 @@ Terms this project uses in a sense of its own.
 - **The input tool**: `pluto-input`, the bench's one virtual keyboard and pointer for a whole run,
   which drivers send commands to ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 - **A valid run**: a run of the rivals' bench whose workload was the one measured: one window of
-  the subject when it is ready and when the measure ends, and, streaming, its 15 answers in flight
-  throughout ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
+  the subject when it is ready and when the measure ends, a process in each of its parts, its 15
+  threads at rest, or, streaming, its 15 answers in flight throughout and its screen changing as a
+  thread streams in it ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md),
+  `scripts/rivals/validity.sh`). A calm run is also on the GPU, with no browser asked for and no
+  early end; `summary.sh` keeps only runs both calm and valid.
+- **A frozen profile**: a subject's home after its first start (`prepare`), from which every run
+  starts ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
+- **A part**: a cgroup of a subject's (its server, its browser, its Xwayland), measured apart and
+  in the whole.
 - **The headline memory**: a program's private memory, swap and GPU memory, summed over all its
   processes; the quality bar's memory figure since [ADR-0026](adr/0026-the-rivals-measured-how.md).
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client

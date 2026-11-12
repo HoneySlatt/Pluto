@@ -81,10 +81,10 @@ begun() {
     grep -c "^{\"begin\":.*\"turn\":$turn,\"segment\":$segment}" "$run_dir/fake.jsonl" 2>/dev/null || true
 }
 
-# Whether at least `count` main requests of a turn's first segment have begun: a chat's turns, or
-# an agent's, streaming.
+# Whether at least `count` main requests of a turn's segment (its first by default) have begun: a
+# chat's turns; an agent's long answers, at its turn's second segment.
 started() {
-    [ "$(begun "$2" 0)" -ge "$1" ]
+    [ "$(begun "$2" "${3:-0}")" -ge "$1" ]
 }
 
 # How many model requests the fake model has journaled for a turn's segment, once their answer
@@ -145,6 +145,8 @@ OUTPUT_SIZE=3840x2160
 input() {
     local mark
     mark=$(mktemp -u /tmp/run/input-done.XXXXXX)
+    # A pipe without its reader would block the writer: the tool must still run.
+    kill -0 "$(cat /tmp/run/input.pid)" 2>/dev/null || { echo "the input tool has stopped" >&2; return 1; }
     printf '%s\n' "$@" "mark $mark" > "$run_dir/input"
     wait_for 120 test -e "$mark" || { echo "the input tool did not play: $*" >&2; return 1; }
     rm -f "$mark"
@@ -167,16 +169,26 @@ start_bus() {
 }
 
 # A Secret Service on the session bus, as a desktop has, for the subjects that keep a secret in the
-# system's keyring (Jan keeps its providers' keys there only; Electron uses it for its own). It is
-# gnome-keyring, its login keyring unlocked by an empty password: a test keyring in the throwaway
-# home, frozen with the profile. It runs in the bench's part, as the bus does, never counted in the
-# subject's figures.
+# system's keyring (Jan its providers' keys; Electron its own). It is gnome-keyring, its login
+# keyring unlocked by a test password, `bench`: a keyring of the throwaway home, made at the first
+# start and frozen with the profile. With an empty password gnome-keyring makes no login keyring,
+# and the subjects fall back to a file of their own. It runs in the bench's part, as the bus does,
+# never counted in the subject's figures. The run stops if the keyring has no unlocked default.
 start_keyring() {
-    gnome-keyring-daemon --unlock --components=secrets < /dev/null > "$run_dir/keyring.log" 2>&1 ||
+    printf bench | gnome-keyring-daemon --unlock --components=secrets > "$run_dir/keyring.log" 2>&1 ||
         { echo "the keyring did not start" >&2; return 1; }
-    wait_for 10 dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
-        org.freedesktop.DBus.GetNameOwner string:org.freedesktop.secrets > /dev/null 2>&1 ||
-        { echo "the keyring never took the Secret Service's name" >&2; return 1; }
+    wait_for 10 keyring_ready || { echo "the keyring has no unlocked default collection" >&2; return 1; }
+}
+
+# Whether the Secret Service's default collection exists and is unlocked.
+keyring_ready() {
+    local collection
+    collection=$(dbus-send --session --print-reply --dest=org.freedesktop.secrets /org/freedesktop/secrets \
+        org.freedesktop.Secret.Service.ReadAlias string:default 2>/dev/null | sed -n 's/^ *object path "\(.*\)"$/\1/p')
+    [ -n "$collection" ] && [ "$collection" != / ] &&
+        dbus-send --session --print-reply --dest=org.freedesktop.secrets "$collection" \
+            org.freedesktop.DBus.Properties.Get string:org.freedesktop.Secret.Collection string:Locked \
+            2>/dev/null | grep -q 'boolean false'
 }
 
 # The run's keyboard and pointer: one of each for the whole run, made before the subject starts, so
@@ -185,6 +197,7 @@ start_keyring() {
 start_input() {
     mkfifo "$run_dir/input"
     "$PLUTO_INPUT" --commands "$run_dir/input" --size "$OUTPUT_SIZE" 2> "$run_dir/input.log" &
+    echo $! > /tmp/run/input.pid
     wait_for 10 grep -q "pluto-input: ready" "$run_dir/input.log" ||
         { echo "the input tool did not start" >&2; cat "$run_dir/input.log" >&2; return 1; }
 }
@@ -298,10 +311,19 @@ count_windows() {
         | select((.type == "con" or .type == "floating_con") and .pid != null)] | length'
 }
 
-# What run.sh's validity checks read, at one end of the measure (`ready` or `done`): the subject's
-# windows, and how far the fake model's journal had gone, which tells the answers in flight then.
+# What run.sh's validity checks read (validity.sh), at one end of the measure (`ready` or `done`):
+# the subject's windows, the processes of each of its parts, the screen, and how far the fake
+# model's journal had gone, which tells the answers in flight then.
 at_bounds() {
     count_windows > "$run_dir/windows-$1.txt" 2>/dev/null || echo unknown > "$run_dir/windows-$1.txt"
+    grim -t ppm -s 0.25 "$run_dir/screen-$1.ppm" 2>/dev/null || true
+    # The subject's main program as it was started, its wrappers' own switches included.
+    [ "$1" = ready ] && tr '\0' ' ' < "/proc/$(cat "$run_dir/subject.pid")/cmdline" > "$run_dir/command.txt" 2>/dev/null
+    true
+    local part
+    for part in $(subject_parts); do
+        echo "$part:$(wc -l < "$cg/subject/$part/cgroup.procs")"
+    done > "$run_dir/parts-$1.txt"
     stat -c %s "$run_dir/fake.jsonl" > "$run_dir/journal-$1.offset" 2>/dev/null || echo 0 > "$run_dir/journal-$1.offset"
 }
 

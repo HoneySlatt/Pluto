@@ -5,7 +5,7 @@
 # it runs through Xwayland, which sway starts for it: Xwayland draws what Jan draws, so it is
 # counted as a part of Jan's (`xwayland`), moved out of the compositor's cgroup once it starts.
 # It reaches the fake model as an OpenAI-compatible custom provider, added at prepare through its
-# settings, and keeps its key in its own encrypted file. It also starts its llama.cpp worker,
+# settings, its key kept in the keyring. It also starts its llama.cpp worker,
 # though no local model is used: Jan's own behaviour, kept in its figure. It is driven by the
 # keyboard, its first start by the pointer.
 #

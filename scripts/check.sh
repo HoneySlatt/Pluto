@@ -12,7 +12,8 @@
 #   anchors, offline (lychee);
 # - the recordings of agents' sessions: their stamp still matches what a replay reads
 #   (scripts/fork-replay.sh --check-stamp, whose head lists it); the crate's own tests read, scan
-#   and replay each recording.
+#   and replay each recording;
+# - the rivals' bench's validity checks, on made-up runs (scripts/rivals/test-validity.sh).
 #
 # With --apk, in `nix develop .#mobile`, the Android app's Kotlin unit tests and its build too; CI
 # does not run them (docs/adr/0012-the-checks-and-ci.md).
@@ -62,6 +63,9 @@ lychee --offline --include-fragments --no-progress "${markdown[@]}"
 
 step "Recordings' stamp"
 scripts/fork-replay.sh --check-stamp
+
+step "The rivals' bench's validity checks"
+scripts/rivals/test-validity.sh
 
 if $apk; then
   step "Android unit tests"

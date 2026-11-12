@@ -94,13 +94,15 @@ subject_open() {
 
 subject_stream() {
     launch "$1" 3 || return 1
-    wait_for 120 finished "$1" 0 3 && sleep 3
+    # Every long answer has begun: they all stream.
+    wait_for 120 started "$1" 3 1
 }
 
-# The newest session opened in the window while it streams: its home (Ctrl+H), then the first
-# session of its list.
+# The newest session opened in the window while it streams: its home (the toolbar's second
+# button; its shortcut, Ctrl+H, did not open it), then the first session of its list.
 subject_show() {
-    input "key ctrl+h" "sleep 2000"
+    click 64 20
+    sleep 2
     click 1816 212
     sleep 3
 }

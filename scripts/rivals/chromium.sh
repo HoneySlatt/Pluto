@@ -27,11 +27,10 @@ CHROMIUM_SWITCHES=(
 )
 
 # Starts Chromium on a page, as an application's window; it must be the subject's main program, so
-# it is exec'd. Its command line is kept in the run's folder, for the fingerprint.
+# it is exec'd. The command line it receives, the wrapper's switches included, goes to the
+# fingerprint (lib.sh's `at_bounds`).
 start_chromium() {
-    local command=(chromium --user-data-dir="$HOME/chromium" "${CHROMIUM_SWITCHES[@]}" --app="$1")
-    printf '%q ' "${command[@]}" > "$run_dir/chromium-command.txt"
-    exec "${command[@]}"
+    exec chromium --user-data-dir="$HOME/chromium" "${CHROMIUM_SWITCHES[@]}" --app="$1"
 }
 
 # Chromium's version, from its store path: never by running it.

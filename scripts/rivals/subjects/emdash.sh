@@ -94,7 +94,8 @@ subject_open() {
 
 subject_stream() {
     launch "$1" 3 || return 1
-    wait_for 120 finished "$1" 0 3 && sleep 3
+    # Every long answer has begun: they all stream.
+    wait_for 120 started "$1" 3 1
 }
 
 # The threads, one a task: the project chosen in the sidebar, a new task (Ctrl+N), its prompt's box
@@ -105,8 +106,8 @@ launch() {
     local turns=("$@") n
     sleep 30
     for n in $(seq 0 $((threads - 1))); do
-        typed_turn "${turns[$((n % ${#turns[@]}))]}" "move 64 96" "sleep 500" "click" "sleep 1500" \
-            "key ctrl+n" "sleep 2000" "move 1914 1153" "sleep 500" "click" "sleep 300" || return 1
+        typed_turn "${turns[$((n % ${#turns[@]}))]}" "move 64 96" "sleep 500" "click" "sleep 800" \
+            "key ctrl+n" "sleep 1200" "move 1914 1153" "sleep 500" "click" "sleep 300" || return 1
     done
     shot after-launch
 }

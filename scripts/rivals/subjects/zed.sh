@@ -77,7 +77,8 @@ subject_open() {
 
 subject_stream() {
     launch "$1" 3 || return 1
-    wait_for 120 finished "$1" 0 3 && sleep 3
+    # Every long answer has begun: they all stream.
+    wait_for 120 started "$1" 3 1
 }
 
 subject_stop() {
