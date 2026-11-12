@@ -93,8 +93,11 @@ the machine's load, the validity checks, the subject's command line as its progr
 log.
 
 `summary.sh <campaign-folder> <scenario>` gives each subject's medians and ranges as Markdown
-tables, its resources, then its start and its profile's growth, for
-[`docs/measurements.md`](../../docs/measurements.md). It keeps only calm and valid runs.
+tables, for [`docs/measurements.md`](../../docs/measurements.md): its resources, its start and its
+profile's growth, each of its parts apart, a web rival less the control (`chromium-blank`), and
+the frames a second of the runs that counted them. It keeps only calm and valid runs, and never
+mixes a run that counted frames with the others. A folder that gathers several campaigns' runs,
+`<subject>/<scenario>-<anything>/`, is summed up the same way.
 
 ## Before running
 
@@ -112,7 +115,8 @@ BUSY_LIMIT=0.6 scripts/rivals/run.sh rest 3 pluto t3code zed
 ```
 
 A campaign runs as a systemd user service of its own, never inside an agent's session, whose
-restart would stop it:
+restart would stop it. Two campaigns at once make each other noisy: give each its own unit, and
+start one only when no other `pluto-rivals-*` unit runs.
 
 ```sh
 systemd-run --user --unit=pluto-rivals-campaign --working-directory="$PWD" --collect \
@@ -120,6 +124,14 @@ systemd-run --user --unit=pluto-rivals-campaign --working-directory="$PWD" --col
     -p StandardError=file:/tmp/pluto-rivals/campaign.log \
     nix develop .#measure -c env BUSY_LIMIT=0.6 scripts/rivals/run.sh rest 3 pluto t3code zed
 ```
+
+`campaign.sh <subject> [<default-deployment>]` is one subject's campaign as
+[ADR-0028](../../docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md) sets it: `RUNS` (3)
+runs at rest and streaming, the anchors `chromium-blank` and `pluto` run once each beside them, a
+web rival's default deployment at rest only, then its frames' runs (`FRAMES=1`, 120 seconds at rest,
+the stream's 45). It first waits until no other `pluto-rivals-*` unit runs, so several campaigns
+can be chained in one service: `bash -c 'for s in emdash jan; do scripts/rivals/campaign.sh $s;
+done'`. A run that is noisy or not valid is not run again: a later campaign makes up the count.
 
 The vendors' packages and images are listed in [`manifest.txt`](manifest.txt), each with its
 version, its source and its digest. `fetch.sh <name>...` downloads them once, by hand, after the
