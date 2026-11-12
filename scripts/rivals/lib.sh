@@ -24,7 +24,71 @@ listening() {
     (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null
 }
 
-# How many model requests the fake model has journaled for a turn's segment (main requests only).
+# Whether a web server of the sandbox answers a page with success.
+served() {
+    curl -sf -o /dev/null --max-time 5 "$1"
+}
+
+# Whether a process has ended.
+gone() {
+    ! kill -0 "$1" 2>/dev/null
+}
+
+# Whether a count, given by the command that follows, is above `before`.
+more_than() {
+    local before=$1
+    shift
+    [ "$("$@")" -gt "$before" ]
+}
+
+# The prompt a driver types for a turn: the same words for every subject that is typed into.
+typed_prompt() {
+    echo "[turn $1] Look at this project and tell me what you find."
+}
+
+# Types a turn's prompt by the keyboard, after the input commands given, which open a new thread and
+# put the focus in its message box, and sends it (Return, or the subject's SEND_KEY); then checks
+# that the turn reached the fake model; if it does not within 30 seconds, all of it once more, in a
+# new thread. A typed prompt can be lost while an application is busy loading; the check makes
+# sure each turn is played once.
+typed_turn() {
+    local turn=$1 before attempt
+    shift
+    before=$(begun "$turn" 0)
+    for attempt in 1 2; do
+        input "$@" "type $(typed_prompt "$turn")" "sleep 500" "key ${SEND_KEY:-Return}" "sleep 300"
+        if wait_for 30 more_than "$before" begun "$turn" 0; then
+            return 0
+        fi
+        echo "turn $turn: the prompt did not reach the model (attempt $attempt)"
+        shot "lost-turn-$turn-$attempt"
+    done
+    return 1
+}
+
+# Asks every process of the subject to end, in all its parts: for a subject of several programs (a
+# server, its database, a browser), once its main program has had its chance to end on its own.
+stop_every_process() {
+    local procs
+    while read -r procs; do
+        xargs -r kill -TERM < "$procs" 2>/dev/null || true
+    done < <(find "$cg/subject" -name cgroup.procs)
+}
+
+# How many main requests of a turn's segment have begun: the journal writes a line when one is read.
+begun() {
+    local turn=$1 segment=$2
+    grep -c "^{\"begin\":.*\"turn\":$turn,\"segment\":$segment}" "$run_dir/fake.jsonl" 2>/dev/null || true
+}
+
+# Whether at least `count` main requests of a turn's first segment have begun: a chat's turns, or
+# an agent's, streaming.
+started() {
+    [ "$(begun "$2" 0)" -ge "$1" ]
+}
+
+# How many model requests the fake model has journaled for a turn's segment, once their answer
+# ended (main requests only).
 journaled() {
     local turn=$1 segment=$2
     grep -c "\"kind\":\"main\".*\"turn\":$turn,\"segment\":$segment," "$run_dir/fake.jsonl" 2>/dev/null || true
@@ -39,16 +103,62 @@ finished() {
     [ "$total" -ge "$count" ]
 }
 
-# Clicks at a point of the screen, in pixels of the 3840 × 2160 output: the virtual pointer goes
-# to the top left corner first, then moves there, rests half a second (buttons shown on hover
-# ignore an instant click), and clicks. Each `wlrctl` call is a new virtual pointer, and sway may
-# handle its click before the window under it has the pointer's focus: the click can be lost.
-# Drivers use the keyboard; the click serves `probe` only.
+# The project the agents work in: a git repository of one commit, at ~/project.
+make_project() {
+    mkdir -p "$HOME/project"
+    git -C "$HOME/project" init -q -b main
+    echo "# A project" > "$HOME/project/README.md"
+    git -C "$HOME/project" add . && git -C "$HOME/project" -c user.name=bench -c user.email=bench@example.invalid commit -qm init
+}
+
+# Claude Code pointed at the fake model, for the subjects that run it on their own (Emdash,
+# Nimbalyst): its user settings' environment, as Claude Code documents it, with its telemetry,
+# error reports and updater off; and its first start and the project's trust already done, as for a
+# user who has used it before.
+claude_on_fake_model() {
+    mkdir -p "$HOME/.claude"
+    cat > "$HOME/.claude/settings.json" <<JSON
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "$FAKE_URL",
+    "ANTHROPIC_AUTH_TOKEN": "fake",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}
+JSON
+    cat > "$HOME/.claude.json" <<JSON
+{
+  "hasCompletedOnboarding": true,
+  "projects": {"$HOME/project": {"hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true}}
+}
+JSON
+}
+
+# The output's size, in pixels: the compositor's mode, and the extent of the pointer's positions.
+OUTPUT_SIZE=3840x2160
+
+# Plays commands on the run's keyboard and pointer (pluto-input; crates/pluto-input lists the
+# commands), one argument a line, and returns once the compositor has had them all.
+input() {
+    local mark
+    mark=$(mktemp -u /tmp/run/input-done.XXXXXX)
+    printf '%s\n' "$@" "mark $mark" > "$run_dir/input"
+    wait_for 120 test -e "$mark" || { echo "the input tool did not play: $*" >&2; return 1; }
+    rm -f "$mark"
+}
+
+# Clicks at a point of the screen, in pixels of the output, after resting there half a second:
+# buttons shown on hover ignore an instant click.
 click() {
-    wlrctl pointer move -4000 -4000
-    wlrctl pointer move "$1" "$2"
-    sleep 0.5
-    wlrctl pointer click left
+    input "move $1 $2" "sleep 500" "click"
+}
+
+# A screenshot of the whole output, at a quarter of its size, into the run's folder.
+shot() {
+    grim -s 0.25 "$run_dir/$1.png"
 }
 
 start_bus() {
@@ -56,12 +166,35 @@ start_bus() {
     export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/run/bus
 }
 
+# A Secret Service on the session bus, as a desktop has, for the subjects that keep a secret in the
+# system's keyring (Jan keeps its providers' keys there only; Electron uses it for its own). It is
+# gnome-keyring, its login keyring unlocked by an empty password: a test keyring in the throwaway
+# home, frozen with the profile. It runs in the bench's part, as the bus does, never counted in the
+# subject's figures.
+start_keyring() {
+    gnome-keyring-daemon --unlock --components=secrets < /dev/null > "$run_dir/keyring.log" 2>&1 ||
+        { echo "the keyring did not start" >&2; return 1; }
+    wait_for 10 dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus.GetNameOwner string:org.freedesktop.secrets > /dev/null 2>&1 ||
+        { echo "the keyring never took the Secret Service's name" >&2; return 1; }
+}
+
+# The run's keyboard and pointer: one of each for the whole run, made before the subject starts, so
+# that it sees a desktop's seat from its first frame (crates/pluto-input). Drivers play commands on
+# them through `input`; in a probe, so can the owner's lead, through the run's folder.
+start_input() {
+    mkfifo "$run_dir/input"
+    "$PLUTO_INPUT" --commands "$run_dir/input" --size "$OUTPUT_SIZE" 2> "$run_dir/input.log" &
+    wait_for 10 grep -q "pluto-input: ready" "$run_dir/input.log" ||
+        { echo "the input tool did not start" >&2; cat "$run_dir/input.log" >&2; return 1; }
+}
+
 # The headless sway every subject draws into: 3840 × 2160 at 240 Hz on the GPU, one output,
-# no input device. With FRAMES=1 it logs every client request (WAYLAND_DEBUG=server), which counts
+# no input device of its own: the input tool's keyboard and pointer are the seat's. With FRAMES=1 it logs every client request (WAYLAND_DEBUG=server), which counts
 # the subject's frames; the log slows the compositor, so runs that count frames are apart from
 # those whose resources are kept (ADR-0026).
 start_compositor() {
-    printf 'output HEADLESS-1 mode 3840x2160@240Hz\ndefault_border none\n' > /tmp/run/sway.conf
+    printf 'output HEADLESS-1 mode %s@240Hz\ndefault_border none\n' "$OUTPUT_SIZE" > /tmp/run/sway.conf
     local debug=
     [ "${FRAMES:-0}" = 1 ] && debug=server
     (
@@ -78,8 +211,11 @@ start_compositor() {
 start_fake() {
     (
         in_part fake
+        # A chat subject's file sets FAKE_CHAT=1: its turns are chat turns (the fake model's --chat).
+        local chat=()
+        [ "${FAKE_CHAT:-0}" = 1 ] && chat=(--chat)
         exec "$PLUTO_FAKE_MODEL" --script "$PLUTO_FAKE_SCRIPT" --listen "127.0.0.1:$FAKE_PORT" \
-            --listen "[::1]:$FAKE_PORT" --journal "$run_dir/fake.jsonl" --speed "${FAKE_SPEED:-1}"
+            --listen "[::1]:$FAKE_PORT" --journal "$run_dir/fake.jsonl" --speed "${FAKE_SPEED:-1}" "${chat[@]}"
     ) 2> "$run_dir/fake.log" &
     wait_for 10 grep -q "listening on http://127.0.0.1" "$run_dir/fake.log" \
         || { echo "the fake model did not start" >&2; return 1; }
@@ -126,11 +262,81 @@ stop_and_wait() {
         echo "the subject was still running 20 s after it was asked to stop" >&2
 }
 
+# A profile is prepared with a route out, where an application's updater may download its next
+# version and keep it for its next start: a frozen profile keeps none, so that every run starts the
+# version measured. electron-updater keeps it in ~/.cache/<application>-updater/; what is removed is
+# listed in the run's folder.
+drop_pending_updates() {
+    local folder
+    for folder in "$HOME"/.cache/*-updater; do
+        [ -e "$folder" ] || continue
+        du -sb "$folder" >> "$run_dir/updates-dropped.txt"
+        rm -rf "$folder"
+    done
+}
+
+# Chromium's and Electron's locks on their profile (SingletonLock, SingletonCookie,
+# SingletonSocket), which name the machine that held them: prepared in pasta's namespace, whose
+# host name differs, a profile would look held by another computer, and Chromium would refuse it. A
+# frozen profile holds no running program's state.
+drop_running_locks() {
+    find "$HOME" -name 'Singleton*' -type l -print -delete >> "$run_dir/locks-dropped.txt"
+}
+
 # The phase files run.sh reads: `ready` once the subject is in the state to measure, holding
-# where the compositor's log stood; run.sh writes `done` when it has measured.
+# where the compositor's log stood; run.sh writes `done` when it has measured. Beside them, what the
+# validity checks read at both ends of the measure (`at_bounds`).
 mark_ready() {
+    at_bounds ready
     stat -c %s "$run_dir/compositor.log" > "$run_dir/ready.tmp"
     mv "$run_dir/ready.tmp" "$run_dir/ready"
+}
+
+# The subject's windows, as the compositor's tree has them: its views, each with a process.
+count_windows() {
+    swaymsg -t get_tree | jq '[recurse(.nodes[]?, .floating_nodes[]?)
+        | select((.type == "con" or .type == "floating_con") and .pid != null)] | length'
+}
+
+# What run.sh's validity checks read, at one end of the measure (`ready` or `done`): the subject's
+# windows, and how far the fake model's journal had gone, which tells the answers in flight then.
+at_bounds() {
+    count_windows > "$run_dir/windows-$1.txt" 2>/dev/null || echo unknown > "$run_dir/windows-$1.txt"
+    stat -c %s "$run_dir/fake.jsonl" > "$run_dir/journal-$1.offset" 2>/dev/null || echo 0 > "$run_dir/journal-$1.offset"
+}
+
+# Every process of the run, for writing a subject's file: its pid, its parent, its part (its cgroup
+# under the run's scope), its name, its executable and its command line. `subject_agents` is set from
+# it.
+process_tree() {
+    local pid part exe
+    printf 'pid\tppid\tpart\tcomm\texe\targs\n'
+    for pid in /proc/[0-9]*; do
+        pid=${pid#/proc/}
+        [ -r "/proc/$pid/stat" ] || continue
+        part=$(sed -n 's|^0::||p' "/proc/$pid/cgroup" 2>/dev/null)
+        exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)" \
+            "${part#"${cg#/sys/fs/cgroup}"}" "$(cat "/proc/$pid/comm" 2>/dev/null)" "$exe" \
+            "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-300)"
+    done
+}
+
+# For writing a subject's file, with PROBE_CONSOLE=1: the subject keeps running, and each line
+# written into the run's `console` pipe is run here, in the driver, its output in `console.log`
+# (`shot NAME`, `input ...`, `process_tree`, a curl to the subject's API); `quit` ends the probe.
+probe_console() {
+    mkfifo "$run_dir/console"
+    local line
+    exec 7<> "$run_dir/console"
+    echo "console ready" > "$run_dir/console.log"
+    while read -r line <&7; do
+        [ "$line" = quit ] && break
+        printf '$ %s\n' "$line" >> "$run_dir/console.log"
+        eval "$line" >> "$run_dir/console.log" 2>&1 || echo "(exit $?)" >> "$run_dir/console.log"
+        printf '\n--\n' >> "$run_dir/console.log"
+    done
+    exec 7<&-
 }
 
 # No browser may start in the sandbox: a link a subject opens goes nowhere, and is noted.
@@ -150,8 +356,10 @@ bench_inside() {
     start_bus
     start_compositor
     watch_windows
+    start_input
     start_fake
     make_home "$scenario"
+    start_keyring
     profile_bytes > "$run_dir/profile-before"
     (
         in_part subject
@@ -162,29 +370,33 @@ bench_inside() {
     (
         in_part driver
         case "$scenario" in
-        rest) subject_open 15 && sleep 10 ;;
+        rest) subject_open "$THREADS" && sleep 10 ;;
         # The stream is measured with one streaming thread open in the window, where the subject
         # can show one.
-        stream) subject_stream 15 && { ! declare -F subject_show > /dev/null || subject_show; } ;;
+        stream) subject_stream "$THREADS" && { ! declare -F subject_show > /dev/null || subject_show; } ;;
         # What a subject's first start needs, before its home is frozen (subject_prepare, or 20 s).
         prepare) if declare -F subject_prepare > /dev/null; then subject_prepare; else sleep 20; fi ;;
         # For writing a subject's file: the subject starts, then a screenshot of the screen, at a
-        # quarter of its size, shows where it stands after PROBE_WAIT seconds.
+        # quarter of its size, shows where it stands after PROBE_WAIT seconds; then PROBE_CLICK,
+        # PROBE_INPUT and the console, each followed by a screenshot; then its processes.
         probe)
             sleep "${PROBE_WAIT:-20}"
-            grim -s 0.25 "$run_dir/probe-0.png"
+            shot probe-0
             if [ -n "${PROBE_CLICK:-}" ]; then
                 # shellcheck disable=SC2086 # x and y, split on purpose
                 click $PROBE_CLICK
                 sleep 3
-                grim -s 0.25 "$run_dir/probe-1.png"
+                shot probe-1
             fi
-            if [ -n "${PROBE_KEYS:-}" ]; then
-                # shellcheck disable=SC2086 # the keys are wtype's arguments, split on purpose
-                wtype $PROBE_KEYS
+            if [ -n "${PROBE_INPUT:-}" ]; then
+                # The input tool's commands, separated by `;`.
+                IFS=';' read -r -a probe_commands <<< "$PROBE_INPUT"
+                input "${probe_commands[@]}"
                 sleep 3
-                grim -s 0.25 "$run_dir/probe-2.png"
+                shot probe-2
             fi
+            [ "${PROBE_CONSOLE:-0}" = 1 ] && probe_console
+            process_tree > "$run_dir/processes.tsv"
             ;;
         *) echo "unknown scenario $scenario" >&2; exit 2 ;;
         esac
@@ -193,11 +405,14 @@ bench_inside() {
     grim -s 0.25 "$run_dir/measured.png" 2>/dev/null || true
     if [ "$scenario" = prepare ]; then
         stop_and_wait
+        drop_pending_updates
+        drop_running_locks
         tar -cf "$run_dir/home.tar" -C "$HOME" .
         return 0
     fi
     mark_ready
     wait_for "${BENCH_MAX_WAIT:-7200}" test -e "$run_dir/done" || true
+    at_bounds "done"
     stat -c %s "$run_dir/compositor.log" > "$run_dir/done.offset"
     stop_and_wait
     profile_bytes > "$run_dir/profile-after"

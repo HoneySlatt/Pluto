@@ -8,8 +8,10 @@
 # Memory is in MiB: the headline figure (private + swap + GPU) of the program and of its agents,
 # and the program's proportional figure (PSS) beside it; wake-ups a second; processor in cores
 # (1.0 is one core busy throughout). A second table gives the start to the first window, in
-# milliseconds, and the profile's growth over the run, in KiB. Only calm runs count: a noisy run, one whose subject did not
-# render on the GPU, asked for a browser or ended early, is counted apart and left out. With
+# milliseconds, and the profile's growth over the run, in KiB. Only calm and valid runs count: a
+# noisy run, one whose subject did not render on the GPU, asked for a browser, ended early, or whose
+# workload was not the one measured (its windows, its streams in flight), is counted apart and left
+# out. With
 # KEEP_NOISY=1 noisy runs count too, for runs whose noise flag is known to be wrong (the README).
 set -euo pipefail
 
@@ -45,7 +47,7 @@ is_calm() {
     local fingerprint=$1/fingerprint.txt
     { [ "${KEEP_NOISY:-0}" = 1 ] || grep -q '^noisy: no' "$fingerprint"; } &&
         grep -q '^gpu: used' "$fingerprint" &&
-        ! grep -q -E '^(browser|ended_early_at_ms):' "$fingerprint"
+        ! grep -q -E '^(browser|ended_early_at_ms):|^valid: no' "$fingerprint"
 }
 
 echo "| Subject | Calm runs (left out) | Its memory, MiB | Its PSS, MiB | Its wake-ups/s | Its processor, cores | Agents' memory, MiB | Agents' wake-ups/s |"

@@ -6,13 +6,14 @@
 # usage: scripts/rivals/run.sh <scenario> <runs> <subject>...
 #   scenario  rest: 15 threads run their turn, then the subject rests while it is measured;
 #             stream: 15 threads stream a long answer at once, measured while they stream;
-#             prepare: the subject's first start, after which its home is frozen into its profile,
-#             target/rivals/profiles/<subject>/ (the other scenarios start from it);
+#             prepare: the subject's first start, with a route out, after which its home is frozen
+#             into its profile, target/rivals/profiles/<subject>/ (the other scenarios start from it);
 #             probe: for writing a subject's file (the README).
 # env:       MEASURE_SECONDS (rest: 600, stream: 45), OUT (/tmp/pluto-rivals), BUSY_LIMIT (0.30 of
 #            a core used by the rest of the machine, above which a run waits, then is marked noisy),
 #            CALM_WAIT (5: the minutes a run waits for the machine to be calm),
-#            FRAMES=1 to count the subject's frames (those runs' resources are not to be kept)
+#            FRAMES=1 to count the subject's frames (those runs' resources are not to be kept),
+#            READY_WAIT (1800: the seconds a run may take to reach the state to measure)
 #
 # Each run's folder, OUT/<date>-<time>/<subject>/<scenario>-<n>/, holds figures.json
 # (pluto-measure's), frames.txt, start.txt (the start to the first window), profile.txt (the
@@ -36,10 +37,15 @@ out=${OUT:-/tmp/pluto-rivals}/$(date +%Y-%m-%d-%H%M%S)
 busy_limit=${BUSY_LIMIT:-0.30}
 calm_wait=${CALM_WAIT:-5}
 
+ready_wait=${READY_WAIT:-1800}
+
 export PLUTO_FAKE_MODEL=$repo/target/release/pluto-fake-model
 export PLUTO_FAKE_SCRIPT=$repo/crates/pluto-fake-model/scripts/workload.json
+export PLUTO_INPUT=$repo/target/release/pluto-input
+# The threads each run launches: the stream scenario's answers in flight (lib.sh's bench_inside).
+export THREADS=15
 measure=$repo/target/release/pluto-measure
-for binary in "$PLUTO_FAKE_MODEL" "$measure" "$repo/target/release/pluto" "$repo/target/release/examples/drive"; do
+for binary in "$PLUTO_FAKE_MODEL" "$PLUTO_INPUT" "$measure" "$repo/target/release/pluto" "$repo/target/release/examples/drive"; do
     [ -x "$binary" ] || { echo "build $binary first (scripts/rivals/README.md)" >&2; exit 1; }
 done
 
@@ -50,11 +56,23 @@ subject_version_of() {
     bash -c "repo=$repo; source $here/subjects/$1.sh; subject_version"
 }
 
-# Every subject measured starts from a frozen profile of its current version.
+# The days a subject's sign-in lasts, which its frozen profile holds, if its file says
+# (`subject_session_days`); nothing for a subject without one.
+session_days_of() {
+    bash -c "repo=$repo; source $here/subjects/$1.sh; ! declare -F subject_session_days > /dev/null || subject_session_days"
+}
+
+# Every subject measured starts from a frozen profile of its current version, whose sign-in has not
+# expired.
 if [ "$scenario" = rest ] || [ "$scenario" = stream ]; then
     for subject in "${subjects[@]}"; do
         if [ "$(cat "$profiles/$subject/version.txt" 2>/dev/null)" != "$(subject_version_of "$subject")" ]; then
             echo "$subject has no frozen profile of its version: run.sh prepare 1 $subject" >&2
+            exit 1
+        fi
+        expires=$(sed -n 's/^expires: //p' "$profiles/$subject/prepared.txt" 2>/dev/null || true)
+        if [ -n "$expires" ] && [ "$expires" != never ] && [ "$(date +%s)" -ge "$(date -d "$expires" +%s)" ]; then
+            echo "$subject's frozen profile signed in until $expires: run.sh prepare 1 $subject" >&2
             exit 1
         fi
     done
@@ -105,6 +123,8 @@ fingerprint() {
         echo "script: $(sha256sum "$PLUTO_FAKE_SCRIPT" | cut -c1-16)"
         echo "bench: $(git -C "$repo" rev-parse --short HEAD)$(git -C "$repo" diff --quiet HEAD -- scripts/rivals crates || echo -dirty)"
         echo "client: sha256 $(sha256sum "$repo/target/release/pluto" | cut -c1-16)"
+        echo "input: sha256 $(sha256sum "$PLUTO_INPUT" | cut -c1-16)"
+        echo "chromium: $(readlink -f "$(command -v chromium)" 2>/dev/null || echo none)"
         echo "agents: $(store_name claude); $(store_name codex); $(store_name opencode)"
         echo "busy_limit: $busy_limit"
         echo "frames_counted: ${FRAMES:-0}"
@@ -144,14 +164,18 @@ start_and_profile() {
     fi
 }
 
-# The prepare scenario: the subject's first start in its sandbox, then its home frozen as its
-# profile, with its version and hash. Nothing is measured.
+# The prepare scenario: the subject's first start in its sandbox, with a route out (ADR-0028), then
+# its home frozen as its profile, with its version, its hash, its date and when its sign-in
+# expires. Nothing is measured.
 prepare_one() {
     local subject=$1 unit=pluto-rivals-$$-$1-prepare
     local dir=$out/$subject/prepare
     trap 'stop_scope "$unit"; exit 130' INT TERM
     mkdir -p "$dir"
-    systemd-run --user --scope --quiet --collect -p Delegate=yes -p RuntimeMaxSec=1800 --unit="$unit" -- \
+    local prepared_at days
+    prepared_at=$(date -Iseconds)
+    days=$(session_days_of "$subject")
+    ROUTE_OUT=1 systemd-run --user --scope --quiet --collect -p Delegate=yes -p RuntimeMaxSec=1800 --unit="$unit" -- \
         "$here/sandbox.sh" netns "$dir" "$subject" prepare > "$dir/sandbox.log" 2>&1 || true
     stop_scope "$unit"
     [ -s "$dir/home.tar" ] || { echo "$subject: no profile prepared; see $dir" >&2; return 1; }
@@ -160,7 +184,49 @@ prepare_one() {
     mv "$profiles/$subject/home.tar.tmp" "$profiles/$subject/home.tar"
     sha256sum "$profiles/$subject/home.tar" | cut -d' ' -f1 > "$profiles/$subject/SHA256"
     subject_version_of "$subject" > "$profiles/$subject/version.txt"
+    {
+        echo "date: $prepared_at"
+        if [ -n "$days" ]; then
+            echo "expires: $(date -Iseconds -d "$prepared_at + $days days")"
+        else
+            echo "expires: never"
+        fi
+        [ -s "$dir/updates-dropped.txt" ] && sed 's/^/update dropped: /' "$dir/updates-dropped.txt"
+    } > "$profiles/$subject/prepared.txt"
     echo "$subject: profile frozen, $(stat -c %s "$profiles/$subject/home.tar") bytes; see $dir/measured.png"
+}
+
+# The fake model's journal as it stood at one end of the measure (`ready` or `done`).
+journal_at() {
+    head -c "$(cat "$1/journal-$2.offset" 2>/dev/null || echo 0)" "$1/fake.jsonl" 2>/dev/null
+}
+
+# Main requests begun, and ended, by one end of the measure.
+main_begun() { journal_at "$1" "$2" | grep -c '^{"begin":' || true; }
+main_ended() { journal_at "$1" "$2" | grep -c '"kind":"main"' || true; }
+
+# Whether a run's workload was the one measured (ADR-0028), as fingerprint lines: the subject
+# showed exactly one window when it was ready and when the measure ended; in the stream scenario,
+# THREADS answers were in flight at both ends and none ended between them, so that they all
+# streamed for the whole measure. A run that fails is left out, as a noisy one.
+validity() {
+    local dir=$1 subject=$2 valid=yes at_ready at_end
+    at_ready=$(cat "$dir/windows-ready.txt" 2>/dev/null || echo unknown)
+    at_end=$(cat "$dir/windows-done.txt" 2>/dev/null || echo unknown)
+    echo "windows: $at_ready at ready, $at_end at the end"
+    { [ "$at_ready" = 1 ] && [ "$at_end" = 1 ]; } || valid=no
+    if [ "$scenario" = stream ]; then
+        local ended expected
+        # THREADS, or what the subject's file says it streams (a control, none).
+        expected=$(bash -c "repo=$repo; source $here/subjects/$subject.sh; ! declare -F subject_threads > /dev/null || subject_threads")
+        expected=${expected:-$THREADS}
+        at_ready=$(($(main_begun "$dir" ready) - $(main_ended "$dir" ready)))
+        at_end=$(($(main_begun "$dir" "done") - $(main_ended "$dir" "done")))
+        ended=$(($(main_ended "$dir" "done") - $(main_ended "$dir" ready)))
+        echo "streams_in_flight: $at_ready at ready, $at_end at the end, $ended ended between"
+        { [ "$at_ready" = "$expected" ] && [ "$at_end" = "$expected" ] && [ "$ended" = 0 ]; } || valid=no
+    fi
+    echo "valid: $valid"
 }
 
 one_run() {
@@ -182,7 +248,7 @@ one_run() {
         kill -0 "$sandbox" 2>/dev/null || { echo "$subject run $n failed; see $dir/sandbox.log" >&2; stop_scope "$unit"; return 1; }
         sleep 1
         waited=$((waited + 1))
-        [ "$waited" -lt 1800 ] || { echo "$subject run $n never got ready" >&2; stop_scope "$unit"; return 1; }
+        [ "$waited" -lt "$ready_wait" ] || { echo "$subject run $n never got ready" >&2; stop_scope "$unit"; return 1; }
     done
     local cgroup
     cgroup=/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$unit.scope")/subject
@@ -217,6 +283,12 @@ one_run() {
         'BEGIN { other = (a - b - (sa - sb)) / t; printf "other_cores: %.3f\n", other; exit !(other < l) }' \
         >> "$dir/fingerprint.txt" || noisy=yes
     echo "noisy: $noisy" >> "$dir/fingerprint.txt"
+    # A subject gone before it was measured leaves no figures: the run is left out, said so.
+    if [ ! -s "$dir/figures.json" ]; then
+        echo "measured: no" >> "$dir/fingerprint.txt"
+        echo "$subject run $n: nothing was measured; see $dir/measure.log" >&2
+        return 1
+    fi
     # A subject that died while it was measured leaves figures that look whole: say it.
     local ended
     ended=$(jq -r '.ended_early_at_ms // empty' "$dir/figures.json")
@@ -235,6 +307,11 @@ one_run() {
         echo "browser: asked" >> "$dir/fingerprint.txt"
         echo "$subject run $n: the subject asked for a browser; see $dir/browser.log" >&2
     fi
+    validity "$dir" "$subject" >> "$dir/fingerprint.txt"
+    if grep -q '^valid: no' "$dir/fingerprint.txt"; then
+        echo "$subject run $n: its workload was not the one measured; see $dir/fingerprint.txt" >&2
+    fi
+    [ -s "$dir/chromium-command.txt" ] && echo "chromium_command: $(cat "$dir/chromium-command.txt")" >> "$dir/fingerprint.txt"
     start_and_profile "$dir"
     if [ "${FRAMES:-0}" = 1 ]; then
         echo "frames: $(frames "$dir/compositor.log" "$(cat "$dir/ready")" "$(cat "$dir/done.offset")") in $seconds s" > "$dir/frames.txt"

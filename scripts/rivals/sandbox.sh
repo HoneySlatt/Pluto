@@ -3,7 +3,8 @@
 # run.sh starts it in a systemd scope of its own with Delegate=yes; it never runs alone.
 #
 # Three steps, each re-entering this script:
-#   netns     in the run's scope: the cgroups of its parts, then a new user and network namespace;
+#   netns     in the run's scope: the cgroups of its parts, then a new user and network namespace,
+#             with a route out through pasta when ROUTE_OUT=1 (`prepare` only), none otherwise;
 #   in-netns  there: the loopback up, and a pair of virtual interfaces with no address and no
 #             route, so that Chromium counts the machine online (address_tracker_linux.cc) while
 #             nothing can leave it; then bubblewrap, back to the owner's uid, in a process
@@ -28,6 +29,10 @@ scenario=$4
 # others are counted apart so that they never weigh on its figures.
 parts=(bench compositor fake driver subject)
 
+# With a route out, the address the sandbox sends its DNS queries to, which pasta forwards to the
+# machine's own resolver: a link-local address, which nothing else in the sandbox uses.
+PASTA_DNS=169.254.53.53
+
 case "$step" in
 netns)
     scope=$(sed -n 's/^0:://p' /proc/self/cgroup)
@@ -41,6 +46,18 @@ netns)
     for part in $(subject_parts); do mkdir -p "$cg/subject/$part"; done
     echo $$ > "$cg/bench/cgroup.procs"
     echo "+memory +cpu +pids" > "$cg/cgroup.subtree_control"
+    if [ "${ROUTE_OUT:-0}" = 1 ]; then
+        # A profile prepared with the network (ADR-0028): pasta gives the namespace a route out
+        # through its own user-mode stack, and nothing in: no port of the namespace is forwarded
+        # from the machine (-t, -u), none of the machine's into the namespace (-T, -U), and no
+        # address of the namespace stands for the machine's loopback or its own address, so that a
+        # subject's 127.0.0.1 is its own and it never meets the owner's services (the fork on
+        # 3773, an Ollama on 11434).
+        exec pasta --quiet --config-net -t none -u none -T none -U none \
+            --map-host-loopback none --map-guest-addr none \
+            --dns-forward "$PASTA_DNS" -- "$0" in-netns "$run_dir" "$subject" "$scenario" \
+            "$(id -u)" "$(id -g)" "$cg"
+    fi
     exec unshare --user --map-root-user --net -- "$0" in-netns "$run_dir" "$subject" "$scenario" \
         "$(id -u)" "$(id -g)" "$cg"
     ;;
@@ -60,9 +77,24 @@ in-netns)
         --ro-bind "$repo/crates/pluto-fake-model/scripts" "$repo/crates/pluto-fake-model/scripts"
         --ro-bind-try "$repo/target/release/pluto" "$repo/target/release/pluto"
         --ro-bind-try "$repo/target/release/pluto-fake-model" "$repo/target/release/pluto-fake-model"
+        --ro-bind-try "$repo/target/release/pluto-input" "$repo/target/release/pluto-input"
         --ro-bind-try "$repo/target/release/examples/drive" "$repo/target/release/examples/drive"
         --ro-bind-try "$repo/target/rivals/packages" "$repo/target/rivals/packages"
+        --ro-bind-try "$repo/target/rivals/images" "$repo/target/rivals/images"
         --ro-bind-try "$repo/target/rivals/profiles" "$repo/target/rivals/profiles")
+    # The sandbox's own users: the subject's login shell is /bin/sh in its own home, never the
+    # owner's shell and profile, which a rival that reads its login shell's environment (OpenCode
+    # Desktop, Nimbalyst) would run, with the owner's own versions of the agents' CLIs.
+    printf 'root:x:0:0::/root:/bin/sh\nsubject:x:%s:%s:subject:/home/subject:/bin/sh\nnobody:x:65534:65534::/var/empty:/bin/sh\n' \
+        "$uid" "$gid" > "$run_dir/passwd"
+    printf 'root:x:0:\nsubject:x:%s:\nnogroup:x:65534:\n' "$gid" > "$run_dir/group"
+    binds+=(--ro-bind "$run_dir/passwd" /etc/passwd --ro-bind "$run_dir/group" /etc/group)
+    # With a route out, names are resolved through pasta's forwarder; offline, a name resolves to
+    # nothing at once, as for a user without a network.
+    if [ "${ROUTE_OUT:-0}" = 1 ]; then
+        printf 'nameserver %s\n' "$PASTA_DNS" > "$run_dir/resolv.conf"
+        binds+=(--ro-bind "$run_dir/resolv.conf" /etc/resolv.conf)
+    fi
     # Read-only extras a subject needs (its package outside the store), from its file's
     # `subject_binds`.
     # shellcheck source=/dev/null
@@ -79,9 +111,11 @@ in-netns)
         --setenv XDG_CONFIG_HOME /home/subject/.config --setenv XDG_CACHE_HOME /home/subject/.cache
         --setenv XDG_DATA_HOME /home/subject/.local/share --setenv XDG_STATE_HOME /home/subject/.local/state
         --setenv XDG_SESSION_TYPE wayland --setenv NIXOS_OZONE_WL 1 --setenv BROWSER false
+        --setenv SHELL /bin/sh --setenv USER subject --setenv LOGNAME subject
         --setenv DBUS_SYSTEM_BUS_ADDRESS unix:path=/tmp/run/no-system-bus
-        --setenv PLUTO_FAKE_MODEL "$PLUTO_FAKE_MODEL" --setenv PLUTO_FAKE_SCRIPT "$PLUTO_FAKE_SCRIPT")
-    for name in FAKE_SPEED FRAMES PROBE_WAIT PROBE_KEYS PROBE_CLICK BENCH_MAX_WAIT; do
+        --setenv PLUTO_FAKE_MODEL "$PLUTO_FAKE_MODEL" --setenv PLUTO_FAKE_SCRIPT "$PLUTO_FAKE_SCRIPT"
+        --setenv PLUTO_INPUT "$PLUTO_INPUT")
+    for name in THREADS FAKE_SPEED FRAMES PROBE_WAIT PROBE_INPUT PROBE_CLICK PROBE_CONSOLE BENCH_MAX_WAIT ROUTE_OUT; do
         [ -n "${!name:-}" ] && env+=(--setenv "$name" "${!name}")
     done
     # Its own process namespace: /proc shows the run's processes only, and its first process

@@ -20,10 +20,8 @@ subject_agents() { echo claude codex opencode; }
 subject_parts() { :; }
 
 subject_setup() {
-    mkdir -p "$HOME/.t3/userdata" "$HOME/project"
-    git -C "$HOME/project" init -q -b main
-    echo "# A project" > "$HOME/project/README.md"
-    git -C "$HOME/project" add . && git -C "$HOME/project" -c user.name=bench -c user.email=bench@example.invalid commit -qm init
+    mkdir -p "$HOME/.t3/userdata"
+    make_project
     cat > "$HOME/.t3/userdata/settings.json" <<JSON
 {
   "providerInstances": {
@@ -50,11 +48,11 @@ subject_start() {
 }
 
 # The first start shows a welcome page: its Start button is the second element from the end
-# (the last is the privacy policy's link). A new virtual keyboard may lose its first keys, so the
-# keys wait a little; then the page must be gone: T3 Code keeps the date it was dismissed.
+# (the last is the privacy policy's link). Then the page must be gone: T3 Code keeps the date it
+# was dismissed.
 dismiss_welcome() {
     sleep 20
-    wtype -s 300 -M shift -k Tab -s 100 -k Tab -m shift -s 100 -k Return -s 300
+    input "sleep 300" "key shift+Tab" "sleep 100" "key shift+Tab" "sleep 100" "key Return" "sleep 300"
     wait_for 15 grep -rqa --include='*settings.json' onboardingCompletedAt "$HOME" ||
         { echo "the welcome page was not dismissed"; return 1; }
 }
@@ -99,7 +97,7 @@ launch() {
 # The first start: the welcome page dismissed, the t3 command installed, the project added.
 subject_prepare() {
     wait_for 60 test -x "$HOME/.local/bin/t3" || { echo "the t3 command was not installed"; return 1; }
-    dismiss_welcome || { grim -s 0.25 "$run_dir/after-welcome.png"; return 1; }
+    dismiss_welcome || { shot after-welcome; return 1; }
     t3 project add "$HOME/project" --base-dir "$HOME/.t3" || return 1
     sleep 5
 }
@@ -118,10 +116,8 @@ subject_stream() {
 # lists none of the threads launched through its server, so `mod+1` finds nothing; its command
 # palette (`mod+k`) finds one by its title, the fake model's side answer (crates/pluto-fake-model/scripts/workload.json).
 subject_show() {
-    wtype -s 300 -M ctrl -k k -m ctrl -s 300
-    sleep 2
-    # The search, the choice and Enter in one wtype: a new virtual keyboard may lose its first keys.
-    wtype -s 300 "Looking at the project" -s 1500 -k Down -s 300 -k Return -s 300
+    input "sleep 300" "key ctrl+k" "sleep 2000" "type Looking at the project" "sleep 1500" "key Down" \
+        "sleep 300" "key Return" "sleep 300"
     sleep 3
 }
 

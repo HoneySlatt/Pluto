@@ -37,10 +37,8 @@ subject_setup() {
 
 # The fork's settings and the project, which pluto-opencode.sh extends.
 pluto_setup() {
-    mkdir -p "$HOME/pluto/userdata" "$HOME/project"
-    git -C "$HOME/project" init -q -b main
-    echo "# A project" > "$HOME/project/README.md"
-    git -C "$HOME/project" add . && git -C "$HOME/project" -c user.name=bench -c user.email=bench@example.invalid commit -qm init
+    mkdir -p "$HOME/pluto/userdata"
+    make_project
     cat > "$HOME/pluto/userdata/settings.json" <<JSON
 {
   "providerInstances": {
@@ -119,10 +117,9 @@ subject_stream() {
 }
 
 # The newest thread, first in the sidebar, opened in the window while it streams: its default
-# binding `mod+1` (`thread.jump.1`). Through the keyboard, not the pointer: each `wlrctl` call is a
-# new virtual pointer, whose click sway handles before the window has the pointer's focus.
+# binding `mod+1` (`thread.jump.1`).
 subject_show() {
-    wtype -s 300 -M ctrl -k 1 -m ctrl -s 300
+    input "sleep 300" "key ctrl+1" "sleep 300"
     sleep 3
 }
 

@@ -37,6 +37,11 @@ Terms this project uses in a sense of its own.
 - **Chat mode**: the fake model's mode for chat applications, which send no tool: a prompt that
   begins with `[turn N]` gets that turn's texts, without its tool calls
   ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
+- **The input tool**: `pluto-input`, the bench's one virtual keyboard and pointer for a whole run,
+  which drivers send commands to ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
+- **A valid run**: a run of the rivals' bench whose workload was the one measured: one window of
+  the subject when it is ready and when the measure ends, and, streaming, its 15 answers in flight
+  throughout ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 - **The headline memory**: a program's private memory, swap and GPU memory, summed over all its
   processes; the quality bar's memory figure since [ADR-0026](adr/0026-the-rivals-measured-how.md).
 - **The frame bench**: `examples/bench.rs`, which measures each frame's CPU cost of the client

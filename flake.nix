@@ -77,21 +77,28 @@
       ];
       # What scripts/measure.sh runs (docs/measurements.md): the heap by call stack, repeated
       # starts, wake-ups per thread, and a headless compositor for the client's real window. And
-      # what the rivals' bench runs (scripts/rivals/, docs/adr/0026-the-rivals-measured-how.md):
-      # its sandbox, its compositor on the GPU, the vendors' AppImages, and the agents' CLIs that
-      # Pluto and the multi-agent rivals drive, one version for all of them.
+      # what the rivals' bench runs (scripts/rivals/, docs/adr/0026-the-rivals-measured-how.md,
+      # docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md): its sandbox, its route out
+      # for preparing profiles (pasta), its compositor on the GPU, its keyring, the vendors'
+      # AppImages and images (fetched by skopeo, unpacked by umoci), the browser of the web
+      # rivals, and the agents' CLIs that Pluto and the multi-agent rivals drive, one version for
+      # all of them.
       measureTools = [
         pkgs.heaptrack
         pkgs.hyperfine
         pkgs.sysstat
         pkgs.weston
         pkgs.bubblewrap
+        pkgs.passt
         pkgs.sway
         pkgs.iproute2
-        pkgs.wtype
         pkgs.grim
-        pkgs.wlrctl
-        pkgs.appimage-run
+        pkgs.gnome-keyring
+        # libgpg-error, which Jan's binary links and appimage-run's environment lacks.
+        (pkgs.appimage-run.override { extraPkgs = p: [ p.libgpg-error ]; })
+        pkgs.skopeo
+        pkgs.umoci
+        pkgs.chromium
         pkgs.claude-code
         pkgs.codex
         pkgs.opencode

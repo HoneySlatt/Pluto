@@ -1,7 +1,8 @@
 # 0028. How the open rivals and the web chats are measured
 
 - Status: Accepted; amends [0026](0026-the-rivals-measured-how.md) (the runs per figure, LibreChat's
-  source, the profiles' network)
+  source, the profiles' network); amended by [0029](0029-the-benchs-tools-and-what-a-rivals-figure-holds.md)
+  (its tools, named)
 - Date: 2026-11-11
 
 ## Context

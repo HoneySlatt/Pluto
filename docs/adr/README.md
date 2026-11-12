@@ -36,7 +36,8 @@ New ADRs copy the template below and take the next free number.
 | [0025](0025-agents-sessions-recorded-and-replayed.md) | Agents' sessions recorded and replayed | Accepted; amends 0012 |
 | [0026](0026-the-rivals-measured-how.md) | How the rivals are measured | Accepted; amends 0014, 0015 and 0017; amended by 0028 |
 | [0027](0027-the-rivals-measures-set-aside.md) | The rivals' measures set aside until the owner's go | Accepted; amends 0017 |
-| [0028](0028-the-open-rivals-and-the-web-chats-measured.md) | How the open rivals and the web chats are measured | Accepted; amends 0026 |
+| [0028](0028-the-open-rivals-and-the-web-chats-measured.md) | How the open rivals and the web chats are measured | Accepted; amends 0026; amended by 0029 |
+| [0029](0029-the-benchs-tools-and-what-a-rivals-figure-holds.md) | The bench's tools for the six, and what a rival's figure holds | Accepted; amends 0028 |
 
 ## Template
 
