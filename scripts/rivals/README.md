@@ -47,8 +47,11 @@ GPU, asked for no browser, did not end early. Valid ([`validity.sh`](validity.sh
 `test-validity.sh` in `scripts/check.sh`): the subject showed exactly one window when it was ready
 and when the measure ended; each of its parts held a process; at rest, exactly 15 threads had
 begun; streaming, its 15 answers were in flight at both ends of the measure with none ended between
-them, read from the fake model's journal, and at least 1 % of the screen changed between both ends,
-as a thread shown streaming changes it. Its fingerprint says which check failed.
+them, read from the fake model's journal; and where the subject's file opens a thread in its window
+(`subject_show`), the screen changed by at least 1 % when it did, so that a click or a key that
+missed is not measured on an empty page. Some agents (Claude Code) give their text only when a
+segment ends: their thread changes little while it is measured, and that is their behaviour. Its
+fingerprint says which check failed.
 
 Scenarios:
 
@@ -86,7 +89,8 @@ threads named), `figures-<part>.json` for a subject split in parts, `frames.txt`
 `measured.png`, `fingerprint.txt` (versions and hashes, the frozen profile's hash, the input
 tool's and Chromium's, the machine, the network, the script's hash, the noise limit and the rest of
 the machine's load, the validity checks, the subject's command line as its program received it),
-`screen-ready.ppm` and `screen-done.ppm`, the fake model's journal `fake.jsonl`, and every log.
+`screen-before-show.ppm` and `screen-ready.ppm`, the fake model's journal `fake.jsonl`, and every
+log.
 
 `summary.sh <campaign-folder> <scenario>` gives each subject's medians and ranges as Markdown
 tables, its resources, then its start and its profile's growth, for
@@ -191,7 +195,7 @@ its probe: a new version that moves them is probed again.
 - Energy is not measured yet: it waits for the root sampler of M1.6c.
 - The pointer's places are the windows' layout of each version. A moved button makes a typed
   prompt's check fail, which stops the run; a moved button of `subject_show` leaves the screen
-  still, which the screen check rejects.
+  still, which the validity check rejects.
 - The Nix store is visible to the subjects, read-only, the owner's own configuration's files in it
   included, as on the machine ([ADR-0029](../../docs/adr/0029-the-benchs-tools-and-what-a-rivals-figure-holds.md)).
 - Preparing a profile online sends the owner's address to the vendors whose applications call home

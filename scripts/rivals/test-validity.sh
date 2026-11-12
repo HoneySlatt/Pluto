@@ -17,15 +17,13 @@ end_line() {
     printf '{"request":%s,"at_ms":1,"method":"POST","path":"/v1/messages","api":"anthropic","kind":"main","status":200,"turn":%s,"segment":%s,"ended_ms":2}\n' "$1" "$2" "$3"
 }
 
-# A run folder: its windows at both ends, two screenshots that differ wholly, and its journal, cut
-# at `ready` after its first `ready_lines` lines.
+# A run folder: its windows at both ends, and its journal, cut at `ready` after its first
+# `ready_lines` lines.
 make_run() {
     local dir=$work/$1 windows_ready=$2 windows_done=$3 ready_lines=$4
     mkdir -p "$dir"
     echo "$windows_ready" > "$dir/windows-ready.txt"
     echo "$windows_done" > "$dir/windows-done.txt"
-    head -c 1000 /dev/zero > "$dir/screen-ready.ppm"
-    head -c 1000 /dev/zero | tr '\0' 'x' > "$dir/screen-done.ppm"
     cat > "$dir/fake.jsonl"
     head -n "$ready_lines" "$dir/fake.jsonl" | wc -c > "$dir/journal-ready.offset"
     wc -c < "$dir/fake.jsonl" > "$dir/journal-done.offset"
@@ -74,17 +72,20 @@ expect "no journal" no "$dir" stream 15
 # The control streams nothing.
 dir=$(make_run control 1 1 0 < /dev/null)
 expect "the control, none expected" yes "$dir" stream 0
-# A screen that did not change: no thread shown streaming.
-dir=$(streams | make_run stream-still 1 1 45)
-cp "$dir/screen-ready.ppm" "$dir/screen-done.ppm"
-expect "a still screen" no "$dir" stream 15
-# A screen that changed a little: a caret, a clock.
-head -c 995 /dev/zero > "$dir/screen-done.ppm"
-printf 'xxxxx' >> "$dir/screen-done.ppm"
+# A thread opened in the window (`subject_show`): the screen changed wholly.
+dir=$(streams | make_run stream-shown 1 1 45)
+head -c 1000 /dev/zero > "$dir/screen-before-show.ppm"
+head -c 1000 /dev/zero | tr '\0' 'x' > "$dir/screen-ready.ppm"
+expect "a thread opened" yes "$dir" stream 15
+# The opening missed: the screen stayed, or a caret blinked.
+cp "$dir/screen-before-show.ppm" "$dir/screen-ready.ppm"
+expect "an opening that missed" no "$dir" stream 15
+head -c 995 /dev/zero > "$dir/screen-ready.ppm"
+printf 'xxxxx' >> "$dir/screen-ready.ppm"
 expect "a caret's change" no "$dir" stream 15
-# No screenshots at all.
-rm "$dir/screen-ready.ppm" "$dir/screen-done.ppm"
-expect "no screenshots" no "$dir" stream 15
+# No screenshot when ready.
+rm "$dir/screen-ready.ppm"
+expect "no screenshot when ready" no "$dir" stream 15
 # A part without a process: a server that died, an Xwayland not moved.
 dir=$(streams | make_run stream-part 1 1 45)
 printf 'app:12\nxwayland:0\n' > "$dir/parts-ready.txt"

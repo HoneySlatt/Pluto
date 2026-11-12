@@ -41,8 +41,8 @@ Terms this project uses in a sense of its own.
   which drivers send commands to ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 - **A valid run**: a run of the rivals' bench whose workload was the one measured: one window of
   the subject when it is ready and when the measure ends, a process in each of its parts, its 15
-  threads at rest, or, streaming, its 15 answers in flight throughout and its screen changing as a
-  thread streams in it ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md),
+  threads at rest, or, streaming, its 15 answers in flight throughout and, where the bench opens a
+  thread in its window, its screen changed by that opening ([ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md),
   `scripts/rivals/validity.sh`). A calm run is also on the GPU, with no browser asked for and no
   early end; `summary.sh` keeps only runs both calm and valid.
 - **A frozen profile**: a subject's home after its first start (`prepare`), from which every run

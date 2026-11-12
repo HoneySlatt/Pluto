@@ -14,26 +14,31 @@ main_begun() { journal_at "$1" "$2" | grep -c '^{"begin":' || true; }
 main_ended() { journal_at "$1" "$2" | grep -c '"kind":"main"' || true; }
 threads_begun() { journal_at "$1" "$2" | grep -c '^{"begin":.*"segment":0}$' || true; }
 
-# How much of the screen changed between both ends of the measure, in percent of the bytes of its
-# screenshots (lib.sh's `at_bounds`); 0 without them.
-screen_change() {
+# How much the screen changed when the subject's file opened a streaming thread
+# (`subject_show`), in percent of the bytes of its screenshots before and when ready (lib.sh); 0
+# without them.
+show_change() {
     local size changed
-    size=$(stat -c %s "$1/screen-ready.ppm" 2>/dev/null || echo 0)
-    [ "$size" -gt 0 ] && [ -s "$1/screen-done.ppm" ] || { echo 0; return; }
-    changed=$(cmp -l "$1/screen-ready.ppm" "$1/screen-done.ppm" 2>/dev/null | wc -l)
+    size=$(stat -c %s "$1/screen-before-show.ppm" 2>/dev/null || echo 0)
+    [ "$size" -gt 0 ] && [ -s "$1/screen-ready.ppm" ] || { echo 0; return; }
+    changed=$(cmp -l "$1/screen-before-show.ppm" "$1/screen-ready.ppm" 2>/dev/null | wc -l)
     awk -v c="$changed" -v s="$size" 'BEGIN { printf "%.2f", 100 * c / s }'
 }
 
-# The least share of the screen a streaming thread changes over the measure, in percent.
-SCREEN_CHANGE_MIN=${SCREEN_CHANGE_MIN:-1}
+# The least share of the screen that opening a thread changes, in percent: a thread replaces a
+# page; a click or a key that missed changes a caret or a clock.
+SHOW_CHANGE_MIN=${SHOW_CHANGE_MIN:-1}
 
 # The checks, as fingerprint lines, the last `valid: yes` or `valid: no`. A run is valid when:
 # - the subject showed exactly one window when it was ready and when the measure ended;
 # - each of its parts held a process when it was ready (a server that died, an Xwayland not moved);
 # - at rest, exactly `expected` threads had begun by then: none lost, none typed twice;
 # - streaming, `expected` answers were in flight at both ends and none ended between them, so that
-#   they all streamed for the whole measure; and at least SCREEN_CHANGE_MIN percent of the screen
-#   changed, as a thread shown streaming changes it.
+#   they all streamed for the whole measure;
+# - streaming, where the subject's file opens a thread in its window (`subject_show`), the screen
+#   changed by at least SHOW_CHANGE_MIN percent when it did: the thread was opened. Some agents
+#   give their text only once a segment ends (Claude Code's), so a thread shown may change little
+#   while it is measured; what is checked is that it was opened.
 # A run that fails is left out, as a noisy one.
 # usage: validity <run-folder> <scenario> <expected threads>
 validity() {
@@ -59,12 +64,10 @@ validity() {
         ended=$(($(main_ended "$dir" "done") - $(main_ended "$dir" ready)))
         echo "streams_in_flight: $at_ready at ready, $at_end at the end, $ended ended between"
         { [ "$at_ready" = "$expected" ] && [ "$at_end" = "$expected" ] && [ "$ended" = 0 ]; } || valid=no
-        # A thread shown while it streams changes the screen: an empty page, a list, a dialog
-        # barely do (a caret, a clock).
-        if [ "$expected" -gt 0 ]; then
-            at_ready=$(screen_change "$dir")
-            echo "screen_changed: $at_ready% of its bytes (at least $SCREEN_CHANGE_MIN%)"
-            awk -v c="$at_ready" -v m="$SCREEN_CHANGE_MIN" 'BEGIN { exit !(c >= m) }' || valid=no
+        if [ -e "$dir/screen-before-show.ppm" ]; then
+            at_ready=$(show_change "$dir")
+            echo "shown: the screen changed by $at_ready% (at least $SHOW_CHANGE_MIN%)"
+            awk -v c="$at_ready" -v m="$SHOW_CHANGE_MIN" 'BEGIN { exit !(c >= m) }' || valid=no
         fi
         ;;
     esac

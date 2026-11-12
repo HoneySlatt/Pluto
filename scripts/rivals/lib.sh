@@ -312,11 +312,11 @@ count_windows() {
 }
 
 # What run.sh's validity checks read (validity.sh), at one end of the measure (`ready` or `done`):
-# the subject's windows, the processes of each of its parts, the screen, and how far the fake
-# model's journal had gone, which tells the answers in flight then.
+# the subject's windows, the processes of each of its parts, the screen when it is ready, and how far
+# the fake model's journal had gone, which tells the answers in flight then.
 at_bounds() {
     count_windows > "$run_dir/windows-$1.txt" 2>/dev/null || echo unknown > "$run_dir/windows-$1.txt"
-    grim -t ppm -s 0.25 "$run_dir/screen-$1.ppm" 2>/dev/null || true
+    [ "$1" = ready ] && grim -t ppm -s 0.25 "$run_dir/screen-ready.ppm" 2>/dev/null
     # The subject's main program as it was started, its wrappers' own switches included.
     [ "$1" = ready ] && tr '\0' ' ' < "/proc/$(cat "$run_dir/subject.pid")/cmdline" > "$run_dir/command.txt" 2>/dev/null
     true
@@ -395,7 +395,14 @@ bench_inside() {
         rest) subject_open "$THREADS" && sleep 10 ;;
         # The stream is measured with one streaming thread open in the window, where the subject
         # can show one.
-        stream) subject_stream "$THREADS" && { ! declare -F subject_show > /dev/null || subject_show; } ;;
+        # The screen before the thread is opened: validity.sh checks the opening changed it.
+        stream)
+            subject_stream "$THREADS" || exit 1
+            if declare -F subject_show > /dev/null; then
+                grim -t ppm -s 0.25 "$run_dir/screen-before-show.ppm"
+                subject_show
+            fi
+            ;;
         # What a subject's first start needs, before its home is frozen (subject_prepare, or 20 s).
         prepare) if declare -F subject_prepare > /dev/null; then subject_prepare; else sleep 20; fi ;;
         # For writing a subject's file: the subject starts, then a screenshot of the screen, at a
