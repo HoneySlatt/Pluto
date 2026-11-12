@@ -241,23 +241,36 @@ fn parse_options() -> Result<Options, String> {
     })
 }
 
-/// Plays every line of the pipe, for as long as the compositor lives.
-fn serve(commands: &Path, devices: &mut Devices) -> Result<(), String> {
-    // Read and write: with a writer of its own, the pipe never reaches its end.
-    let pipe = OpenOptions::new()
+/// Opens the commands' pipe for reading and writing: with a writer of its own, it never reaches
+/// its end, however many writers come and go.
+fn open_pipe(commands: &Path) -> Result<File, String> {
+    OpenOptions::new()
         .read(true)
         .write(true)
         .open(commands)
-        .map_err(|error| format!("cannot open {}: {error}", commands.display()))?;
-    for line in BufReader::new(pipe).lines() {
-        let line = line.map_err(|error| format!("cannot read the commands: {error}"))?;
+        .map_err(|error| format!("cannot open {}: {error}", commands.display()))
+}
+
+/// Plays every line of the pipe, for as long as the compositor lives. A line that is not valid
+/// UTF-8 is reported and skipped, as any command that cannot be read.
+fn serve(pipe: File, devices: &mut Devices) -> Result<(), String> {
+    let mut reader = BufReader::new(pipe);
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        let read = reader
+            .read_until(b'\n', &mut bytes)
+            .map_err(|error| format!("cannot read the commands: {error}"))?;
+        if read == 0 {
+            return Ok(());
+        }
+        let line = String::from_utf8_lossy(&bytes);
         match parse_line(&line) {
             Ok(Some(command)) => devices.play(command)?,
             Ok(None) => {}
             Err(message) => eprintln!("pluto-input: {line:?}: {message}; skipped"),
         }
     }
-    Ok(())
 }
 
 fn main() -> ExitCode {
@@ -269,9 +282,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Ready once both the devices and the pipe are: a command written then is played.
     let result = Devices::connect(options.size).and_then(|mut devices| {
+        let pipe = open_pipe(&options.commands)?;
         eprintln!("pluto-input: ready");
-        serve(&options.commands, &mut devices)
+        serve(pipe, &mut devices)
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -261,3 +261,43 @@ fn a_chat_text_joins_the_turns_texts_and_wraps_around() {
     );
     assert_eq!(script.chat_text(3), "Turn one.");
 }
+
+/// The rivals' bench reads the journal with `grep` (scripts/rivals/lib.sh, validity.sh): the text of
+/// its lines, field order included, is a contract, kept here and in test-validity.sh.
+#[test]
+fn the_journal_lines_keep_their_text() {
+    let dir = std::env::temp_dir().join(format!("pluto-fake-model-text-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("journal.jsonl");
+    let _ = std::fs::remove_file(&path);
+    let handle = start(SCRIPT, false, Some(path.clone()));
+    post(
+        handle.addrs[0],
+        "/v1/messages",
+        &json!({"model": "m", "max_tokens": 5,
+            "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            "messages": [{"role": "user", "content": "[turn 0] x"}]}),
+    );
+    handle.stop();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    let at = lines[0]
+        .strip_prefix("{\"begin\":1,\"at_ms\":")
+        .and_then(|rest| rest.split_once(','))
+        .map(|(ms, rest)| (ms.parse::<u64>().is_ok(), rest))
+        .unwrap_or_else(|| panic!("{}", lines[0]));
+    assert_eq!(
+        at,
+        (true, "\"api\":\"anthropic\",\"turn\":0,\"segment\":0}"),
+        "{}",
+        lines[0]
+    );
+    assert!(lines[1].starts_with("{\"request\":1,"), "{}", lines[1]);
+    assert!(
+        lines[1].contains("\"kind\":\"main\",\"status\":200,\"turn\":0,\"segment\":0,"),
+        "{}",
+        lines[1]
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
