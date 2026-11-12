@@ -1,0 +1,14 @@
+[package]
+name = "pluto-input"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "The rivals' bench's keyboard and pointer: one virtual keyboard and one virtual pointer for a whole run, driven by commands read from a pipe."
+
+[dependencies]
+# The Wayland client and the two protocols of virtual input that sway offers; already built into
+# Pluto through eframe (docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md).
+wayland-client = "0.31"
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
