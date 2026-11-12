@@ -1,0 +1,25 @@
+# The vendors' packages and images the rivals' bench runs (scripts/rivals/README.md), each fetched
+# once by fetch.sh and checked against its digest here. A new version is a new line, fetched, its
+# subject's profile prepared again.
+#
+# name: what a subject's file and fetch.sh call it; kind: appimage (unpacked by appimage-run),
+# archive (a .tar.gz unpacked), file (kept as is), or image (an OCI image, copied by skopeo for
+# linux/amd64 and unpacked by umoci); version: the vendor's; source: the URL, or the image's reference; digest: the
+# file's SHA-256, or the image's manifest for linux/amd64, pinned by it.
+#
+# name                  kind      version   source                                                                                          digest
+t3code                  appimage  0.1.8     https://github.com/pingdotgg/t3code/releases/download/v0.1.8/T3-Code-0.1.8-x86_64.AppImage           sha256:e117698be4cc59e5ec1416c51dfd442a53efa3141977bc20cbd0d81fd3fd5824
+zed                     archive   1.27.0    https://github.com/zed-industries/zed/releases/download/v1.27.0/zed-linux-x86_64.tar.gz             sha256:719f6bf649ea8d87961adbf728e178561bac3f598d72d7949558d1150cfc43dd
+opencode-desktop        appimage  2.2.7     https://github.com/anomalyco/opencode/releases/download/v2.2.7/opencode-desktop-linux-x86_64.AppImage sha256:8a54709fde6e596497059fab6162b5231edf26ed612ff1d23d0b1d517828fed0
+emdash                  appimage  1.2.11    https://github.com/generalaction/emdash/releases/download/v1.2.11/emdash-x86_64.AppImage             sha256:8d2187e93fbd5537aa8a5c4bde2d2e70de71c542d0e5ebc8daa4b52690e098a8
+nimbalyst               appimage  0.83.0    https://github.com/Nimbalyst/nimbalyst/releases/download/v0.83.0/Nimbalyst-Linux.AppImage            sha256:8f5614d0215f8e2af761c04f81b098454f88b7111046679537d43a5fe512dc2f
+jan                     appimage  0.8.8     https://github.com/janhq/jan/releases/download/v0.8.8/Jan_0.8.8_amd64.AppImage                      sha256:ef98314c0230e3066235fd195ff1ffdf652b85b264bbd9ddf337f99d077c9159
+open-webui-slim         image     0.13.3    ghcr.io/open-webui/open-webui:v0.13.3-slim                                                      sha256:de69a0181effe6c3c319fdb0258b15ed7dab07b972b9012951b4a5eb6bab6b22
+open-webui              image     0.13.3    ghcr.io/open-webui/open-webui:v0.13.3                                                           sha256:e731360d9e6eeb25482d90cf3d564ce81a1c4a10e6a84ed9e6c63aa7ac48b0b6
+librechat               image     0.8.8     registry.librechat.ai/librechat-ai/librechat:v0.8.8                                             sha256:1e3bd3ac2cdbbcd64bdc4ef04c850d6fef5392d1fcb22cea46c5dcba17da7b95
+mongo                   image     8.0.20    docker.io/library/mongo:8.0.20                                                                  sha256:972a9fa5d0f06418faa85d3f831ebba14e203a55dee5cd2dbcaf09490d2eff31
+librechat-admin-panel   image     latest    registry.librechat.ai/clickhouse/librechat-admin-panel:latest                                   sha256:65e3d3f0a2dd1afc9388c2ad87423e8ac683d132707c00a2062573173b38d184
+meilisearch             image     1.35.1    docker.io/getmeili/meilisearch:v1.35.1                                                          sha256:f8d986130128f830e4439f31add56033d74a34bb8942b50b93ff9630289d761c
+pgvector                image     0.8.0     docker.io/pgvector/pgvector:0.8.0-pg15-trixie                                                   sha256:7ed468f55926b0284a51848dcb2d7a4cc645581a508f6293956f1fca51bdeceb
+librechat-rag-api       image     latest    registry.librechat.ai/librechat-ai/librechat-rag-api-dev-lite:latest                            sha256:3577689eedb1a74d4de69d70cee70b4cd42a9375ad74cdd5238ffc19a97392e3
+librechat-env           file      0.8.8     https://raw.githubusercontent.com/LibreChat-AI/LibreChat/v0.8.8/.env.example sha256:3f4adea5852d54599b28ab46ca073074884dcad5f78fbc09b0b9bc15641e7cba
