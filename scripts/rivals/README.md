@@ -126,12 +126,15 @@ systemd-run --user --unit=pluto-rivals-campaign --working-directory="$PWD" --col
 ```
 
 `campaign.sh <subject> [<default-deployment>]` is one subject's campaign as
-[ADR-0028](../../docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md) sets it: `RUNS` (3)
-runs at rest and streaming, the anchors `chromium-blank` and `pluto` run once each beside them, a
-web rival's default deployment at rest only, then its frames' runs (`FRAMES=1`, 120 seconds at rest,
-the stream's 45). It first waits until no other `pluto-rivals-*` unit runs, so several campaigns
-can be chained in one service: `bash -c 'for s in emdash jan; do scripts/rivals/campaign.sh $s;
-done'`. A run that is noisy or not valid is not run again: a later campaign makes up the count.
+[ADR-0028](../../docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md) sets it: runs at rest
+and streaming until `RUNS` (3) of each are kept, calm and valid, the anchors `chromium-blank` and
+`pluto` run once each beside them, a web rival's default deployment at rest only; then one kept
+run of each scenario that counts frames (`FRAMES=1`, 120 seconds at rest, the stream's 45). The
+runs already kept under `OUT`, by any campaign, count; it makes at most `TRIES` (8) runs for one
+count, so that a busy machine cannot hold it for ever. It first waits until no other
+`pluto-rivals-*` unit runs, so several campaigns can be chained in one service: `bash -c 'for s
+in emdash jan; do scripts/rivals/campaign.sh $s; done'`. Which runs are kept is `validity.sh`'s
+`run_kept`, which `summary.sh` reads too.
 
 The vendors' packages and images are listed in [`manifest.txt`](manifest.txt), each with its
 version, its source and its digest. `fetch.sh <name>...` downloads them once, by hand, after the

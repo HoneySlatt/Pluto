@@ -73,3 +73,19 @@ validity() {
     esac
     echo "valid: $valid"
 }
+
+# Whether a run's figures may be kept, from its fingerprint: it was calm (or KEEP_NOISY=1, for runs
+# whose noise flag is known to be wrong), its subject rendered on the GPU, asked for no browser and
+# did not end early, and its workload was the one measured. Read by summary.sh and campaign.sh.
+run_kept() {
+    local fingerprint=$1/fingerprint.txt
+    [ -f "$1/figures.json" ] || return 1
+    { [ "${KEEP_NOISY:-0}" = 1 ] || grep -q '^noisy: no' "$fingerprint"; } &&
+        grep -q '^gpu: used' "$fingerprint" &&
+        ! grep -q -E '^(browser|ended_early_at_ms):|^valid: no' "$fingerprint"
+}
+
+# Whether a run counted its frames (FRAMES=1), which slowed its compositor: only its frames are kept.
+counted_frames() {
+    grep -q '^frames_counted: 1' "$1/fingerprint.txt"
+}

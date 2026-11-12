@@ -23,6 +23,9 @@
 # slows it. With KEEP_NOISY=1 noisy runs count too, for runs whose noise flag is known to be wrong
 # (the README).
 set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=validity.sh
+source "$here/validity.sh"
 
 folder=$1
 scenario=$2
@@ -60,19 +63,6 @@ value() {
     for run in "$@"; do sed -n "s/^$key: \([-0-9.]*\)$/\1/p" "$run/$file" 2>/dev/null; done | median_range
 }
 
-# Whether a run's figures may be kept.
-is_calm() {
-    local fingerprint=$1/fingerprint.txt
-    { [ "${KEEP_NOISY:-0}" = 1 ] || grep -q '^noisy: no' "$fingerprint"; } &&
-        grep -q '^gpu: used' "$fingerprint" &&
-        ! grep -q -E '^(browser|ended_early_at_ms):|^valid: no' "$fingerprint"
-}
-
-# Whether a run counted its frames, which slowed its compositor.
-counted_frames() {
-    grep -q '^frames_counted: 1' "$1/fingerprint.txt"
-}
-
 # A subject's calm runs of the scenario, into `runs`; those left out counted into `left_out`. With
 # `frames`, the runs that counted frames, otherwise the others.
 calm_runs() {
@@ -82,7 +72,7 @@ calm_runs() {
     for run in "$subject_dir$scenario"-*; do
         [ -f "$run/figures.json" ] || continue
         if [ "$kind" = frames ]; then counted_frames "$run" || continue; else ! counted_frames "$run" || continue; fi
-        if is_calm "$run"; then runs+=("$run"); else left_out=$((left_out + 1)); fi
+        if run_kept "$run"; then runs+=("$run"); else left_out=$((left_out + 1)); fi
     done
 }
 
