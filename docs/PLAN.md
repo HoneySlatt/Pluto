@@ -291,30 +291,37 @@ verifiable step before its end.
     `StructuredOutput` tool). Before, every structured title failed on the fake model and was
     asked again of other models: M1.6a's request counts for Pluto and T3 Code were inflated.
   - Frozen profiles (`run.sh prepare`), the start to the first window and the profile's growth in
-    every run; a streaming thread opened in Pluto's window by `mod+1` and in T3 Code's through its
-    command palette (a pointer's click is lost: each `wlrctl` call is a new virtual pointer);
+    every run; a streaming thread opened in Pluto's window by `mod+1`, and in T3 Code's through its
+    command palette, tried in one trial run only (a pointer's click is lost: each `wlrctl` call is
+    a new virtual pointer);
     Zed's driver waits for each prompt to reach the fake model and types a lost one again; T3
     Code's driver tries once more when its server stays silent under load.
   - Pluto with Codex (`pluto-codex`) and with OpenCode (`pluto-opencode`, over Chat Completions)
     as its agent.
   - The cause of the client's frames at rest: the logo's moon, stepping every 1.25 s, which egui
-    turned into six frames a step. By the owner's choice of 2026-11-11 the moon is still: 4 frames
-    in 2 minutes at rest instead of about 580, 3.3 wake-ups a second instead of 31.
+    turned into six frames a step. By the owner's choice of 2026-11-11 the moon is still.
 
-  The campaign ran on 2026-11-11 while other sessions loaded the machine: 7 of 31 resource runs
-  are calm. By the owner's decision of 2026-11-14 the milestone closes with every run's figures,
-  marked provisional ([`measurements.md`](measurements.md#the-rivals-bench-m16b1-provisional)),
+  The campaign ran on 2026-11-11 while other sessions loaded the machine. By the owner's decision
+  of 2026-11-14 the milestone closes with every run's figures, marked provisional
+  ([`measurements.md`](measurements.md#the-rivals-bench-m16b1-provisional)),
   and three calm runs a figure of `pluto`, `pluto-codex`, `pluto-opencode`, `t3code` and `zed`,
   T3 Code streaming and its frames streaming among them, are taken with M1.6b2's campaigns.
+  Pluto's start there must leave out the bench's own token step, which M1.6b1's figure holds.
+- **Closing review (2026-11-14).** It found the documents wrong where M1.6b1's commits had left
+  them: Pluto's start holding the bench's token step, a stream comparison of unequal work (Claude
+  Code and Codex show no text until a segment ends), M1.6a's request counts read the wrong way,
+  memory lowered by swap on the loaded machine, T3 Code's missing stream explained wrongly, PSS
+  missing; all are corrected in `measurements.md`. What it found in the bench is in the debt.
 
 #### M1.6b2 — The open rivals and the chats
 
 - **Goal.** Every open rival and chat that takes an endpoint has its figures.
 - **Delivers.** OpenCode Desktop, Emdash, Nimbalyst, Jan, Open WebUI and LibreChat measured at rest
   and streaming, three runs a figure, or a written reason. Open WebUI and LibreChat are web
-  applications: which browser serves them in the bench, and how it is counted, is put to the owner
-  first. Also the three calm runs a figure that M1.6b1 left for Pluto (with each of its three
-  agents), T3 Code and Zed.
+  applications: which browser serves them and how it is counted is decided in
+  [ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md), which splits M1.6b2 in two:
+  M1.6b2a readies the bench, M1.6b2b runs the campaigns. Also the three calm runs a figure that
+  M1.6b1 left for Pluto (with each of its three agents), T3 Code and Zed.
 - **Done when.** Each has its figures, or a written reason.
 
 #### M1.6b3 — The long thread and real days
@@ -427,14 +434,21 @@ verifiable step before its end.
   Left as they are: they are caches, and the owner's own runs write them too.
 - The rivals' bench found in today's Pluto at rest after 15 threads
   ([`measurements.md`](measurements.md#the-rivals-bench-m16a)): the egui client wakes 31 times a
-  second (its main thread and its clipboard thread), most of it following the frames the logo's
-  moon drew, still since M1.6b1; every Claude Code session the fork started stays alive, about
+  second in M1.6a, 3.3 since M1.6b1 made the logo's moon still; every Claude Code session the fork started stays alive, about
   1.45 GiB and 325 wake-ups a second for 15; the fork's titles go through Codex, about 54 KB sent
   per title request. The fork leaves in Stage 2; the client is frozen except fixes.
 - The egui client still draws 2 frames a minute at rest: its 30-second tick of relative times
   (`src/app.rs`). And egui shortens every delayed repaint by a predicted frame, so a countdown
   that asks again on each frame (a tooltip's delay, a draft's save) ends in a burst of a few
   frames rather than one. Neither runs at rest for long; followed by the uwui client.
+- The rivals' bench, as M1.6b1's closing review found it: a frozen profile is checked against the
+  subject's binaries only, not its setup; a subject still running 20 s after its stop is only
+  logged; a run with no window counts with `first_window_ms: none`, which `summary.sh` skips
+  silently; a campaign reads the live checkout and `target/release`, and the fingerprint hashes
+  neither the fake model nor `pluto-measure`, and checks `src/` for no change; Zed's and T3 Code's
+  retries could double a slow prompt; `summary.sh` prints large numbers as `1.343e+04`; a store
+  path is parsed three ways (`run.sh`'s `store_name`, `pluto.sh`'s `package_of`, `t3code.sh`).
+  None changed a figure of M1.6b1. Followed by M1.6b2's campaigns.
 - The rivals' bench counts frames but cannot judge them on time, and has no energy yet
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Its scripts are not linted: `shellcheck` is
   not in the Nix shell, as for M1.5's.

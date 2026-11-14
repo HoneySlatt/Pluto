@@ -118,7 +118,10 @@ mod tests {
     use super::*;
 
     /// The draft hero shows the logo while the client rests: once egui's first
-    /// passes have settled, drawing it must ask for no further frame.
+    /// passes have settled, drawing it must ask for no further frame. This
+    /// checks the logo alone; the moon's old request sat in the hero
+    /// (`chat.rs`), whose frames at rest the rivals' bench counts
+    /// (`docs/measurements.md`).
     #[test]
     fn the_logo_asks_for_no_repaint() {
         let ctx = egui::Context::default();

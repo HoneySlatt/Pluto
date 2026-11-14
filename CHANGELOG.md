@@ -16,6 +16,8 @@ What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.
 
 ### Changed
 
+- The logo above the new-thread page no longer moves its moon. Its step every 1.25 s made the
+  client draw about five frames a second at rest; it now draws two a minute there.
 - An answer's images, its links' icons and its tools' icons load by themselves only from a site
   its web searches and fetches returned, over HTTPS, without a query string, and never from a
   local or private address. Any other image shows a "Load image from …" chip and loads on a click,
