@@ -38,7 +38,10 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   set the rivals' measures aside until a go of theirs
   ([ADR-0027](adr/0027-the-rivals-measures-set-aside.md)), then gave it the same day: Pluto, T3
   Code and Zed now have their figures at rest and streaming. On 2026-11-11 the owner split M1.6b
-  in three; next: [M1.6b1](#m16b1--the-bench-finished-on-three-subjects).
+  in three; [M1.6b1](#m16b1--the-bench-finished-on-three-subjects) finished the bench, its
+  figures provisional (the machine was loaded); next:
+  [M1.6b2](#m16b2--the-open-rivals-and-the-chats), decided in
+  [ADR-0028](adr/0028-the-open-rivals-and-the-web-chats-measured.md).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md), for SlimeEngine's M6d.9a, M6d.9b
   and M6d.10.
 
@@ -52,7 +55,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | [M1.4](#m14--the-cuts) | The egui client and the Android app lose what the triage cuts | Done; its start to measure again on an idle machine |
 | [M1.5](#m15--agents-sessions-recorded) | Recorded agent sessions that drivers' tests can replay | Built; 2 of 11 recordings made, the 9 left set aside by the owner |
 | [M1.6a](#m16a--the-fake-model-and-the-rivals-bench) | The fake model and the bench, calibrated on Pluto, T3 Code and Zed | Done; stopped by the owner after two runs at rest, the rest moved to M1.6b |
-| [M1.6b1](#m16b1--the-bench-finished-on-three-subjects) | The bench finished on Pluto, T3 Code and Zed; Chat Completions in the fake model | In progress |
+| [M1.6b1](#m16b1--the-bench-finished-on-three-subjects) | The bench finished on Pluto, T3 Code and Zed; Chat Completions in the fake model | Done; its figures provisional, the calm runs moved to M1.6b2 |
 | [M1.6b2](#m16b2--the-open-rivals-and-the-chats) | The open rivals and the chats measured at rest and streaming | Planned |
 | [M1.6b3](#m16b3--the-long-thread-and-real-days) | The long thread in each application, and real days side by side | Planned |
 | [M1.6c](#m16c--the-vendors-applications-energy-frames-and-the-bar) | The vendors' applications, energy, frames; the bar tightened | Planned |
@@ -281,40 +284,28 @@ verifiable step before its end.
   figure has three calm runs per subject in `measurements.md`, or a written reason.
 - **How to test.** `cargo test -p pluto-fake-model -p pluto-measure`; the bench's runs, on the
   desktop.
-- **Where it stands (2026-11-11).** Built and committed:
+- **Done (2026-11-14), its figures provisional.** Built and committed:
   - Chat Completions in the fake model, its usage streamed only when asked, as OpenAI documents.
   - Structured side answers: a title request that asks for JSON gets JSON fitting its schema
     (Responses' `text.format`, Chat Completions' `response_format`, Ollama's `format`, Claude's
-    `StructuredOutput` tool). Before, every structured title failed on the fake model, and Pluto's
-    server retried it on Codex three times, then on Claude, then on OpenCode, which played the
-    whole turn again: M1.6a's request counts for Pluto and T3 Code were inflated by it.
+    `StructuredOutput` tool). Before, every structured title failed on the fake model and was
+    asked again of other models: M1.6a's request counts for Pluto and T3 Code were inflated.
   - Frozen profiles (`run.sh prepare`), the start to the first window and the profile's growth in
-    every run; a streaming thread opened in Pluto's and T3 Code's windows by `mod+1` (a pointer's
-    click is lost: each `wlrctl` call is a new virtual pointer); Zed's driver waits for each prompt
-    to reach the fake model and types a lost one again.
+    every run; a streaming thread opened in Pluto's window by `mod+1` and in T3 Code's through its
+    command palette (a pointer's click is lost: each `wlrctl` call is a new virtual pointer);
+    Zed's driver waits for each prompt to reach the fake model and types a lost one again; T3
+    Code's driver tries once more when its server stays silent under load.
   - Pluto with Codex (`pluto-codex`) and with OpenCode (`pluto-opencode`, over Chat Completions)
-    as its agent: both ran their 15 turns with their tools in the bench.
+    as its agent.
   - The cause of the client's frames at rest: the logo's moon, stepping every 1.25 s, which egui
-    turned into six frames a step. By the owner's choice of 2026-11-11 the moon is still: 2 frames
-    a minute at rest instead of 290, 3.2 wake-ups a second instead of 31 (measured by the
-    reader in the bench; the campaign measures it again).
+    turned into six frames a step. By the owner's choice of 2026-11-11 the moon is still: 4 frames
+    in 2 minutes at rest instead of about 580, 3.3 wake-ups a second instead of 31.
 
-  The campaign (`pluto`, `pluto-codex`, `pluto-opencode`, `t3code`, `zed`, three runs at rest and
-  three streaming, then the frames' own runs) ran on 2026-11-11 from 19:15 to 22:12, its results
-  under `/tmp/pluto-rivals/` (the campaign folders from `2026-11-11-191458` on). Other sessions
-  loaded the machine throughout: most runs are noisy. Calm runs so far, of three wanted: at rest,
-  Pluto 1, the others 0; streaming, Pluto 2, Pluto with Codex 2, with OpenCode 1, Zed 1, T3 Code 0.
-  T3 Code's campaign stream runs showed no thread (its sidebar lists none of the threads its
-  server launched); they are set aside as `no-thread-shown-stream-*`, and its driver now opens
-  one through its command palette. The frames' runs are done for every subject but T3 Code
-  streaming. A run to complete them stopped at the owner's word on 2026-11-11 at 23:30, until the
-  machine rests.
-
-  Next, on a resting machine: run each subject and scenario again, one run at a time
-  (`BUSY_LIMIT=0.6 CALM_WAIT=120 scripts/rivals/run.sh rest 1 <subject>`, `MEASURE_SECONDS=300`;
-  `stream` likewise), until each has three calm runs, and `FRAMES=1 scripts/rivals/run.sh stream 1
-  t3code`; then the figures in `measurements.md` (summary.sh over the calm runs gathered in one
-  folder), the correction of M1.6a's request counts there, and the closing review.
+  The campaign ran on 2026-11-11 while other sessions loaded the machine: 7 of 31 resource runs
+  are calm. By the owner's decision of 2026-11-14 the milestone closes with every run's figures,
+  marked provisional ([`measurements.md`](measurements.md#the-rivals-bench-m16b1-provisional)),
+  and three calm runs a figure of `pluto`, `pluto-codex`, `pluto-opencode`, `t3code` and `zed`,
+  T3 Code streaming and its frames streaming among them, are taken with M1.6b2's campaigns.
 
 #### M1.6b2 — The open rivals and the chats
 
@@ -322,7 +313,8 @@ verifiable step before its end.
 - **Delivers.** OpenCode Desktop, Emdash, Nimbalyst, Jan, Open WebUI and LibreChat measured at rest
   and streaming, three runs a figure, or a written reason. Open WebUI and LibreChat are web
   applications: which browser serves them in the bench, and how it is counted, is put to the owner
-  first.
+  first. Also the three calm runs a figure that M1.6b1 left for Pluto (with each of its three
+  agents), T3 Code and Zed.
 - **Done when.** Each has its figures, or a written reason.
 
 #### M1.6b3 — The long thread and real days

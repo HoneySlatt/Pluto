@@ -327,8 +327,10 @@ agents' processes parse them.
 From the fake model's journal of a first campaign's rest runs, the same day at `04087f4`, in
 bytes, which stand for tokens until Stage 2 ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
 That campaign's resource figures were not kept (its review found a browser counted in T3 Code's,
-and unequal streams), but what the clients send does not depend on them. A turn's first request; then every other
-request of the 15 short turns, titles and summaries among them.
+and unequal streams). A turn's first request; then every other request of the 15 short turns,
+titles and summaries among them. The counts of other requests are wrong for Pluto and T3 Code:
+the fake model then answered a title asked as JSON with plain text, so each title failed and was
+asked again of other models. [M1.6b1's counts](#what-each-request-carries-m16b1) replace them.
 
 | Subject | A turn's first request | Of it: instructions | Of it: tools | Tools offered | Other requests for 15 turns |
 |---|---|---|---|---|---|
@@ -350,10 +352,99 @@ three a thread; and 90 of Claude Code's own, about 10 KB each, two a thread, whi
 
 ### What is not measured yet
 
-- The start to the first frame and the profile's growth: the bench does not take them yet.
+- The start to the first frame and the profile's growth: taken since M1.6b1
+  ([below](#the-rivals-bench-m16b1-provisional)).
 - Frames on time: the headless compositor's clock is no display's
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)); frames are counted only.
 - Energy: it waits for the root sampler of M1.6c.
+
+## The rivals' bench, M1.6b1 (provisional)
+
+Pluto, its two other agents, T3 Code and Zed measured again on 2026-11-11 by
+`scripts/rivals/run.sh` from `b4c4a9d` on, each run from a frozen profile, with the start to the
+first window, the profile's growth and, streaming, one streaming thread open in the window
+([the bench's README](../scripts/rivals/README.md)). The subjects and their versions are
+[M1.6a's](#the-rivals-bench-m16a), with Pluto's client after the logo's moon was made still
+(sha256 `5f6e1b236f488fae` → its rebuild at `5ab98e1`), and two more:
+
+| Subject | What runs |
+|---|---|
+| Pluto with Codex | the fork and the egui client; Codex 0.164 as its agent, over Responses |
+| Pluto with OpenCode | the fork and the egui client; OpenCode 2.1.4 as its agent, over Chat Completions |
+
+**These figures are provisional.** Other sessions loaded the machine during the whole campaign: of
+31 resource runs, 7 are calm (the rest of the machine under 0.6 of a core). By the owner's
+decision of 2026-11-14, M1.6b1 closes with them, and the three calm runs a figure are taken again
+with M1.6b2 on a resting machine. The tables give the median of every run, noisy ones included,
+then the range, and the calm runs among them. Processor time is the figure noise affects most.
+T3 Code has no stream figure: its campaign runs showed no thread in its window (its sidebar does
+not list the threads its server launched; its driver now opens one through its command palette),
+and one of its rest runs failed. The runs are on the desktop, gathered in
+`/tmp/pluto-rivals/m16b1-final/`.
+
+### At rest, 5 minutes
+
+| Subject | Runs (calm) | Its memory, MiB | Its wake-ups a second | Its processor, cores | The agents' memory, MiB | The agents' wake-ups a second | Frames in 120 s |
+|---|---|---|---|---|---|---|---|
+| Pluto | 4 (1) | 710 (685–715) | 13.3 (11.2–13.8) | 0.0033 | 1,520 (1,515–1,528) | 279 (266–303) | 4 |
+| Pluto with Codex | 4 (0) | 707 (695–709) | 11.8 (11.5–12.0) | 0.0028 | 317 (304–348) | 15.5 (14.5–17.7) | 4 |
+| Pluto with OpenCode | 4 (0) | 738 (698–744) | 15.3 (15.2–15.9) | 0.0029 | 322 (313–340) | 21.6 (21.6–22.2) | 4 |
+| T3 Code | 3 (0) | 777 (776–778) | 47.1 (46.8–48.2) | 0.0062 | 1,520 (1,520–1,527) | 282 (275–310) | 0 |
+| Zed | 4 (0) | 517 (432–526) | 184 (182–186) | 0.0025 | none apart | none apart | 0 |
+
+- The logo's moon made still, Pluto's client wakes 3.3 times a second at rest, down from 30.7
+  ([M1.6a](#at-rest)), and draws 4 frames in 2 minutes, its 30-second tick of relative times,
+  down from about 580. Its memory did not move: 405 MiB, 340 of it GPU memory.
+- With Codex or OpenCode as its agent, Pluto's agents at rest weigh a fifth of Claude Code's,
+  whose 15 sessions all stay alive ([M1.6a](#at-rest)).
+
+### 15 threads streaming, 45 seconds
+
+| Subject | Runs (calm) | Its memory, MiB | Its wake-ups a second | Its processor, cores | The agents' memory, MiB | The agents' wake-ups a second | Frames a second |
+|---|---|---|---|---|---|---|---|
+| Pluto | 3 (2) | 850 (844–866) | 314 (305–320) | 0.041 (0.039–0.058) | 1,814 (1,787–1,820) | 2,964 (2,805–3,011) | 18.0 |
+| Pluto with Codex | 3 (2) | 843 (840–866) | 352 (320–358) | 0.064 (0.064–0.081) | 314 (310–315) | 2,167 (2,094–2,238) | 19.9 |
+| Pluto with OpenCode | 3 (1) | 1,048 (1,047–1,067) | 374 (369–395) | 0.189 (0.174–0.214) | 373 (359–381) | 760 (754–762) | 23.9 |
+| Zed | 3 (1) | 548 (543–549) | 6,464 (6,444–6,734) | 0.489 (0.471–0.504) | none apart | none apart | 24.8 |
+
+With a streaming thread in its window, Pluto's client draws 18 to 24 frames a second, and Pluto
+weighs 60 MiB more than in [M1.6a's stream](#15-threads-streaming), whose window showed no
+thread. With OpenCode as its agent, Pluto weighs about 200 MiB more than with the two others;
+which of its parts holds it is not looked into.
+
+### The start and the profile
+
+The start is from the subject's start to the first window the compositor maps; for Pluto, it
+holds the fork's start, which the client waits for. The profile's growth is what a run added to
+its home, the project left out: 15 short turns at rest, 15 long turns streaming.
+
+| Subject | Start to the first window, ms | Profile's growth at rest, KiB | Profile's growth streaming, KiB |
+|---|---|---|---|
+| Pluto | 2,528 (2,493–2,757) | 12,380 | 10,400 |
+| Pluto with Codex | 2,535 (2,463–13,430) | 20,640 | 21,430 |
+| Pluto with OpenCode | 2,554 (2,495–2,591) | 12,880 | 40,250 |
+| T3 Code | 893 (874–1,586) | 25,940 | – |
+| Zed | 463 (338–618) | 4,012 | 3,991 |
+
+Start figures are at rest, over the same runs as above. One start of Pluto with Codex took
+13.4 s, during a noisy run; its cause is not looked into.
+
+### What each request carries, M1.6b1
+
+From each subject's first rest run's journal, in bytes. Every subject now sends 59 other requests
+for its 15 turns: 44 of the turns' own and 15 titles, one a thread. The titles are side requests;
+Pluto's go to Codex, whatever its agent.
+
+| Subject | A turn's first request | Of it: instructions | Of it: tools | Tools offered | Other requests, bytes | Of them: 15 titles, bytes |
+|---|---|---|---|---|---|---|
+| Pluto (Claude Code) | 62,689 | 14,467 | 34,158 | 13 | 3,589,834 | 815,863 |
+| Pluto with Codex | 152,873 | 0 | 117,687 | 13 | 7,570,135 | 815,863 |
+| Pluto with OpenCode | 35,204 | 21,390 | 13,600 | 12 | 2,663,841 | 815,585 |
+| T3 Code (Claude Code) | 61,816 | 11,489 | 35,828 | 14 | 2,927,629 | 192,030 |
+| Zed (its own agent) | 47,092 | 15,993 | 30,884 | 16 | 2,102,798 | 13,960 |
+
+Codex's requests carry no `instructions` field, so their instructions part is 0: what Codex
+sends as instructions is counted in its history. Pluto's title costs about 54 KB, T3 Code's 12.8 KB, Zed's 0.9 KB.
 
 ## The budgets M1.2 set
 
