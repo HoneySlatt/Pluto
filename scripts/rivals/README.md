@@ -213,6 +213,9 @@ its probe: a new version that moves them is probed again.
   still, which the validity check rejects.
 - The Nix store is visible to the subjects, read-only, the owner's own configuration's files in it
   included, as on the machine ([ADR-0029](../../docs/adr/0029-the-benchs-tools-and-what-a-rivals-figure-holds.md)).
+- The vendors' packages, their images and the frozen profiles live in `target/rivals/` (about
+  22 GB): `cargo clean` erases them, and the profiles must then be prepared again online. Clean
+  only `target/debug` or `target/release` when the disk is short.
 - Preparing a profile online sends the owner's address to the vendors whose applications call home
   at their first start ([ADR-0028](../../docs/adr/0028-the-open-rivals-and-the-web-chats-measured.md)).
 
