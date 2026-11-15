@@ -9,6 +9,11 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 
 ## Current
 
+- **On 2026-11-15 a design session changed Pluto's foundation: Pluto becomes a harness.** Its
+  decisions are in [`design-2026-11-15.md`](design-2026-11-15.md), which overrides this PLAN and
+  the ROADMAP where they differ. Next, in a new session: turn it into ADRs, a new ROADMAP and the
+  PLAN of the new Stage 2, show them to the owner, then run Stage 1's audit. No milestone of
+  Stage 1 below starts again.
 - DeepSeek Harness joined today's Pluto as a provider of the fork, through its official local Web
   protocol ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)); the owner's delegated tasks
   run on it with real turns since 2026-11-08. Its limits are in the provider guide.
