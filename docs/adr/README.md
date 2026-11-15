@@ -39,7 +39,7 @@ New ADRs copy the template below and take the next free number.
 | [0027](0027-the-rivals-measures-set-aside.md) | The rivals' measures set aside until the owner's go | Accepted; amends 0017; amended by 0039 |
 | [0028](0028-the-open-rivals-and-the-web-chats-measured.md) | How the open rivals and the web chats are measured | Accepted; amends 0026; amended by 0029 |
 | [0029](0029-the-benchs-tools-and-what-a-rivals-figure-holds.md) | The bench's tools for the six, and what a rival's figure holds | Accepted; amends 0028 |
-| [0030](0030-pluto-becomes-a-harness.md) | Pluto becomes a harness: one kernel, two products | Accepted; amends 0003 |
+| [0030](0030-pluto-becomes-a-harness.md) | Pluto becomes a harness: one kernel, two products | Accepted; amends 0003; amended by 0041 |
 | [0031](0031-three-kinds-of-engine.md) | Three kinds of engine under one thread model | Accepted; amends 0006 |
 | [0032](0032-plutos-loop-and-its-provider-clients.md) | Pluto's loop and its own provider clients | Accepted; supersedes 0011 |
 | [0033](0033-one-pluto-agent-process-per-session.md) | One `pluto-agent` process per session, its log on disk | Accepted; amends 0005 and 0008 |
@@ -50,6 +50,7 @@ New ADRs copy the template below and take the next free number.
 | [0038](0038-a-new-foundation-beside-the-fork.md) | A new foundation beside the frozen fork, in the same repository | Accepted; supersedes 0004; amends 0001, 0002 and 0010 |
 | [0039](0039-the-order-of-the-stages.md) | The order of the stages, and Stage 1 closed | Accepted; amends 0017 and 0027 |
 | [0040](0040-out-of-the-plan.md) | Out of the plan: the editor, office editors, calls and the smart home | Accepted; amends 0003, 0009, 0019, 0020 and 0022 |
+| [0041](0041-the-assistant-on-every-plan-opened-to-third-parties.md) | The assistant on every plan opened to third-party applications | Accepted; amends 0030 |
 
 ## Template
 

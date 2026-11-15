@@ -192,6 +192,7 @@ Also held, without a figure:
 | Topic | Decision |
 |---|---|
 | What Pluto is | A harness of its own; one kernel, two products: the work first, the assistant later ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)); what still holds of [ADR-0003](adr/0003-what-pluto-is-to-become.md) |
+| What the assistant runs on | API keys, DeepSeek, local models, and every plan a provider officially opens to third-party applications (ChatGPT's today); Claude by an API key until Anthropic offers an official sign-in billed as extra usage ([ADR-0041](adr/0041-the-assistant-on-every-plan-opened-to-third-parties.md)) |
 | Engines | Pluto's loop; vendors' engines (Claude Code through a mod, Codex's app-server, Copilot's SDK); ACP for the others; the main work on Claude Code ([ADR-0031](adr/0031-three-kinds-of-engine.md)) |
 | Pluto's loop | A small core, per-model profiles, four provider clients of its own, models.dev's registry, outside tools over MCP ([ADR-0032](adr/0032-plutos-loop-and-its-provider-clients.md)) |
 | Sessions | One `pluto-agent` process each, an append-only log on disk; also a library ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.md)) |
@@ -228,7 +229,7 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | The protocol's wire format and transports | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 5, the protocol's milestone |
 | A thread moved between machines | how, and whether | after Stage 5 |
 | Agents' sessions kept ready for the chat | how many, and for how long, against "nothing runs at rest" | Stage 6, measured |
-| Gemini through its official CLI | allowed or not by Google, which has not answered; an API key until then | when Google answers |
+| Gemini through its official CLI, or a sign-in Google offers to third-party applications | allowed or not by Google, which has not answered; an API key until then ([ADR-0041](adr/0041-the-assistant-on-every-plan-opened-to-third-parties.md)) | when Google answers |
 | Tuta's calendar | TutaBridge serves only mail; another bridge, or none | Stage 7 |
 | Where the assistant runs once it leaves the desktop | a NAS, or a server | Stage 7 |
 | Signal and Matrix as the assistant's channels | an open path, not planned | after Stage 7 |
