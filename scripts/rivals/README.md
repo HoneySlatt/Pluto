@@ -192,7 +192,7 @@ its probe: a new version that moves them is probed again.
   cause not known; its driver then tries once more, if no thread reached the fake model.
 - `pluto-measure` misses processes that start and end between two samples; their processor time
   is in `unattributed_cpu_seconds`.
-- Energy is not measured yet: it waits for the root sampler of M1.6c.
+- Energy is not measured yet: it waits for the root sampler of M1.6c, moved to Stage 5.
 - The pointer's places are the windows' layout of each version. A moved button makes a typed
   prompt's check fail, which stops the run; a moved button of `subject_show` leaves the screen
   still, which the validity check rejects.

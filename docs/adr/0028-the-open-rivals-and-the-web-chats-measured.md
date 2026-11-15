@@ -7,7 +7,7 @@
 
 ## Context
 
-[M1.6b2](../PLAN.md#m16b2--the-open-rivals-and-the-chats) measures six more rivals in the rivals'
+[M1.6b2](../history.md#m16--the-rivals-measured) measures six more rivals in the rivals'
 bench ([ADR-0026](0026-the-rivals-measured-how.md)): OpenCode Desktop, Emdash, Nimbalyst, Jan,
 Open WebUI and LibreChat. A design session on 2026-11-11 surveyed them from their own
 documentation, releases and sources. A challenger agent then attacked the first recommendation.

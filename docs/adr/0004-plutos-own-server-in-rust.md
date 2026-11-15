@@ -1,6 +1,6 @@
 # 0004. Pluto's own server, in Rust, in front of the frozen fork
 
-- Status: Accepted
+- Status: Superseded by [0038](0038-a-new-foundation-beside-the-fork.md)
 - Date: 2026-11-06
 
 ## Context

@@ -28,6 +28,8 @@ What the field does, read on 2026-11-15:
 
 ## Decision
 
+The lead's implementation choice, from the challenge, shown to the owner with this record.
+
 **On Linux, the sandbox is shaped after Codex's:**
 - bubblewrap for files and namespaces;
 - seccomp for system calls;
@@ -42,7 +44,8 @@ that needs a secret runs outside; the model and the sandboxed code never see it.
 **`claude` and `codex` run inside the same sandbox.** Wrapping a binary does not modify it. Each
 agent, and later the assistant, has its own connections, never one set shared by all.
 
-**macOS and Windows** are decided when Pluto goes public, as ADR-0009 set.
+**macOS, Windows and Android** are decided when Pluto goes public, as ADR-0009 (Windows and
+Android) and [ADR-0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) (macOS) set.
 
 ## Alternatives considered
 
@@ -50,8 +53,8 @@ agent, and later the assistant, has its own connections, never one set shared by
   agents, and Claude Code has none on Windows.
 - **Permission prompts only**, as OpenCode and Pi. Little friction. But a prompt is not a
   boundary, and unattended tasks cannot be asked.
-- **MicroVMs** (microsandbox, libkrun). The strongest isolation. But heavier, and microsandbox runs
-  on Apple Silicon only, not the owner's Intel Mac. An optional tier later, if a need shows.
+- **MicroVMs** (microsandbox, libkrun). The strongest isolation. But heavier, and on macOS
+  microsandbox runs on Apple Silicon only. An optional tier later, if a need shows.
 - **Containers** (Docker, Podman). Familiar. But a daemon to run, and heavier than namespaces on
   the HP.
 
@@ -60,5 +63,7 @@ agent, and later the assistant, has its own connections, never one set shared by
 - New dependencies (`seccompiler`, `landlock`) are asked of the owner when the sandbox's
   milestone comes.
 - bubblewrap needs unprivileged user namespaces; the owner's NixOS allows them.
+- `claude` and `codex` keep their own sign-ins inside the sandbox; how tool code there is kept
+  from them is designed with the sandbox's milestone.
 - How the vault keeps secrets without a graphical session stays open
   ([ROADMAP](../ROADMAP.md#open)).

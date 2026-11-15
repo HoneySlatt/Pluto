@@ -16,8 +16,8 @@ How to read it:
   maps each family to its section.
 - Each feature is **core**, always present, or **optional**, present only when the owner turns it
   on or installs what it needs (ADR-0003). Optional is said; core is the default.
-- The stage that builds each part is the [ROADMAP](ROADMAP.md#4-stages)'s. The client's sections
-  are built at Stage 6, the editor at Stage 7.
+- The stage that builds each part is the [ROADMAP](ROADMAP.md#4-stages)'s. The client's base is
+  built at Stage 5 and the rest at Stage 6; the editor is an idea, out of the plan ([ADR-0040](adr/0040-out-of-the-plan.md)).
 - The budgets each part must meet are in the [quality bar](ROADMAP.md#quality-bar).
 
 ## 1. What holds everywhere
@@ -54,7 +54,14 @@ How to read it:
 
 ## 2. The server
 
-One Rust server per machine that codes ([ADR-0004](adr/0004-plutos-own-server-in-rust.md)). It is a
+Since 2026-11-15 Pluto is a harness of its own
+([ADR-0030](adr/0030-pluto-becomes-a-harness.md) to [ADR-0040](adr/0040-out-of-the-plan.md)). Its
+kernel adds to what follows: every session in its own `pluto-agent` process, its log the truth
+(ADR-0033); Pluto's loop (ADR-0032); the delegation object (ADR-0034); a complete TUI, for code,
+chat, the delegation and the inspector; the inspector of every turn (ADR-0036). The personal
+assistant is specified at Stage 7.
+
+One Rust server per machine that codes ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). It is a
 service: closing a window stops nothing, and an update or a restart never stops a running agent.
 
 ### 2.1 Threads, storage and history
@@ -63,7 +70,7 @@ service: closing a window stops nothing, and an update or a restart never stops 
   day of heavy use (ADR-0008, ADR-0017).
 - A thread's states: pinned, snoozed until a time, settled, archived; auto-settle after its pull
   request merges or after N days, set per project (1.6 to 1.9, 1.26).
-- A readable export of any thread; the fork's history imported and verified (Stage 3); the owner's
+- A readable export of any thread; the fork's history imported and verified (Stage 5); the owner's
   exports from ChatGPT, Claude, Gemini and others imported into one history (ADR-0020).
 - A full-text index of messages, answers, archived threads and imported history on each server and,
   optionally, an index by meaning built with a local embedding model the owner downloads, both
@@ -74,9 +81,11 @@ service: closing a window stops nothing, and an update or a restart never stops 
 
 ### 2.2 Agents
 
-- Drivers ([ADR-0006](adr/0006-agents-drivers.md)): Claude Code, Codex, OpenCode, Kimi Code,
-  Mistral Vibe, Z Code, Grok, Antigravity, Pi, Muse, DeepSeek Harness, any agent of the ACP
-  registry, Ollama, and Pluto's own agent (Stage 4) (16.19 to 16.21, 16.23 to 16.32). Cursor is not driven.
+- Engines ([ADR-0031](adr/0031-three-kinds-of-engine.md), [ADR-0006](adr/0006-agents-drivers.md)): Claude Code, Codex, OpenCode, Kimi Code,
+  Mistral Vibe, Z Code, Grok, Antigravity, Pi, Muse, DeepSeek Harness, GitHub Copilot through its
+  SDK, any agent of the ACP registry, and Pluto's own loop (Stage 3), which runs Ollama's models,
+  DeepSeek's and those reached by key or by a plan that allows it (16.19 to 16.21, 16.23 to 16.32).
+  Cursor is not driven.
 - Several instances of one agent, each with its name, colour, home and account; a thread may move
   to a compatible account or, with its context handed over, to another agent (16.3, 16.18, 16.33).
 - Each driver describes its own settings, and the client draws them (16.1, 16.5, 17.10).
@@ -93,12 +102,12 @@ service: closing a window stops nothing, and an update or a restart never stops 
   (16.34, 16.35). "Sign in with ChatGPT" where OpenAI allows it (ADR-0020).
 - Status, version and models probed when used (16.36, 16.11).
 - Runs in the vendors' clouds: optional, off by default, turned on per provider (ADR-0018).
-- Sessions kept ready for the chat: how many and how long is decided at Stage 2, measured (ADR-0020).
+- Sessions kept ready for the chat: how many and how long is decided at Stage 6, measured (ADR-0020).
 
 ### 2.3 Local models
 
 Core; Ollama is installed by the owner (family 17).
-- Ollama for chat and code, code through Pluto's own agent from Stage 4 (17.1 to 17.5, 17.7, 17.9).
+- Ollama for chat and code, code through Pluto's own agent from Stage 3 (17.1 to 17.5, 17.7, 17.9).
 - Any OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM) for chat and Pluto's agent, without
   model management (17.16).
 - Managed from Pluto: installed models with their size, whether loaded, their GPU memory, unload
@@ -134,7 +143,7 @@ Core; Ollama is installed by the owner (family 17).
 
 - Real terminals per thread, kept across the client's restarts (family 7).
 - A project's files listed, searched, read and lightly edited; an edit never overwrites an agent's
-  concurrent write (8.1 to 8.12). From Stage 7, the editor's core runs here: open files merged
+  concurrent write (8.1 to 8.12). If the editor returns from the ideas ([ADR-0040](adr/0040-out-of-the-plan.md)), its core runs here: open files merged
   live, language servers, search ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)).
 - Projects: one project is one repository, on every machine where it is checked out (28.10); added
   from a folder, a URL cloned, or a new empty repository, on a chosen machine (28.12); a project's
@@ -237,7 +246,7 @@ recovers within a second on the local network, losing nothing; the client never 
 
 ## 4. The desktop client
 
-Pluto's own look on uwui (ADR-0003, ADR-0016); built at Stage 6.
+Pluto's own look on uwui (ADR-0003, ADR-0016); its base built at Stage 5, the rest at Stage 6.
 
 ### 4.1 The dashboard
 
@@ -315,7 +324,7 @@ when the setting says so (0.1 to 0.7).
   rejected; comments on lines kept like a draft and sent in one batch; "Have it reviewed by…"
   another provider's agent (6.1 to 6.17). A full-window review mode beside the panel (6.0).
 - **Files** (family 8): the project's tree by mouse and keyboard, search, a file dragged into the
-  composer, a clickable breadcrumb; highlighted source; small edits until the editor (Stage 7);
+  composer, a clickable breadcrumb; highlighted source; small edits;
   images, SVG and AVIF, Markdown rendered with its task boxes, CSV and TSV tables, video, HTML and PDF
   in place; a line commented for the agent; "open in" the owner's editor (8.1 to 8.12, 8.14).
 - **Terminal** (family 7), as today: a drawer and tabs, splits and groups, links, selection added to
@@ -347,7 +356,7 @@ Family 11:
 - **Keys** (family 14): every command bound per zone (thread, composer, review, terminal…),
   remapped on a page with search, recording, conflicts and defaults, and in a readable TOML file
   watched for changes; a command's key shown beside it; optionally, a modal navigation (j/k, gg, /)
-  on the editor's modal core, with a leader key, built with that core at Stage 7 (14.1, 14.3 to
+  on the editor's modal core, with a leader key, built with that core if the editor returns ([ADR-0040](adr/0040-out-of-the-plan.md)) (14.1, 14.3 to
   14.11, 14.13, 14.14, 14.16 to 14.18).
 
 ### 4.6 Agents, models and usage
@@ -400,7 +409,7 @@ connectors.
 
 ### 4.10 The editor
 
-Optional, at Stage 7, as [ADR-0019](adr/0019-a-code-editor-in-pluto.md) decides: on uwui's
+An idea, out of the plan since [ADR-0040](adr/0040-out-of-the-plan.md). If it returns, as [ADR-0019](adr/0019-a-code-editor-in-pluto.md) decides: on uwui's
 code-editor component, its core in the server, Vim and Helix engines held to the real programs, the
 owner's Neovim imported, a live merge with the agents' edits, language servers, huge files, a
 terminal mode.
@@ -437,7 +446,7 @@ Optional, an application of its own; in Kotlin until uwui runs Android applicati
 
 ## 6. What leaves
 
-Cut by the triage, from the egui client and the Android app in [M1.4](PLAN.md#m14--the-cuts) where
+Cut by the triage, from the egui client and the Android app in [M1.4](history.md#m14--the-cuts) where
 they are there, and never built again (ADR-0022): 0.8 to 0.10, 1.21 to 1.23, 8.13, 9.3 (in the uwui
 client; the egui client keeps it while it has no web view), 9.7, 9.8, 11.2, 11.3, 11.16, 12.3,
 14.2, 14.12, 14.15, 16.10, 16.11, 16.22, 18.15, 18.17, 19.27, 20.1 to 20.3, 20.10, 27.7, 28.6 to 28.8,

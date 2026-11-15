@@ -7,7 +7,7 @@ holds what was measured, and when.
 ## The check
 
 Budget: `scripts/check.sh` takes at most 20 minutes, locally and in CI with its cache
-([M1.1](PLAN.md#m11--under-the-method)). A CI run without the cache, the first of a branch or after
+([M1.1](history.md#m11--under-the-method)). A CI run without the cache, the first of a branch or after
 GitHub drops a cache unused for a while, may take longer: the owner accepted about 30 minutes on
 2026-11-07.
 
@@ -75,7 +75,7 @@ seconds.
 
 Of the 4 frames, one is the measurement's own timer; which of the client's 46
 `request_repaint_after` calls (counted in `src/`) asked for the 3 others is not known. The connection
-thread's wake-up a second is known debt ([PLAN](PLAN.md#known-debt)). `blocking-1` belongs to zbus,
+thread's wake-up a second is known debt ([`debt.md`](debt.md)). `blocking-1` belongs to zbus,
 which only AccessKit, egui's accessibility, brings in; it woke as often in the first runs, before
 the sandbox had a session bus of its own, as with one.
 
@@ -219,7 +219,7 @@ MiB a day. The threads hold 17,053 messages; the longest thread 3,785.
 
 ## The cuts of M1.4
 
-The client before and after [M1.4](PLAN.md#m14--the-cuts) removed what the triage cut, on the
+The client before and after [M1.4](history.md#m14--the-cuts) removed what the triage cut, on the
 desktop, by `scripts/measure.sh` on the fixture, as above: before at `86a601b`, after at `d688416`,
 on 2026-11-10. The code loses about 7,500 lines of Rust net (9,089 removed, 1,628 added).
 
@@ -326,7 +326,7 @@ agents' processes parse them.
 ### What each request carries
 
 From the fake model's journal of a first campaign's rest runs, the same day at `04087f4`, in
-bytes, which stand for tokens until Stage 2 ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
+bytes, which stand for tokens until a tokenizer is added ([ADR-0026](adr/0026-the-rivals-measured-how.md)).
 That campaign's resource figures were not kept (its review found a browser counted in T3 Code's,
 and unequal streams). A turn's first request; then every other request of the 15 short turns,
 titles and summaries among them. The counts of other requests are wrong for Pluto and T3 Code:
@@ -359,7 +359,7 @@ counts side requests only; M1.6b1's comparable column is its 15 titles.
   ([below](#the-rivals-bench-m16b1-provisional)).
 - Frames on time: the headless compositor's clock is no display's
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)); frames are counted only.
-- Energy: it waits for the root sampler of M1.6c.
+- Energy: it waits for the root sampler of M1.6c, moved to Stage 5.
 
 ## The rivals' bench, M1.6b1 (provisional)
 
@@ -378,8 +378,8 @@ first window, the profile's growth and, streaming, one streaming thread open in 
 **These figures are provisional.** Other sessions loaded the machine during the whole campaign: of
 31 resource runs, 7 are calm (the rest of the machine under 0.6 of a core). By the owner's
 decision of 2026-11-14, M1.6b1 closes with them, and the three calm runs a figure are taken again
-with M1.6b2 on a resting machine. The tables give the median of every run, noisy ones included,
-then the range, and the calm runs among them. Noise weighs on processor time, and memory too: in
+with M1.6b2, moved to Stage 5, on a resting machine. The tables give the median of every run,
+noisy ones included, then the range, and the calm runs among them. Noise weighs on processor time, and memory too: in
 some rest runs the loaded machine pushed pages to swap or reclaimed them (Zed 57 to 73 MiB of
 swap, Pluto 21 MiB), so the low ends of the memory ranges are a loaded machine's. The noise check
 reads processor time only. Memory is private, swap and GPU memory; PSS beside it.
@@ -388,7 +388,8 @@ T3 Code has no stream figure: in its campaign stream runs, `mod+1` opened no thr
 showed its working threads folded). Its driver now opens one through its command palette, which
 worked in a trial run, not yet in a campaign. One of its rest runs failed. The profiles were
 prepared offline, against ADR-0026's "prepared once with the network"; ADR-0028 prepares them
-online from M1.6b2. The runs are on the desktop, gathered in `/tmp/pluto-rivals/m16b1-final/`.
+online from M1.6b2, moved to Stage 5. The runs are on the desktop, gathered in
+`/tmp/pluto-rivals/m16b1-final/`.
 
 ### At rest, 5 minutes
 
@@ -437,7 +438,7 @@ The start is from the subject's start to the first window the compositor maps. *
 comparable with the others' yet:** it holds the fork's start (about 1.3 s), then the bench's own
 step, a token issued by a second `pluto-server` process and a check every 0.5 s, then the
 client's start; from the fork's readiness to the client's window takes 1.1 to 1.7 s, where M1.2
-measured the client alone at 125 ms warm. M1.6b2 measures it without the bench's step. T3 Code's
+measured the client alone at 125 ms warm. M1.6b2, moved to Stage 5, measures it without the bench's step. T3 Code's
 and Zed's hold the start of `appimage-run`'s environment.
 
 The profile's growth is what a run added to its home, the project left out: 15 short turns at

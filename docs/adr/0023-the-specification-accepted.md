@@ -11,7 +11,7 @@ features, triaged by the owner, and that what is kept, with the differences of
 the uwui client. The families were marked on 2026-11-08
 ([ADR-0018](0018-the-markets-features-and-the-triage.md)) and their rows on 2026-11-10
 ([ADR-0022](0022-the-triage-row-by-row.md)). The ROADMAP left "the features kept" open until
-[M1.3](../PLAN.md#m13--the-triage).
+[M1.3](../history.md#m13--the-triage).
 
 [`specification.md`](../specification.md) was written from the marks and from ADR-0003 and
 ADR-0017 to ADR-0022. A closing review checked it against those ADRs and the owner's answers;
@@ -33,6 +33,6 @@ change to it is decided by an ADR, and the specification is updated with it.
 ## Consequences
 
 - The ROADMAP's open decision on the features kept is taken.
-- [M1.3](../PLAN.md#m13--the-triage) is done. [M1.4](../PLAN.md#m14--the-cuts) cuts what the
+- [M1.3](../history.md#m13--the-triage) is done. [M1.4](../history.md#m14--the-cuts) cuts what the
   specification's section 6 lists, from the egui client and the Android app.
 - Stage 2's milestones are planned from the specification's server sections.

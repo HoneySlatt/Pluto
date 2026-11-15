@@ -8,7 +8,7 @@
 ## Context
 
 The quality bar of the [ROADMAP](../ROADMAP.md#quality-bar) left six budgets without a figure, to be
-set from the measurements of [M1.2](../PLAN.md#m12--today-measured). Those measurements are in
+set from the measurements of [M1.2](../history.md#m12--today-measured). Those measurements are in
 [`measurements.md`](../measurements.md). Four of the six cannot be measured on today's code: the
 client does not ask for the compositor's presentation times, the fixture runs no turn, and an
 agent's resume needs a real agent.

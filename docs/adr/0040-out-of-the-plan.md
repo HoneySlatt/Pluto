@@ -2,15 +2,18 @@
 
 - Status: Accepted; amends [0019](0019-a-code-editor-in-pluto.md) (the editor becomes an idea, out
   of the stages), [0020](0020-the-chat.md) (a document written together no longer rests on the
-  editor's live merge) and [0003](0003-what-pluto-is-to-become.md) (files viewed and lightly
-  edited, real editing in the owner's editor, as first decided)
+  editor's live merge), [0003](0003-what-pluto-is-to-become.md) (files viewed and lightly
+  edited, real editing in the owner's editor, as first decided),
+  [0009](0009-secrets-privacy-and-the-sandbox.md) (the sandbox on Windows decided when Pluto goes
+  public again) and [0022](0022-the-triage-row-by-row.md) (the modal navigation no longer at a
+  Stage 7)
 - Date: 2026-11-15
 
 ## Context
 
 The design session of 2026-11-15 widened what Pluto is for
 ([ADR-0030](0030-pluto-becomes-a-harness.md)): a harness, design as a first-class space, a
-personal assistant. Its challenger found the whole scope beyond one programme:
+personal assistant. Its challenger found the whole scope beyond one program:
 - the owner is the bottleneck, with checks and measures waiting by hand in several projects;
 - each new space adds tests only the owner can run;
 - the fastest teams delete: Cursor removed three roles from its harness, Amp three features in

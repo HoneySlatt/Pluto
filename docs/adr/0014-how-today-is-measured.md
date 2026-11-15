@@ -6,7 +6,7 @@
 
 ## Context
 
-[M1.2](../PLAN.md#m12--today-measured) asks for today's figure beside every budget of the quality
+[M1.2](../history.md#m12--today-measured) asks for today's figure beside every budget of the quality
 bar, taken on the fixture server and never on the owner's data. The client is frozen
 ([ADR-0010](0010-todays-features-triaged.md)): measuring may add tools beside it, not change what
 it does. Until then the only tool was `examples/bench.rs`, which runs the client without a window,
@@ -56,7 +56,7 @@ pattern table in the script sorts each allocation's stack into fonts, syntax hig
 own, the timeline and the server's state, text laid out, images, and the rest.
 
 **Streams are replayed in the frame bench**, `examples/bench.rs`. The fixture has no provider, and
-no recorded stream exists until [M1.5](../PLAN.md#m15--agents-sessions-recorded). It feeds the client the events a
+no recorded stream exists until [M1.5](../history.md#m15--agents-sessions-recorded). It feeds the client the events a
 server sends while 15 threads stream: the open thread's answer growing, the 14 others' shell rows,
 each ten times a second.
 

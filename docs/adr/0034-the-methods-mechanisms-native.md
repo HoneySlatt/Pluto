@@ -13,7 +13,7 @@ every task. It is already a harness, made of scripts over six agent tools.
 
 Its ledger held 467 tasks on 2026-11-15. A survey of it found:
 - the bookkeeping is by hand: each brief, each hidden check, each ledger line;
-- 74 tasks record a report the child could not write, which the lead saved instead;
+- 74 tasks record a report the child could not write; in 37 the lead saved it instead;
 - 15 tasks were cut by a usage limit and 43 resumed, the provider marked down by hand;
 - most of the spend on Claude is context read again, not routing;
 - every child runs as the owner, and could read another provider's credentials and the hidden
@@ -41,7 +41,9 @@ The field:
   the child's reach, the proofs, the report written by Pluto, and the ledger line, in one record;
 - limits of depth, count and time;
 - end conditions, and false stops refused;
-- the provenance of content: the owner's, an agent's, a tool's, untrusted;
+- the provenance of content: the owner's, an agent's, a tool's, untrusted; the lead's choice,
+  from OpenClaw's memory and shown to the owner with this record: it is set by code, never by the
+  model;
 - exact costs, from each provider's usage;
 - providers down, fallback, and resume from the last step.
 
@@ -49,7 +51,8 @@ The field:
 the efforts, when to check, named agents, skills and hooks. Changing the method changes a file, not
 Pluto.
 
-**A know-how is recorded as a skill file the owner reviews**, never learnt by Pluto alone.
+**A know-how is recorded as a skill file**, never learnt by Pluto alone. Pluto proposes the file;
+the owner reviews it before it is kept.
 
 ## Alternatives considered
 
@@ -64,6 +67,7 @@ Pluto.
 ## Consequences
 
 - The owner's delegated tasks are the first slice of daily work to move onto Pluto, in Stage 3.
-- Pluto reads the method's files where the owner keeps them; it never writes them.
+- Pluto reads the method's files where the owner keeps them. It writes none of them itself: a new
+  skill is a proposal the owner keeps or not.
 - Efforts per role and the conditional checker become figures on the bench
   ([ADR-0037](0037-how-the-harness-is-judged.md)), from replays of saved briefs.

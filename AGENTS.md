@@ -4,22 +4,25 @@ Rules for AI agents working in this repository. Read this file fully at the star
 
 ## Project
 
-Pluto is one place to work with every coding agent and every model: Claude Code, Codex, OpenCode,
-Kimi Code, Mistral Vibe, Z Code, the ACP agents, DeepSeek and local models through Ollama, for
-code and for chat. It is native, frugal and private. It is in Rust, for Linux first, under MIT
-(new code MIT OR Apache-2.0).
+Pluto is a harness of its own: one place to work with every model and every coding agent (Claude
+Code, Codex, Copilot, OpenCode, Kimi Code, Mistral Vibe, Z Code, the ACP agents, DeepSeek, local models through
+Ollama), for code, chat, design and orchestration, and later a personal assistant. It is native,
+frugal and private. It is in Rust, for Linux first, under MIT (new code MIT OR Apache-2.0).
 
-Its direction changed on 2026-11-06 ([ADR-0003](docs/adr/0003-what-pluto-is-to-become.md)). It is
-no longer a port of T3 Code. Its state today:
+Its direction changed on 2026-11-06 ([ADR-0003](docs/adr/0003-what-pluto-is-to-become.md)), then
+on 2026-11-15: Pluto becomes a harness ([ADR-0030](docs/adr/0030-pluto-becomes-a-harness.md) to
+[ADR-0040](docs/adr/0040-out-of-the-plan.md)). Its state today:
 
-- **Desktop client**: a native client on egui (`src/`, about 110,000 lines). It is frozen except
-  fixes, the triage's cuts and the move to Pluto's protocol. It moves to uwui, the owner's UI
-  framework, as one of uwui's pilots.
+- **New foundation**: new crates from Stage 2, beside the frozen code below
+  ([ADR-0038](docs/adr/0038-a-new-foundation-beside-the-fork.md)).
+- **Desktop client**: on egui (`src/`, about 110,000 lines), frozen except fixes. The client on
+  uwui, the owner's UI framework, replaces it at Stage 5.
 - **Shared core**: the connection, model and timeline, shared with the phone (`crates/pluto-core`).
-- **Android app**: Kotlin and Compose over the core through UniFFI (`android/`, `crates/pluto-ffi`).
-- **Server**: today a frozen TypeScript fork of T3 Code's server, `pluto-server`, at
-  `~/Projects/pluto-server`, branch `pluto` (see its `PLUTO.md`). Pluto's own server, in Rust,
-  replaces it step by step from Stage 2 ([ADR-0004](docs/adr/0004-plutos-own-server-in-rust.md)).
+- **Android app**: Kotlin and Compose over the core through UniFFI (`android/`, `crates/pluto-ffi`);
+  on Pluto's protocol at Stage 5.
+- **Server**: a frozen TypeScript fork of T3 Code's server, `pluto-server`, at
+  `~/Projects/pluto-server`, branch `pluto` (see its `PLUTO.md`). Pluto's own server replaces it at
+  Stage 5.
 
 Agents develop it; the owner sets its direction and validates its decisions. Anyone must be able to
 understand it from the repository alone. Documentation is part of every deliverable.
@@ -60,7 +63,7 @@ Never, on your own:
 - run a real provider turn: sending a message starts a session on the owner's accounts and spends
   their quota. Automated checks use fixtures, fakes and recorded sessions. One exception: Pluto's
   bench may run on local models through Ollama, by hand during a milestone, never in CI
-  ([ADR-0011](docs/adr/0011-plutos-own-harness-minimal-and-measured.md));
+  ([ADR-0037](docs/adr/0037-how-the-harness-is-judged.md));
 - touch the owner's data (`~/.pluto`, `~/.t3`, the agents' own homes): use disposable fixtures,
   and copies for measurements;
 - modify `~/Projects/pluto-server`, SlimeEngine or uwui, unless the owner asks.
@@ -82,13 +85,19 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
 ## Architecture rules
 
 - The protocol is Pluto's own, described once in a shared crate
-  ([ADR-0005](docs/adr/0005-plutos-own-typed-protocol.md)). From Stage 2, clients never speak T3's
-  protocol; only the server's gateway does, until the fork stops.
+  ([ADR-0005](docs/adr/0005-plutos-own-typed-protocol.md)). New code never speaks T3's protocol;
+  only the egui client and the Android app do, until the end of Stage 5.
+- Each agent session runs in its own `pluto-agent` process; its append-only log is the session's
+  truth, the context a view of it ([ADR-0033](docs/adr/0033-one-pluto-agent-process-per-session.md)).
+- Pluto's own code has no Node. The one exception is Claude Code's mod, in TypeScript
+  ([ADR-0031](docs/adr/0031-three-kinds-of-engine.md)).
 - The server and the protocol crate never depend on a UI crate. `pluto-core` never depends on egui.
 - The interface's thread never waits on the network or a disk.
 - Nothing runs, polls or redraws while there is nothing to do: no timer that wakes for nothing.
-- Agents' drivers follow [ADR-0006](docs/adr/0006-agents-drivers.md): native only with a written
-  reason, tested on recorded sessions or fakes.
+- Engines follow [ADR-0031](docs/adr/0031-three-kinds-of-engine.md) and
+  [ADR-0006](docs/adr/0006-agents-drivers.md): tested on recorded sessions or fakes. A component of
+  Pluto's loop stays only while the bench shows its gain
+  ([ADR-0037](docs/adr/0037-how-the-harness-is-judged.md)).
 
 ## Rules the code depends on
 

@@ -3,7 +3,7 @@
 - Status: Accepted; amends [0003](0003-what-pluto-is-to-become.md) (real editing in Pluto, no
   longer only in the owner's editor; going public moves to Stage 8; the server runs on Windows from
   Stage 7) and [0009](0009-secrets-privacy-and-the-sandbox.md) (the sandbox on Windows decided
-  when Stage 7 starts)
+  when Stage 7 starts); amended by [0040](0040-out-of-the-plan.md) (an idea, out of the stages)
 - Date: 2026-11-08
 
 ## Context

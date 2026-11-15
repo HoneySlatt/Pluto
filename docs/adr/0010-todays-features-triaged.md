@@ -1,6 +1,6 @@
 # 0010. Today's features triaged, and the egui client frozen
 
-- Status: Accepted; amended by [0021](0021-deepseek-harness-in-todays-pluto.md) (DeepSeek Harness in the current client)
+- Status: Accepted; amended by [0021](0021-deepseek-harness-in-todays-pluto.md) (DeepSeek Harness in the current client) and [0038](0038-a-new-foundation-beside-the-fork.md) (the egui client never moved to Pluto's protocol)
 - Date: 2026-11-06
 
 ## Context

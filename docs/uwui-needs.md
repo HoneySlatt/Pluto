@@ -2,7 +2,11 @@
 
 Pluto's desktop client is drawn with egui today. It will move to uwui, the owner's UI framework,
 once uwui runs applications ([ADR-0001](adr/0001-a-native-client-on-egui-until-uwui.md),
-[ADR-0003](adr/0003-what-pluto-is-to-become.md)). Pluto's client is one of the programs of uwui's
+[ADR-0003](adr/0003-what-pluto-is-to-become.md)). The owner expects uwui to be ready before
+Pluto's Stage 3; the client's base comes at Stage 5 and the rest at Stage 6
+([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). The needs of the spaces decided on
+2026-11-15 (the design canvas, visual editing of a running app or mockup, the context inspector)
+are added here when Stage 5 is planned. Pluto's client is one of the programs of uwui's
 first stage, and uwui's API is not declared stable before it runs Pluto at its bar (SlimeEngine's
 ADR-0203). SlimeEngine's M6d.1b3b chose how an application's state changes its interface,
 signals, from three lists like this one: Opium's, Pluto's and a DAW's (SlimeEngine's ADR-0205).
@@ -88,7 +92,7 @@ SlimeEngine's ADR-0202 does not script either case yet.
 | Find in a long view: matches highlighted over virtualized content, next and previous, the count | Find in a thread, in a diff, in a file | New |
 | A rich text input: inline atomic chips (a file, a thread, a skill), a popover of suggestions at the caret, IME, undo across chips, a paste of 100,000 characters without a freeze, images pasted and dropped | The composer | Precision: ADR-0190 has rich text, not atomic chips and caret popovers |
 | A view of code, read-mostly with light edits: syntax colours, line numbers, a gutter of comments, folding, a small edit saved; cheap in memory when many are open | The Files panel (`ui/file_editor.rs`) | Precision: ADR-0190's code editor; Pluto needs its light mode first |
-| The whole code editor: a buffer that merges concurrent edits (a CRDT) from the user and agents, with a caret per author; Vim's and Helix's modal engines on one core of selections; LSP and DAP; files held by a remote core, the window only drawing; huge files read in pieces in bounded memory; multibuffers; extensions in WebAssembly that may draw under a frame budget; a terminal rendering of the same editor; a virtual document a screen reader can read | Pluto's editor, Stage 7 ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)) | Precision: ADR-0190's code editor (Tree-sitter, LSP, several carets, folding, a minimap); the merge, the modal engines, the remote core, huge files, the terminal rendering and screen readers on a virtual document are new |
+| The whole code editor: a buffer that merges concurrent edits (a CRDT) from the user and agents, with a caret per author; Vim's and Helix's modal engines on one core of selections; LSP and DAP; files held by a remote core, the window only drawing; huge files read in pieces in bounded memory; multibuffers; extensions in WebAssembly that may draw under a frame budget; a terminal rendering of the same editor; a virtual document a screen reader can read | Pluto's editor, an idea since [ADR-0040](adr/0040-out-of-the-plan.md) ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)) | Precision: ADR-0190's code editor (Tree-sitter, LSP, several carets, folding, a minimap); the merge, the modal engines, the remote core, huge files, the terminal rendering and screen readers on a virtual document are new |
 | A diff view: unified and side by side, colours, words changed within a line, thousands of lines, comments anchored to lines, files that load when opened | The diff panel, cross-agent review | New: ADR-0190 has a code editor, not a diff view. An editor, a git tool and any review tool need it too |
 | A terminal fed by a stream of bytes from anywhere, not only from a local process: mouse reporting, wide characters, links, the Kitty keyboard; many open, only the visible ones drawn | Terminals whose process runs on a server, maybe another machine (`terminal.rs`) | Precision: ADR-0190's terminal crate, fed by the network |
 | A texture replaced at each frame from decoded images, decoded away from the interface's thread, input forwarded from the element | The browser on the server, seen through its screencast (`server_browser.rs`) | Yes: uwui's ROADMAP, "textures updated at each frame" |
@@ -116,7 +120,8 @@ SlimeEngine's ADR-0202 does not script either case yet.
 | A global shortcut that opens a small window over the desktop, and a window or part of the screen captured at the user's request, through Wayland's portals | The chat outside Pluto's window ([ADR-0020](adr/0020-the-chat.md)) | New |
 
 All are indispensable: the port would lose a function Pluto has, or an ADR asks for it. The whole
-code editor is needed by Stage 7, after uwui's first stage.
+code editor is needed only if Pluto's editor returns from its ideas
+([ADR-0040](adr/0040-out-of-the-plan.md)).
 
 ## Pluto as an agent, and as an application driven
 

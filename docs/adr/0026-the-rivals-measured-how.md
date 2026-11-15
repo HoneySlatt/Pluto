@@ -12,7 +12,7 @@
 [ADR-0017](0017-pluto-measured-against-the-market.md) asks that every rival be measured on one
 workload from a scripted fake model service, in a disposable, isolated profile, so that the quality
 bar holds the stricter of Pluto's budgets and the best rival's figure with its margin.
-[M1.6](../PLAN.md#m16a--the-fake-model-and-the-rivals-bench) does it first. A design session on
+[M1.6](../history.md#m16--the-rivals-measured) does it first. A design session on
 2026-11-11 surveyed the rivals, the mock model servers and how to measure another program from
 outside; a challenger agent attacked the first recommendation. What it found:
 

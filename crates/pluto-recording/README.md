@@ -88,7 +88,7 @@ and `grok` record stand-ins that play the synthetic recordings, in a throwaway h
   (approve, then interrupt once the tool runs) is seen only then.
 - A Grok recording's prompt frame holds the fork's own instructions, compared whole on replay: a
   client other than the fork must send the same text. Which part a Rust driver must send is
-  decided with Stage 2's ACP driver.
+  decided with Stage 4's ACP engine.
 - A reference is versioned (`pluto-thread-reference`, version 1). A change to what the harness's
   thread view keeps raises its version and needs a migration in the harness, or new recordings:
   a reference comes from a live run and is never rebuilt from its recording.

@@ -6,7 +6,7 @@
 ## Context
 
 [ADR-0011](0011-plutos-own-harness-minimal-and-measured.md) gave Pluto a minimal harness, a driver
-of its server for local models, after Stage 3. Pluto now becomes a harness
+of its server for local models, after Stage 3 of the ROADMAP of 2026-11-08. Pluto now becomes a harness
 ([ADR-0030](0030-pluto-becomes-a-harness.md)), and its loop runs every model the terms allow it
 ([ADR-0031](0031-three-kinds-of-engine.md)). ADR-0011's evidence still holds:
 - the harness matters most for small models: up to 27 points, against 3 to 8 among frontier
@@ -66,11 +66,12 @@ as data.
 **A model registry from models.dev**, kept as a snapshot in the repository. It is refreshed only on
 the owner's go: nothing leaves the machine of Pluto's own accord.
 
-**Tools.** Pluto's own tools are native: an MCP browser costs 13,000 to 18,000 tokens at a
-session's start. Outside tools come through MCP, with the official Rust SDK, `rmcp`, pinned.
-
-**Extensions are text for now:** skills, hooks and named agents as files. No WebAssembly extension
-until a second concrete use exists.
+**The lead's implementation choices**, from the challenge, shown to the owner with this record:
+- Pluto's own tools are native: an MCP browser costs 13,000 to 18,000 tokens at a session's start.
+- Outside tools come through MCP, with the official Rust SDK, `rmcp`, pinned; as a new dependency,
+  it is asked of the owner when its milestone comes.
+- Extensions are text for now: skills, hooks and named agents as files. No WebAssembly extension
+  until a second concrete use exists.
 
 ## Alternatives considered
 
@@ -90,8 +91,7 @@ until a second concrete use exists.
 - Four clients and a quirks table to maintain. Their churn is the providers' APIs, slower than any
   Rust library on top of them.
 - The OpenCode companion stays until the loop beats it on the bench, on the owner's local models.
-- Agents may run the bench on local models through Ollama, by hand during a milestone, never in CI.
-  Runs on API keys or subscriptions are the owner's alone.
+- Who runs the bench, on which models, is [ADR-0037](0037-how-the-harness-is-judged.md)'s.
 - `rmcp` and `agent-client-protocol` change fast (ACP went from 3.6 to 5.3 in 17 days); both are
   pinned, and their upgrades are planned work.
 - Each new dependency is still asked of the owner when its milestone comes.

@@ -1,6 +1,6 @@
 # 0008. The server's storage, and the history moved from the fork
 
-- Status: Accepted
+- Status: Accepted; amended by [0033](0033-one-pluto-agent-process-per-session.md) (a session stored as its log)
 - Date: 2026-11-06
 
 ## Context

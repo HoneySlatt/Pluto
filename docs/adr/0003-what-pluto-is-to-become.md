@@ -6,7 +6,7 @@
   added), [0019](0019-a-code-editor-in-pluto.md) (a code editor in Pluto; going public at Stage 8)
   and [0020](0020-the-chat.md) (the chat replaces the vendors' applications) and
   [0022](0022-the-triage-row-by-row.md) (the dashboard as the home screen; glass not a setting;
-  safe images and icons of answers loaded)
+  safe images and icons of answers loaded) and [0030](0030-pluto-becomes-a-harness.md) (a harness at Pluto's core; a personal assistant) and [0040](0040-out-of-the-plan.md) (the editor an idea again)
 - Date: 2026-11-06
 
 ## Context

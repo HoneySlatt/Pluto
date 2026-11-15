@@ -1,7 +1,7 @@
 # 0020. The chat
 
 - Status: Accepted; amends [0003](0003-what-pluto-is-to-become.md) (the chat replaces the vendors'
-  applications for the owner)
+  applications for the owner); amended by [0040](0040-out-of-the-plan.md) (writing together without the editor's merge)
 - Date: 2026-11-08
 
 ## Context

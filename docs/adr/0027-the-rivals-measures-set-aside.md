@@ -1,14 +1,14 @@
 # 0027. The rivals' measures set aside until the owner's go
 
 - Status: Accepted; amends [0017](0017-pluto-measured-against-the-market.md) (Stage 2 no longer
-  waits for the rivals' figures)
+  waits for the rivals' figures); amended by [0039](0039-the-order-of-the-stages.md) (the remaining campaigns at Stage 5)
 - Date: 2026-11-11
 
 ## Context
 
 [ADR-0017](0017-pluto-measured-against-the-market.md) asked that a milestone of Stage 1 measure
 the rivals, so that Stage 2's server starts from their figures, and Stage 1's exit in the
-[ROADMAP](../ROADMAP.md) wants the rivals' figures beside today's. [M1.6a](../PLAN.md#m16a--the-fake-model-and-the-rivals-bench)
+[ROADMAP](../ROADMAP.md) wants the rivals' figures beside today's. [M1.6a](../history.md#m16--the-rivals-measured)
 built the fake model and the rivals' bench ([ADR-0026](0026-the-rivals-measured-how.md)) and took
 first figures of Pluto, T3 Code and Zed at rest; a full campaign takes hours of the owner's
 machine, and M1.6b and M1.6c remain. On 2026-11-11 the owner stopped the measures to move on.

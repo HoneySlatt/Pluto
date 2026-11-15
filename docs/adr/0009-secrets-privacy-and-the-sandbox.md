@@ -4,7 +4,7 @@
   actions kept for a person) and [0018](0018-the-markets-features-and-the-triage.md) (computer
   use in an isolated session; triggers run locked) and [0019](0019-a-code-editor-in-pluto.md) (the
   sandbox on Windows decided when Stage 7 starts) and [0022](0022-the-triage-row-by-row.md) (safe
-  images and icons of answers loaded)
+  images and icons of answers loaded) and [0035](0035-the-sandbox-and-the-vault.md) (the sandbox after Codex's; a vault) and [0040](0040-out-of-the-plan.md) (the sandbox on Windows back to going public)
 - Date: 2026-11-06
 
 ## Context

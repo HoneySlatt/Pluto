@@ -8,7 +8,11 @@ changes when the code does.
 
 Pluto today is two clients over one shared Rust core. Both speak to one server, the fork
 (`pluto-server`, T3 Code's server in TypeScript, outside this repository; see the
-[glossary](glossary.md)).
+[glossary](glossary.md)). From Stage 2, a new foundation grows beside them: new crates for the
+session log, the bench, then `pluto-agent`, its engines and Pluto's own server. The fork and the
+egui client stop at Stage 5, never bridged to the new code
+([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)); this file describes each part once it
+exists.
 
 DeepSeek Harness is a provider of the fork ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)):
 the server launches the official `dsh` local Web server and drives its protocol. The clients
@@ -234,7 +238,7 @@ replay:     fork's adapter ──stdio──> pluto-replay-agent <── the rec
   real failure shows "Image unavailable".
   The egui client has no sandbox, so the rule's "under the thread's sandbox network rule" waits for
   Pluto's own server. Agents' pages and MCP apps are outside the rule: they load in the client's
-  Chromium, whose requests reach any host (see the [PLAN's debt](PLAN.md#known-debt)).
+  Chromium, whose requests reach any host (see the [debt](debt.md)).
 - The desktop and `pluto-ffi` each draw their own presentation from the core: the desktop in
   `src/ui/`, the phone in `crates/pluto-ffi/src/views.rs` and Compose. Reconnecting is also written
   twice, with different policies.

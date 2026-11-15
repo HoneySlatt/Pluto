@@ -1,6 +1,6 @@
 # 0011. Pluto's own harness, minimal and measured
 
-- Status: Accepted; amends [0003](0003-what-pluto-is-to-become.md) (the agent loop kept in view is
+- Status: Superseded by [0032](0032-plutos-loop-and-its-provider-clients.md); it amended [0003](0003-what-pluto-is-to-become.md) (the agent loop kept in view is
   decided) and [0006](0006-agents-drivers.md) (one driver is Pluto's own agent)
 - Date: 2026-11-07
 

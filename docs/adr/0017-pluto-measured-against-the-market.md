@@ -6,7 +6,7 @@
   [0022](0022-the-triage-row-by-row.md) (safe images and icons of answers loaded) and
   [0026](0026-the-rivals-measured-how.md) (the vendors' applications without the owner's accounts;
   energy by a root sampler) and [0027](0027-the-rivals-measures-set-aside.md) (Stage 2 no longer
-  waits for the rivals' figures)
+  waits for the rivals' figures) and [0037](0037-how-the-harness-is-judged.md) (the harness joins the bar) and [0039](0039-the-order-of-the-stages.md) (the rivals' remaining campaigns at Stage 5)
 - Date: 2026-11-08
 
 ## Context
@@ -157,7 +157,7 @@ database keeps its budget of 25 MiB a day.
 - The quality bar of the [ROADMAP](../ROADMAP.md#quality-bar) is rewritten: the rule, the rivals,
   the margins, and the new budgets (long sessions, energy, tokens, the disk, the reliability's
   guarantees, the phone's).
-- Stage 1 gains a milestone, [M1.6](../PLAN.md#m16--the-rivals-measured): the fake model service,
+- Stage 1 gains a milestone, [M1.6](../history.md#m16--the-rivals-measured): the fake model service,
   the rivals' sandbox, the first figures of the agents' applications and the chats. The editor's
   rivals are measured when Stage 7 starts, the phone's with Stage 5. Every figure missed is debt
   until met.

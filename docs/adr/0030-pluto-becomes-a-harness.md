@@ -8,7 +8,7 @@
 
 Until 2026-11-15 Pluto was to relay other vendors' agents through a server of its own
 ([ADR-0004](0004-plutos-own-server-in-rust.md)), with a small harness of its own for local models
-after Stage 3 ([ADR-0011](0011-plutos-own-harness-minimal-and-measured.md)). A harness is the loop,
+after Stage 3 of the ROADMAP of 2026-11-08 ([ADR-0011](0011-plutos-own-harness-minimal-and-measured.md)). A harness is the loop,
 tools, prompts and context management that make a model an agent. In a design session on
 2026-11-15, the owner asked for a real harness at Pluto's core. The owner gave four reasons:
 - control over the brain: prompts, tools, context, memory;
@@ -54,8 +54,10 @@ What the surveys of 2026-11-15 found:
     shared one set of connections
     ([Business Insider](https://www.businessinsider.com/personal-ai-agent-grok-bot-posted-bank-details-company-slack-2026-10)).
 - **Anthropic's consumer terms** forbid access "through automated or non-human means" without an
-  API key or permission ([terms and credential use](https://code.claude.com/docs/en/legal-and-compliance)).
-  An always-on assistant is such a use.
+  API key or permission ([Consumer Terms](https://www.anthropic.com/legal/consumer-terms)). An
+  always-on assistant is such a use.
+- **Two assistants are written in Rust**, ZeroClaw and IronClaw; they are to be read before
+  Pluto's is built.
 
 ## Decision
 
@@ -78,13 +80,17 @@ Both show in the same application.
 **The assistant's rules**, set now so the kernel allows them:
 - It never deletes without a way back.
 - It spends money or sends a message on the owner's behalf only after an explicit approval. The
-  approval shows the action, the target and every recipient, and is checked outside the model.
+  approval shows the action, the target and every recipient.
 - It runs on API keys, DeepSeek or local models, never on a Claude subscription.
 - Mail goes through IMAP. Tuta's mail goes through TutaBridge, a separate program.
 - Its notes are plain files.
 - It runs on the desktop first, and on a NAS or a server later.
-- It wakes on schedules and events, never by polling. Its watchers are scripts until one signals;
-  only then is a model called.
+- It speaks through Pluto's own applications.
+
+**The lead's implementation choices**, from the challenge, shown to the owner with this record:
+- the approval is checked outside the model, as Claude Duet does;
+- the assistant wakes on schedules and events, never by polling; its watchers are scripts until
+  one signals, and only then is a model called.
 
 ## Alternatives considered
 

@@ -142,7 +142,7 @@ Claude's Remote Control, by one user. The owner's decisions:
 
 ## Consequences
 
-- The specification ([M1.3](../PLAN.md#m13--the-triage)) takes these features. Their stages, as
+- The specification ([M1.3](../history.md#m13--the-triage)) takes these features. Their stages, as
   proposed to the owner:
   - the review view, the one configuration and side questions: the server of Stage 2 and the client
     of Stage 6;

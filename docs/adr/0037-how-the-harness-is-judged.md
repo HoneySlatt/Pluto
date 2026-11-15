@@ -41,8 +41,8 @@ Every result carries its confidence interval. The bench's environment is fixed a
 part of what is measured.
 
 **Within a fixed monthly budget for runs**, which the owner sets. Agents run local models through
-Ollama by hand during a milestone. Runs on API keys or subscriptions are the owner's, or need the
-owner's go.
+Ollama by hand during a milestone, never in CI. Runs on API keys or subscriptions are the owner's
+alone.
 
 **Every component of the loop is kept only if the bench shows its gain**
 ([ADR-0032](0032-plutos-loop-and-its-provider-clients.md)). Tokens per task, cache hits, time and
@@ -66,5 +66,8 @@ replayed before it reaches the owner's work.
 - Its task set, its subset of Terminal-Bench, the runs per task and the monthly budget are decided
   at Stage 2's start. Saved briefs from private projects cannot be published: what of them may sit
   in this repository is decided then.
+- The harnesses Pluto's loop is measured against: Claude Code, Codex, OpenCode, Pi, Kimi Code CLI,
+  Mistral Vibe and DeepSeek Harness; the public boards as outside references.
+- Which account each frontier run uses, under each provider's terms, is decided with the task set.
 - [ADR-0017](0017-pluto-measured-against-the-market.md)'s token budget holds for vendors' engines:
   a turn started by Pluto spends at most 5 % more tokens than the same agent alone.

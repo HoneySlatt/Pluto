@@ -67,20 +67,20 @@ whatever runs them. What an engine cannot give is shown as absent.
 bench ([ADR-0037](0037-how-the-harness-is-judged.md)). It takes over a kind of work only where it
 matches or beats it.
 
-**Claude Code under the mod.**
+**Claude Code under the mod**, the lead's implementation choices from the challenge, shown to the
+owner with this record:
 - Pluto appends to Claude's system prompt by default. It replaces the prompt only per thread, on
   the owner's choice, and both ways are measured.
 - Pluto serves its tools to Claude over MCP, from its own process, and uses Claude Code's hooks.
 - A replay test fails the day `-p` turns bare by default, so the change is seen before it breaks
   the owner's work.
-- Pluto never puts a proxy on Claude's API address to watch its traffic: that would intermediate
-  the plan's credentials.
+
+**What the terms rule out.** Pluto never puts a proxy on Claude's API address to watch its
+traffic: that would intermediate the plan's credentials. Pluto's loop sends Pluto's own client
+identifier, as Kimi's terms require.
 
 **Rust without Node, with one exception.** Pluto's own code has no Node. `claude` is a Node
 program, and its mod is a small TypeScript program. Both remain while Claude Code is an engine.
-
-**Each engine identifies itself honestly.** Pluto's loop sends Pluto's own client identifier, as
-Kimi's terms require.
 
 ## Alternatives considered
 
@@ -90,9 +90,10 @@ Kimi's terms require.
 - **Claude Code relayed bare, with no mod.** No TypeScript in Pluto. But no control of its prompt
   or tools, no plan limits, and the subscription stops working the day `-p` turns bare.
 - **Two kinds of engine, without ACP.** Less to maintain. But the plans that work only in official
-  tools (Google's, Z.ai's) would be lost.
-- **Codex only where Pluto's loop falls short.** Less to build. But Codex's app-server is how
-  OpenAI documents ChatGPT's plan, and it reaches the board's top five far more cheaply.
+  tools, such as Z.ai's, would be lost; whether Google's may be driven through Gemini CLI is still
+  unanswered.
+- **Codex only where Pluto's loop falls short.** Less to build. But Codex is OpenAI's own engine on
+  ChatGPT's plan, and it reaches the board's top five far more cheaply.
 - **A proxy on the vendors' API addresses**, to feed the inspector. Forbidden by Anthropic's
   terms, and by Pluto's rule on other programs' credentials.
 
@@ -100,8 +101,9 @@ Kimi's terms require.
 
 - [ADR-0006](0006-agents-drivers.md) holds for vendors' engines and ACP: native where it brings
   what ACP lacks, Cursor dropped, every engine tested without a real turn, idle processes stopped.
-- Claude Code's mod features date from versions 2.1.289 to 2.1.323. The CLIs are pinned in the Nix
-  shell, and their changes show in the replay tests.
+- Claude Code's mod features date from versions 2.1.289 to 2.1.323. The CLIs are to be pinned in
+  the Nix shell, so that their changes show in the replay tests; today they are not
+  ([`debt.md`](../debt.md)).
 - The quotas come from each engine's own interface, Claude's from the mod
   ([ADR-0022](0022-the-triage-row-by-row.md)).
 - Whether Sign in with ChatGPT covers a general application with its own loop, beyond the open-source

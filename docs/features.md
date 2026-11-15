@@ -2,7 +2,7 @@
 
 Every feature of Pluto today, by family, and what the owner decided for each: keep, rethink or cut
 ([ADR-0010](adr/0010-todays-features-triaged.md)). The marks are the start of the specification of
-the Rust server and of the uwui client ([M1.3](PLAN.md#m13--the-triage)).
+the Rust server and of the uwui client ([M1.3](history.md#m13--the-triage)).
 
 - **Keep**: the family and its form go to the specification. A row kept may name what it gains.
 - **Rethink**: its need stays; its form is decided row by row below, each row with its problem,
@@ -27,7 +27,7 @@ lines of Rust, rounded.
 | 5 | Plans | The proposed plan's card: refine, implement, save, implement in a new thread | `ui/plan_card.rs` | 1,100 | Keep | Supplied to every agent (ADR-0017) |
 | 6 | The diff and review | Working tree, branch and turn scopes, the changed files' card | `ui/diff_panel.rs`, `diff_review.rs`, `changed_files.rs`, `crates/pluto-core/src/diff.rs` | 3,500 | Rethink | The market's best review view, comments sent to an agent (ADR-0018) |
 | 7 | The terminal | A real terminal per thread, in a drawer, on the server | `terminal.rs`, `ui/terminal_drawer.rs`, `ui/terminal_surface.rs` | 2,500 | Keep | Marked Rethink by mistake on 2026-11-08, corrected by the owner |
-| 8 | Files | A tree, search, a highlighted view, small edits, media previews | `ui/files.rs`, `ui/file_*.rs`, `ui/project_file.rs` | 2,700 | Rethink | The editor's light mode, then the editor of Stage 7 ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)) |
+| 8 | Files | A tree, search, a highlighted view, small edits, media previews | `ui/files.rs`, `ui/file_*.rs`, `ui/project_file.rs` | 2,700 | Rethink | The editor's light mode, then the editor of Stage 7 ([ADR-0019](adr/0019-a-code-editor-in-pluto.md)); the editor an idea since [ADR-0040](adr/0040-out-of-the-plan.md) |
 | 9 | The browser | A preview panel, server-side tabs that agents drive, a Device surface | `preview.rs`, `ui/preview.rs`, `server_browser.rs`, `ui/server_browser.rs` | 3,200 | Rethink | One browser on the server, watched in a tab, which also shows computer use; optional where Chromium is installed |
 | 10 | Git and worktrees | A quick action, commit, push, pull, branches, stash, worktrees' setup, publishing, Bitbucket | `ui/git_actions.rs`, `branch_picker.rs`, `source_control.rs`, `stash.rs`, `worktree_setup.rs`, `publish.rs`, `bitbucket.rs` | 6,200 | Keep | Worktrees' size shown and cleaned, checkpoints at each turn (ADR-0017); GitHub, GitLab and Forgejo kept, Bitbucket and Azure DevOps cut |
 | 11 | Pull requests | A page of pull requests, those linked to each thread and their state | `ui/pull_requests.rs`, `linked_pull_requests.rs`, `thread_pull_requests.rs`, `crates/pluto-core/src/change_request.rs` | 2,700 | Rethink | A state of the thread and of the dashboard; followed to the merge (ADR-0018) |
@@ -36,7 +36,7 @@ lines of Rust, rounded.
 | 14 | Keybindings | Bindings resolved by the server, a when-clause builder, the shortcuts' page | `ui/keybindings.rs`, `when_builder.rs`, `shortcuts.rs` | 2,800 | Rethink | Remappable by zone, no when-clause builder; the editor's Vim and Helix modes shared |
 | 15 | Agents' pages and MCP apps | A page an agent publishes, shown in the thread; MCP applications' frames | `ui/html_render.rs`, `mcp_apps.rs`, `crates/pluto-core/src/html_render.rs`, `mcp_app.rs` | 1,300 | Rethink | Heavy, and not powerful enough: a preview in the thread, the page in a panel, in uwui's web view; living artifacts ([rows](#15-agents-pages-and-mcp-apps)) |
 | 16 | Providers and models | Each provider's settings, instances, the model picker, custom models | `ui/providers.rs`, `providers/`, `pickers.rs`, `custom_model_editor.rs` | 6,700 | Rethink | One configuration for every agent (ADR-0018); one picker, local and remote equal, quotas beside |
-| 17 | Local models | Ollama's driver in the fork; code through the OpenCode companion | the fork's `packages/provider-ollama` | none in the client | Rethink | Managed in Pluto, as ADR-0003; coded by Pluto's own agent ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)) |
+| 17 | Local models | Ollama's driver in the fork; code through the OpenCode companion | the fork's `packages/provider-ollama` | none in the client | Rethink | Managed in Pluto, as ADR-0003; coded by Pluto's own agent ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md), now [ADR-0032](adr/0032-plutos-loop-and-its-provider-clients.md)) |
 | 18 | Usage and limits | Cost and token charts, limits, prices, the context meter | `ui/usage*.rs`, `context_meter.rs` | 4,400 | Rethink | Quotas in the dashboard, warned before they run out, a switch suggested; Pluto's own tokens shown (ADR-0017) |
 | 19 | Settings | Pages, search, scope and inheritance, project overrides, defaults restored | `ui/settings*.rs`, `setting_inheritance.rs` | 7,200 | Rethink | Fewer, each useful, triaged row by row; inheritance by machine, project and thread kept |
 | 20 | Themes and typography | T3's environment themes, the accent picker, fonts, Lucide icons | `theme.rs`, `ui/accent_picker.rs`, `typography.rs`, `lucide.rs` | 3,000 | Rethink | Pluto's own look of ADR-0003 and ADR-0016, dark and light; T3's environment themes cut |
@@ -193,7 +193,7 @@ Rival: Zed (the agent edits the same buffers, review per hunk); Warp next.
 | 8.3 | Breadcrumb | `files.rs:337` | Static text | C | Rethink: each step clickable |
 | 8.4 | Highlighted source with line numbers | `file_source` | — | C | Keep |
 | 8.5 | "Open in" the owner's editor | `ui/open_in.rs` | — | C | Keep |
-| 8.6 | Small edits, saved alone | `ui/file_editor.rs` | Files over 1 MB stay read-only | C | Rethink: through the editor's live merge, never over an agent's write; real editing in the owner's editor, then Stage 7 |
+| 8.6 | Small edits, saved alone | `ui/file_editor.rs` | Files over 1 MB stay read-only | C | Rethink: through the editor's live merge, never over an agent's write; real editing in the owner's editor, then Stage 7 (an idea since ADR-0040) |
 | 8.7 | Images and SVG | `ui/file_previews.rs` | AVIF routed but not decoded | C | Keep, AVIF decoded |
 | 8.8 | Markdown rendered, task boxes saved | `rendered_markdown` | — | C | Keep |
 | 8.9 | CSV and TSV as a table | `delimited_table` | — | C | Keep |
@@ -367,7 +367,7 @@ and Jan next. Core; Ollama is installed by the owner.
 
 | Id | Feature | Where | Problem today | C/O | Mark |
 |---|---|---|---|---|---|
-| 17.1 | An Ollama instance, for chats | `provider-ollama` | A code project's thread is refused | C | Rethink: chat and code, code through Pluto's agent (Stage 4) |
+| 17.1 | An Ollama instance, for chats | `provider-ollama` | A code project's thread is refused | C | Rethink: chat and code, code through Pluto's agent (Stage 4; Stage 3 since ADR-0039) |
 | 17.2 | Its models, thinking levels, vision, context | `modelCatalog.ts` | — | C | Keep |
 | 17.3 | A local chat turn, streamed | `adapter.ts` | — | C | Keep |
 | 17.4 | The conversation kept by the server, handed over | `transcript.ts` | — | C | Keep |

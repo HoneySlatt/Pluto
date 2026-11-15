@@ -4,19 +4,24 @@
 
 # Pluto
 
-Pluto aims to be one place to work with every coding agent and every model: Claude Code, Codex,
-OpenCode, Kimi Code, Mistral Vibe, Z Code, the ACP agents, DeepSeek and local models through
-Ollama, for code and for chat. It is native, frugal and private, in Rust, for Linux first.
+Pluto is becoming a harness of its own: one place to work with every model and every coding
+agent (Claude Code, Codex, Copilot, OpenCode, Kimi Code, Mistral Vibe, Z Code, the ACP agents, DeepSeek and local
+models through Ollama), for code, chat, design and orchestration, and later a personal assistant.
+It is native, frugal and private, in Rust, for Linux first.
 
-Pluto changed direction on 2026-11-06 ([ADR-0003](docs/adr/0003-what-pluto-is-to-become.md)): it no
-longer aims at parity with T3 Code. What exists today:
+Its loop, tools, prompts and context are Pluto's own; where a vendor's engine is better, or the
+only path its terms allow, Pluto drives it under the same thread model. The owner decided it on
+2026-11-15 ([ADR-0030](docs/adr/0030-pluto-becomes-a-harness.md)); after Stage 1's audit, Stage 2
+builds the bench that judges the harness, and the session log every engine writes. What exists today:
 
 - a native desktop client on [egui](https://github.com/emilk/egui) (`src/`), frozen except fixes
-  until it moves to uwui, the owner's UI framework;
+  until the client on uwui, the owner's UI framework, replaces it;
 - an Android app in Kotlin and Compose (`android/`) over the same Rust core (`crates/pluto-core`);
 - both speak to `pluto-server`, a frozen fork of [T3 Code](https://t3.codes)'s server, in its
   protocol (Effect RPC envelopes, orchestration protocol 2). Pluto's own server, in Rust, replaces
-  it step by step ([ADR-0004](docs/adr/0004-plutos-own-server-in-rust.md)).
+  it at Stage 5 ([ADR-0038](docs/adr/0038-a-new-foundation-beside-the-fork.md));
+- the tools of Stage 1's measures: a fake model service, a bench of the rivals, and recorded agent
+  sessions.
 
 How the code fits together is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the direction in
 [`docs/ROADMAP.md`](docs/ROADMAP.md); the current work in [`docs/PLAN.md`](docs/PLAN.md). The

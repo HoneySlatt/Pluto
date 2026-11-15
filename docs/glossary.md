@@ -4,17 +4,51 @@ Terms this project uses in a sense of its own.
 
 - **Agent**: a coding agent's program that Pluto drives, such as Claude Code, Codex or Kimi Code,
   usually its official CLI.
-- **Pluto's agent**: Pluto's own harness, a driver of the server for local models and API keys
-  ([ADR-0011](adr/0011-plutos-own-harness-minimal-and-measured.md)).
+- **The kernel**: the pieces of Pluto that both its products stand on: the session log, Pluto's
+  loop, the engines, tools in a sandbox, the delegation object, a scheduler and the bench
+  ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)).
+- **The two products**: the work (code, chat, design, orchestration) and, later, the personal
+  assistant, a daemon of its own on the same kernel ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)).
+- **Pluto's loop**, or Pluto's own agent: Pluto's harness, a crate with a small core, a profile per
+  model and four provider clients of its own
+  ([ADR-0032](adr/0032-plutos-loop-and-its-provider-clients.md)).
+- **An engine**: what runs a thread's turns: Pluto's loop, a vendor's engine (Claude Code through
+  the mod, Codex's app-server, Copilot's SDK), or an agent over ACP
+  ([ADR-0031](adr/0031-three-kinds-of-engine.md)).
+- **The mod**: Pluto's plugin for Claude Code, in TypeScript, which changes its prompt, answers its
+  tool calls and reads its usage and limits without modifying its binary
+  ([ADR-0031](adr/0031-three-kinds-of-engine.md)).
+- **`pluto-agent`**: the process that runs one agent session, whatever its engine, and writes its
+  log; also a library for the TUI and the phone
+  ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.md)).
+- **The session log**: a session's append-only, versioned events on disk; the session's truth, of
+  which the context sent to a model is a view
+  ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.md)).
+- **The delegation object**: one record of a delegated task: its brief, base commit, hidden checks,
+  proofs, report and ledger line ([ADR-0034](adr/0034-the-methods-mechanisms-native.md)).
+- **A brief**: the written task a delegated agent receives: its goal, scope, what it must not do,
+  when it is done, and what it reports.
+- **A hidden check**: a test of a delegated task that its agent never sees, run after it stops.
+- **Provenance**: who a piece of content comes from: the owner, an agent, a tool, or an untrusted
+  source ([ADR-0034](adr/0034-the-methods-mechanisms-native.md)).
+- **The vault**: where Pluto keeps secrets and hidden checks, outside the sandbox, out of the
+  model's reach ([ADR-0035](adr/0035-the-sandbox-and-the-vault.md)).
+- **The inspector**: the view of what a model receives at each turn, part by part, with its tokens
+  and cost; changes append by default ([ADR-0036](adr/0036-the-inspector-appends-by-default.md)).
+- **The quirks table**: the data that says how each provider differs from the wire format Pluto's
+  client speaks to it ([ADR-0032](adr/0032-plutos-loop-and-its-provider-clients.md)).
+- **The new foundation**: the crates built from Stage 2, beside the frozen egui client, its core and
+  the fork ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)).
 - **Harness**: the loop, tools, prompts and context management around a model that make it a coding
   agent.
-- **The bench**: Pluto's small fixed set of coding tasks, run on the owner's local models to measure
-  the harness and each of its components.
+- **Pluto's bench**: the owner's saved briefs replayed with their hidden checks, beside a subset of
+  Terminal-Bench, which measure a harness and each of its components
+  ([ADR-0037](adr/0037-how-the-harness-is-judged.md)); not to be confused with the rivals' bench.
 - **A rival**: a program of the market that Pluto is measured against, named only to be measured,
   with its version and date ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)).
 - **The fake model service**: a scripted service that streams the same workload to Pluto and its
   rivals as a model would, so that they compare with no quota spent; it counts the bytes it
-  receives, by part, which stand for tokens until Stage 2 brings a tokenizer;
+  receives, by part, which stand for tokens until a tokenizer is added;
   `crates/pluto-fake-model` ([ADR-0017](adr/0017-pluto-measured-against-the-market.md),
   [ADR-0026](adr/0026-the-rivals-measured-how.md)).
 - **The margin**: how much better than the best rival Pluto must be on a family of criteria, such
@@ -65,8 +99,9 @@ Terms this project uses in a sense of its own.
   and Pro, which an application adds if it wants them.
 - **Model profile**: the harness's settings for one model: its edit format, tool names, message
   format, and which components are on.
-- **Driver**: the server's code that speaks one agent's protocol and turns it into Pluto's threads.
-  *Native* when written for that agent, *ACP* when it goes through the Agent Client Protocol.
+- **Driver**: the fork's code that speaks one agent's protocol and turns it into threads; in the new
+  foundation, an engine. *Native* when written for that agent, *ACP* when it goes through the Agent
+  Client Protocol.
 - **At rest**: a client or a server with nothing to do: no input, no turn running. The quality bar
   asks it to draw nothing and wake for nothing.
 - **First useful frame**: the first frame the client draws with the server's projects and threads;
@@ -74,8 +109,6 @@ Terms this project uses in a sense of its own.
 - **The fixture**: the disposable server of synthetic threads that `scripts/fixture-server.sh`
   builds, on which every automated measurement runs, never on the owner's data.
 - **The fork**: `pluto-server`, the TypeScript fork of T3 Code's server, frozen since 2026-11-06.
-- **The gateway**: the part of Pluto's Rust server that forwards to the fork what is not yet
-  ported, and translates its protocol into Pluto's. It disappears when the fork stops.
 - **The relay**: the owner's own server through which devices reach each other away from home,
   built on iroh; it sees only encrypted traffic.
 - **The triage**: the owner's marking of every feature as keep, cut or rethink; its result is the

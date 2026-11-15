@@ -1,6 +1,6 @@
 # 0005. Pluto's own typed protocol
 
-- Status: Accepted
+- Status: Accepted; amended by [0033](0033-one-pluto-agent-process-per-session.md) (the agent's part carries the session log's events)
 - Date: 2026-11-06
 
 ## Context

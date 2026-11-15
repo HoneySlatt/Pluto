@@ -19,8 +19,9 @@ and where a session lives, decide what survives a crash, an update, and ten time
 - **Codex** keeps threads, turns and items with started, delta and completed events, persisted so
   clients reconnect. **Pi** keeps sessions as append-only JSON Lines, with atomic publishing and a
   repair of a torn last line.
-- **The phone** gets "Pluto's own agent in a light form", offline
-  ([ADR-0018](0018-the-markets-features-and-the-triage.md)): the loop must run without the server.
+- **The phone** gets "Pluto's own agent (Stage 4) in a light form", offline
+  ([ADR-0018](0018-the-markets-features-and-the-triage.md); Stage 4 of the ROADMAP of 2026-11-08):
+  the loop must run without the server.
 - **The inspector** shows what the model receives at every turn
   ([ADR-0036](0036-the-inspector-appends-by-default.md)). A snapshot of every request, for 15
   threads of 100 requests of 400 KB, would make about 600 MB a day, an estimate, against the
@@ -59,8 +60,11 @@ and how a torn write is repaired.
 
 - [ADR-0005](0005-plutos-own-typed-protocol.md) holds; the agent's part of the protocol carries the
   log's events.
-- [ADR-0008](0008-storage-and-the-history-moved.md) holds for what is not a session: the server's
-  SQLite indexes the logs. The history imported from the fork becomes logs.
+- [ADR-0008](0008-storage-and-the-history-moved.md) holds for what is not a session. The history
+  imported from the fork becomes logs. The lead's choice, shown to the owner with this record: the
+  server's SQLite indexes the logs.
+- The storage budget of 25 MiB a day of heavy use now counts the sessions' logs and the server's
+  database together, not the database alone.
 - A process per session costs memory and a start. Both are measured in Stage 3, and its budgets are
   set from those figures. An idle process stops, and resumes from its log
   ([ADR-0006](0006-agents-drivers.md)).

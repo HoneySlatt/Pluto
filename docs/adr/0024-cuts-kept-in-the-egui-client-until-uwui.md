@@ -7,7 +7,7 @@
 ## Context
 
 [ADR-0022](0022-the-triage-row-by-row.md) lists what leaves Pluto, and
-[M1.4](../PLAN.md#m14--the-cuts) removes it from the egui client and the Android app. The PLAN
+[M1.4](../history.md#m14--the-cuts) removes it from the egui client and the Android app. The PLAN
 says that a cut whose loss would break daily work before its replacement exists is put to the
 owner first. Mapping the code showed three such cuts:
 
