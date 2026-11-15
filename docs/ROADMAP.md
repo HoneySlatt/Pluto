@@ -23,8 +23,8 @@ nothing leaves the owner's machines but the models' own traffic, with the one ex
 promises below name.
 
 It is made for its owner first, who runs 5 to 15 threads on a busy day, and designed so it can go
-public later. Its surfaces are a complete TUI, a desktop client on uwui, the owner's UI framework,
-and a phone that does everything. It is one of uwui's programs of reference.
+public later. Its surfaces are a desktop client on uwui, the owner's UI framework, a phone that
+does everything, a command line, and later a light TUI for machines without a screen ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)). It is one of uwui's programs of reference.
 
 ## 2. Principles
 
@@ -132,15 +132,15 @@ hours without a crash on 2026-11-07
 ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)); the rest on 2026-11-08
 ([ADR-0017](adr/0017-pluto-measured-against-the-market.md) to [ADR-0020](adr/0020-the-chat.md)).
 Each may be tightened by the rivals' figures. Most are not yet met: today's figures are beside
-them, and each gap is known debt. The budgets of `pluto-agent` and the TUI are set at Stage 3 from
-their first figures.
+them, and each gap is known debt. The budgets of `pluto-agent` and its command line are set at Stage 3
+from their first figures, the TUI's at Stage 7.
 
 | Budget | Target | Today | Measured by | Checked in |
 |---|---|---|---|---|
-| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB with 15 threads open, counted as private, swap and GPU memory ([ADR-0026](adr/0026-the-rivals-measured-how.md)) | 0.05 frames and 3.2 wake-ups a second; 143 MB resident ([measured](measurements.md#the-client-at-rest)); counted as ADR-0026 counts memory, about 405 MiB, 340 of it GPU memory, after 15 threads ([provisional](measurements.md#the-rivals-bench-m16b1-provisional)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | from Stage 5, on uwui, by hand at each milestone; CI once a headless run exists; the TUI's from Stage 3 |
+| Client at rest | 0 frames, 0 wake-ups of its own a second; at most 100 MB with 15 threads open, counted as private, swap and GPU memory ([ADR-0026](adr/0026-the-rivals-measured-how.md)) | 0.05 frames and 3.2 wake-ups a second; 143 MB resident ([measured](measurements.md#the-client-at-rest)); counted as ADR-0026 counts memory, about 405 MiB, 340 of it GPU memory, after 15 threads ([provisional](measurements.md#the-rivals-bench-m16b1-provisional)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | from Stage 5, on uwui, by hand at each milestone; CI once a headless run exists; the TUI's from Stage 7 |
 | Server at rest | at most 80 MB, counted as for the client, agents' processes and Chromium excluded; 0 wake-ups of its own | the fork: 394 to 892 MB, 4 to 30 wake-ups a second ([measured](measurements.md#the-fork)) | `scripts/measure.sh`: `/proc/<pid>/status`, `pidstat -w` | CI, from Stage 5 |
-| Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | 125 ms warm, 195 ms cold, to its painting ([measured](measurements.md#the-start)) | `examples/live.rs`, `hyperfine` | from Stage 5, on uwui, by hand at each milestone; the TUI's from Stage 3 |
-| Frames | 99.9 % of frames on time at the display's rate, none over 1.5 times the frame, in every scenario: a long thread of 5,000 messages, 15 threads streaming, scrolling, opening a thread; the HP at 60 Hz | the long thread: p99 8.5 ms, UI pass only, at 1440 × 900; 15 streams: p99 3.6 ms on replayed streams ([measured](measurements.md#a-long-thread-and-streams)) | `examples/bench.rs`, on recorded streams from M1.5 | from Stage 5, on uwui, by hand at each milestone; the TUI's from Stage 3 |
+| Start | first useful frame warm in 100 ms, cold in 500 ms, high tier | 125 ms warm, 195 ms cold, to its painting ([measured](measurements.md#the-start)) | `examples/live.rs`, `hyperfine` | from Stage 5, on uwui, by hand at each milestone; the TUI's from Stage 7 |
+| Frames | 99.9 % of frames on time at the display's rate, none over 1.5 times the frame, in every scenario: a long thread of 5,000 messages, 15 threads streaming, scrolling, opening a thread; the HP at 60 Hz | the long thread: p99 8.5 ms, UI pass only, at 1440 × 900; 15 streams: p99 3.6 ms on replayed streams ([measured](measurements.md#a-long-thread-and-streams)) | `examples/bench.rs`, on recorded streams from M1.5 | from Stage 5, on uwui, by hand at each milestone; the TUI's from Stage 7 |
 | Input to photon | at most one frame at p99 | not measured: needs the light sensor | the light sensor bought for SlimeEngine; the compositor's presentation times for Pluto's own traces | from Stage 5, on uwui |
 | Long sessions | after 24 hours and after 7 days with 15 threads open, memory and wake-ups, client and server, within 10 % of a fresh start | not measured | a long session replayed on the fake model, accelerated | at each stage's end |
 | Energy | at rest and over an hour of 15 threads streaming, at most half the best rival's | not measured | the HP's battery; the desktop's processor counters | at each stage's end |
@@ -223,7 +223,8 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | The session log's format | JSON Lines; a binary encoding; how entries, provenance and torn writes are handled | Stage 2, its first milestone |
 | The bench's tasks and budget | how many saved briefs, from which projects, and what of them may sit in this public repository; the Terminal-Bench subset; runs per task; the monthly budget | Stage 2 |
 | Whether Sign in with ChatGPT covers Pluto's loop | a first test on the owner's account; OpenAI's interest form | Stage 3, the provider clients' milestone |
-| The budgets of `pluto-agent` and the TUI, and the TUI's rivals | from their first figures; Claude Code's, Codex's and OpenCode's TUIs | Stage 3, its first milestone |
+| The budgets of `pluto-agent` and its command line | from their first figures | Stage 3, its first milestone |
+| The TUI's budgets and rivals | Claude Code's, Codex's and OpenCode's TUIs | Stage 7 |
 | A keyring without a graphical session | systemd's credentials; a file sealed by the session's keyring; another | Stage 3, the vault's milestone |
 | DeepSeek Harness beside DeepSeek's models in Pluto's loop | an ACP engine, or none; the fork drives its local Web protocol meanwhile ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)) | Stage 4 |
 | The protocol's wire format and transports | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 5, the protocol's milestone |
@@ -256,16 +257,18 @@ every session from Stage 3 on has a format to write.
 **Exit.** The bench runs in CI on the fake model, and by hand on real models. The vendors' harnesses
 have figures with their confidence intervals. Recorded sessions convert into the log.
 
-### Stage 3 — `pluto-agent` and its TUI
+### Stage 3 — `pluto-agent` and its command line
 
-**Goal.** The owner's delegated tasks run on Pluto's own loop, followed in a TUI.
+**Goal.** The owner's delegated tasks run on Pluto's own loop, started and followed from a command
+line ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)).
 
 - Pluto's loop and its provider clients: Anthropic's Messages, OpenAI's Responses, Chat
   Completions, Ollama's native API; the model registry and the quirks table.
 - `pluto-agent`, one process per session, writing its log.
 - The sandbox and the vault.
 - The delegation object, its limits and end conditions; the owner's method read from its files.
-- The TUI: threads, the delegation, the inspector.
+- The command line: run a brief, list and follow sessions, answer approvals, show the inspector's
+  view; the same by SSH, from a script and from an agent.
 
 **Exit.** The owner's delegated tasks run through `pluto-agent` every day. The loop beats the
 OpenCode companion on the bench on the owner's local models, and replaces it.
@@ -327,6 +330,8 @@ measured on the HP.
   lists; a second brain of notes as files; the machine and the NAS.
 - Watchers as scripts; a model called only on a signal.
 - Full voice conversation, local.
+- A light TUI, for SSH and machines without a screen: threads, following, approvals, the
+  inspector ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)).
 
 **Exit.** The assistant runs every day on the owner's desktop within its budget, with no action
 taken without its approval.
@@ -346,7 +351,7 @@ taken without its approval.
 | Version | Stage | Content |
 |---|---|---|
 | 0.2 | 2 | The bench and the session log |
-| 0.3 | 3 | `pluto-agent` and its TUI |
+| 0.3 | 3 | `pluto-agent` and its command line |
 | 0.4 | 4 | The engines |
 | 0.5 | 5 | Pluto's server, the fork stopped |
 | 0.6 | 6 | The uwui client completed |

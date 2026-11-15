@@ -1,7 +1,7 @@
 # 0039. The order of the stages, and Stage 1 closed
 
 - Status: Accepted; amends [0017](0017-pluto-measured-against-the-market.md) and
-  [0027](0027-the-rivals-measures-set-aside.md) (the rivals' remaining campaigns move to Stage 5)
+  [0027](0027-the-rivals-measures-set-aside.md) (the rivals' remaining campaigns move to Stage 5); amended by [0042](0042-a-cli-first-the-tui-with-the-assistant.md) (a command line at Stage 3, the TUI at Stage 7)
 - Date: 2026-11-15
 
 ## Context

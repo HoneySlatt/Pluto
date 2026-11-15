@@ -19,7 +19,7 @@ Terms this project uses in a sense of its own.
   tool calls and reads its usage and limits without modifying its binary
   ([ADR-0031](adr/0031-three-kinds-of-engine.md)).
 - **`pluto-agent`**: the process that runs one agent session, whatever its engine, and writes its
-  log; also a library for the TUI and the phone
+  log; its command line starts and follows sessions; also a library for the TUI and the phone
   ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.md)).
 - **The session log**: a session's append-only, versioned events on disk; the session's truth, of
   which the context sent to a model is a view

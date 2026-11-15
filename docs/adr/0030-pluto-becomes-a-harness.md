@@ -1,7 +1,7 @@
 # 0030. Pluto becomes a harness: one kernel, two products
 
 - Status: Accepted; amends [0003](0003-what-pluto-is-to-become.md) (a harness of Pluto's own at its
-  core; a personal assistant as a second product); amended by [0041](0041-the-assistant-on-every-plan-opened-to-third-parties.md) (what the assistant runs on)
+  core; a personal assistant as a second product); amended by [0041](0041-the-assistant-on-every-plan-opened-to-third-parties.md) (what the assistant runs on) and [0042](0042-a-cli-first-the-tui-with-the-assistant.md) (the TUI at Stage 7)
 - Date: 2026-11-15
 
 ## Context

@@ -57,9 +57,9 @@ How to read it:
 Since 2026-11-15 Pluto is a harness of its own
 ([ADR-0030](adr/0030-pluto-becomes-a-harness.md) to [ADR-0040](adr/0040-out-of-the-plan.md)). Its
 kernel adds to what follows: every session in its own `pluto-agent` process, its log the truth
-(ADR-0033); Pluto's loop (ADR-0032); the delegation object (ADR-0034); a complete TUI, for code,
-chat, the delegation and the inspector; the inspector of every turn (ADR-0036). The personal
-assistant is specified at Stage 7.
+(ADR-0033); Pluto's loop (ADR-0032); the delegation object (ADR-0034); a command line from
+Stage 3, and a light TUI for machines without a screen at Stage 7 (ADR-0042); the inspector of
+every turn (ADR-0036). The personal assistant is specified at Stage 7.
 
 One Rust server per machine that codes ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). It is a
 service: closing a window stops nothing, and an update or a restart never stops a running agent.
