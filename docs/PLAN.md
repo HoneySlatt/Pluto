@@ -28,7 +28,15 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
     confirm;
   - the method changed on 2026-11-16: architecture is part of the bar (change and failure
     scenarios, invariants, ownership, recovery, each ADR's validation and reconsideration).
-    Stage 1's audit reviews Pluto against it; M2.0 applies it.
+    Stage 1's audit reviews Pluto against it; M2.0 applies it;
+  - the license: the crates declare MIT OR Apache-2.0, but the repository holds only T3's MIT
+    text, under T3's name; no Apache-2.0 text, no copyright line of Pluto's own. Fixed before any
+    outside contribution, with the choice of a DCO or a CLA.
+- **Stage 1's audit also asks**, from a review of 2026-11-16:
+  - `AGENTS.md` still says "no abstraction without a second concrete use"; the method now also
+    accepts a boundary around an unstable dependency, a protected invariant or a test. Align, on
+    the owner's go;
+  - ADR-0020 says to check shortcuts with Umbriel; the compositor is now Niri.
 
 ## Status
 
@@ -76,7 +84,28 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
     content's provenance kept, tool output never taken as instructions; extensions pinned by
     digest;
   - Pluto's own Nix packages and module, its engines' CLIs pinned in its flake, and the owner's
-    rules and skills read from the one place the NixOS module keeps them.
+    rules and skills read from a path its Nix module gives, never guessed among the agents' own
+    copies;
+  - a review of 2026-11-16 adds what that survey left out:
+    - the execution model, decided once: an async runtime (tokio, which `rmcp` and iroh use) or
+      threads. Formats, the protocol and the loop's logic do no I/O, so that they replay, fuzz and
+      port; I/O stays at the edges;
+    - authorization, not only authentication: tokens scoped by device, client and child agent, as
+      the fork's step C did late; a token never passed in an environment variable (the fork's ACP,
+      Pi and Kimi children keep theirs there, readable by the owner's other processes); the server
+      bound to loopback unless told otherwise (the fork listens on every address);
+    - room in the log, from M2.1, for what comes later: checkpoints (Stage 3), the digest of the
+      profile, prompt and tools at each turn (for the bench), sessions with no repository (the
+      chat, the assistant), segments that can be compressed (the storage budget);
+    - a corpus of every past version of the log, the protocol and the settings, read by
+      `scripts/check.sh`; every reader of outside input fuzzed (the log, the protocol, the CLIs'
+      output);
+    - the data's folders, with the public name: XDG's config, data, state and cache, or one folder;
+      one server per data folder, locked;
+    - the workspace's rules: shared lints (no `unwrap` outside tests, `unsafe` forbidden where
+      unused), dependency versions shared, public items documented, a toolchain file so that cargo
+      builds without Nix;
+    - the frozen client out of the repository's root, so that the root builds the new foundation.
 - **Delivers.**
   - In [`ARCHITECTURE.md`](ARCHITECTURE.md), the target: the crates of Stages 2 to 5 by name, what
     each holds, the direction of their dependencies, and each one's public surface.
@@ -85,7 +114,8 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   - A check in `scripts/check.sh` that refuses a dependency against the direction.
   - The frozen egui client and its crates in a workspace of their own, so that the new foundation
     builds and tests without them.
-  - `CONTRIBUTING.md`: the environment, the commands, where to start.
+  - `CONTRIBUTING.md`: the environment, the commands, where to start. `SECURITY.md`: how to
+    report a vulnerability privately.
 - **Done when.** The ADRs are accepted. The dependency check fails on a test crate that breaks the
   direction and passes on `main`. The new foundation's checks run without building eframe.
 - **How to test.** `scripts/check.sh`; a newcomer test: a fresh agent, given only the README,
