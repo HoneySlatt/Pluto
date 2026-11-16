@@ -220,7 +220,13 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 
 | Topic | Candidates | Decide at |
 |---|---|---|
-| The session log's format | JSON Lines; a binary encoding; how entries, provenance and torn writes are handled | Stage 2, its first milestone |
+| The new foundation's architecture | the crates and their dependencies, the seams, how sessions survive the server, identifiers, the protocol's compatibility, ownership and limits, the sandbox's boundary; the list in [M2.0](PLAN.md#m20--the-new-foundations-architecture) | M2.0 |
+| The public name | renaming later reaches crate and binary names, `~/.pluto` and the protocol's identifiers | M2.0, before a crate is published or a path fixed |
+| How outside contributions are accepted | a Developer Certificate of Origin, or a contributor licence agreement | M2.0, before the first outside contribution |
+| The interface's languages | English only, or texts kept apart from the code from the first screen so that French and others can follow | M2.0 |
+| The way back | checkpoints of the files agents change; a trash for the assistant; how long each is kept | Stage 3, with the sandbox |
+| Updates | no updater of Pluto's own beside the system's package manager; migrations with a tested recovery path; turns kept across an update | M2.0 |
+| The session log's format | JSON Lines; a binary encoding; how entries, provenance and torn writes are handled | Stage 2, M2.1 |
 | The bench's tasks and budget | how many saved briefs, from which projects, and what of them may sit in this public repository; the Terminal-Bench subset; runs per task; the monthly budget | Stage 2 |
 | Whether Sign in with ChatGPT covers Pluto's loop | a first test on the owner's account; OpenAI's interest form | Stage 3, the provider clients' milestone |
 | The budgets of `pluto-agent` and its command line | from their first figures | Stage 3, its first milestone |
@@ -236,7 +242,7 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | Signal and Matrix as the assistant's channels | an open path, not planned | after Stage 7 |
 | Pluto as the owner's assistant on the desktop, calling the actions uwui's applications declare, where Linux has no such mechanism | built or not, and how | Stage 7, once uwui's local MCP server exists |
 | Extensions beyond text files | WebAssembly components, MCP servers; only with a second concrete use | the owner's go |
-| Going public | each provider's terms, kept in the table of the vendors' paths ([ADR-0020](adr/0020-the-chat.md)); the name; Flatpak, AppImage, Windows packages; macOS, the client through uwui and the server's sandbox, keyring and terminals ported; the sandbox on Windows and Android | Stage 8 |
+| Going public | each provider's terms, kept in the table of the vendors' paths ([ADR-0020](adr/0020-the-chat.md)); Flatpak, AppImage, Windows packages; macOS, the client through uwui and the server's sandbox, keyring and terminals ported; the sandbox on Windows and Android | Stage 8 |
 
 ## 4. Stages
 

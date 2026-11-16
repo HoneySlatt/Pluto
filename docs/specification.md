@@ -59,7 +59,10 @@ Since 2026-11-15 Pluto is a harness of its own
 kernel adds to what follows: every session in its own `pluto-agent` process, its log the truth
 (ADR-0033); Pluto's loop (ADR-0032); the delegation object (ADR-0034); a command line from
 Stage 3, and a light TUI for machines without a screen at Stage 7 (ADR-0042); the inspector of
-every turn (ADR-0036). The personal assistant is specified at Stage 7.
+every turn (ADR-0036). The delegation keeps what the fork's gained on 2026-11-09: a delegated
+task is refused every tool that starts work or acts outside its own thread; each provider's usage
+windows are shown with when they were read; each task reports its own tokens and an estimated
+cost. The personal assistant is specified at Stage 7.
 
 One Rust server per machine that codes ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). It is a
 service: closing a window stops nothing, and an update or a restart never stops a running agent.

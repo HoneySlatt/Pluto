@@ -10,11 +10,8 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 
 ## Current
 
-- **On 2026-11-15 Pluto became a harness.** A design session with the owner decided it; its
-  decisions, and the lead's implementation choices marked as such, are
-  [ADR-0030](adr/0030-pluto-becomes-a-harness.md) to [ADR-0040](adr/0040-out-of-the-plan.md), and
-  the new stages are in the
-  [ROADMAP](ROADMAP.md#4-stages).
+- **On 2026-11-15 Pluto became a harness**: [ADR-0030](adr/0030-pluto-becomes-a-harness.md) and
+  the ADRs after it; the new stages are in the [ROADMAP](ROADMAP.md#4-stages).
 - **Stage 1's milestones are done or moved** ([`history.md`](history.md)). Stage 1 closes with its
   stage audit, which comes next, in a session of its own, following the method's `audits.md`; the
   fate of the unpushed branch `m16b2b` is one of its questions. Then
@@ -24,6 +21,14 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   the fork ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md). The owner expects uwui to be ready
   before Stage 3.
+- **Urgent, found on 2026-11-16**, each costlier the longer it waits:
+  - the fork's branch `pluto` is pushed nowhere, and the owner's NixOS builds it from a local path:
+    a private copy, on the owner's go;
+  - the owner's history in `~/.pluto` needs a backup before Stage 5's import: the owner's to
+    confirm;
+  - the method changed on 2026-11-16: architecture is part of the bar (change and failure
+    scenarios, invariants, ownership, recovery, each ADR's validation and reconsideration).
+    Stage 1's audit reviews Pluto against it; M2.0 applies it.
 
 ## Status
 
@@ -50,7 +55,28 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   contribute (the owner's request of 2026-11-16).
 - **Decided first.** A design session, without code: how Codex, goose, Zed and OpenCode lay out
   their crates and extension points; the options; a challenger; the decisions put to the owner one
-  at a time, then ADRs.
+  at a time, then ADRs. A survey of 2026-11-16 of what harnesses had to redo late (sources local,
+  in `.delegation/retrofits-survey/`) names what it must settle:
+  - sessions survive a restart or an update of the server: systemd stops a service's whole group,
+    so each session needs its own unit or a supervisor apart;
+  - the log: one writer per session, retired event types readable forever, no silent deletion;
+  - identifiers unique across machines, independent of the machine and the environment;
+  - the protocol: a version and capabilities on every message, unknown variants ignored, schemas
+    generated for Kotlin and the mod, experiments behind an opt-in; an authenticated local server
+    from its first commit;
+  - who owns each state, how each task is cancelled and stopped, every queue and cache bounded
+    with its behaviour at the limit; typed errors with stable codes;
+  - bounded, structured diagnostics with no secret; costs recorded once in the log, with cache,
+    price tiers and billing route; a clock and randomness injected for tests; contract tests
+    against each CLI version Pluto drives;
+  - platform code (paths, shells, sandbox backends) behind one boundary, the platform-free crates
+    checked on Windows and macOS in CI;
+  - permissions as typed actions, never parsed shell strings; a trust gate before a project's
+    files are read or run; the sandbox denying the network, the session bus and the keyring;
+    content's provenance kept, tool output never taken as instructions; extensions pinned by
+    digest;
+  - Pluto's own Nix packages and module, its engines' CLIs pinned in its flake, and the owner's
+    rules and skills read from the one place the NixOS module keeps them.
 - **Delivers.**
   - In [`ARCHITECTURE.md`](ARCHITECTURE.md), the target: the crates of Stages 2 to 5 by name, what
     each holds, the direction of their dependencies, and each one's public surface.
