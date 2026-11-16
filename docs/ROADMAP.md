@@ -248,6 +248,8 @@ or moved, and it closes with its stage audit.
 **Goal.** Pluto can measure any harness on the owner's own work and on a public benchmark, and
 every session from Stage 3 on has a format to write.
 
+- The new foundation's architecture: its crates and the direction of their dependencies, the
+  seams as contracts, a way in for contributors, checked in CI.
 - The session log's format, in a crate of its own, versioned.
 - Pluto's bench: saved briefs replayed with their hidden checks, in a sandbox, graded outside the
   agent's reach.

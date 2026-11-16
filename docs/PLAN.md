@@ -18,7 +18,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 - **Stage 1's milestones are done or moved** ([`history.md`](history.md)). Stage 1 closes with its
   stage audit, which comes next, in a session of its own, following the method's `audits.md`; the
   fate of the unpushed branch `m16b2b` is one of its questions. Then
-  [M2.1](#m21--the-session-logs-format).
+  [M2.0](#m20--the-new-foundations-architecture).
 - The egui client, the Android app and the fork run unchanged until the end of Stage 5
   ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). DeepSeek Harness is a provider of
   the fork ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)).
@@ -30,6 +30,7 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 | Milestone | Goal | Status |
 |---|---|---|
 | Stage 1's audit | The whole project examined at Stage 1's end; its findings in `docs/audits/` | Planned |
+| [M2.0](#m20--the-new-foundations-architecture) | The new foundation's parts, boundaries and ways to extend it, written and checked before its first crate | Planned |
 | [M2.1](#m21--the-session-logs-format) | One versioned format holds any session; the context is a view of it | Planned |
 | [M2.2](#m22--the-benchs-tasks-and-budget) | The owner has chosen what the bench runs and what it may spend | Planned |
 | [M2.3](#m23--the-benchs-runner) | One command runs a task with an engine and a model, sandboxed, and grades it | Planned |
@@ -41,6 +42,30 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 Pluto measures any harness on the owner's own work and on a public benchmark before it builds its
 own loop ([ADR-0037](adr/0037-how-the-harness-is-judged.md)), and fixes the format every session
 writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.md)).
+
+### M2.0 — The new foundation's architecture
+
+- **Goal.** The new foundation's parts, their boundaries and the ways to extend it are written and
+  checked before its first crate, so that the harness can change easily and newcomers can
+  contribute (the owner's request of 2026-11-16).
+- **Decided first.** A design session, without code: how Codex, goose, Zed and OpenCode lay out
+  their crates and extension points; the options; a challenger; the decisions put to the owner one
+  at a time, then ADRs.
+- **Delivers.**
+  - In [`ARCHITECTURE.md`](ARCHITECTURE.md), the target: the crates of Stages 2 to 5 by name, what
+    each holds, the direction of their dependencies, and each one's public surface.
+  - The seams as contracts: the session log's schema, the provider client, the engine, the tool;
+    a recipe to add a provider, a tool or an engine, each in one place.
+  - A check in `scripts/check.sh` that refuses a dependency against the direction.
+  - The frozen egui client and its crates in a workspace of their own, so that the new foundation
+    builds and tests without them.
+  - `CONTRIBUTING.md`: the environment, the commands, where to start.
+- **Done when.** The ADRs are accepted. The dependency check fails on a test crate that breaks the
+  direction and passes on `main`. The new foundation's checks run without building eframe.
+- **How to test.** `scripts/check.sh`; a newcomer test: a fresh agent, given only the README,
+  `CONTRIBUTING.md` and `ARCHITECTURE.md`, finds where a provider, a tool and an engine are added.
+- **Measured.** The check's duration, locally and in CI, before and after the split.
+- **By hand.** The owner's decisions.
 
 ### M2.1 — The session log's format
 
