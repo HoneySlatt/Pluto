@@ -74,6 +74,8 @@
       checkTools = [
         pkgs.cargo-deny
         pkgs.lychee
+        # scripts/adr-index.py and scripts/changelog.py, on the standard library alone.
+        pkgs.python3
       ];
       # What scripts/measure.sh runs (docs/measurements.md): the heap by call stack, repeated
       # starts, wake-ups per thread, and a headless compositor for the client's real window. And

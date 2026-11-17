@@ -10,6 +10,9 @@
 #   (cargo deny, policy in deny.toml; it fetches the advisory database, so it needs the network);
 # - the links between the Markdown files that git tracks or has been told to add, and their
 #   anchors, offline (lychee);
+# - the ADRs' index, which docs/adr/README.md must hold as the ADRs' own statuses give it, and
+#   the changelog's fragments' names and form (scripts/adr-index.py, scripts/changelog.py), and
+#   those scripts' own tests (scripts/test_*.py);
 # - the recordings of agents' sessions: their stamp still matches what a replay reads
 #   (scripts/fork-replay.sh --check-stamp, whose head lists it); the crate's own tests read, scan
 #   and replay each recording;
@@ -60,6 +63,12 @@ cargo deny --locked check --hide-inclusion-graph
 step "Links between documents"
 mapfile -d '' markdown < <(git ls-files -z --cached -- '*.md')
 lychee --offline --include-fragments --no-progress "${markdown[@]}"
+
+step "ADRs' index and changelog fragments"
+python3 -I scripts/adr-index.py
+python3 -I scripts/changelog.py
+# The tests of the scripts that check the documents.
+python3 -I -B -m unittest discover --start-directory scripts --pattern "test_*.py"
 
 step "Recordings' stamp"
 scripts/fork-replay.sh --check-stamp

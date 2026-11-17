@@ -2,11 +2,23 @@
 
 An ADR records one decision: its context, the decision, the alternatives rejected and the
 consequences. Once accepted, only its status changes, and its links are repointed when their target
-moves. A later decision that replaces it whole makes it `Superseded by NNNN`, and the newer one
-`Accepted; supersedes NNNN`; one that changes part of it makes it `Accepted; amended by NNNN`, and
-the newer one `Accepted; amends NNNN (what)`.
+moves.
 
-New ADRs copy the template below and take the next free number.
+- A decision changed, even in part, is a new ADR that supersedes the old one and states the whole
+  rule then in force on its topic: its status is `Accepted; supersedes NNNN`, the old one's
+  `Superseded by NNNN`. One ADR is read for a topic, never a chain of amendments.
+- An ADR that holds several topics and changes on one of them alone is superseded in part: the new
+  one states that topic's rule whole, `Accepted; supersedes in part NNNN (the topic)`, the old one
+  `…; superseded in part by NNNN (the topic)`, and stays in force for the rest.
+- An ADR that adds a decision without changing one names the older in its context alone.
+- A precision decided while a milestone runs goes in the milestone's plan or in a new ADR, never
+  into an older ADR's status.
+- Until 2026-11-16 a partial change was written as an amendment (`Accepted; amended by NNNN` on the
+  older ADR, `Accepted; amends NNNN (what)` on the newer). Those chains are consolidated by Stage
+  1's audit: one ADR per topic supersedes them, the rule stated whole.
+
+New ADRs copy [`0000-template.md`](0000-template.md) and take the next free number. The index
+below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -20,7 +32,7 @@ New ADRs copy the template below and take the next free number.
 | [0008](0008-storage-and-the-history-moved.md) | The server's storage, and the history moved from the fork | Accepted; amended by 0033 |
 | [0009](0009-secrets-privacy-and-the-sandbox.md) | Secrets, privacy and the agents' sandbox | Accepted; amended by 0016, 0018, 0019, 0022, 0035 and 0040 |
 | [0010](0010-todays-features-triaged.md) | Today's features triaged, and the egui client frozen | Accepted; amended by 0021 and 0038 |
-| [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Superseded by 0032 |
+| [0011](0011-plutos-own-harness-minimal-and-measured.md) | Pluto's own harness, minimal and measured | Superseded by 0032; amends 0003 and 0006 |
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted; amended by 0025 |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
 | [0014](0014-how-today-is-measured.md) | How today is measured | Accepted; amended by 0026 |
@@ -52,28 +64,3 @@ New ADRs copy the template below and take the next free number.
 | [0040](0040-out-of-the-plan.md) | Out of the plan: the editor, office editors, calls and the smart home | Accepted; amends 0003, 0009, 0019, 0020 and 0022 |
 | [0041](0041-the-assistant-on-every-plan-opened-to-third-parties.md) | The assistant on every plan opened to third-party applications | Accepted; amends 0030 |
 | [0042](0042-a-cli-first-the-tui-with-the-assistant.md) | A command line at Stage 3, a light TUI with the assistant | Accepted; amends 0030, 0033 and 0039 |
-
-## Template
-
-```markdown
-# NNNN. The decision, as a short title
-
-- Status: Accepted
-- Date: YYYY-MM-DD
-
-## Context
-
-What forces the decision: the need, the constraints, what the code holds today, what was measured.
-
-## Decision
-
-What is decided, in bold lead-ins, one paragraph each.
-
-## Alternatives considered
-
-- **Alternative**: what it would give, and why it was rejected.
-
-## Consequences
-
-- What follows, good and bad, and what is left to decide later.
-```

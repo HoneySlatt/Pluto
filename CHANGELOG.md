@@ -1,8 +1,10 @@
 # Changelog
 
-What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.md)).
+What changed for users. Releases before 1.0 are private ([ROADMAP](docs/ROADMAP.md)). A change
+adds a fragment to [`changelog.d/`](changelog.d/README.md); `scripts/changelog.py --merge` brings
+them here at each release.
 
-## Unreleased
+## [Unreleased]
 
 ### Added
 
