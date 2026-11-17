@@ -100,6 +100,13 @@ are frozen and leave at Stage 5 ([ADR-0038](adr/0038-a-new-foundation-beside-the
 - The rivals' bench counts frames but cannot judge them on time, and has no energy yet
   ([ADR-0026](adr/0026-the-rivals-measured-how.md)). Its scripts are not linted: `shellcheck` is
   not in the Nix shell, as for M1.5's.
+- The egui client and `pluto-ffi` write their files through a temporary file and a rename, at
+  seven places, none with an `fsync`, several ignoring the error: `src/ui/drafts.rs`, `src/app.rs`
+  (three), `src/ui/stash.rs`, `src/ui/settings.rs`, `crates/pluto-ffi/src/prefs.rs`. A power loss
+  can leave a draft or the settings empty. The client's settings carry no version. Found by the
+  [audit of 2026-11-17](audits/2026-11-17-architecture-and-contribution.md); the new foundation
+  writes through one durable function (M2.0); the frozen sites leave with the egui client, and the
+  drafts' may be fixed before, as a fix.
 - CI does not run the Android app's Kotlin tests nor build its APK; `scripts/check.sh --apk` does,
   locally ([ADR-0012](adr/0012-the-checks-and-ci.md)). Followed by Stage 1's audit.
 - The HP's figures wait for the owner's hand: its commands are in

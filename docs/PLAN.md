@@ -29,13 +29,26 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   - the method changed on 2026-11-16: architecture is part of the bar (change and failure
     scenarios, invariants, ownership, recovery, each ADR's validation and reconsideration).
     Stage 1's audit reviews Pluto against it; M2.0 applies it;
-  - the license: the crates declare MIT OR Apache-2.0, but the repository holds only T3's MIT
-    text, under T3's name; no Apache-2.0 text, no copyright line of Pluto's own. Fixed before any
-    outside contribution, with the choice of a DCO or a CLA.
-- **Stage 1's audit also asks**, from a review of 2026-11-16:
+  - the license: the root crate, `pluto-core`, `pluto-ffi` and `uniffi-bindgen` declare MIT, the
+    four tool crates MIT OR Apache-2.0, and the repository holds only T3's MIT text, under T3's
+    name; no Apache-2.0 text, no copyright line of Pluto's own. Code copied from Codex's sandbox,
+    under Apache-2.0, could not be offered under MIT (ADR-0035 plans a notice only). Fixed before
+    any outside contribution or the first line copied from Codex, with a DCO or a CLA; CI also
+    runs on pull requests by then.
+- **The [audit of 2026-11-17](audits/2026-11-17-architecture-and-contribution.md)**, on the
+  owner's demand, examined the architecture, contribution and what to decide early. The owner took
+  its first decision: each session in its own unit, and an agent approves only what its brief
+  grants ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)). Its other findings are planned
+  below, in Stage 1's audit, M2.0 and M2.1.
+- **Stage 1's audit also asks**, from a review of 2026-11-16 and the audit of 2026-11-17:
   - `AGENTS.md` still says "no abstraction without a second concrete use"; the method now also
     accepts a boundary around an unstable dependency, a protected invariant or a test. Align, on
-    the owner's go;
+    the owner's go, before M2.0, whose injected clock and platform boundary the old rule forbids;
+  - the contradictions the audit lists: PLAN's version on every message against ADR-0005's at
+    connection; the ROADMAP's protocol at Stage 5 against Stage 3's channel;
+  - the chains of amendments consolidated, the foundation's topics first (0005 and 0033, 0009 and
+    0035, 0006 and 0031), each with a validation section;
+  - the quality bar given its change and failure scenarios, from the audit's table;
   - ADR-0020 says to check shortcuts with Umbriel; the compositor is now Niri.
 
 ## Status
@@ -60,16 +73,19 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
 
 - **Goal.** The new foundation's parts, their boundaries and the ways to extend it are written and
   checked before its first crate, so that the harness can change easily and newcomers can
-  contribute (the owner's request of 2026-11-16).
+  contribute (the owner's request of 2026-11-16). Taken already: how sessions are supervised
+  ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)).
 - **Decided first.** A design session, without code: how Codex, goose, Zed and OpenCode lay out
   their crates and extension points; the options; a challenger; the decisions put to the owner one
-  at a time, then ADRs. A survey of 2026-11-16 of what harnesses had to redo late (sources local,
-  in `.delegation/retrofits-survey/`) names what it must settle:
-  - sessions survive a restart or an update of the server: systemd stops a service's whole group,
-    so each session needs its own unit or a supervisor apart;
+  at a time, then ADRs. A survey of 2026-11-16 of what harnesses had to redo late, its primary
+  sources in the [audit of 2026-11-17](audits/2026-11-17-architecture-and-contribution.md#sources),
+  names what it must settle:
+  - sessions survive a restart or an update of the server: each in its own unit, decided by
+    ADR-0043;
   - the log: one writer per session, retired event types readable forever, no silent deletion;
   - identifiers unique across machines, independent of the machine and the environment;
-  - the protocol: a version and capabilities on every message, unknown variants ignored, schemas
+  - the protocol: a version and capabilities on every message, unknown entries kept and shown but
+    an unknown critical one refused (the writer marks each entry's class), schemas
     generated for Kotlin and the mod, experiments behind an opt-in; an authenticated local server
     from its first commit;
   - who owns each state, how each task is cancelled and stopped, every queue and cache bounded
@@ -106,6 +122,21 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
       unused), dependency versions shared, public items documented, a toolchain file so that cargo
       builds without Nix;
     - the frozen client out of the repository's root, so that the root builds the new foundation.
+  - the audit of 2026-11-17 adds, in this order after the workspace's split:
+    - the data folders and the public name, decided before M2.1 fixes a path; the audit
+      recommends the logs in XDG's data, the index in its state, derived and rebuilt from the
+      logs, the cache apart, and one root a test profile can move;
+    - no third-party type in a persisted format or the protocol, checked with `cargo deny`'s
+      `wrappers` beside the direction check; error codes in reserved ranges, which the interface
+      translates later;
+    - one durable-write function (temporary file, `fsync`, rename, `fsync` of the folder), the
+      other ways refused by clippy in the new crates ([`debt.md`](debt.md) has the client's seven);
+    - a one-page trust map: a tool process per call; the sandbox without the session bus,
+      keyring and systemd sockets; where tool code can and cannot reach an engine's credentials;
+    - the command line's channel to `pluto-agent` as the protocol crate's agent part, versioned;
+      Stage 5 keeps only the network's transport and encoding;
+    - the license's fix and a DCO, `SECURITY.md` with GitHub's private reporting, CI on pull
+      requests; bidirectional text asked of uwui in [`uwui-needs.md`](uwui-needs.md).
 - **Delivers.**
   - In [`ARCHITECTURE.md`](ARCHITECTURE.md), the target: the crates of Stages 2 to 5 by name, what
     each holds, the direction of their dependencies, and each one's public surface.
@@ -128,7 +159,13 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
 - **Goal.** One versioned format holds any session from any engine, and the context a model
   receives is a view of it.
 - **Decided first.** The encoding, the entries, the provenance of content, and how a torn write is
-  repaired: options put to the owner, then an ADR.
+  repaired: options put to the owner, then an ADR. The entries must hold, from the first line
+  ([audit of 2026-11-17](audits/2026-11-17-architecture-and-contribution.md)): an intent before
+  each effect Pluto runs and its outcome after, paired by the call's id, an interruption appended
+  on resume and nothing run again by itself; the id a client chose, and a gapless sequence per
+  session; each entry's class, so that an unknown critical one is refused; the parent session and
+  its time limit, and who gave each approval under which grant (ADR-0043); the digest of each
+  method file read; an engine's unknown event kept raw.
 - **Delivers.**
   - `crates/pluto-log`: the entries (messages, tool calls and results, usage, context edits,
     fetched pages, provenance), versioned from the first line; an append-only writer whose
@@ -136,10 +173,12 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   - A converter from Stage 1's recordings (Claude Code's `stream-json`, Grok's ACP) into logs.
 - **Done when.** Each recording, real or synthetic, converts into a log whose view gives the
   scenario's reference exactly. The tests cover an empty log, a huge one, malformed and torn
-  entries, a second writer refused, and a newer version refused with a plain message.
+  entries, a second writer refused, a newer version refused with a plain message, entries from a
+  future version kept and shown, and a session killed between an intent and its outcome.
 - **How to test.** `cargo test -p pluto-log`, in `scripts/check.sh`.
-- **Measured.** An append's time; a log's size per turn on the recordings, against the storage
-  budget of 25 MiB a day ([ROADMAP](ROADMAP.md#quality-bar)).
+- **Measured.** An append's time, its `fsync` included, on the desktop and on the HP's disk; a
+  log's size per turn on the recordings, against the storage budget of 25 MiB a day
+  ([ROADMAP](ROADMAP.md#quality-bar)).
 
 ### M2.2 — The bench's tasks and budget
 
@@ -165,7 +204,11 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
 - **Goal.** One command runs one task with one engine and one model, in a sandbox, and grades it.
 - **Delivers.**
   - `pluto-bench`: the task's workspace at its base commit, in bubblewrap, with no network but the
-    model's endpoint.
+    model's endpoint: on the fake model, an empty network namespace with the model inside; on a
+    local model, one forwarded port; on a frontier model (M2.5), an allowlist of hosts that never
+    decrypts TLS ([ADR-0031](adr/0031-three-kinds-of-engine.md)). Each run in its own unit, which
+    dies with the runner ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)). Results written
+    through M2.0's durable-write function.
   - The engines run headless: Claude Code (`claude -p --output-format stream-json`), Codex
     (`codex exec --json`) and OpenCode (`opencode run`), each also on local models through Ollama.
     Pluto's own loop joins in Stage 3.

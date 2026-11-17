@@ -2,7 +2,9 @@
 
 - Status: Accepted; amends [0030](0030-pluto-becomes-a-harness.md) (the TUI's place among the
   surfaces), [0033](0033-one-pluto-agent-process-per-session.md) (what supervises sessions before
-  the server) and [0039](0039-the-order-of-the-stages.md) (what Stages 3 and 7 deliver)
+  the server) and [0039](0039-the-order-of-the-stages.md) (what Stages 3 and 7 deliver); superseded in part by
+  [0043](0043-each-session-in-its-own-unit.md) (what supervises sessions before the server;
+  approvals answered by an agent)
 - Date: 2026-11-15
 
 ## Context

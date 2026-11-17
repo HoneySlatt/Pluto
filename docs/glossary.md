@@ -4,6 +4,8 @@ Terms this project uses in a sense of its own.
 
 - **Agent**: a coding agent's program that Pluto drives, such as Claude Code, Codex or Kimi Code,
   usually its official CLI.
+- **To supervise a session**: to start, find, watch and stop it, never to be its parent process;
+  each session runs in its own unit ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)).
 - **The kernel**: the pieces of Pluto that both its products stand on: the session log, Pluto's
   loop, the engines, tools in a sandbox, the delegation object, a scheduler and the bench
   ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)).

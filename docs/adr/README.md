@@ -54,7 +54,7 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0030](0030-pluto-becomes-a-harness.md) | Pluto becomes a harness: one kernel, two products | Accepted; amends 0003; amended by 0041 and 0042 |
 | [0031](0031-three-kinds-of-engine.md) | Three kinds of engine under one thread model | Accepted; amends 0006 |
 | [0032](0032-plutos-loop-and-its-provider-clients.md) | Pluto's loop and its own provider clients | Accepted; supersedes 0011 |
-| [0033](0033-one-pluto-agent-process-per-session.md) | One `pluto-agent` process per session, its log on disk | Accepted; amends 0005 and 0008; amended by 0042 |
+| [0033](0033-one-pluto-agent-process-per-session.md) | One `pluto-agent` process per session, its log on disk | Accepted; superseded in part by 0043; amends 0005 and 0008; amended by 0042 |
 | [0034](0034-the-methods-mechanisms-native.md) | The method's mechanisms native, the method itself in text | Accepted |
 | [0035](0035-the-sandbox-and-the-vault.md) | The sandbox after Codex's, with a vault | Accepted; amends 0009 |
 | [0036](0036-the-inspector-appends-by-default.md) | The inspector appends by default | Accepted |
@@ -63,4 +63,5 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0039](0039-the-order-of-the-stages.md) | The order of the stages, and Stage 1 closed | Accepted; amends 0017 and 0027; amended by 0042 |
 | [0040](0040-out-of-the-plan.md) | Out of the plan: the editor, office editors, calls and the smart home | Accepted; amends 0003, 0009, 0019, 0020 and 0022 |
 | [0041](0041-the-assistant-on-every-plan-opened-to-third-parties.md) | The assistant on every plan opened to third-party applications | Accepted; amends 0030 |
-| [0042](0042-a-cli-first-the-tui-with-the-assistant.md) | A command line at Stage 3, a light TUI with the assistant | Accepted; amends 0030, 0033 and 0039 |
+| [0042](0042-a-cli-first-the-tui-with-the-assistant.md) | A command line at Stage 3, a light TUI with the assistant | Accepted; superseded in part by 0043; amends 0030, 0033 and 0039 |
+| [0043](0043-each-session-in-its-own-unit.md) | Each session in its own unit; an agent approves only what its brief grants | Accepted; supersedes in part 0033 and 0042 |

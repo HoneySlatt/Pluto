@@ -89,6 +89,8 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
   only the egui client and the Android app do, until the end of Stage 5.
 - Each agent session runs in its own `pluto-agent` process; its append-only log is the session's
   truth, the context a view of it ([ADR-0033](docs/adr/0033-one-pluto-agent-process-per-session.md)).
+  It runs in its own unit, never as a child of the server, the command line or a lead agent, and
+  an agent approves only what its brief grants ([ADR-0043](docs/adr/0043-each-session-in-its-own-unit.md)).
 - Pluto's own code has no Node. The one exception is Claude Code's mod, in TypeScript
   ([ADR-0031](docs/adr/0031-three-kinds-of-engine.md)).
 - The server and the protocol crate never depend on a UI crate. `pluto-core` never depends on egui.
