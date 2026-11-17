@@ -99,8 +99,11 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
     ([ADR-0044](adr/0044-five-platforms-at-going-public.md));
   - permissions as typed actions, never parsed shell strings; a trust gate before a project's
     files are read or run; the sandbox denying the network, the session bus and the keyring;
-    content's provenance kept, tool output never taken as instructions; extensions pinned by
-    digest;
+    content's provenance kept, tool output never taken as instructions; every file Pluto loads
+    pinned by digest, a repository's files inactive until trust, layers that restrict and never
+    grant, hooks from the owner alone with defined outcomes, skills in the open format, an
+    inventory before anything is enabled, and Pluto's own features through its contracts
+    ([ADR-0046](adr/0046-what-pluto-loads-from-files.md));
   - Pluto's own Nix packages and module, its engines' CLIs pinned in its flake, and the owner's
     rules and skills read from a path its Nix module gives, never guessed among the agents' own
     copies;

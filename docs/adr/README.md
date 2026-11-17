@@ -67,3 +67,4 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0043](0043-each-session-in-its-own-unit.md) | Each session in its own unit; an agent approves only what its brief grants | Accepted; supersedes in part 0033 and 0042 |
 | [0044](0044-five-platforms-at-going-public.md) | Five platforms, the three new ones at going public, the core portable now | Accepted |
 | [0045](0045-features-from-other-harnesses-add-ons.md) | Features from other harnesses' add-ons, adapted, never installed | Accepted |
+| [0046](0046-what-pluto-loads-from-files.md) | What Pluto loads from files: pinned, gated, layered, inventoried | Accepted |
