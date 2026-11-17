@@ -271,7 +271,11 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
 - Two weeks of local, private counts of which features the owner uses. Kept on the machine, never
   sent; ask before building.
 - Features that other harnesses ship as plugins, skills or extensions, to build into Pluto itself
-  (a survey of 2026-11-17). Pluto opens no extensions to others: the architecture only keeps the
+  (a survey of 2026-11-17). **A first draft, not yet the owner's choice**: a wider survey of the
+  same day (connectors, companion tools, chat front ends, 3D, media and the owner's own stack)
+  is put to the owner one feature at a time, and this list is then replaced by what the owner
+  keeps; the extension mechanisms the architecture should allow follow, as M2.0's decisions.
+  Pluto opens no extensions to others: the architecture only keeps the
   way open ([ROADMAP](ROADMAP.md#open)). A source under MIT or Apache-2.0 may be adapted, its notice
   in `NOTICE.md`; any other is an idea only. Each one that touches the loop earns its place on the
   bench ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
