@@ -25,6 +25,8 @@ promises below name.
 It is made for its owner first, who runs 5 to 15 threads on a busy day, and designed so it can go
 public later. Its surfaces are a desktop client on uwui, the owner's UI framework, a phone that
 does everything, a command line, and later a light TUI for machines without a screen ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)). It is one of uwui's programs of reference.
+It targets Linux, Windows, macOS, Android and iOS: Linux and Android first, the three others at
+going public ([ADR-0044](adr/0044-five-platforms-at-going-public.md)).
 
 ## 2. Principles
 
@@ -213,6 +215,7 @@ Also held, without a figure:
 | The chat | It replaces the vendors' applications; each vendor by its permitted path; one memory, local voice, one history ([ADR-0020](adr/0020-the-chat.md)) |
 | uwui's decisions of 2026-11-07 | Agents reach uwui's applications only where the sandbox allows it; what only a person may do is never offered to agents; macOS decided when Pluto goes public ([ADR-0016](adr/0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md)) |
 | License | MIT OR Apache-2.0 for new code ([ADR-0003](adr/0003-what-pluto-is-to-become.md)) |
+| Platforms | Linux, Windows, macOS, Android and iOS; Windows, macOS and iOS at Stage 8, iOS as a client; the core portable from M2.0 ([ADR-0044](adr/0044-five-platforms-at-going-public.md)) |
 
 ### Open
 
@@ -242,7 +245,7 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | Signal and Matrix as the assistant's channels | an open path, not planned | after Stage 7 |
 | Pluto as the owner's assistant on the desktop, calling the actions uwui's applications declare, where Linux has no such mechanism | built or not, and how | Stage 7, once uwui's local MCP server exists |
 | Extensions beyond text files | WebAssembly components, MCP servers; only with a second concrete use | the owner's go |
-| Going public | each provider's terms, kept in the table of the vendors' paths ([ADR-0020](adr/0020-the-chat.md)); Flatpak, AppImage, Windows packages; macOS, the client through uwui and the server's sandbox, keyring and terminals ported; the sandbox on Windows and Android | Stage 8 |
+| Going public | each provider's terms, kept in the table of the vendors' paths ([ADR-0020](adr/0020-the-chat.md)); Flatpak, AppImage, Windows and macOS packages, iOS through the App Store; the server's sandbox, keyring, sessions' units and terminals ported to Windows and macOS ([ADR-0044](adr/0044-five-platforms-at-going-public.md)); the sandbox on Android | Stage 8 |
 
 ## 4. Stages
 
@@ -349,7 +352,8 @@ taken without its approval.
 **Goal.** Pluto opens to others, on the owner's go.
 
 - The open decisions of going public taken.
-- Packages beyond Nix; Windows.
+- Windows and macOS, client and server; iOS, the client ([ADR-0044](adr/0044-five-platforms-at-going-public.md)).
+- Packages beyond Nix.
 - A release audit.
 
 **Exit.** A public release, after the owner's go.

@@ -94,7 +94,9 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
     price tiers and billing route; a clock and randomness injected for tests; contract tests
     against each CLI version Pluto drives;
   - platform code (paths, shells, sandbox backends) behind one boundary, the platform-free crates
-    checked on Windows and macOS in CI;
+    checked on Windows and macOS in CI; the durable write and the log's one-writer lock designed
+    and tested for Windows and macOS too, since Pluto reaches them at Stage 8
+    ([ADR-0044](adr/0044-five-platforms-at-going-public.md));
   - permissions as typed actions, never parsed shell strings; a trust gate before a project's
     files are read or run; the sandbox denying the network, the session bus and the keyring;
     content's provenance kept, tool output never taken as instructions; extensions pinned by
