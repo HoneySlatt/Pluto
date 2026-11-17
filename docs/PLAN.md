@@ -270,6 +270,76 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
 - Two weeks of local, private counts of which features the owner uses. Kept on the machine, never
   sent; ask before building.
+- Features that other harnesses ship as plugins, skills or extensions, to build into Pluto itself
+  (a survey of 2026-11-17). Pluto opens no extensions to others: the architecture only keeps the
+  way open ([ROADMAP](ROADMAP.md#open)). A source under MIT or Apache-2.0 may be adapted, its notice
+  in `NOTICE.md`; any other is an idea only. Each one that touches the loop earns its place on the
+  bench ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
+  - **Stage 3, the loop and the context:**
+    - MCP tools loaded lazily: one search tool of about 200 tokens in the context, a server
+      started at its first call and stopped when idle
+      ([pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter), MIT);
+    - a map of the repository fitted to a token budget ([Aider](https://github.com/Aider-AI/aider),
+      Apache-2.0);
+    - tools' outputs compressed by kind (logs, JSON, test runs), measured against a plain "be
+      concise" ([caveman](https://github.com/JuliusBrussee/caveman), Apache-2.0);
+    - one script calling the other tools in the sandbox, rather than many calls (Pi's `codemode`,
+      MIT);
+    - documentation answered from a local store of pinned versions the owner chooses, as
+      [Context7](https://github.com/upstash/context7) does as a service (MIT);
+    - renaming and finding references through the language's server, as
+      [Serena](https://github.com/oraios/serena) does (GPL-3.0: an idea only);
+    - output styles as a profile's delta per thread, their token effect measured (Claude Code's
+      output styles; the most installed skills of Gemini CLI's gallery are of this kind).
+  - **Stage 3, the delegation and the method:**
+    - success checks run by code, a failed run started again up to a limit
+      ([goose's recipes](https://goose-docs.ai/docs/guides/recipes/recipe-reference),
+      Apache-2.0), beside the hidden checks;
+    - a graph of tasks: independent ones run at once (Kiro's waves), a task claimed so two agents
+      never take it ([Beads](https://github.com/steveyegge/beads), MIT), a step that closes the
+      gap between the brief and the code ([spec-kit](https://github.com/github/spec-kit)'s
+      `converge`, MIT);
+    - a price limit checked before each model call, beside depth, count and time
+      ([Mistral Vibe](https://github.com/mistralai/mistral-vibe), Apache-2.0);
+    - each of the owner's skills measured with and without it, and how often it triggers when it
+      should (Anthropic's `skill-creator`, Apache-2.0; [agentskills.io](https://agentskills.io)'s
+      evaluations);
+    - each skill's cost in every turn shown, the skills never used listed, and a skill unused for
+      weeks proposed for archiving, by counters, never by a model (Claude Code's `plugin details`
+      and `/skill-doctor`; Hermes's curator, MIT);
+    - the owner's rules as a few lines each (an event, a pattern, warn or block), proposed by an
+      agent after a correction and kept by the owner (Claude's `hookify`, Apache-2.0); a pattern
+      over a shell string only warns, the typed permissions block;
+    - skills an agent proposes wait in a queue the owner reads, as a diff, then keeps or refuses
+      ([Hermes](https://github.com/NousResearch/hermes-agent)'s write approval, MIT);
+    - hard tasks checked by fresh agents against a ledger of what is proved, refuted and open
+      (Claude's `math-proof`, Apache-2.0).
+  - **Stage 3, the command line and the way back:**
+    - a session explained from its log, each claim with its line, and a bundle without secrets
+      for a bug report ([superpowers](https://github.com/obra/superpowers)'
+      `diagnosing-superpowers`, MIT);
+    - the costliest turns and the cache's misses of a session (Claude's `session-report`,
+      Apache-2.0);
+    - checkpoints linked to commits by a trailer, kept outside the branch, covering what Bash and
+      subagents change, which Claude Code's do not ([Entire](https://github.com/entireio/cli),
+      MIT);
+    - secrets replaced by placeholders before a request leaves for a model, and put back on the
+      machine (`opencode-vibeguard`), beside ADR-0009's masking on screen.
+  - **Stage 4, the engines:**
+    - a review in two passes: checks by code first, then a model's review on demand with its cost
+      shown, its findings filtered by confidence and a list of known false positives, never
+      blocking (Claude's `code-review` and `security-guidance`, Apache-2.0);
+    - the owner's skills, rules and settings of other agents imported as a proposal, previewed
+      first, each item kept by the owner (Codex's `externalAgentConfig/import`; Hermes's
+      `import-agent`, MIT).
+  - **Stage 5 and after:**
+    - scheduled jobs that are only a script, with no model, run by a systemd timer (Hermes's
+      `no_agent` jobs, MIT);
+    - a board of tasks whose chain starts the next task when one ends
+      ([Cline's Kanban](https://docs.cline.bot/usage/kanban), Apache-2.0), for the dashboard of
+      Stage 6;
+    - the chat's memory bounded, its fill shown to the model (Hermes, MIT), with Hindsight's
+      ideas above.
 
 ## Known debt
 
