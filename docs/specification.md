@@ -493,3 +493,97 @@ favicon service.
 | 30 | Media | Keep | 4.2 | 6 |
 | 31 | The Android application | Rethink | 5 | 2 (protocol); 5; 6 |
 | 0 | The right panel | — | 4.3 | 6 |
+
+## 8. Features from other harnesses' add-ons
+
+Kept by the owner on 2026-11-17, one at a time, from a survey of what users add to other harnesses
+([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)). Pluto builds each one itself; a
+source under MIT or Apache-2.0 may be adapted, its notice in `NOTICE.md`, any other is an idea
+only. *Bench* marks a feature that stays only while the bench shows its gain
+([ADR-0037](adr/0037-how-the-harness-is-judged.md)). Platforms: L Linux, W Windows, M macOS,
+A Android, I iOS ([ADR-0044](adr/0044-five-platforms-at-going-public.md)); "via the server" means
+the phone shows what a desktop or server does.
+
+**The loop and the context**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| MCP tools loaded lazily: three tools (list, describe, call) in the context, a server started at its first call and stopped when idle, the tools of a turn selected. *Bench* | 3 | all; local servers L W M | pi-mcp-adapter (MIT); Epic's Unreal plugin |
+| Tools' outputs compressed by kind (logs, JSON, test runs), measured against a plain "be concise". *Bench* | 3 | all | rtk (idea); caveman (Apache-2.0) |
+| Documentation read offline at the exact versions: crates at `Cargo.lock`, Nix's options and packages, libraries pinned by the owner | 3 | L W M; Nix L M | Context7 (MIT); lockdoc (Apache-2.0); mcp-nixos (MIT) |
+| Codemode: one script calls the other tools in the sandbox, only its result returns. *Bench* | 3 | L W M | Pi (MIT) |
+| Images described by a vision model when the thread's model cannot see them | 3 | all | @getpipher/vision (MIT) |
+| A project's kind (Unreal, Bevy, Blender, Godot, Nix, Android) detected, a few lines of its conventions added. *Bench* | 3 to 4 | all | Epic's Unreal plugin (MIT) |
+| Nix lookup: packages, NixOS and Home Manager options, versions by channel; requests shown, cached, off when offline | 3 | L M; W by plain requests | mcp-nixos (MIT) |
+
+**The delegation and the method**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| Interview first: the agent asks until the request is clear, then writes the glossary's entries and ADRs | 3 | all | mattpocock/skills (MIT) |
+| Success checks run by code; a failed run started again up to a limit the owner sets, beside the hidden checks | 3 | L W M | goose's recipes (Apache-2.0); ralph-loop |
+| Each skill measured with and without it, and its triggering; its cost in every turn shown; skills never used listed, proposed for archiving by counters, never by a model | 3 | all | Anthropic's skill-creator (Apache-2.0); Hermes's curator (MIT) |
+| Skills an agent proposes wait in a queue the owner reads as diffs; a skill can be locked against agents | 3 | all | Hermes (MIT) |
+| Routing by the owner's rules (a cheap model for exploring, a strong one for hard edits), fallbacks on a full context or a refused content, named presets. *Bench* | 3 | all | LiteLLM (MIT); OpenRouter (idea) |
+| An overloaded provider retried with a growing delay; a task cut by a usage limit resumed at the reset | 3 to 4 | all | Maestro (idea) |
+| A test-first rule per project: no code change before a failing test. *Bench* | 3 | L W M | tdd-guard (MIT) |
+| A setup advisor that proposes a project's rules, skills and hooks, and a check of `AGENTS.md` (contradictions, staleness, length) | 3 | all | claude-code-setup; agnix (Apache-2.0) |
+
+**The command line, sessions and safety**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| A status line under the command line's input: model, context, branch, limits, subagents, cost | 3 | L W M | claude-hud, ccstatusline (MIT) |
+| Long jobs (a build, a render, a cook) in their own unit, their log in a file, the thread woken when they end, nothing polled | 3 | L; W M at Stage 8 | Godot's and Blender's command lines; bevy_brp |
+| Processes an agent starts in the background and waits on by an event | 3 | L W M | opencode-pty (MIT) |
+| A session's costliest turns and the cache's misses | 3 | all | Claude's session-report (Apache-2.0) |
+| A line traced back to the session and turn that wrote it | 3 to 6 | all | ctx (Apache-2.0) |
+| A tool for agents to search earlier sessions. *Bench* | 3 | all | ctx; session-logs |
+| Secrets replaced by placeholders before a request leaves for a model, put back on the machine, in agents and in the chat | 3 to 6 | all | Jan (Apache-2.0); opencode-vibeguard |
+| Destructive commands' classes (history rewritten, secrets read, execution hijacked) as tests that the sandbox and typed permissions block, with no model | 3 | L | nah, cc-safety-net (MIT) |
+| Remote MCP servers the owner adds, each with a trust label, each tool set to always, ask or blocked, writes asking by default; servers' own annotations not trusted | 3 to 6 | all | Claude's, Copilot's and Mistral's connectors |
+
+**Creative and game work**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| Bridges to editors (Blender, Unreal through Epic's plugin, Godot) under one profile: loopback, a token per project, consent for each destructive call, no free Python without approval, telemetry off | 3 to 4 | L W M | MCP for Blender (MIT); Epic's Unreal plugin (MIT) |
+| A look tool: the engine's own render as one image in a token budget (size, count, one sheet of views), never the owner's desktop | 3 | L W M; the phone shows | MCP for Blender's look (MIT) |
+| Bevy's remote protocol spoken in Rust: the running world read and changed, watched, captured | 3 | L W M | bevy_remote; bevy_brp_mcp (MIT OR Apache-2.0) |
+| 3D assets generated through Tripo's command line, with a spend cap, the owner's go per provider, a provenance line beside the file, and the plan's rights shown first; TRELLIS.2 locally where an NVIDIA GPU of 24 GB allows | 3 | API all; local L | tripo-cli (MIT); TRELLIS.2 (MIT) |
+| ffmpeg used by plan: the plan shown, run with the inputs' fingerprints checked, the originals never touched, one frame of the result looked at, in the sandbox without network | 3 | L W M | ffmpeg-skill (MIT) |
+| A copy kept before an agent's turn may change a creative project (a DAW session, a `.blend`, an edit), restored in one action | 3 | L W M | ffmpeg-skill; Kdenlive-mcp |
+| A bridge to the owner's own applications by a local protocol, Magnolia and Opium first, then REAPER, Kdenlive or Ableton, under a brief's rights | 5 | L W M; via the server | ableton-mcp, reaper-mcp (MIT) |
+| 3D models previewed in a thread: a turning image rendered by the server first, a live viewer in uwui later | 6 | image all; live L W M | model-viewer (Apache-2.0); f3d |
+| Binary assets reviewed: before and after renders and a summary (objects, polygons, materials), opened in the sandbox with scripts off | 6 | L W M; images all | none found |
+
+**The server, the client and the chat**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| The machine kept awake only while a thread generates, released at once | 5 | L W M | Zed (idea) |
+| The Android app tested by an agent: the emulator driven by the accessibility tree, logcat filtered with crashes grouped and personal data masked, Gradle's results summed up | 5 | L W M | mobile-mcp (Apache-2.0); android-log-mcp, gradle-mcp |
+| Scheduled runs guarded: at most hourly by default, one at a time, stopped on an approval, their MCP servers checked first, each run's trace kept | 5 | L W M | LibreChat (MIT) |
+| Scheduled jobs that are only a script, with no model; a missed slot caught up once; a timeout stops the whole group | 5 | L; W M at Stage 8 | Hermes (MIT) |
+| Plans, specifications, pages and diffs annotated, the notes sent back in one batch; a long change reviewed chapter by chapter | 6 | all | plannotator (Apache-2.0) |
+| Accessibility checked in a running interface an agent built: unnamed elements, contrast, keyboard order, flicker | 6 | L | shotbox (MIT) |
+| Rules of interface design as files of the design charter, each measured. *Bench* | 6 | all | frontend-design; ui-ux-pro-max, taste-skill (MIT) |
+| A library of prompts as files, with typed variables and slash commands, versioned | 6 | all | Open WebUI, TypingMind, Msty, LibreChat |
+| The next message queued, or the answer steered, while the chat streams | 6 | all | LibreChat (MIT) |
+| Every saved version of a preset or named agent kept and made current again in one gesture | 6 | all | Open WebUI (idea) |
+| MCP Apps, the open standard, as the format of interactive cards, in uwui's isolated web view | 6 | where a web view runs | Open WebUI's MCP App Bridge (BSD-3-Clause) |
+| The chat's memory bounded, its fill shown to the model, frozen at a session's start for the cache | 6 | all | Hermes (MIT) |
+| An animated companion that reacts to the agents' work and stays still at rest | 6 | L W M | Clawd on Desk (idea) |
+
+**The assistant**
+
+| Feature | Stage | Platforms | Taken from |
+|---|---|---|---|
+| An agent over a folder of notes (an Obsidian vault): notes mentioned with `@`, changes proposed as diffs, read-only by default | 6 to 7 | L W M; via the server | Copilot for Obsidian (idea); Claudian (MIT); Agent Client (Apache-2.0) |
+| Cheap first: common requests matched by sentences and triggers, a model called only when none matches | 7 | all | Home Assistant Assist (Apache-2.0) |
+| Mail over IMAP: the sender checked (allowlist, DMARC) before any model reads; a reader with no tool that writes; drafts only, the owner sends; rules in plain words; a morning brief | 7 | daemon L; W M; via the server | OpenClaw's IMAP reader (MIT); Himalaya (Apache-2.0) |
+| Calendar and contacts over CalDAV and CardDAV, read-only by default; an invitation is a send, its approval lists every guest | 7 | all | RFC 4791 |
+| The owner's storage over WebDAV and the NAS; a share's approval lists its recipients | 7 | all | — |
+| Triggers from mail, forges and webhooks run a script, which calls a model only when it decides to | 5 to 7 | daemon | ChatGPT's event tasks (idea); OpenClaw, Hermes |
+| Every inbound channel refused by default: pairing by code and an allowlist | 5 to 7 | all | Hermes, OpenClaw |
+| An application's actions called by name, a card showing the action and its target before it runs | 7 | L W M | Raycast's AI extensions (idea) |

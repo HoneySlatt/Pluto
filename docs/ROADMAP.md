@@ -209,7 +209,7 @@ Also held, without a figure:
 | The protocol | Pluto's own, typed, versioned ([ADR-0005](adr/0005-plutos-own-typed-protocol.md)) |
 | Machines | Several servers in one view, a relay on iroh ([ADR-0007](adr/0007-several-servers-and-a-relay.md)) |
 | Storage | SQLite, versioned, indexing the sessions' logs; the history imported ([ADR-0008](adr/0008-storage-and-the-history-moved.md)) |
-| Features | Today's, triaged; egui frozen ([ADR-0010](adr/0010-todays-features-triaged.md)); kept row by row, the specification accepted ([ADR-0022](adr/0022-the-triage-row-by-row.md), [ADR-0023](adr/0023-the-specification-accepted.md), [`specification.md`](specification.md)) |
+| Features | Today's, triaged; egui frozen ([ADR-0010](adr/0010-todays-features-triaged.md)); kept row by row, the specification accepted ([ADR-0022](adr/0022-the-triage-row-by-row.md), [ADR-0023](adr/0023-the-specification-accepted.md), [`specification.md`](specification.md)); the features of other harnesses' add-ons, built by Pluto, never installed ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)) |
 | The market's features | Review in Pluto, triggers, one configuration for every agent, side questions, dictation, cloud runs, computer use in an isolated session; the phone's notifications through UnifiedPush, its own models ([ADR-0018](adr/0018-the-markets-features-and-the-triage.md)) |
 | Judged against the market | The best rival measured on each criterion sets the bar, beaten by a margin per family; the stricter of that and the budgets ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)) |
 | The chat | It replaces the vendors' applications; each vendor by its permitted path; one memory, local voice, one history ([ADR-0020](adr/0020-the-chat.md)) |
@@ -280,6 +280,9 @@ line ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)).
 - The delegation object, its limits and end conditions; the owner's method read from its files.
 - The command line: run a brief, list and follow sessions, answer approvals, show the inspector's
   view; the same by SSH, from a script and from an agent.
+- Its features taken from other harnesses' add-ons, in the
+  [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
 
 **Exit.** The owner's delegated tasks run through `pluto-agent` every day. The loop beats the
 OpenCode companion on the bench on the owner's local models, and replaces it.
@@ -293,6 +296,9 @@ their quotas and exact costs.
 - Quotas and plan limits from each engine; exact costs; providers down, fallback and resume.
 - The recordings Stage 1 left, made with these engines, and their replay tests.
 - Cross-agent review, comparison of several models, delegation between providers.
+- Its features taken from other harnesses' add-ons, in the
+  [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
 
 **Exit.** The owner's main work runs on Claude Code under Pluto, and every first-rank engine passes
 the grid of recorded sessions.
@@ -311,6 +317,9 @@ the grid of recorded sessions.
 - The Android app on Pluto's protocol.
 - The history imported and verified; the fork stopped; the egui client removed.
 - The rivals' campaigns Stage 1 left.
+- Its features taken from other harnesses' add-ons, in the
+  [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
 
 **Exit.** The fork is stopped and the egui client gone. The budgets are met on the high tier and
 measured on the HP.
@@ -328,6 +337,9 @@ measured on the HP.
 - Deep research with replayable sources; publishing a page; tools' own interfaces in uwui's
   isolated web view.
 - WCAG 2.2 AA; then the web through uwui's web target.
+- Its features taken from other harnesses' add-ons, in the
+  [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
 
 **Exit.** Every budget is met on the high tier and on the HP, and the owner works in Pluto only.
 
@@ -343,6 +355,9 @@ measured on the HP.
 - Full voice conversation, local.
 - A light TUI, for SSH and machines without a screen: threads, following, approvals, the
   inspector ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)).
+- Its features taken from other harnesses' add-ons, in the
+  [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
 
 **Exit.** The assistant runs every day on the owner's desktop within its budget, with no action
 taken without its approval.

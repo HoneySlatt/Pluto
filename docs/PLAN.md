@@ -272,80 +272,42 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
 - Two weeks of local, private counts of which features the owner uses. Kept on the machine, never
   sent; ask before building.
-- Features that other harnesses ship as plugins, skills or extensions, to build into Pluto itself
-  (a survey of 2026-11-17). **A first draft, not yet the owner's choice**: a wider survey of the
-  same day (connectors, companion tools, chat front ends, 3D, media and the owner's own stack)
-  is put to the owner one feature at a time, and this list is then replaced by what the owner
-  keeps; the extension mechanisms the architecture should allow follow, as M2.0's decisions.
-  Pluto opens no extensions to others: the architecture only keeps the
-  way open ([ROADMAP](ROADMAP.md#open)). A source under MIT or Apache-2.0 may be adapted, its notice
-  in `NOTICE.md`; any other is an idea only. Each one that touches the loop earns its place on the
-  bench ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
-  - **Stage 3, the loop and the context:**
-    - MCP tools loaded lazily: one search tool of about 200 tokens in the context, a server
-      started at its first call and stopped when idle
-      ([pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter), MIT);
-    - a map of the repository fitted to a token budget ([Aider](https://github.com/Aider-AI/aider),
-      Apache-2.0);
-    - tools' outputs compressed by kind (logs, JSON, test runs), measured against a plain "be
-      concise" ([caveman](https://github.com/JuliusBrussee/caveman), Apache-2.0);
-    - one script calling the other tools in the sandbox, rather than many calls (Pi's `codemode`,
-      MIT);
-    - documentation answered from a local store of pinned versions the owner chooses, as
-      [Context7](https://github.com/upstash/context7) does as a service (MIT);
-    - renaming and finding references through the language's server, as
-      [Serena](https://github.com/oraios/serena) does (GPL-3.0: an idea only);
-    - output styles as a profile's delta per thread, their token effect measured (Claude Code's
-      output styles; the most installed skills of Gemini CLI's gallery are of this kind).
-  - **Stage 3, the delegation and the method:**
-    - success checks run by code, a failed run started again up to a limit
-      ([goose's recipes](https://goose-docs.ai/docs/guides/recipes/recipe-reference),
-      Apache-2.0), beside the hidden checks;
-    - a graph of tasks: independent ones run at once (Kiro's waves), a task claimed so two agents
-      never take it ([Beads](https://github.com/steveyegge/beads), MIT), a step that closes the
-      gap between the brief and the code ([spec-kit](https://github.com/github/spec-kit)'s
-      `converge`, MIT);
-    - a price limit checked before each model call, beside depth, count and time
-      ([Mistral Vibe](https://github.com/mistralai/mistral-vibe), Apache-2.0);
-    - each of the owner's skills measured with and without it, and how often it triggers when it
-      should (Anthropic's `skill-creator`, Apache-2.0; [agentskills.io](https://agentskills.io)'s
-      evaluations);
-    - each skill's cost in every turn shown, the skills never used listed, and a skill unused for
-      weeks proposed for archiving, by counters, never by a model (Claude Code's `plugin details`
-      and `/skill-doctor`; Hermes's curator, MIT);
-    - the owner's rules as a few lines each (an event, a pattern, warn or block), proposed by an
-      agent after a correction and kept by the owner (Claude's `hookify`, Apache-2.0); a pattern
-      over a shell string only warns, the typed permissions block;
-    - skills an agent proposes wait in a queue the owner reads, as a diff, then keeps or refuses
-      ([Hermes](https://github.com/NousResearch/hermes-agent)'s write approval, MIT);
-    - hard tasks checked by fresh agents against a ledger of what is proved, refuted and open
-      (Claude's `math-proof`, Apache-2.0).
-  - **Stage 3, the command line and the way back:**
-    - a session explained from its log, each claim with its line, and a bundle without secrets
-      for a bug report ([superpowers](https://github.com/obra/superpowers)'
-      `diagnosing-superpowers`, MIT);
-    - the costliest turns and the cache's misses of a session (Claude's `session-report`,
-      Apache-2.0);
-    - checkpoints linked to commits by a trailer, kept outside the branch, covering what Bash and
-      subagents change, which Claude Code's do not ([Entire](https://github.com/entireio/cli),
-      MIT);
-    - secrets replaced by placeholders before a request leaves for a model, and put back on the
-      machine (`opencode-vibeguard`), beside ADR-0009's masking on screen.
-  - **Stage 4, the engines:**
-    - a review in two passes: checks by code first, then a model's review on demand with its cost
-      shown, its findings filtered by confidence and a list of known false positives, never
-      blocking (Claude's `code-review` and `security-guidance`, Apache-2.0);
-    - the owner's skills, rules and settings of other agents imported as a proposal, previewed
-      first, each item kept by the owner (Codex's `externalAgentConfig/import`; Hermes's
-      `import-agent`, MIT).
-  - **Stage 5 and after:**
-    - scheduled jobs that are only a script, with no model, run by a systemd timer (Hermes's
-      `no_agent` jobs, MIT);
-    - a board of tasks whose chain starts the next task when one ends
-      ([Cline's Kanban](https://docs.cline.bot/usage/kanban), Apache-2.0), for the dashboard of
-      Stage 6;
-    - the chat's memory bounded, its fill shown to the model (Hermes, MIT), with Hindsight's
-      ideas above.
+- Features from other harnesses' add-ons that the owner left for later on 2026-11-17
+  ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md); those kept are in the
+  [specification](specification.md#8-features-from-other-harnesses-add-ons)). Each would be built
+  by Pluto itself, its source adapted only under MIT or Apache-2.0:
+  - **the loop**: a map of the repository in a token budget (Aider); feedback after each edit
+    (cargo check, clippy, tests and the language server, parsed); a hash-anchored edit format; a
+    context compactor with no model call; terse or simple answer profiles, measured;
+  - **the delegation**: a graph of tasks with waves, claims and a converge step (Kiro, Beads,
+    spec-kit); a price limit before each call and a budget reserved for parallel children (Vibe,
+    LiteLLM); the owner's rules in a few lines, proposed after a correction (hookify); hard tasks
+    checked by fresh agents with a ledger (Claude's math-proof); a debug mode with a local log
+    sink and a checked cleanup (Cursor); a filter of endpoints by their data policy (OpenRouter);
+    "consult agent X" in the composer; a reminder before a quota resets (code-notify);
+  - **the command line and sessions**: `pluto ask` and a shell key, and `cmd | pluto` (shell_gpt,
+    aichat, llm); a worktree command (Worktrunk); cost by branch, task and pull request with a
+    waste finder (CodeBurn); a session replayed as one file without secrets (claude-replay); a
+    two-pass review with a simplify pass (Claude's code-review and code-simplifier); checkpoints
+    linked to commits (Entire); the running app annotated from a code thread (Cursor); a
+    repository wiki with evidence (openwiki); a learning mode;
+  - **notifications and voice**: sounds per event and a spoken line (peon-ping); spoken approvals
+    and dictation for a coding session; dictation into any app, offline (Handy);
+  - **forges**: a ticket starts a thread; a pull request's template filled; issues triaged with a
+    rationale and a confidence;
+  - **the desktop and creative work**: a private desktop session as a tool, with takeover; the
+    owner's desktop driven through Niri and AT-SPI, on the owner's leave (computer-use-linux); LFS
+    and Perforce, edits refused on unlocked files (p4mcp-server); Figma and Penpot read; audio,
+    MIDI and score viewers in the files panel; MusicBrainz tag proposals and voice control for
+    Opium;
+  - **the chat and the assistant**: the library's chunks and a query console (Msty); a model
+    matchmaker from the owner's bench; chat with the open page; saved actions on a selection;
+    meeting notes without a bot (against ADR-0040's calls, the owner's call); related notes by
+    meaning; a compiled wiki of notes (Karpathy's LLM wiki); an inbox of documents and links
+    (Paperless-AI, Karakeep);
+  - **outside the rules today, ideas only**: cloud sandboxes, optional and off by default; usage
+    limits read from browser cookies, against ADR-0009; the smart home through Home Assistant's
+    MCP server, out of the plan by ADR-0040.
 
 ## Known debt
 

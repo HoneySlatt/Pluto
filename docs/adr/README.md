@@ -66,3 +66,4 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0042](0042-a-cli-first-the-tui-with-the-assistant.md) | A command line at Stage 3, a light TUI with the assistant | Accepted; superseded in part by 0043; amends 0030, 0033 and 0039 |
 | [0043](0043-each-session-in-its-own-unit.md) | Each session in its own unit; an agent approves only what its brief grants | Accepted; supersedes in part 0033 and 0042 |
 | [0044](0044-five-platforms-at-going-public.md) | Five platforms, the three new ones at going public, the core portable now | Accepted |
+| [0045](0045-features-from-other-harnesses-add-ons.md) | Features from other harnesses' add-ons, adapted, never installed | Accepted |
