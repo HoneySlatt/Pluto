@@ -261,6 +261,13 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
 - A Nix build without the web client.
 - The fork exists on one disk only: its branch `pluto` is pushed nowhere. A private copy would
   protect it; the owner's call.
+- For the chat's memory at Stage 6 ([ADR-0020](adr/0020-the-chat.md)), read on 2026-11-17:
+  [Hindsight](https://github.com/vectorize-io/hindsight) (MIT) keeps facts, experiences and
+  beliefs apart, each with its time and its evidence, and recalls by fusing keyword, semantic,
+  graph and time searches. Its ideas fit; its server does not (Python and PostgreSQL, a model call
+  at each memory kept, consolidation in the background). LongMemEval or LoCoMo in the bench would
+  show whether a memory earns its place
+  ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
 - Two weeks of local, private counts of which features the owner uses. Kept on the machine, never
   sent; ask before building.
 
