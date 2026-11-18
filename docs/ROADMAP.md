@@ -150,7 +150,7 @@ from their first figures, the TUI's at Stage 7.
 | The harness's score | on frontier models, the vendor's harness within the error margin; on local and cheap models, a measured lead | not measured | Pluto's bench and a subset of Terminal-Bench | from Stage 3 |
 | The chat's own delay | at most 10 ms added by Pluto from sending to the first word shown, same machine | not measured | the fake model | from Stage 6 |
 | The HP | the client, a server and three agents without swap | not measured: its commands are ready ([the HP](measurements.md#the-hp)) | `/proc/meminfo`, `vmstat` | by hand at each stage |
-| The binary's size | each binary, client and server, at most 30 MB stripped | the client, 59.5 MB stripped ([measured](measurements.md#the-budgets-m12-set)) | the stripped binary's size | by hand at each stage |
+| The binary's size | each binary, client and server, at most 30 MB stripped | the client, 59.0 MB stripped ([measured](measurements.md#the-cuts-of-m14)) | the stripped binary's size | by hand at each stage |
 | An event's latency | server to client, p99 within 5 ms on loopback, 16 ms on the local network | not measured: the fixture runs no turn | the protocol's tests | from Stage 5 |
 | A thread opened | a thread visited before shows whole in the frame after the click; a thread never opened, within 50 ms from a server on the same machine, to confirm by measure | not measured | the frame bench | from Stage 5 |
 | The history's import | at most 60 s on the high tier, 5 min on the HP, resumable | not measured: 2.79 GiB to import ([measured](measurements.md#the-forks-database)) | timed on a copy of the owner's history | Stage 5 |
@@ -160,16 +160,56 @@ from their first figures, the TUI's at Stage 7.
 | Hours without a crash | at least 99.9 % of hours of use without a crash; no work lost after one, a draft in the composer included | not measured: neither hours nor crashes are counted | the hours of use and the crashes, counted on the machine | from Stage 3 for `pluto-agent`, Stage 5 for the server and the client |
 | The phone | cold start, frames, the battery over an hour of a thread streaming, data per hour, memory: the desktop's families and margins | not measured | Macrobenchmark and Perfetto on the Pixel | from Stage 5 |
 
-Guarantees, each with its test ([ADR-0017](adr/0017-pluto-measured-against-the-market.md)):
-- an update or a restart of the server never stops a running agent;
-- a dropped connection recovers within one second on the local network, losing nothing;
-- a worktree with uncommitted work is never deleted;
-- an update of Pluto costs no thread and no draft;
-- every first-rank engine has steering, interrupt, resume, checkpoints, approvals, the plan and its
-  usage, native or supplied by Pluto, checked by a grid of tests on recorded sessions;
-- the assistant never deletes without a way back, and never spends money or sends a message without
-  an approval that shows the action, the target and every recipient
-  ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)).
+Guarantees and scenarios: what holds when the world around Pluto changes or fails, how it is
+checked, and from when ([ADR-0017](adr/0017-pluto-measured-against-the-market.md); the audit of
+[2026-11-17](audits/2026-11-17-architecture-and-contribution.md#change-and-failure-scenarios)
+traces what carries each). "Not yet checked" is said where it is true.
+- **The server updated or restarted during a turn**: the running agent never stops; its session
+  runs in its own unit and the server finds it again
+  ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)). A test restarts the server under a
+  fake turn, from Stage 3 for `pluto-agent`, Stage 5 for the server.
+- **The connection dropped**, even after an accepted action: it recovers within one second on the
+  local network, losing nothing and doing nothing twice (the client's id on each command). The
+  protocol's tests, from Stage 3 for the command line, Stage 5 for the network.
+- **Pluto updated**, or a migration interrupted: no thread and no draft lost; logs are never
+  migrated in place, older ones read forever, a newer one refused by an older Pluto. A test per
+  format version, from M2.1.
+- **Power lost, or the disk full, during a write**: what was written before stays; a log's last
+  entry is whole or absent; a draft survives. A test that cuts the write, from M2.1; the egui
+  client's sites are known debt.
+- **A session killed between an intent and its outcome**: its log shows the intent without an
+  outcome, and nothing is done twice. From Stage 3.
+- **A delegation cancelled with children**: every child stops and none is left running. From
+  Stage 3; an engine's own subagents from Stage 4.
+- **A tool that needs approval**: the session waits, survives a restart, and the approval counts
+  once; only a person gives the approvals ADR-0043 keeps for a person. From Stage 3.
+- **A worktree with uncommitted work** is never deleted. From Stage 3.
+- **A new model released**: the bench runs it against each component of Pluto's loop; a component
+  stays only while it shows a gain ([ADR-0037](adr/0037-how-the-harness-is-judged.md)). From
+  Stage 3.
+- **A vendor's CLI changes its events, terms or defaults**: its engine's grid of tests on recorded
+  sessions fails before the owner meets it, unknown events are kept raw, the other engines keep
+  working; the vendors' paths and terms are checked at each stage's end
+  ([ADR-0020](adr/0020-the-chat.md)). Every first-rank engine has steering, interrupt, resume,
+  checkpoints, approvals, the plan and its usage, native or supplied by Pluto. From Stage 4; the
+  CLIs are not yet pinned (known debt).
+- **A provider with other capabilities added**: a missing capability shows as absent, nothing
+  else changes. From Stage 4.
+- **A structuring dependency replaced**: no third-party type is in a format or a contract. A
+  review at each stage's audit.
+- **A second platform**: the crates that need no platform build and pass their tests on Windows
+  and macOS in CI ([ADR-0044](adr/0044-five-platforms-at-going-public.md)). From M2.0.
+- **A paired device lost**: its key is revoked alone, the others keep working
+  ([ADR-0009](adr/0009-secrets-privacy-and-the-sandbox.md)). From Stage 5.
+- **An untrusted repository opened**: nothing it holds runs or loads without the owner's go
+  ([ADR-0046](adr/0046-what-pluto-loads-from-files.md)). From Stage 3.
+- **Ten times the events a client can take**: the client reads the log from a position and shows
+  that it lags, never loses or blocks. From Stage 5.
+- **Two contributors at once**: changelog fragments and a generated ADR index keep their changes
+  apart. Checked by `scripts/check.sh` today.
+- **The assistant** never deletes without a way back, and never spends money or sends a message
+  without an approval that shows the action, the target and every recipient
+  ([ADR-0030](adr/0030-pluto-becomes-a-harness.md)). From Stage 7.
 
 Promises:
 - instant: no common action on the desktop shows a loading state;
@@ -236,7 +276,7 @@ Each is decided by an ADR when it becomes necessary, not earlier.
 | The TUI's budgets and rivals | Claude Code's, Codex's and OpenCode's TUIs | Stage 7 |
 | A keyring without a graphical session | systemd's credentials; a file sealed by the session's keyring; another | Stage 3, the vault's milestone |
 | DeepSeek Harness beside DeepSeek's models in Pluto's loop | an ACP engine, or none; the fork drives its local Web protocol meanwhile ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)) | Stage 4 |
-| The protocol's wire format and transports | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 5, the protocol's milestone |
+| The protocol's network wire format and transports (its agent part comes in Stage 3) | JSON over WebSocket; a binary encoding (CBOR, postcard); QUIC through iroh away from home | Stage 5, the protocol's milestone |
 | A thread moved between machines | how, and whether | after Stage 5 |
 | Agents' sessions kept ready for the chat | how many, and for how long, against "nothing runs at rest" | Stage 6, measured |
 | Gemini through its official CLI, or a sign-in Google offers to third-party applications | allowed or not by Google, which has not answered; an API key until then ([ADR-0041](adr/0041-the-assistant-on-every-plan-opened-to-third-parties.md)) | when Google answers |
@@ -278,8 +318,11 @@ line ([ADR-0042](adr/0042-a-cli-first-the-tui-with-the-assistant.md)).
 - `pluto-agent`, one process per session, writing its log.
 - The sandbox and the vault.
 - The delegation object, its limits and end conditions; the owner's method read from its files.
-- The command line: run a brief, list and follow sessions, answer approvals, show the inspector's
-  view; the same by SSH, from a script and from an agent.
+- The command line: run a brief, list and follow sessions, answer the approvals a brief grants,
+  steer and interrupt, show the inspector's view; the same by SSH, from a script and from an
+  agent. It speaks the protocol crate's agent part, versioned from M2.0, each command with an id
+  its client chooses; the approvals only a person may give go only through the channel of
+  [ADR-0043](adr/0043-each-session-in-its-own-unit.md), which agents cannot reach.
 - Its features taken from other harnesses' add-ons, in the
   [specification §8](specification.md#8-features-from-other-harnesses-add-ons)
   ([ADR-0045](adr/0045-features-from-other-harnesses-add-ons.md)).
@@ -308,7 +351,9 @@ the grid of recorded sessions.
 **Goal.** The fork's Node server no longer runs, and every client speaks Pluto's protocol
 ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)).
 
-- Pluto's server, supervising the sessions; the protocol's crate; pairing.
+- Pluto's server, supervising the sessions; the protocol's network part; pairing.
+- T3's notice removed from `LICENSE-MIT` once no code taken from T3 remains
+  ([`NOTICE.md`](../NOTICE.md)).
 - The scheduler and triggers; the owner's inbox; the browser through CDP; computer use in an
   isolated session.
 - Several servers in one view, and the relay on iroh
