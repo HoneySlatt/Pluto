@@ -4,7 +4,8 @@
 # provides the toolchain, cargo-deny and lychee:
 #
 # - formatting, then clippy with warnings as errors, over the whole workspace: the desktop client,
-#   pluto-core, and the Android app's Rust core, pluto-ffi;
+#   pluto-core, the Android app's Rust core pluto-ffi and its uniffi-bindgen, and Stage 1's tools
+#   (pluto-fake-model, pluto-input, pluto-measure, pluto-recording);
 # - the workspace's tests;
 # - the dependencies: their licenses, the advisories against them and where they come from
 #   (cargo deny, policy in deny.toml; it fetches the advisory database, so it needs the network);

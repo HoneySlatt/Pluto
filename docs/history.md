@@ -55,5 +55,15 @@ The fake model service and the rivals' bench
 [ADR-0029](adr/0029-the-benchs-tools-and-what-a-rivals-figure-holds.md)). M1.6a and M1.6b1 done
 2026-11-11 and 2026-11-14, their figures provisional: the machine was loaded. M1.6b2 (the open
 rivals and the web chats), M1.6b3 (the long thread, real days) and M1.6c (the vendors'
-applications, energy, frames, the bar tightened) move to Stage 5. The unpushed branch `m16b2b`
-holds part of M1.6b2; its fate is a question for Stage 1's audit.
+applications, energy, frames, the bar tightened) move to Stage 5. The branch `m16b2b` holds part
+of M1.6b2, pushed unreviewed by Stage 1's audit; it is reviewed and merged with Stage 5's
+campaigns.
+
+### Stage 1's audit
+
+2026-11-18 ([`audits/2026-11-18-stage-1.md`](audits/2026-11-18-stage-1.md)). Six crashes on input
+from outside, two wrong results and a leak fixed; the fork's analytics, sent to T3 by default,
+turned off; the license given Pluto's own notice and the Apache text; the owner's decisions on the
+branches, the abstraction rule, the protocol's version, Stage 3's channel, the ADRs' chains, the
+scenarios and the debt ([ADR-0047](adr/0047-stage-numbers-in-adrs-before-the-reordering.md)); the
+rest planned in M1.7.

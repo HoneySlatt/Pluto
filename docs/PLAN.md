@@ -12,56 +12,57 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
 
 - **On 2026-11-15 Pluto became a harness**: [ADR-0030](adr/0030-pluto-becomes-a-harness.md) and
   the ADRs after it; the new stages are in the [ROADMAP](ROADMAP.md#4-stages).
-- **Stage 1's milestones are done or moved** ([`history.md`](history.md)). Stage 1 closes with its
-  stage audit, which comes next, in a session of its own, following the method's `audits.md`; the
-  fate of the unpushed branch `m16b2b` is one of its questions. Then
-  [M2.0](#m20--the-new-foundations-architecture).
-- The egui client, the Android app and the fork run unchanged until the end of Stage 5
+- **Stage 1 is closed by its [audit of 2026-11-18](audits/2026-11-18-stage-1.md)**: its fixes,
+  the owner's decisions, the debt triaged. Next, [M1.7](#m17--the-fixes-of-stage-1s-audit) in a
+  session of its own, then [M2.0](#m20--the-new-foundations-architecture).
+- The egui client and the Android app are frozen except fixes, and the fork changes only on the
+  owner's word, until the end of Stage 5
   ([ADR-0038](adr/0038-a-new-foundation-beside-the-fork.md)). DeepSeek Harness is a provider of
   the fork ([ADR-0021](adr/0021-deepseek-harness-in-todays-pluto.md)).
 - What Pluto asks of uwui is in [`uwui-needs.md`](uwui-needs.md). The owner expects uwui to be ready
   before Stage 3.
-- **Urgent, found on 2026-11-16**, each costlier the longer it waits:
-  - the fork's branch `pluto` is pushed nowhere, and the owner's NixOS builds it from a local path:
-    a private copy, on the owner's go;
-  - the owner's history in `~/.pluto` needs a backup before Stage 5's import: the owner's to
-    confirm;
-  - the method changed on 2026-11-16: architecture is part of the bar (change and failure
-    scenarios, invariants, ownership, recovery, each ADR's validation and reconsideration).
-    Stage 1's audit reviews Pluto against it; M2.0 applies it;
-  - the license: the root crate, `pluto-core`, `pluto-ffi` and `uniffi-bindgen` declare MIT, the
-    four tool crates MIT OR Apache-2.0, and the repository holds only T3's MIT text, under T3's
-    name; no Apache-2.0 text, no copyright line of Pluto's own. Code copied from Codex's sandbox,
-    under Apache-2.0, could not be offered under MIT (ADR-0035 plans a notice only). Fixed before
-    any outside contribution or the first line copied from Codex, with a DCO or a CLA; CI also
-    runs on pull requests by then.
-- **The [audit of 2026-11-17](audits/2026-11-17-architecture-and-contribution.md)**, on the
-  owner's demand, examined the architecture, contribution and what to decide early. The owner took
-  its first decision: each session in its own unit, and an agent approves only what its brief
-  grants ([ADR-0043](adr/0043-each-session-in-its-own-unit.md)). Its other findings are planned
-  below, in Stage 1's audit, M2.0 and M2.1.
-- **Stage 1's audit also asks**, from a review of 2026-11-16 and the audit of 2026-11-17:
-  - `AGENTS.md` still says "no abstraction without a second concrete use"; the method now also
-    accepts a boundary around an unstable dependency, a protected invariant or a test. Align, on
-    the owner's go, before M2.0, whose injected clock and platform boundary the old rule forbids;
-  - the contradictions the audit lists: PLAN's version on every message against ADR-0005's at
-    connection; the ROADMAP's protocol at Stage 5 against Stage 3's channel;
-  - the chains of amendments consolidated, the foundation's topics first (0005 and 0033, 0009 and
-    0035, 0006 and 0031), each with a validation section;
-  - the quality bar given its change and failure scenarios, from the audit's table;
-  - ADR-0020 says to check shortcuts with Umbriel; the compositor is now Niri.
+- **The owner's steps**, none of which an agent can take:
+  - switch to the NixOS change that sets `T3CODE_TELEMETRY_ENABLED=false` for `pluto-server`
+    (prepared on 2026-11-18; the fork's own default is off since its commit `ba942f93b7`);
+  - turn on GitHub's private vulnerability reporting, which `SECURITY.md` sends reports to;
+  - copy off the machine the fork's branch `pluto`, pushed nowhere, whose bundle of 2026-11-18
+    sits on the same disk, and back up the history in `~/.pluto` before Stage 5's import;
+  - remove the worktrees of branches already merged (`m16b2a`, `mobile`,
+    `t3/research-sub-agent-brief`), after checking them for uncommitted work;
+  - the HP's figures, before M2.1 ([`measurements.md`](measurements.md#the-hp)).
+- Before the first outside contribution or the first line copied from Codex's sandbox: a DCO or a
+  CLA, and CI on pull requests.
 
 ## Status
 
 | Milestone | Goal | Status |
 |---|---|---|
-| Stage 1's audit | The whole project examined at Stage 1's end; its findings in `docs/audits/` | Planned |
+| Stage 1's audit | The whole project examined at Stage 1's end ([audit](audits/2026-11-18-stage-1.md)) | Done |
+| [M1.7](#m17--the-fixes-of-stage-1s-audit) | The defects Stage 1's audit found, fixed | Planned |
 | [M2.0](#m20--the-new-foundations-architecture) | The new foundation's parts, boundaries and ways to extend it, written and checked before its first crate | Planned |
 | [M2.1](#m21--the-session-logs-format) | One versioned format holds any session; the context is a view of it | Planned |
 | [M2.2](#m22--the-benchs-tasks-and-budget) | The owner has chosen what the bench runs and what it may spend | Planned |
 | [M2.3](#m23--the-benchs-runner) | One command runs a task with an engine and a model, sandboxed, and grades it | Planned |
 | [M2.4](#m24--a-subset-of-terminal-bench) | A public reference through the same runner | Planned |
 | [M2.5](#m25--the-vendors-harnesses-measured) | The figures Pluto's loop must reach | Planned |
+
+## M1.7 — The fixes of Stage 1's audit
+
+- **Goal.** What Stage 1's audit found against the bar, fixed before M2.0, each with the test that
+  fails first; the list is in [`debt.md`](debt.md#paid-by-m17-the-fixes-of-stage-1s-audit).
+- **Delivers.** The eight client defects; the client's text functions fuzzed; the drafts written
+  durably off the interface's thread; the four ignored write errors shown; a default-deny
+  Content-Security-Policy for agents' pages and MCP apps, after reading the domains the MCP Apps
+  specification lets an app declare; a CI job for `--apk` on `android/`, `pluto-ffi`,
+  `pluto-core` and the lock files, and weekly, with an ADR superseding ADR-0012 on this point;
+  `docs/vendors.md`, the vendors' paths and terms from sourced research
+  ([ADR-0020](adr/0020-the-chat.md)); the light theme's dead paths deleted; the mutants of
+  `mask.rs` killed and `runs.rs`'s silent return made a skip CI sees; `features.md` brought to
+  the present.
+- **Done when.** Every test failed before its fix; `scripts/check.sh --apk` passes; the CI job's
+  duration is measured and recorded; each line of `vendors.md` cites its source.
+- **How to test.** `scripts/check.sh`, `--apk`; the fuzz targets run once, with memory capped; a
+  closing review.
 
 ## Stage 2 — The bench and the session log
 
@@ -84,8 +85,11 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
     ADR-0043;
   - the log: one writer per session, retired event types readable forever, no silent deletion;
   - identifiers unique across machines, independent of the machine and the environment;
-  - the protocol: a version and capabilities on every message, unknown entries kept and shown but
-    an unknown critical one refused (the writer marks each entry's class), schemas
+  - the protocol: where its version and capabilities are carried, decided here (ADR-0005's at
+    connection holds until then) against these cases: a `pluto-agent` older than the server that
+    an update left running, the command line's one connection a command, the relay, several
+    servers; the branch `stage2-design` read as prior art; in every option, unknown entries
+    kept and shown but an unknown critical one refused (the writer marks each entry's class); schemas
     generated for Kotlin and the mod, experiments behind an opt-in; an authenticated local server
     from its first commit;
   - who owns each state, how each task is cancelled and stopped, every queue and cache bounded
@@ -138,10 +142,18 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
       other ways refused by clippy in the new crates ([`debt.md`](debt.md) has the client's seven);
     - a one-page trust map: a tool process per call; the sandbox without the session bus,
       keyring and systemd sockets; where tool code can and cannot reach an engine's credentials;
-    - the command line's channel to `pluto-agent` as the protocol crate's agent part, versioned;
-      Stage 5 keeps only the network's transport and encoding;
-    - the license's fix and a DCO, `SECURITY.md` with GitHub's private reporting, CI on pull
-      requests; bidirectional text asked of uwui in [`uwui-needs.md`](uwui-needs.md).
+    - the command line's channel to `pluto-agent` as the protocol crate's agent part, versioned,
+      each command with an id its client chooses, the approvals only a person may give through
+      ADR-0043's channel alone (the [ROADMAP](ROADMAP.md#stage-3--pluto-agent-and-its-command-line)'s
+      Stage 3); Stage 5 keeps only the network's transport and encoding;
+    - a DCO, CI on pull requests; bidirectional text asked of uwui in
+      [`uwui-needs.md`](uwui-needs.md).
+  - Stage 1's audit adds: the three foundation topics' chains of amendments superseded by M2.0's
+    ADRs as they decide, each rule stated whole with its validation section (the protocol; secrets
+    and the sandbox; the engines, ADR-0011's place in ADR-0003's and ADR-0006's statuses
+    included); the ROADMAP's guarantees and scenarios as the contracts' criteria; jiff or time in
+    place of chrono; AGENTS.md, the ROADMAP and this PLAN brought back under their word limits;
+    the branch `stage2-design` archived off the machine once read.
 - **Delivers.**
   - In [`ARCHITECTURE.md`](ARCHITECTURE.md), the target: the crates of Stages 2 to 5 by name, what
     each holds, the direction of their dependencies, and each one's public surface.
@@ -150,8 +162,7 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   - A check in `scripts/check.sh` that refuses a dependency against the direction.
   - The frozen egui client and its crates in a workspace of their own, so that the new foundation
     builds and tests without them.
-  - `CONTRIBUTING.md`: the environment, the commands, where to start. `SECURITY.md`: how to
-    report a vulnerability privately.
+  - `CONTRIBUTING.md`: the environment, the commands, where to start, how to run the fake model.
 - **Done when.** The ADRs are accepted. The dependency check fails on a test crate that breaks the
   direction and passes on `main`. The new foundation's checks run without building eframe.
 - **How to test.** `scripts/check.sh`; a newcomer test: a fresh agent, given only the README,
