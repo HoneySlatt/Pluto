@@ -3,7 +3,7 @@
 - Status: Accepted; amends [0005](0005-plutos-own-typed-protocol.md) (the agent's part of the
   protocol carries the session log's events) and [0008](0008-storage-and-the-history-moved.md) (a
   session is stored as its log); amended by [0042](0042-a-cli-first-the-tui-with-the-assistant.md) (the command line supervises sessions before the server); superseded in part by
-  [0043](0043-each-session-in-its-own-unit.md) (what supervises sessions)
+  [0043](0043-each-session-in-its-own-unit.md) (what supervises sessions) and [0047](0047-stage-numbers-in-adrs-before-the-reordering.md) (its stage numbers)
 - Date: 2026-11-15
 
 ## Context

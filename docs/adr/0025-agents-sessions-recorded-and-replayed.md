@@ -1,6 +1,6 @@
 # 0025. Agents' sessions recorded and replayed
 
-- Status: Accepted; amends [0012](0012-the-checks-and-ci.md) (a check that runs only on the owner's machine)
+- Status: Accepted; amends [0012](0012-the-checks-and-ci.md) (a check that runs only on the owner's machine); superseded in part by [0047](0047-stage-numbers-in-adrs-before-the-reordering.md) (its stage numbers)
 - Date: 2026-11-11
 
 ## Context

@@ -14,8 +14,9 @@ moves.
 - A precision decided while a milestone runs goes in the milestone's plan or in a new ADR, never
   into an older ADR's status.
 - Until 2026-11-16 a partial change was written as an amendment (`Accepted; amended by NNNN` on the
-  older ADR, `Accepted; amends NNNN (what)` on the newer). Those chains are consolidated by Stage
-  1's audit: one ADR per topic supersedes them, the rule stated whole.
+  older ADR, `Accepted; amends NNNN (what)` on the newer). Each chain is consolidated by the
+  milestone that next decides its topic, as [Stage 1's audit](../audits/2026-11-18-stage-1.md)
+  plans it: one ADR per topic supersedes the chain, the rule stated whole.
 
 New ADRs copy [`0000-template.md`](0000-template.md) and take the next free number. The index
 below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it.
@@ -36,17 +37,17 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0012](0012-the-checks-and-ci.md) | The checks in one script, run by CI in the Nix shell | Accepted; amended by 0025 |
 | [0013](0013-plutos-logo.md) | Pluto's logo | Accepted |
 | [0014](0014-how-today-is-measured.md) | How today is measured | Accepted; amended by 0026 |
-| [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted; amended by 0017 and 0026 |
+| [0015](0015-the-budgets-set-from-todays-figures.md) | The budgets set from today's figures | Accepted; superseded in part by 0047; amended by 0017 and 0026 |
 | [0016](0016-uwuis-decisions-of-2026-11-07-taken-by-pluto.md) | uwui's decisions of 2026-11-07, taken by Pluto | Accepted; amends 0001, 0003 and 0009; amended by 0017 |
 | [0017](0017-pluto-measured-against-the-market.md) | Pluto measured against the market | Accepted; amends 0015 and 0016; amended by 0022, 0026, 0027, 0037 and 0039 |
-| [0018](0018-the-markets-features-and-the-triage.md) | The market's features, and the triage by family | Accepted; amends 0002, 0003, 0007 and 0009; amended by 0022 |
+| [0018](0018-the-markets-features-and-the-triage.md) | The market's features, and the triage by family | Accepted; superseded in part by 0047; amends 0002, 0003, 0007 and 0009; amended by 0022 |
 | [0019](0019-a-code-editor-in-pluto.md) | A code editor in Pluto | Accepted; amends 0003 and 0009; amended by 0040 |
-| [0020](0020-the-chat.md) | The chat | Accepted; amends 0003; amended by 0040 |
+| [0020](0020-the-chat.md) | The chat | Accepted; superseded in part by 0047; amends 0003; amended by 0040 |
 | [0021](0021-deepseek-harness-in-todays-pluto.md) | DeepSeek Harness in today's Pluto | Accepted; amends 0006 and 0010 |
 | [0022](0022-the-triage-row-by-row.md) | The triage, row by row | Accepted; amends 0003, 0009, 0017 and 0018; amended by 0024 and 0040 |
 | [0023](0023-the-specification-accepted.md) | The specification accepted | Accepted |
 | [0024](0024-cuts-kept-in-the-egui-client-until-uwui.md) | Cuts kept in the egui client until uwui | Accepted; amends 0022 |
-| [0025](0025-agents-sessions-recorded-and-replayed.md) | Agents' sessions recorded and replayed | Accepted; amends 0012 |
+| [0025](0025-agents-sessions-recorded-and-replayed.md) | Agents' sessions recorded and replayed | Accepted; superseded in part by 0047; amends 0012 |
 | [0026](0026-the-rivals-measured-how.md) | How the rivals are measured | Accepted; amends 0014, 0015 and 0017; amended by 0028 |
 | [0027](0027-the-rivals-measures-set-aside.md) | The rivals' measures set aside until the owner's go | Accepted; amends 0017; amended by 0039 |
 | [0028](0028-the-open-rivals-and-the-web-chats-measured.md) | How the open rivals and the web chats are measured | Accepted; amends 0026; amended by 0029 |
@@ -54,7 +55,7 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0030](0030-pluto-becomes-a-harness.md) | Pluto becomes a harness: one kernel, two products | Accepted; amends 0003; amended by 0041 and 0042 |
 | [0031](0031-three-kinds-of-engine.md) | Three kinds of engine under one thread model | Accepted; amends 0006 |
 | [0032](0032-plutos-loop-and-its-provider-clients.md) | Pluto's loop and its own provider clients | Accepted; supersedes 0011 |
-| [0033](0033-one-pluto-agent-process-per-session.md) | One `pluto-agent` process per session, its log on disk | Accepted; superseded in part by 0043; amends 0005 and 0008; amended by 0042 |
+| [0033](0033-one-pluto-agent-process-per-session.md) | One `pluto-agent` process per session, its log on disk | Accepted; superseded in part by 0043 and 0047; amends 0005 and 0008; amended by 0042 |
 | [0034](0034-the-methods-mechanisms-native.md) | The method's mechanisms native, the method itself in text | Accepted |
 | [0035](0035-the-sandbox-and-the-vault.md) | The sandbox after Codex's, with a vault | Accepted; amends 0009 |
 | [0036](0036-the-inspector-appends-by-default.md) | The inspector appends by default | Accepted |
@@ -68,3 +69,4 @@ below is written by `scripts/adr-index.py --write`; `scripts/check.sh` checks it
 | [0044](0044-five-platforms-at-going-public.md) | Five platforms, the three new ones at going public, the core portable now | Accepted |
 | [0045](0045-features-from-other-harnesses-add-ons.md) | Features from other harnesses' add-ons, adapted, never installed | Accepted |
 | [0046](0046-what-pluto-loads-from-files.md) | What Pluto loads from files: pinned, gated, layered, inventoried | Accepted |
+| [0047](0047-stage-numbers-in-adrs-before-the-reordering.md) | Stage numbers in ADRs written before the stages were reordered | Accepted; supersedes in part 0015, 0018, 0020, 0025 and 0033 |

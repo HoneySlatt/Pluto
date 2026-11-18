@@ -2,7 +2,7 @@
 
 - Status: Accepted; amended by [0017](0017-pluto-measured-against-the-market.md) (rivals may
   tighten each budget, never loosen it; frames at 99.9 %; input timed to the photon) and [0026](0026-the-rivals-measured-how.md) (memory counted as private,
-  swap and GPU memory)
+  swap and GPU memory); superseded in part by [0047](0047-stage-numbers-in-adrs-before-the-reordering.md) (its stage numbers)
 - Date: 2026-11-07
 
 ## Context
