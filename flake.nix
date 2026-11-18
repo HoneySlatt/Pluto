@@ -105,14 +105,17 @@
         pkgs.codex
         pkgs.opencode
       ];
+      # Named, not `latest`: a flake update then never changes the compiler unseen. Cargo.toml's
+      # `rust-version` says the same.
+      rustVersion = "1.99.1";
       # The desktop toolchain is kept minimal: CI downloads it at every run.
-      desktopRust = pkgs.rust-bin.stable.latest.minimal.override {
+      desktopRust = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
         extensions = [
           "clippy"
           "rustfmt"
         ];
       };
-      rust = pkgs.rust-bin.stable.latest.default.override {
+      rust = pkgs.rust-bin.stable.${rustVersion}.default.override {
         extensions = [ "rust-src" ];
         targets = [
           "aarch64-linux-android"
