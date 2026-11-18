@@ -27,8 +27,6 @@ Every milestone ends with the definition of done in [`AGENTS.md`](../AGENTS.md#d
   - turn on GitHub's private vulnerability reporting, which `SECURITY.md` sends reports to;
   - copy off the machine the fork's branch `pluto`, pushed nowhere, whose bundle of 2026-11-18
     sits on the same disk, and back up the history in `~/.pluto` before Stage 5's import;
-  - remove the worktrees of branches already merged (`m16b2a`, `mobile`,
-    `t3/research-sub-agent-brief`), after checking them for uncommitted work;
   - the HP's figures, before M2.1 ([`measurements.md`](measurements.md#the-hp)).
 - Before the first outside contribution or the first line copied from Codex's sandbox: a DCO or a
   CLA, and CI on pull requests.
