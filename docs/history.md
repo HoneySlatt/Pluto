@@ -63,7 +63,7 @@ campaigns.
 
 2026-11-18 ([`audits/2026-11-18-stage-1.md`](audits/2026-11-18-stage-1.md)). Six crashes on input
 from outside, two wrong results and a leak fixed; the fork's analytics, sent to T3 by default,
-turned off; the license given Pluto's own notice and the Apache text; the owner's decisions on the
-branches, the abstraction rule, the protocol's version, Stage 3's channel, the ADRs' chains, the
-scenarios and the debt ([ADR-0047](adr/0047-stage-numbers-in-adrs-before-the-reordering.md)); the
-rest planned in M1.7.
+turned off; the license given Pluto's own notice and the Apache text; the dependencies updated, on
+Rust 1.100; the owner's decisions on the branches, the abstraction rule, the protocol's version,
+Stage 3's channel, the ADRs' chains, the scenarios and the debt
+([ADR-0047](adr/0047-stage-numbers-in-adrs-before-the-reordering.md)); the rest planned in M1.7.
