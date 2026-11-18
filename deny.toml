@@ -18,6 +18,7 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive, merged into zbus 6; only AccessKit's adapter on Linux uses it, through zbus 5" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono, unmaintained since 2026-11-17 with no maintained release; only the frozen egui client, pluto-core and pluto-ffi use it, and they leave at Stage 5; the new foundation chooses jiff or time at M2.0" },
 ]
 
 # The permissive licenses of the dependencies today, all compatible with MIT OR Apache-2.0.

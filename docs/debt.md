@@ -7,10 +7,13 @@ are frozen and leave at Stage 5 ([ADR-0038](adr/0038-a-new-foundation-beside-the
 - The egui client stays at T3 v0.1.0 parity with the gaps listed in `docs/parity/`. Those gaps are
   no longer debt: the triage decided what of them matters ([`features.md`](features.md)).
 - The Z Code driver has never run a real turn.
-- `deny.toml` ignores six advisories of unmaintained crates with no maintained release their
+- `deny.toml` ignores seven advisories of unmaintained crates with no maintained release their
   parents accept: bincode (syntect), ttf-parser and rustybuzz (resvg 0.45, which egui_extras
-  requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5). Followed by the
-  dependency update at Stage 1's end; those of the egui client leave with it.
+  requires), and zvariant, zvariant_derive and zbus_names (AccessKit's zbus 5), all still needed
+  at Stage 1's audit, the newest parents requiring them still; and chrono, unmaintained since
+  2026-11-17, a direct dependency of the egui client, `pluto-core` and `pluto-ffi`, ignored by the
+  owner's decision of 2026-11-18. They leave with the egui client and the core at Stage 5; the new
+  foundation chooses jiff or time at M2.0.
 - The core's connection thread wakes at least once a second while connected
   (`wait` in `crates/pluto-core/src/protocol.rs`), against the bar's zero wake-ups at rest: 1.1 a
   second, measured by M1.2. By the owner's decision of 2026-11-07, it stays until Pluto's own
