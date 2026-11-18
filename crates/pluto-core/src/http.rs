@@ -117,12 +117,18 @@ fn exchange(
         Some(query) => format!("{}?{query}", url.path()),
         None => url.path().to_owned(),
     };
+    // RFC 9112 §3.2: the URL's authority, an IPv6 address in brackets, the port when it is not
+    // the scheme's default. `host` stays bare for the TLS server name.
+    let authority = match url.port() {
+        Some(port) => format!("{}:{port}", url.host_str()?),
+        None => url.host_str()?.to_owned(),
+    };
     let request = match upload {
         None => format!(
-            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\n{headers}Connection: close\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: pluto\r\nAccept: */*\r\n{headers}Connection: close\r\n\r\n"
         ),
         Some((content_type, body)) => format!(
-            "POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: pluto\r\nAccept: */*\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
+            "POST {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: pluto\r\nAccept: */*\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
             body.len()
         ),
     }
@@ -321,11 +327,16 @@ fn dechunk(mut body: &[u8]) -> Vec<u8> {
         let head = String::from_utf8_lossy(&body[..line]);
         let size =
             usize::from_str_radix(head.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
-        if size == 0 || body.len() < line + 2 + size {
+        // The size comes from the server: one past the body, or past `usize`, ends the body.
+        let start = line + 2;
+        let Some(end) = start.checked_add(size).filter(|&end| end <= body.len()) else {
+            break;
+        };
+        if size == 0 {
             break;
         }
-        out.extend_from_slice(&body[line + 2..line + 2 + size]);
-        body = &body[(line + 2 + size + 2).min(body.len())..];
+        out.extend_from_slice(&body[start..end]);
+        body = &body[(end + 2).min(body.len())..];
     }
     out
 }
@@ -495,6 +506,14 @@ mod tests {
         assert_eq!(dechunk(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n"), b"abcde");
     }
 
+    /// A size line as large as `usize` allows, from any host an image may come from: what came
+    /// before it is kept, and nothing panics.
+    #[test]
+    fn a_chunk_size_past_the_body_ends_it() {
+        assert_eq!(dechunk(b"3\r\nabc\r\nffffffffffffffff\r\nde\r\n"), b"abc");
+        assert_eq!(dechunk(b"fffffffffffffffe\r\n"), b"");
+    }
+
     /// A one-shot local server: answers `status` and hands back the request.
     fn serve_once(status: &'static str) -> (url::Url, std::thread::JoinHandle<Vec<u8>>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -532,6 +551,12 @@ mod tests {
         assert!(request.contains("Content-Type: application/pdf\r\n"));
         assert!(request.contains("Content-Length: 7\r\n"));
         assert!(request.ends_with("\r\n\r\npayload"));
+        // RFC 9112 §3.2: the authority, its port included when it is not the scheme's default.
+        let port = url.port().unwrap();
+        assert!(
+            request.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")),
+            "{request}"
+        );
 
         let (url, _) = serve_once(
             "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nContent-Length must match the upload size.",

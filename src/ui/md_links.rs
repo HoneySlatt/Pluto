@@ -284,25 +284,6 @@ fn looks_like_file_path(path: &str, authored: &str) -> bool {
     relative_file_path(authored) || relative_file_name(path)
 }
 
-pub(crate) fn percent_decode(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&value[i + 1..i + 3], 16)
-        {
-            out.push(byte);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8(out).unwrap_or_else(|_| value.to_owned())
-}
-
 /// `parseMarkdownFileLink`: a link destination naming a file, if it does.
 pub(crate) fn parse_file_link(href: &str) -> Option<FileRef> {
     let normalized = href.trim().trim_start_matches('<').trim_end_matches('>');
@@ -314,8 +295,8 @@ pub(crate) fn parse_file_link(href: &str) -> Option<FileRef> {
         None => (normalized, ""),
     };
     let path = path_with_search.split('?').next().unwrap_or("");
-    let path = percent_decode(path.trim());
-    let hash = percent_decode(hash.trim());
+    let path = pluto_core::media::percent_decode(path.trim());
+    let hash = pluto_core::media::percent_decode(hash.trim());
     if path.is_empty() {
         return None;
     }
@@ -600,6 +581,16 @@ pub(crate) fn chip_colors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An agent's link whose `%` is followed by a character of more than one byte (`%aé`, `%€`):
+    /// the link is read as it is written, and nothing panics.
+    #[test]
+    fn a_percent_before_a_wide_character_stays_as_written() {
+        let path = |href: &str| parse_file_link(href).map(|file| file.path);
+        assert_eq!(path("./notes/%aé.md"), Some("./notes/%aé.md".into()));
+        assert_eq!(path("./prix%€.md"), Some("./prix%€.md".into()));
+        assert_eq!(path("./a%20b.rs"), Some("./a b.rs".into()));
+    }
 
     #[test]
     fn a_links_icon_is_fetched_only_for_a_source_host() {

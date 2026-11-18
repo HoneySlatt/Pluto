@@ -218,6 +218,11 @@ enum Block {
     },
 }
 
+/// How deep tags and `<details>` nest before deeper levels join their parent. The parser and the
+/// renderer recurse once a level, and an answer may nest 100,000 quotes (`>>>>…`); a list level
+/// takes two or three tags (the list, the item, its paragraph).
+const MAX_NESTING: usize = 32;
+
 /// With `line_breaks`, every line break is a break (`remark-breaks`, the
 /// `lineBreaks` of user messages).
 fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
@@ -233,6 +238,7 @@ fn parse_with(text: &str, line_breaks: bool) -> Vec<Block> {
             event => event,
         })
         .collect();
+    let events = flatten_deep_nesting(events);
     // User messages show HTML as typed; answers parse the sanitized tags.
     RAW_HTML.set(!line_breaks);
     FOOTNOTES.with_borrow_mut(Footnotes::clear);
@@ -843,16 +849,40 @@ fn standalone_image(events: &[Event], index: &mut usize) -> Option<Block> {
 }
 
 fn parse_blocks(events: &[Event], index: &mut usize, until: Option<TagEnd>) -> Vec<Block> {
-    parse_blocks_until(events, index, until, false)
+    parse_blocks_until(events, index, until, 0)
+}
+
+/// `events` without the tags nested deeper than `MAX_NESTING`: their content joins the deepest
+/// level kept. Every `Start` has its `End`, so a stack of what was kept pairs them.
+fn flatten_deep_nesting(events: Vec<Event>) -> Vec<Event> {
+    let mut kept: Vec<bool> = Vec::new();
+    let mut depth = 0;
+    events
+        .into_iter()
+        .filter(|event| match event {
+            Event::Start(_) => {
+                let keep = depth < MAX_NESTING;
+                depth += usize::from(keep);
+                kept.push(keep);
+                keep
+            }
+            Event::End(_) => {
+                let keep = kept.pop().unwrap_or(true);
+                depth = depth.saturating_sub(usize::from(keep));
+                keep
+            }
+            _ => true,
+        })
+        .collect()
 }
 
 /// Blocks until `until`, or, inside a `<details>`, until the HTML block that
-/// closes it.
+/// closes it. `details_depth` counts the open `<details>` that hold them.
 fn parse_blocks_until(
     events: &[Event],
     index: &mut usize,
     until: Option<TagEnd>,
-    in_details: bool,
+    details_depth: usize,
 ) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut loose: Vec<Inline> = Vec::new();
@@ -983,7 +1013,8 @@ fn parse_blocks_until(
                     continue;
                 }
                 let lower = html.to_ascii_lowercase();
-                if in_details && !lower.contains("<details") && lower.contains("</details>") {
+                if details_depth > 0 && !lower.contains("<details") && lower.contains("</details>")
+                {
                     let before = &html[..lower.find("</details>").unwrap_or(0)];
                     html_blocks(before, &mut blocks);
                     break;
@@ -996,7 +1027,15 @@ fn parse_blocks_until(
                             html_blocks(&after[..close], &mut children);
                         } else {
                             html_blocks(&after, &mut children);
-                            children.extend(parse_blocks_until(events, index, until, true));
+                            // Past the limit, the blocks that follow stay at this level.
+                            if details_depth < MAX_NESTING {
+                                children.extend(parse_blocks_until(
+                                    events,
+                                    index,
+                                    until,
+                                    details_depth + 1,
+                                ));
+                            }
                         }
                         blocks.push(Block::Details {
                             summary,
@@ -3915,6 +3954,41 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// How many blocks deep `blocks` nest.
+    fn nesting(blocks: &[Block]) -> usize {
+        let children = |block: &Block| match block {
+            Block::Quote(children) | Block::Alert(_, children) => nesting(children),
+            Block::Details { blocks, .. } => nesting(blocks),
+            Block::List { items, .. } => items.iter().map(|item| nesting(item)).max().unwrap_or(0),
+            Block::Footnotes(list) => nesting(std::slice::from_ref(list)),
+            _ => 0,
+        };
+        blocks
+            .iter()
+            .map(|block| 1 + children(block))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The parser and the renderer recurse once a level: an answer nesting 100,000 quotes, lists
+    /// or `<details>` would overflow the stack. Past the limit, levels join their parent.
+    #[test]
+    fn deep_nesting_is_flattened_past_the_limit() {
+        for text in [
+            format!("{}x", ">".repeat(100_000)),
+            format!("{}x", "- ".repeat(50_000)),
+            format!("{}x", "<details>\n\n".repeat(10_000)),
+        ] {
+            let blocks = parse_with(&text, false);
+            assert!(nesting(&blocks) <= 2 * MAX_NESTING, "{}", nesting(&blocks));
+        }
+        let shallow = parse_with("> > a", false);
+        let [Block::Quote(outer)] = shallow.as_slice() else {
+            panic!("{shallow:?}")
+        };
+        assert!(matches!(outer.as_slice(), [Block::Quote(_)]), "{outer:?}");
     }
 
     #[test]

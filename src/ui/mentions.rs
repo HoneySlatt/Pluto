@@ -77,7 +77,7 @@ fn file_link(text: &str, start: usize) -> Option<(String, usize)> {
         return None;
     }
     let end = after + 1 + length + 1;
-    let path = crate::ui::md_links::percent_decode(&rest[..length]);
+    let path = pluto_core::media::percent_decode(&rest[..length]);
     let basename = path.rsplit(['/', '\\']).next().unwrap_or(&path);
     (!path.is_empty()
         && !has_external_scheme(&path)

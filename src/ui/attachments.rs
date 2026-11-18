@@ -213,19 +213,45 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
         .with_guessed_format()
         .ok()?;
     let mut limits = image::Limits::default();
-    limits.max_image_width = Some(16_384);
-    limits.max_image_height = Some(16_384);
-    limits.max_alloc = Some(512 * 1024 * 1024);
+    limits.max_image_width = Some(MAX_DECODED_SIDE);
+    limits.max_image_height = Some(MAX_DECODED_SIDE);
+    limits.max_alloc = Some(MAX_DECODED_PIXELS_BYTES);
     reader.limits(limits);
     let Ok(decoded) = reader.decode() else {
-        let svg = egui_extras::image::load_svg_bytes(bytes, &Default::default()).ok()?;
-        let [width, height] = svg.size;
-        let pixels = svg.pixels.iter().flat_map(|p| p.to_array()).collect();
-        return image::RgbaImage::from_raw(width as u32, height as u32, pixels);
+        return rasterize_svg(bytes);
     };
     let mut image = decoded.to_rgba8();
     premultiply(&mut image);
     Some(image)
+}
+
+/// The largest side and pixel buffer an image is decoded to.
+const MAX_DECODED_SIDE: u32 = 16_384;
+const MAX_DECODED_PIXELS_BYTES: u64 = 512 * 1024 * 1024;
+
+/// An SVG at its own size, in premultiplied RGBA. Its size is only declared (70 bytes may ask for
+/// 100,000 pixels a side), so it is refused past the limits a PNG meets.
+fn rasterize_svg(bytes: &[u8]) -> Option<image::RgbaImage> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).ok()?;
+    let size = tree.size();
+    let (width, height) = (size.width().round() as u32, size.height().round() as u32);
+    let fits = width <= MAX_DECODED_SIDE
+        && height <= MAX_DECODED_SIDE
+        && u64::from(width) * u64::from(height) * 4 <= MAX_DECODED_PIXELS_BYTES;
+    if !fits {
+        return None;
+    }
+    let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(
+            width as f32 / size.width(),
+            height as f32 / size.height(),
+        ),
+        &mut pixmap.as_mut(),
+    );
+    image::RgbaImage::from_raw(width, height, pixmap.take())
 }
 
 /// `source` cropped to `aspect` (width / height) around its center, then
@@ -1057,6 +1083,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An SVG's size is only declared: 70 bytes may ask for 100,000 pixels a side (40 GB), from
+    /// an answer's image or a `data:` URL. It is refused, as a PNG that large is.
+    #[test]
+    fn an_svg_declaring_a_huge_size_is_refused() {
+        let svg = |side: u32| {
+            format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{side}" height="{side}"/>"#)
+        };
+        assert!(decode(svg(100_000).as_bytes()).is_none());
+        assert!(decode(svg(16_385).as_bytes()).is_none());
+        let small = decode(svg(64).as_bytes()).expect("a small SVG is drawn");
+        assert_eq!(small.dimensions(), (64, 64));
+    }
 
     #[test]
     fn uploads_are_data_urls() {

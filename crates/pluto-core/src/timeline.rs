@@ -1996,10 +1996,12 @@ pub fn thread_read_prefix(label: &str) -> Option<String> {
 fn compact_tool_label(value: &str) -> &str {
     let trimmed = value.trim_end();
     for suffix in [" completed", " complete"] {
-        if trimmed.len() >= suffix.len()
-            && trimmed[trimmed.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
-        {
-            return trimmed[..trimmed.len() - suffix.len()].trim();
+        let Some(cut) = trimmed.len().checked_sub(suffix.len()) else {
+            continue;
+        };
+        // A cut inside a character (a Chinese or Russian label) cannot start the ASCII suffix.
+        if trimmed.is_char_boundary(cut) && trimmed[cut..].eq_ignore_ascii_case(suffix) {
+            return trimmed[..cut].trim();
         }
     }
     trimmed.trim()
@@ -3603,5 +3605,18 @@ mod tests {
             provider_subagent_status(&detail, now),
             ("Cancelled".into(), false)
         );
+    }
+
+    /// The suffix is cut from the end by bytes: a label whose cut falls inside a character
+    /// (Chinese, Russian, an emoji) is kept whole, and an English one still loses its suffix.
+    #[test]
+    fn tool_labels_in_any_script_keep_their_text() {
+        assert_eq!(compact_tool_label("读取文件"), "读取文件");
+        assert_eq!(compact_tool_label("Прочитать файл"), "Прочитать файл");
+        assert_eq!(compact_tool_label("Deploy 🚀🚀"), "Deploy 🚀🚀");
+        assert_eq!(compact_tool_label("读取文件 completed"), "读取文件");
+        assert_eq!(compact_tool_label("Read file Completed "), "Read file");
+        assert_eq!(compact_tool_label("Read file complete"), "Read file");
+        assert_eq!(compact_tool_label("complete"), "complete");
     }
 }

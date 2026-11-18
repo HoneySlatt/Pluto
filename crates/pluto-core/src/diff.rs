@@ -93,6 +93,54 @@ fn strip_prefix(path: &str) -> String {
         .to_owned()
 }
 
+/// A name as git writes it in a header: quoted with C escapes (`"caf\303\251"`) when it holds a
+/// byte outside printable ASCII, and followed by a tab on `---`/`+++` lines when it holds a space.
+fn git_name(raw: &str) -> String {
+    let raw = raw.strip_suffix('\t').unwrap_or(raw);
+    match raw
+        .strip_prefix('"')
+        .and_then(|quoted| quoted.strip_suffix('"'))
+    {
+        Some(quoted) => unquote(quoted),
+        None => raw.to_owned(),
+    }
+}
+
+/// Git's C quoting undone: `\\`, `\"`, `\a` to `\r`, and a byte as three octal digits.
+fn unquote(quoted: &str) -> String {
+    let mut bytes = Vec::with_capacity(quoted.len());
+    let mut rest = quoted.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        rest = tail;
+        if byte != b'\\' {
+            bytes.push(byte);
+            continue;
+        }
+        let Some((&escape, tail)) = rest.split_first() else {
+            bytes.push(b'\\');
+            break;
+        };
+        rest = tail;
+        let octal = |b: &u8| matches!(b, b'0'..=b'7');
+        bytes.push(match escape {
+            b'a' => 0x07,
+            b'b' => 0x08,
+            b't' => b'\t',
+            b'n' => b'\n',
+            b'v' => 0x0b,
+            b'f' => 0x0c,
+            b'r' => b'\r',
+            b'0'..=b'3' if rest.len() >= 2 && rest[..2].iter().all(octal) => {
+                let value = (escape - b'0') * 64 + (rest[0] - b'0') * 8 + (rest[1] - b'0');
+                rest = &rest[2..];
+                value
+            }
+            other => other,
+        });
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 fn parse_range(text: &str) -> u32 {
     text.split(',')
         .next()
@@ -106,10 +154,13 @@ pub fn parse(patch: &str) -> Vec<FileDiff> {
     let mut new_line = 0u32;
     for raw in patch.lines() {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
-            let path = rest
-                .rsplit_once(" b/")
-                .map(|(_, b)| b.to_owned())
-                .unwrap_or_else(|| strip_prefix(rest));
+            // Each side is quoted on its own when its name needs it.
+            let new_side = if rest.ends_with('"') {
+                rest.rsplit_once(" \"b/").map(|(_, b)| format!("\"{b}"))
+            } else {
+                rest.rsplit_once(" b/").map(|(_, b)| b.to_owned())
+            };
+            let path = new_side.map_or_else(|| strip_prefix(rest), |b| git_name(&b));
             files.push(FileDiff {
                 path,
                 old_path: None,
@@ -130,15 +181,15 @@ pub fn parse(patch: &str) -> Vec<FileDiff> {
             } else if raw.starts_with("deleted file mode") {
                 file.status = FileStatus::Deleted;
             } else if let Some(from) = raw.strip_prefix("rename from ") {
-                file.old_path = Some(from.to_owned());
+                file.old_path = Some(git_name(from));
                 file.status = FileStatus::Renamed;
             } else if let Some(to) = raw.strip_prefix("rename to ") {
-                file.path = to.to_owned();
+                file.path = git_name(to);
             } else if raw.starts_with("Binary files ") {
                 file.binary = true;
             } else if let Some(path) = raw.strip_prefix("+++ ") {
                 if path != "/dev/null" {
-                    file.path = strip_prefix(path);
+                    file.path = strip_prefix(&git_name(path));
                 }
                 continue;
             }
@@ -552,6 +603,30 @@ fn token_diff(old: &str, new: &str) -> (Ranges, Ranges) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `git diff`'s own output: a name holding a space ends its `---`/`+++` lines with a tab, and
+    /// a name outside ASCII is quoted with octal escapes (`core.quotePath`), in every header.
+    #[test]
+    fn paths_with_a_space_or_outside_ascii_keep_their_names() {
+        let patch = "diff --git a/my file.txt b/my file.txt\n\
+            --- a/my file.txt\t\n\
+            +++ b/my file.txt\t\n\
+            @@ -1 +1 @@\n-one\n+two\n\
+            diff --git \"a/\\303\\251t\\303\\251.txt\" \"b/\\303\\251t\\303\\251.txt\"\n\
+            --- \"a/\\303\\251t\\303\\251.txt\"\n\
+            +++ \"b/\\303\\251t\\303\\251.txt\"\n\
+            @@ -1 +1 @@\n-deux\n+trois\n\
+            diff --git \"a/logo \\303\\251.png\" \"b/logo \\303\\251.png\"\n\
+            Binary files \"a/logo \\303\\251.png\" and \"b/logo \\303\\251.png\" differ\n\
+            diff --git \"a/old\\tname\" \"b/caf\\303\\251\"\n\
+            similarity index 100%\n\
+            rename from \"old\\tname\"\n\
+            rename to \"caf\\303\\251\"\n";
+        let files = parse(patch);
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["my file.txt", "été.txt", "logo é.png", "café"]);
+        assert_eq!(files[3].old_path.as_deref(), Some("old\tname"));
+    }
 
     const PATCH: &str = "diff --git a/src/theme.rs b/src/theme.rs
 index 1111111..2222222 100644
