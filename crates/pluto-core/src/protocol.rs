@@ -125,20 +125,24 @@ struct Wake(OwnedFd);
 
 impl Wake {
     fn new() -> Result<Self, String> {
+        // SAFETY: `eventfd` takes two integers and touches no memory of ours.
         let fd = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
         if fd < 0 {
             return Err("Could not start the connection worker".into());
         }
+        // SAFETY: `eventfd` just opened `fd`, and nothing else owns it.
         Ok(Self(unsafe { OwnedFd::from_raw_fd(fd) }))
     }
 
     fn notify(&self) {
         let one = 1_u64;
+        // SAFETY: `one` is the 8 bytes `write` reads, alive for the call; the descriptor is ours.
         unsafe { libc::write(self.0.as_raw_fd(), (&raw const one).cast(), 8) };
     }
 
     fn clear(&self) {
         let mut count = 0_u64;
+        // SAFETY: `count` is the 8 bytes `read` writes, alive for the call; the descriptor is ours.
         unsafe { libc::read(self.0.as_raw_fd(), (&raw mut count).cast(), 8) };
     }
 }
@@ -449,6 +453,7 @@ fn wait(socket: &Socket, wake: &Wake, timeout: Duration) {
         },
     ];
     let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
+    // SAFETY: `fds` is the array of two `pollfd` that `poll` reads and writes, alive for the call.
     unsafe { libc::poll(fds.as_mut_ptr(), 2, millis) };
     if fds[1].revents != 0 {
         wake.clear();

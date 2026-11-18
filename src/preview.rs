@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::os::fd::{FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -395,43 +395,76 @@ const HEIGHT_SCRIPT: &str = r#"(function(){var h;function z(){var r=document.doc
 /// The headless browser process and its temporary profile.
 struct Process {
     child: Child,
-    profile: PathBuf,
+    /// Dropped after `drop` below has stopped the browser that writes in it.
+    _profile: Profile,
 }
 
 impl Drop for Process {
     fn drop(&mut self) {
         // The launcher script may have forked the browser: its group goes.
+        // SAFETY: `kill` touches no memory of ours; the group is the child's own (`setpgid` below).
         unsafe {
             libc::kill(-(self.child.id() as i32), libc::SIGKILL);
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.profile);
     }
 }
 
-fn pipe() -> Result<(RawFd, RawFd), String> {
+/// The browser's temporary profile, removed when dropped: on any failure to start, or with its
+/// `Process`.
+struct Profile(PathBuf);
+
+impl Profile {
+    /// A fresh, empty profile: one per process.
+    fn create() -> Result<Self, String> {
+        let path = profile_path();
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).map_err(|_| "Could not create the preview profile")?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for Profile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The temporary profile's path.
+fn profile_path() -> PathBuf {
+    std::env::temp_dir().join(format!("pluto-preview-{}", std::process::id()))
+}
+
+/// A pipe's read and write ends, closed when dropped.
+fn pipe() -> Result<(OwnedFd, OwnedFd), String> {
     let mut fds = [0; 2];
+    // SAFETY: `fds` is the array of two descriptors `pipe2` writes.
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err("Could not open the preview pipe".into());
     }
-    Ok((fds[0], fds[1]))
+    // SAFETY: `pipe2` just opened both descriptors, and nothing else owns them.
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
 /// Starts the browser; returns it, the pipe it reads commands from and
 /// the pipe it answers on.
 fn launch() -> Result<(Process, File, File), String> {
     let binary = browser_binary().ok_or("No Chromium-based browser was found")?;
-    let profile = std::env::temp_dir().join(format!("pluto-preview-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&profile);
-    std::fs::create_dir_all(&profile).map_err(|_| "Could not create the preview profile")?;
+    start(&binary)
+}
+
+/// Starts `binary` headless on a fresh profile. Whatever fails, the profile and the pipes'
+/// descriptors are released.
+fn start(binary: &std::path::Path) -> Result<(Process, File, File), String> {
+    let profile = Profile::create()?;
     let (commands_read, commands_write) = pipe()?;
     let (answers_read, answers_write) = pipe()?;
-    let mut command = Command::new(&binary);
+    let mut command = Command::new(binary);
     command
         .arg("--headless=new")
         .arg("--remote-debugging-pipe")
-        .arg(format!("--user-data-dir={}", profile.display()))
+        .arg(format!("--user-data-dir={}", profile.0.display()))
         .args([
             "--no-first-run",
             "--no-default-browser-check",
@@ -443,6 +476,10 @@ fn launch() -> Result<(Process, File, File), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    let (child_commands, child_answers) = (commands_read.as_raw_fd(), answers_write.as_raw_fd());
+    // SAFETY: the closure runs in the child between fork and exec, so it only calls
+    // async-signal-safe functions (setpgid, prctl, fcntl, dup2, close, errno) and allocates
+    // nothing. The two descriptors it reads stay open in the parent until `spawn` returns.
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(move || {
@@ -452,8 +489,8 @@ fn launch() -> Result<(Process, File, File), String> {
             // The DevTools pipe: commands on fd 3, answers on fd 4. The ends
             // move above both first: one may already be fd 3 or 4, where
             // dup2 would keep its close-on-exec flag (or clobber the other).
-            let commands = libc::fcntl(commands_read, libc::F_DUPFD, 10);
-            let answers = libc::fcntl(answers_write, libc::F_DUPFD, 10);
+            let commands = libc::fcntl(child_commands, libc::F_DUPFD, 10);
+            let answers = libc::fcntl(child_answers, libc::F_DUPFD, 10);
             if commands < 0
                 || answers < 0
                 || libc::dup2(commands, 3) < 0
@@ -467,18 +504,18 @@ fn launch() -> Result<(Process, File, File), String> {
         });
     }
     let child = command.spawn();
-    unsafe {
-        libc::close(commands_read);
-        libc::close(answers_write);
-    }
+    // The child holds its own copies now; ours close here, whether it started or not.
+    drop((commands_read, answers_write));
     let child = child.map_err(|_| format!("Could not start {}", binary.display()))?;
-    let (commands, answers) = unsafe {
-        (
-            File::from_raw_fd(commands_write),
-            File::from_raw_fd(answers_read),
-        )
+    let process = Process {
+        child,
+        _profile: profile,
     };
-    Ok((Process { child, profile }, commands, answers))
+    Ok((
+        process,
+        File::from(commands_write),
+        File::from(answers_read),
+    ))
 }
 
 /// A DevTools connection: requests by id and their purpose.
@@ -1252,4 +1289,17 @@ fn cast(devtools: &mut Devtools, page: &mut Page, on: bool) -> Result<(), String
         page.casting = true;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A browser found but unable to start leaves no profile behind.
+    #[test]
+    fn a_browser_that_cannot_start_leaves_no_profile() {
+        let missing = std::path::Path::new("/nonexistent/pluto-test-chromium");
+        assert!(start(missing).is_err());
+        assert!(!profile_path().exists());
+    }
 }
