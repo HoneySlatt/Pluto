@@ -38,7 +38,9 @@ pub(crate) fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+        // By bytes: the twelfth may fall inside a letter, and `;` is ASCII, so `end` never does.
+        let window = &rest.as_bytes()[..rest.len().min(12)];
+        let Some(end) = window.iter().position(|&byte| byte == b';') else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -186,6 +188,18 @@ pub(crate) fn safe_href(href: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An answer's HTML with `&` before Japanese or Russian text: the twelfth byte the search for
+    /// `;` stops at falls inside a letter. The text is kept, and nothing panics.
+    #[test]
+    fn an_ampersand_before_wide_letters_stays_text() {
+        assert_eq!(
+            decode_entities("Q&A: 日本語のテキスト"),
+            "Q&A: 日本語のテキスト"
+        );
+        assert_eq!(decode_entities("&ёжик и ёлка"), "&ёжик и ёлка");
+        assert_eq!(decode_entities("a &amp; 日本"), "a & 日本");
+    }
 
     #[test]
     fn html_splits_into_text_and_tags() {

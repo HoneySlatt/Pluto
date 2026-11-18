@@ -6,3 +6,5 @@
   join their parent).
 - An image whose server sends a chunk size larger than the answer no longer crashes the client;
   what came before it is kept.
+- The desktop client no longer crashes on an answer's HTML holding `&` before Japanese, Chinese or
+  Russian text.
