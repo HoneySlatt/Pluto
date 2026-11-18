@@ -556,8 +556,7 @@ impl App {
                     }
                 };
                 let mut y = origin.y + table.heights.first().copied().unwrap_or_default();
-                for index in 1..table.heights.len() {
-                    let row_height = table.heights[index];
+                for (index, &row_height) in table.heights.iter().enumerate().skip(1) {
                     if y + row_height >= clip.top() && y <= clip.bottom() {
                         paint_row(ui, index, y);
                     }

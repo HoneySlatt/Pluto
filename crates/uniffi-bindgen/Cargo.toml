@@ -2,10 +2,13 @@
 name = "uniffi-bindgen"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99.1"
+rust-version = "1.100"
 license = "MIT"
 publish = false
 description = "Generates the Kotlin bindings of pluto-ffi."
 
 [dependencies]
 uniffi = { version = "0.32", features = ["cli"] }
+
+[lints]
+workspace = true

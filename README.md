@@ -192,6 +192,15 @@ nix develop --command scripts/check.sh   # every check CI runs; its head lists t
 `scripts/fixture-server.sh` starts a disposable server on :3999 with synthetic threads, for the
 bench and the measurements below.
 
+The toolchain is named in `flake.nix` (`rustVersion`) and in every manifest's `rust-version`: a
+new compiler is its own commit. Cargo takes no version published less than three days ago
+(`.cargo/config.toml`). For an urgent fix, such as a security release, take that one version
+alone, by name, and say why in its commit:
+
+```sh
+CARGO_REGISTRY_GLOBAL_MIN_PUBLISH_AGE=0 cargo update -p <crate> --precise <version>
+```
+
 `scripts/check.sh --fork`, on the owner's machine, also replays the agents' recorded sessions
 through the fork's adapters and writes the stamp CI checks. `scripts/record-session.sh` records
 those sessions with real agents, so only the owner runs it; its procedure is in

@@ -1,0 +1,5 @@
+# Cargo picks no version published less than three days ago, so that a malicious release pulled
+# quickly never reaches the lock file; versions already locked stay. For an urgent fix, the README
+# (Development) gives the one-time exception.
+[registry]
+global-min-publish-age = "3 days"

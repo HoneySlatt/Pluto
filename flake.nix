@@ -107,7 +107,7 @@
       ];
       # Named, not `latest`: a flake update then never changes the compiler unseen. Cargo.toml's
       # `rust-version` says the same.
-      rustVersion = "1.99.1";
+      rustVersion = "1.100.0";
       # The desktop toolchain is kept minimal: CI downloads it at every run.
       desktopRust = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
         extensions = [

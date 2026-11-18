@@ -2,7 +2,7 @@
 name = "pluto-core"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99.1"
+rust-version = "1.100"
 license = "MIT"
 publish = false
 description = "Pluto's connection to the server and its conversation model, shared by the desktop and mobile clients."
@@ -21,3 +21,6 @@ zeroize = "1"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true
