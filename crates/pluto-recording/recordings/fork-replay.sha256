@@ -30,4 +30,4 @@ c7f5a3b561a6ad330d7ef60f7c88782a7269601490230fb42abb00145a88835e  crates/pluto-r
 9bc58da176748d63380049caad1ac4b8d463d3dda4de00474f778e9ab6d247a5  crates/pluto-recording/src/replay.rs
 dd7b6a803520c4e4173e30fbb038e51b2453ccb41bad384d766984b65f66674c  crates/pluto-recording/src/scan.rs
 d5ec50aab764458e7b07d340cf12ea163ddf095dbddf2ab6b94004fea03f3664  scripts/fork-replay.sh
-b756e6eba21fda11a002e3b27b44d02c74e961da8a275d3fdc8030f25cf9066c  (the crate's resolved dependencies)
+d26ff614dd46270120177ec14a5eded4cd75293705da1a23b3760f62b8b8319c  (the crate's resolved dependencies)
