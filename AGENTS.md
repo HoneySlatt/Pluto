@@ -40,7 +40,7 @@ You remember nothing from earlier sessions. What is not written in these files i
 
 - Work on the current milestone of `docs/PLAN.md`, or on what the owner asks. A request that changes
   the plan is written into the PLAN.
-- Do not start later stages, nor prepare abstractions for them.
+- Do not start later stages; build for them only what an accepted ADR asks.
 - Add no feature to the egui client: it is frozen ([ADR-0010](docs/adr/0010-todays-features-triaged.md)).
 - Do not replace the client's framework with a web view.
 - When experience contradicts the roadmap, propose a change; once accepted, record it in an ADR.
@@ -119,7 +119,7 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
 
 ## Code rules
 
-- No abstraction without a second concrete use.
+- No abstraction without a second concrete use, or a benefit an accepted ADR names.
 - No reimplementation of the standard library without a measurement.
 - A new dependency needs a reason, an alternative weighed and a license checked; ask the owner.
 - Every `unsafe` block has a `// SAFETY:` comment.
