@@ -1,8 +1,11 @@
 # Notices
 
-Pluto is released under the MIT license (`LICENSE`). It ports the client of
-[T3 Code](https://t3.codes) (MIT, Copyright (c) 2026 T3
-Tools Inc.), whose notice `LICENSE` keeps.
+Pluto's new code is under MIT OR Apache-2.0, at your choice (`LICENSE-MIT`, `LICENSE-APACHE`).
+The root crate (the egui client), `pluto-core`, `pluto-ffi` and `uniffi-bindgen` are under MIT
+alone, as their manifests declare: the egui client and `pluto-core` port the client of
+[T3 Code](https://t3.codes) (MIT, Copyright (c) 2026 T3 Tools Inc.), whose notice `LICENSE-MIT`
+keeps. The notice leaves once no code taken from T3 remains, at Stage 5
+([ROADMAP](docs/ROADMAP.md)).
 
 Pluto's logo (`assets/logo/pluto.svg`) is not under MIT: its author keeps its rights, and
 `assets/logo/README.md` says how it may be shown.

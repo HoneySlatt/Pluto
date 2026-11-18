@@ -218,3 +218,9 @@ from @pierre/diffs and the `lang-*` file type icons from @pierre/trees
 (Apache-2.0, `assets/PIERRE-DIFFS-LICENSE`). Code theme: pierre-dark (MIT,
 `assets/PIERRE-THEME-LICENSE`). `NOTICE.md` lists every bundled asset, the
 provider trademarks and the T3 Code notice.
+
+## License
+
+New code is under MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`); the code ported from T3
+Code is under MIT, with T3's notice ([`NOTICE.md`](NOTICE.md)). Report a vulnerability privately,
+as [`SECURITY.md`](SECURITY.md) says.
