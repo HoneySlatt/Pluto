@@ -15,11 +15,11 @@ on 2026-11-15: Pluto becomes a harness ([ADR-0030](docs/adr/0030-pluto-becomes-a
 
 - **New foundation**: new crates from Stage 2, beside the frozen code below
   ([ADR-0038](docs/adr/0038-a-new-foundation-beside-the-fork.md)).
-- **Desktop client**: on egui (`src/`, about 110,000 lines), frozen except fixes. The client on
+- **Desktop client**: on egui (`src/`, about 100,000 lines), frozen except fixes. The client on
   uwui, the owner's UI framework, replaces it at Stage 5.
 - **Shared core**: the connection, model and timeline, shared with the phone (`crates/pluto-core`).
-- **Android app**: Kotlin and Compose over the core through UniFFI (`android/`, `crates/pluto-ffi`);
-  on Pluto's protocol at Stage 5.
+- **Android app**: Kotlin and Compose over the core through UniFFI (`android/`, `crates/pluto-ffi`),
+  frozen except fixes; on Pluto's protocol at Stage 5.
 - **Server**: a frozen TypeScript fork of T3 Code's server, `pluto-server`, at
   `~/Projects/pluto-server`, branch `pluto` (see its `PLUTO.md`). Pluto's own server replaces it at
   Stage 5.
@@ -41,7 +41,8 @@ You remember nothing from earlier sessions. What is not written in these files i
 - Work on the current milestone of `docs/PLAN.md`, or on what the owner asks. A request that changes
   the plan is written into the PLAN.
 - Do not start later stages; build for them only what an accepted ADR asks.
-- Add no feature to the egui client: it is frozen ([ADR-0010](docs/adr/0010-todays-features-triaged.md)).
+- Add no feature to the egui client or the Android app: both are frozen
+  ([ADR-0010](docs/adr/0010-todays-features-triaged.md)).
 - Do not replace the client's framework with a web view.
 - When experience contradicts the roadmap, propose a change; once accepted, record it in an ADR.
 
@@ -152,6 +153,8 @@ check to make it pass (a skipped test, a raised budget, a silenced lint) without
 
 - Commit and push whenever the work needs it, without asking (the owner's decision of
   2026-11-07), once `scripts/check.sh` passes; then follow CI to the end.
+- A commit that touches `android/`, `crates/pluto-ffi` or `crates/pluto-core` passes
+  `scripts/check.sh --apk` first, in `nix develop .#mobile`.
 - One logical change per commit, in English, its subject in the imperative.
 - Never commit code that fails the checks. A check that fails on the main branch is fixed before
   any new work.
