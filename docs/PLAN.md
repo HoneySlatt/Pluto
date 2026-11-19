@@ -320,6 +320,21 @@ writes from Stage 3 on ([ADR-0033](adr/0033-one-pluto-agent-process-per-session.
   - **outside the rules today, ideas only**: cloud sandboxes, optional and off by default; usage
     limits read from browser cookies, against ADR-0009; the smart home through Home Assistant's
     MCP server, out of the plan by ADR-0040.
+- A code mode for Pluto's loop, read on 2026-11-19 in Claude Code's experimental
+  [Code Mode](https://code.claude.com/docs/en/code-mode): the model writes a short script that
+  makes several tool calls at once (in parallel, one result feeding the next) and returns only what
+  it needs to read. Codex has a similar mode. It could save turns and context
+  ([ADR-0032](adr/0032-plutos-loop-and-its-provider-clients.md)), but Anthropic publishes no
+  figures: it earns its place only on the bench ([ADR-0037](adr/0037-how-the-harness-is-judged.md)).
+  Its limits:
+  - Pluto has no Node, so an interpreter embedded in Rust: a new dependency, the owner's call and
+    an ADR.
+  - Each call the script makes passes the sandbox's checks
+    ([ADR-0035](adr/0035-the-sandbox-and-the-vault.md)), not only the script: a review of the
+    script cannot see values computed while it runs.
+  - It is switched per model profile, since small local models write such scripts badly.
+  - It does not reach the Claude Code engine ([ADR-0031](adr/0031-three-kinds-of-engine.md)):
+    Claude Code's Code Mode refuses `-p` and mods that check tool calls.
 
 ## Known debt
 
